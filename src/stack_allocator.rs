@@ -25,7 +25,7 @@ impl StackMemory {
         )
     }
 
-    pub unsafe fn allocate_region(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
+    pub unsafe fn allocate(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         let start = self.data.as_ptr() as usize + self.pos;
         let aligned_start = (start + align - 1) & !(align - 1);
         let end = aligned_start + size;
@@ -61,7 +61,7 @@ pub struct StackAllocator<'mem> {
 impl<'mem> StackAllocator<'mem> {
 
     pub fn new<'short>(size: usize, memory: &'short mut StackMemory) -> Option<Self> {
-        let ptr = unsafe { memory.allocate_region(size, mem::align_of::<usize>())? };
+        let ptr = unsafe { memory.allocate(size, mem::align_of::<usize>())? };
         Some(
             Self {
                 data: ptr,
@@ -93,8 +93,8 @@ impl<'mem> StackAllocator<'mem> {
         unsafe { self.allocate_raw(size, align).map(|ptr| ptr.cast::<T>()) }
     }
 
-    pub fn clear(&mut self) {
-        self.pos = 0;
+    pub fn size(&self) -> usize {
+        self.size
     }
 
     pub fn used(&self) -> usize {
@@ -107,6 +107,10 @@ impl<'mem> StackAllocator<'mem> {
 
     pub fn full(&self) -> bool {
         self.pos >= self.size
+    }
+
+    pub fn clear(&mut self) {
+        self.pos = 0;
     }
 }
 
@@ -141,5 +145,52 @@ impl<'stack, 'mem> Drop for StackGuard<'stack, 'mem> {
 
     fn drop(&mut self) {
         self.stack.pos = self.pos_rollback;
+    }
+}
+
+pub struct StackRegion<'mem> {
+    data: NonNull<u8>,
+    size: usize,
+    pos: usize,
+    _marker: PhantomData<&'mem mut NonNull<u8>>,
+}
+
+impl<'mem> StackRegion<'mem> {
+
+    pub fn new<'stack>(size: usize, stack: &'stack mut StackAllocator<'mem>) -> Option<Self>
+    {
+        let ptr = unsafe { stack.allocate_raw(size, align_of::<usize>())? };
+        Some(
+            Self {
+                data: ptr,
+                size,
+                pos: 0,
+                _marker: PhantomData,
+            }
+        )
+    }
+}
+
+impl<'mem> AllocateExt<'mem> for StackRegion<'mem> {
+
+    unsafe fn allocate_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
+        let start = self.data.as_ptr() as usize + self.pos;
+        let aligned_start = (start + align - 1) & !(align - 1);
+        let end = aligned_start + size;
+        if end > self.data.as_ptr() as usize + self.size {
+            return None
+        }
+        self.pos = end - self.data.as_ptr() as usize;
+        Some(
+            unsafe {
+                NonNull::new_unchecked(aligned_start as *mut u8)
+            }
+        )
+    }
+
+    unsafe fn allocate_uninit<T>(&mut self, count: usize) -> Option<NonNull<T>> {
+        let size = std::mem::size_of::<T>() * count;
+        let align = std::mem::align_of::<T>();
+        unsafe { self.allocate_raw(size, align).map(|ptr| ptr.cast::<T>()) }
     }
 }

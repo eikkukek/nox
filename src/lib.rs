@@ -1,15 +1,17 @@
 pub mod nox;
+pub mod renderer;
+
 pub mod version;
 pub mod utility;
 pub mod string;
 pub mod vec_types;
+pub mod interface;
 
 mod backend;
-mod constants;
 mod allocator_traits;
 mod stack_allocator;
 
-pub use nox::{Nox, InitSettings, AppName, Memory};
+pub use nox::{Nox, InitSettings, AppName, Memory, Extent};
 pub use version::Version;
 pub use string::String;
-pub use backend::DeviceName;
+pub use renderer::DeviceName;

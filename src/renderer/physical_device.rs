@@ -1,12 +1,10 @@
-use super::SmallError;
-
 use crate::{
-    string::String,
+    string::{String, SmallError},
     version::Version,
     utility::{has_bit, has_not_bit},
 };
 
-use ash::{ext::graphics_pipeline_library, khr::{self, surface}, vk};
+use ash::{khr::{self, surface}, vk};
 use arrayvec::ArrayVec;
 
 pub struct QueueFamilyIndex {
@@ -64,7 +62,7 @@ impl PhysicalDeviceInfo {
     {
         let properties = unsafe { instance.get_physical_device_properties(physical_device) };
         let device_name =
-            match String::from_ascii(properties.device_name) {
+            match String::from_ascii(&properties.device_name) {
                 Ok(device_name) => device_name,
                 Err(_) => return Err(String::from_str("failed to convert device name to string")),
             };
@@ -281,7 +279,7 @@ pub fn rate_physical_device(
     for extension in &required_extensions {
         found_extensions = false;
         for available_extension in &available_extensions {
-            let other = String::<{vk::MAX_EXTENSION_NAME_SIZE}>::from_ascii(available_extension.extension_name)?;
+            let other = String::<{vk::MAX_EXTENSION_NAME_SIZE}>::from_ascii(&available_extension.extension_name)?;
             if extension == &other {
                 found_extensions = true;
                 break;
