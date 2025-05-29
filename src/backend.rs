@@ -4,7 +4,7 @@ use super::{
 };
 
 pub struct Memory<'mem> {
-    pool: StackMemory,
+    _pool: StackMemory,
     renderer_memory: renderer::Memory<'mem>,
 }
 
@@ -16,7 +16,7 @@ impl<'mem> Memory<'mem> {
         let renderer_memory = renderer::Memory::new(renderer_layout, &mut pool)?;
         Some(
             Self {
-                pool,
+                _pool: pool,
                 renderer_memory,
             }
         )
@@ -48,6 +48,6 @@ impl<'mem> Backend<'mem> {
 impl<'mem> Drop for Backend<'mem> {
 
     fn drop(&mut self) {
-        println!("Nox backend message: terminated backend");
+        println!("Nox backend message: terminating backend");
     }
 }

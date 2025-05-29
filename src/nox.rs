@@ -1,5 +1,3 @@
-use crate::renderer;
-
 use super::{
     interface::Interface,
     backend::{self, Backend},
@@ -77,8 +75,8 @@ pub struct Nox<'interface, I>
 {
     interface: Option<&'interface mut I>,
     window: Option<Window>,
-    backend: Backend<'interface>,
     renderer: Option<Renderer<'interface>>,
+    backend: Backend<'interface>, // contains memory for renderer
 }
 
 impl<'interface, I: Interface> Nox<'interface, I> {
@@ -102,11 +100,18 @@ impl<'interface, I: Interface> Nox<'interface, I> {
         event_loop.set_control_flow(ControlFlow::Poll);
         event_loop.run_app(&mut self).expect("failed to run event loop");
     }
+
+    pub fn get_renderer(&mut self) -> Option<&mut Renderer<'interface>> {
+        Some(self.renderer.as_mut()?)
+    }
 }
 
 impl<'interface, I: Interface> Drop for Nox<'interface, I> {
 
     fn drop(&mut self) {
+        if let Some(mut renderer) = self.renderer.take() {
+            renderer.destroy();
+        }
     }
 }
 
@@ -121,15 +126,17 @@ impl<'interface, I: Interface> ApplicationHandler for Nox<'interface, I> {
                 }
             },
             WindowEvent::RedrawRequested => {
+                let Some(interface) = self.interface.take() else { return };
                 if let Some(window) = &self.window {
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
-                        if let Err(e) = renderer.draw(&window, self.backend.renderer_memory()) {
+                        if let Err(e) = renderer.render(&window, interface, self.backend.renderer_memory()) {
                             eprintln!("Nox renderer error: {}", e);
                             event_loop.exit();
                         }
                     }
                 }
+                self.interface = Some(interface);
             },
             _ => {},
         }

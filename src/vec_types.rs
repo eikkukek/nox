@@ -39,11 +39,65 @@ impl<'a, T> DoubleEndedIterator for VecIter<'a, T> {
     }
 }
 
+pub struct MutVecIter<'a, T> {
+    ptr: *mut T,
+    end: *mut T,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> Iterator for MutVecIter<'a, T> {
+
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr == self.end {
+            None
+        }
+        else {
+            let item = unsafe { &mut *self.ptr };
+            self.ptr = unsafe { self.ptr.add(1) };
+            Some(item)
+        }
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for MutVecIter<'a, T> {
+
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.ptr == self.end {
+            None
+        }
+        else {
+            self.end = unsafe { self.ptr.sub(1) };
+            Some(unsafe { &mut *self.end })
+        }
+    }
+}
+
 pub trait VecOperations<T> {
 
-    fn push(&mut self, value: T) -> Option<&mut T>; 
+    fn len(&self) -> usize;
+
+    fn size(&self) -> usize;
+
+    fn as_ptr(&self) -> *const MaybeUninit<T>;
+
+    fn as_mut_ptr(&mut self) -> *mut MaybeUninit<T>;
+
+    fn as_slice(&self) -> &[T];
+
+    fn as_mut_slice(&mut self) -> &mut [T];
+
+    fn push_back(&mut self, value: T) -> Option<&mut T>; 
+
+    fn pop_back(&mut self) -> Option<T>;
+
+    fn insert(&mut self, value: T, index: usize) -> Option<&mut T>;
+
     fn remove(&mut self, index: usize) -> Option<T>;
+
     fn swap_remove(&mut self, index: usize) -> Option<T>;
+
     fn clear(&mut self);
 
     fn contains(&self,
@@ -52,7 +106,7 @@ pub trait VecOperations<T> {
         where
             T: Eq;
 
-    fn push_if_unique(
+    fn push_back_if_unique(
         &mut self,
         value: T
     ) -> Option<&mut T>
@@ -60,7 +114,7 @@ pub trait VecOperations<T> {
             T: Eq
     {
         if self.contains(&value) { None }
-        else { self.push(value) }
+        else { self.push_back(value) }
     }
 }
 
@@ -125,34 +179,6 @@ impl<'a, T> FixedVec<'a, T> {
         )
     }
 
-    #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    #[inline(always)]
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    #[inline(always)]
-    pub fn as_ptr(&self) -> *const T {
-        self.data
-    }
-
-    #[inline(always)]
-    pub fn as_mut_ptr(&mut self) -> *mut T {
-        self.data
-    }
-
-    pub fn as_slice(&self) -> &[T] {
-        unsafe { slice::from_raw_parts(self.data, self.len) }
-    }
-
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut(self.data, self.len) }
-    }
-
     pub fn back(&mut self) -> Option<&mut T> {
         if self.len == 0 {
             None
@@ -191,16 +217,79 @@ impl<'a, T> FixedVec<'a, T> {
             _marker: PhantomData,
         }
     }
+
+    pub fn mut_iter(&self) -> MutVecIter<'_, T> {
+        let ptr = self.data;
+        let end = unsafe { self.data.add(self.len) };
+        MutVecIter {
+            ptr,
+            end,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<'a, T> VecOperations<T> for FixedVec<'a, T> {
 
-    fn push(&mut self, value: T) -> Option<&mut T> {
-        if self.len == self.size { return None; }
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline(always)]
+    fn size(&self) -> usize {
+        self.size
+    }
+
+    #[inline(always)]
+    fn as_ptr(&self) -> *const MaybeUninit<T> {
+        self.data as *const MaybeUninit<T>
+    }
+
+    #[inline(always)]
+    fn as_mut_ptr(&mut self) -> *mut MaybeUninit<T> {
+        self.data as *mut MaybeUninit<T>
+    }
+
+    #[inline(always)]
+    fn as_slice(&self) -> &[T] {
+        unsafe { slice::from_raw_parts(self.data, self.len) }
+    }
+
+    #[inline(always)]
+    fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe { slice::from_raw_parts_mut(self.data, self.len) }
+    }
+
+    fn push_back(&mut self, value: T) -> Option<&mut T> {
+        if self.len == self.size { return None }
         let ptr = unsafe { self.data.add(self.len) };
         unsafe { std::ptr::write(ptr, value) };
         self.len += 1;
         Some(unsafe { &mut *ptr })
+    }
+
+    fn pop_back(&mut self) -> Option<T> {
+        if self.len == 0 { return None }
+        let ptr = unsafe { self.data.add(self.len) };
+        self.len -= 1;
+        Some(unsafe { ptr.read() })
+    }
+
+    fn insert(&mut self, value: T, index: usize) -> Option<&mut T> {
+        if index >= self.len || self.len == self.size {
+            None
+        }
+        else {
+            unsafe {
+                for i in (index + 1..=self.len).rev() {
+                    self.data.add(i).write(self.data.add(i - 1).read());
+                }
+                let ptr = self.data.add(index);
+                ptr.write(value);
+                Some(ptr.as_mut()?)
+            }
+        }
     }
 
     fn remove(&mut self, index: usize) -> Option<T> {
@@ -292,11 +381,11 @@ impl<'a, 'b, T> IntoIterator for &'a FixedVec<'b, T> {
 
 impl<'a, 'b, T> IntoIterator for &'a mut FixedVec<'b, T> {
 
-    type Item = &'a T;
-    type IntoIter = VecIter<'a, T>;
+    type Item = &'a mut T;
+    type IntoIter = MutVecIter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+        self.mut_iter()
     }
 }
 
@@ -331,34 +420,6 @@ impl<T, const N: usize> ArrayVec<T, N> {
         )
     }
 
-    #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    #[inline(always)]
-    pub fn size(&self) -> usize {
-        N
-    }
-
-    #[inline(always)]
-    pub fn as_ptr(&self) -> *const MaybeUninit<T> {
-        self.data.as_ptr()
-    }
-
-    #[inline(always)]
-    pub fn as_mut_ptr(&mut self) -> *mut MaybeUninit<T> {
-        self.data.as_mut_ptr()
-    }
-
-    pub fn as_slice(&self) -> &[T] {
-        unsafe { slice::from_raw_parts(self.data.as_ptr() as *const T, self.len) }
-    }
-
-    pub fn as_mut_slice(&mut self) -> &mut [T] {
-        unsafe { slice::from_raw_parts_mut(self.data.as_ptr() as *mut T, self.len) }
-    }
-
     pub fn resize(&mut self, len: usize)
         where
             T: Default
@@ -385,12 +446,66 @@ impl<T, const N: usize> ArrayVec<T, N> {
 
 impl<T, const N: usize> VecOperations<T> for ArrayVec<T, N> {
 
-    fn push(&mut self, value: T) -> Option<&mut T> {
-        if self.len == N { return None; }
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline(always)]
+    fn size(&self) -> usize {
+        N
+    }
+
+    #[inline(always)]
+    fn as_ptr(&self) -> *const MaybeUninit<T> {
+        self.data.as_ptr()
+    }
+
+    #[inline(always)]
+    fn as_mut_ptr(&mut self) -> *mut MaybeUninit<T> {
+        self.data.as_mut_ptr()
+    }
+
+    #[inline(always)]
+    fn as_slice(&self) -> &[T] {
+        unsafe { slice::from_raw_parts(self.data.as_ptr() as *const T, self.len) }
+    }
+
+    #[inline(always)]
+    fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe { slice::from_raw_parts_mut(self.data.as_ptr() as *mut T, self.len) }
+    }
+
+    fn push_back(&mut self, value: T) -> Option<&mut T> {
+        if self.len == N { return None }
         let ptr = unsafe { self.as_mut_ptr().add(self.len) };
         unsafe { std::ptr::write(ptr, MaybeUninit::new(value)) };
         self.len += 1;
         Some(unsafe { &mut *(ptr as *mut T) })
+    }
+
+    fn pop_back(&mut self) -> Option<T> {
+        if self.len == 0 { return None }
+        let ptr = unsafe { self.as_mut_ptr().add(self.len).cast::<T>() };
+        self.len -= 1;
+        Some(unsafe { ptr.read() })
+    }
+
+    fn insert(&mut self, value: T, index: usize) -> Option<&mut T> {
+        if index >= self.len || self.len == N {
+            None
+        }
+        else {
+            unsafe {
+                let data = self.as_mut_ptr();
+                for i in (index + 1..=self.len).rev() {
+                    data.add(i).write(data.add(i - 1).read());
+                }
+                let ptr = data.add(index) as *mut T;
+                ptr.write(value);
+                Some(ptr.as_mut()?)
+            }
+        }
     }
 
     fn remove(&mut self, index: usize) -> Option<T> {

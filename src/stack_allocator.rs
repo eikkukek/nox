@@ -44,9 +44,11 @@ impl StackMemory {
 impl Drop for StackMemory {
 
     fn drop(&mut self) {
+        if self.size == 0 { panic!("attempting to drop twice") }
         unsafe {
             let layout = Layout::from_size_align_unchecked(self.size, mem::align_of::<usize>());
             dealloc(self.data.as_ptr(), layout);
+            self.size = 0;
         }
     }
 }
@@ -168,6 +170,10 @@ impl<'mem> StackRegion<'mem> {
                 _marker: PhantomData,
             }
         )
+    }
+
+    pub fn clear(&mut self) {
+        self.pos = 0;
     }
 }
 

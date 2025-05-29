@@ -5,6 +5,7 @@ pub mod version;
 pub mod utility;
 pub mod string;
 pub mod vec_types;
+pub mod map_types;
 pub mod interface;
 
 mod backend;
