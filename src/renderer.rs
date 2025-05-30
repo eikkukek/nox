@@ -1,24 +1,31 @@
-pub mod image_state;
-pub mod frame_graph;
+mod image_state;
+mod frame_graph;
 mod physical_device;
 mod swapchain_context;
 mod vulkan_context;
 mod thread_context;
 mod helpers;
-
-use crate::AppName;
+mod buffer_allocator;
 
 use super::{
     interface::Interface,
     Version,
     string::{String, LargeError},
     stack_allocator::{StackMemory, StackAllocator},
+    allocator_traits::AllocateExt,
+    map_types::FixedMap,
+    stack_allocator::StackGuard,
+    AppName
 };
 
-use image_state::ImageState;
+pub use ash;
+pub use frame_graph::{UID, Pass, WriteInfo, FrameGraph, ResourcePool, ImageResource};
+pub use image_state::ImageState;
+use frame_graph::Exec;
+use helpers::Handle;
 use swapchain_context::{PresentResult, SwapchainContext};
 use thread_context::ThreadContext;
-use vulkan_context::{VulkanContext, VulkanMemory, SwapchainState};
+use vulkan_context::{VulkanContext, SwapchainState};
 
 use ash::vk;
 
@@ -54,27 +61,94 @@ impl MemoryLayout {
 }
 
 pub struct Memory<'mem> {
-    pub vulkan_memory: VulkanMemory<'mem>,
+    pub init_allocator: StackAllocator<'mem>,
+    pub swapchain_allocator: StackAllocator<'mem>,
 }
 
 impl<'mem> Memory<'mem> {
 
     pub fn new(layout: MemoryLayout, pool: &mut StackMemory) -> Option<Self> {
-        let vulkan_memory = VulkanMemory {
+        Some(Self {
             init_allocator: StackAllocator::new(layout.init_size, pool)?,
             swapchain_allocator: StackAllocator::new(layout.swapchain_size, pool)?,
-        };
-        Some(
-            Self {
-                vulkan_memory,
-            }
-        )
+        })
     }
 }
 
+pub struct Frame<'r, 'mem> {
+    device: Handle<'r, ash::Device>,
+    command_buffer: Handle<'r, vk::CommandBuffer>,
+    swapchain_image_resource: ImageResource<'r>,
+    allocator: Option<StackGuard<'r, 'mem>>,
+    temp_allocator: Option<StackGuard<'r, 'mem>>,
+    queue_family_indices: physical_device::QueueFamilyIndices,
+}
+
+impl<'r, 'mem> Frame<'r, 'mem> {
+
+    fn new(
+        device: Handle<'r, ash::Device>,
+        command_buffer: Handle<'r, vk::CommandBuffer>,
+        swapchain_image_resource: ImageResource<'r>,
+        allocator: StackGuard<'r, 'mem>,
+        temp_allocator: StackGuard<'r, 'mem>,
+        queue_family_indices: physical_device::QueueFamilyIndices,
+    ) -> Self {
+        Self {
+            device,
+            command_buffer,
+            swapchain_image_resource,
+            allocator: Some(allocator),
+            temp_allocator: Some(temp_allocator),
+            queue_family_indices,
+        }
+    }
+
+    pub fn swapchain_image_resource(&self) -> frame_graph::ImageResource<'r> {
+        self.swapchain_image_resource.clone()
+    }
+
+    pub fn graphics_queue_family_index(&self) -> u32 {
+        self.queue_family_indices.get_graphics_index()
+    }
+
+    pub fn transfer_queue_family_index(&self) -> u32 {
+        self.queue_family_indices.get_transfer_index()
+    }
+
+    pub fn compute_queue_family_index(&self) -> u32 {
+        self.queue_family_indices.get_compute_index()
+    }
+
+    pub fn take_allocator(&mut self) -> Option<StackGuard<'r, 'mem>> {
+        self.allocator.take()
+    }
+
+    pub fn take_temp_allocator(&mut self) -> Option<StackGuard<'r, 'mem>> {
+        self.temp_allocator.take()
+    }
+
+    pub fn render<'a, 'b, B: AllocateExt<'b>>(
+        &mut self,
+        frame_graph: &FrameGraph<'a>,
+        resource_pool: &mut ResourcePool<'a, 'r>,
+        callbacks: Option<&FixedMap<'a, UID, fn(UID)>>,
+        temp_allocator: &mut B,
+    ) {
+        frame_graph.execute(
+            &self.device,
+            *self.command_buffer,
+            resource_pool,
+            &mut self.swapchain_image_resource,
+            callbacks,
+            temp_allocator,
+        );
+    }
+} 
+
 pub struct Renderer<'mem> {
     vulkan_context: ManuallyDrop<VulkanContext<'mem>>,
-    main_thread_context: ManuallyDrop<ThreadContext>,
+    main_thread_context: ManuallyDrop<ThreadContext<'mem>>,
 }
 
 impl<'mem> Renderer<'mem> {
@@ -92,13 +166,13 @@ impl<'mem> Renderer<'mem> {
                 &app_name,
                 app_version,
                 enable_validation,
-                &mut renderer_memory.vulkan_memory,
+                renderer_memory,
             ).map_err(|e| {
                 e
             })?);
         let main_thread_context = ManuallyDrop::new(ThreadContext
             ::new(
-                vulkan_context.device().clone(),
+                vulkan_context.device(),
                 vulkan_context.queue_family_indices())
             .map_err(|e| {
                 String::format(format_args!(
@@ -128,11 +202,11 @@ impl<'mem> Renderer<'mem> {
         let device = self.vulkan_context.device();
         let graphics_queue = self.vulkan_context.graphics_queue();
         let swapchain_loader = self.vulkan_context.swapchain_loader();
-        let graphics_index = self.vulkan_context.queue_family_indices().get_graphics_index();
+        let queue_family_indices = *self.vulkan_context.queue_family_indices();
         let swapchain_context = self.vulkan_context
             .get_swapchain_context(
                 self.main_thread_context.graphics_pool(),
-                &mut renderer_memory.vulkan_memory)
+                renderer_memory)
             .map_err(|e| {
                 String::format(format_args!(
                     "failed to get swapchain context ( {} )", e
@@ -153,29 +227,31 @@ impl<'mem> Renderer<'mem> {
                 "failed to begin command buffer {:?}", e
             )))
         }
-        let image_state = ImageState::new(
-            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            graphics_index,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        );
-        let memory_barrier = frame_data.image_state.to_memory_barrier(
-            frame_data.image,
-            &image_state,
-            SwapchainContext::image_subresource_range()
-        );
-        unsafe {
-            device.cmd_pipeline_barrier(
-                frame_data.command_buffer,
-                frame_data.image_state.pipeline_stage,
-                image_state.pipeline_stage,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                slice::from_ref(&memory_barrier),
+        let mut frame = Frame::new(
+            device.clone(),
+            Handle::new(frame_data.command_buffer),
+            ImageResource::<'_>::new(
+                Handle::new(frame_data.image),
+                Handle::new(frame_data.image_view),
+                SwapchainContext::image_subresource_range(),
+                frame_data.image_state,
+                frame_data.format,
+                frame_data.extent,
+            ),
+            StackGuard::new(&mut renderer_memory.swapchain_allocator),
+            StackGuard::new(&mut renderer_memory.init_allocator),
+            queue_family_indices);
+        interface
+            .render(&mut frame)
+            .map_err(|e| {
+                String::format(format_args!("interface failed to render ( {} )", e))
+            })?;
+        let (submit_info, fence) = swapchain_context
+            .setup_submit(
+                &device,
+                frame.swapchain_image_resource.state(),
+                queue_family_indices.get_graphics_index()
             );
-        }
-        let (submit_info, fence) = swapchain_context.setup_submit(&device, image_state, graphics_index);
         if let Err(e) = unsafe { device.end_command_buffer(frame_data.command_buffer) } {
             return Err(String::format(format_args!(
                 "failed to end command buffer {:?}", e

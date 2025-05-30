@@ -4,9 +4,12 @@ use crate::{
     utility::{has_bit, has_not_bit},
 };
 
-use ash::{khr::{self, surface}, vk};
+use ash::{ext::memory_priority, khr::{self, surface}, vk};
 use arrayvec::ArrayVec;
 
+use super::DeviceName;
+
+#[derive(Clone, Copy)]
 pub struct QueueFamilyIndex {
     pub index: u32,
     pub is_unique: bool,
@@ -22,6 +25,7 @@ impl QueueFamilyIndex {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct QueueFamilyIndices {
     pub graphics: QueueFamilyIndex,
     pub transfer: QueueFamilyIndex,
@@ -44,16 +48,17 @@ impl QueueFamilyIndices {
 }
 
 pub struct PhysicalDeviceInfo {
-    pub api_version: Version,
-    pub device_name: String<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>,
-    pub queue_family_indices: QueueFamilyIndices,
-    pub properties: vk::PhysicalDeviceProperties,
-    pub features: vk::PhysicalDeviceFeatures,
+    properties: vk::PhysicalDeviceProperties,
+    features: vk::PhysicalDeviceFeatures,
+    memory_properties: vk::PhysicalDeviceMemoryProperties,
+    queue_family_indices: QueueFamilyIndices,
+    api_version: Version,
+    device_name: String<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>,
 }
 
 impl PhysicalDeviceInfo {
 
-    pub fn new(
+    fn new(
         physical_device: vk::PhysicalDevice,
         instance: &ash::Instance,
         surface_loader: &surface::Instance,
@@ -78,21 +83,43 @@ impl PhysicalDeviceInfo {
                 Err(err) => return Err(err),
             };
         let features = unsafe { instance.get_physical_device_features(physical_device) };
+        let memory_properties = unsafe { instance.get_physical_device_memory_properties(physical_device) };
         Ok(
             Some(
                 Self {
-                    api_version,
-                    device_name,
-                    queue_family_indices,
                     properties,
                     features,
+                    memory_properties,
+                    queue_family_indices,
+                    api_version,
+                    device_name,
                 }
             )
         )
     }
 
-    pub fn get_queue_family_indices(&self) -> &QueueFamilyIndices {
+    pub fn api_version(&self) -> Version {
+        self.api_version
+    }
+
+    pub fn device_name(&self) -> &DeviceName {
+        &self.device_name
+    }
+
+    pub fn queue_family_indices(&self) -> &QueueFamilyIndices {
         &self.queue_family_indices
+    }
+
+    pub fn properties(&self) -> &vk::PhysicalDeviceProperties {
+        &self.properties
+    }
+
+    pub fn features(&self) -> &vk::PhysicalDeviceFeatures {
+        &self.features
+    }
+
+    pub fn memory_properties(&self) -> &vk::PhysicalDeviceMemoryProperties {
+        &self.memory_properties
     }
 }
 

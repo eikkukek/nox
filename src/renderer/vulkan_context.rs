@@ -3,10 +3,11 @@ use super::{
     physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo},
     swapchain_context::SwapchainContext,
     DeviceName,
+    Memory,
 };
 
 use crate::{
-    stack_allocator::{StackAllocator, StackGuard, StackRegion},
+    stack_allocator::{StackGuard, StackRegion},
     string::{LargeError, SmallError, String},
     vec_types::{ArrayVec, FixedVec, VecOperations},
     version::Version, AppName
@@ -21,11 +22,6 @@ use ash::{
 use ash_window;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle,};
 use std::{ffi::CString, mem::ManuallyDrop};
-
-pub struct VulkanMemory<'mem> {
-    pub init_allocator: StackAllocator<'mem>,
-    pub swapchain_allocator: StackAllocator<'mem>,
-}
 
 pub enum SwapchainState {
     Valid,
@@ -56,9 +52,9 @@ impl<'mem> VulkanContext<'mem> {
         app_name: &AppName,
         app_version: Version,
         enable_validation: bool,
-        vulkan_memory: &mut VulkanMemory,
+        memory: &mut Memory,
     ) -> Result<VulkanContext<'mem>, LargeError> {
-        let mut init_allocator = StackGuard::new(&mut vulkan_memory.init_allocator);
+        let mut init_allocator = StackGuard::new(&mut memory.init_allocator);
         let entry = unsafe { Entry::load().unwrap() };
         match unsafe { entry.try_enumerate_instance_version() } {
             Ok(v) => {
@@ -154,10 +150,10 @@ impl<'mem> VulkanContext<'mem> {
                 String::format(format_args!("failed to find suitable physical device ( {} )", e))
             })?;
         let mut unique_device_queues = ArrayVec::<u32, 3>::new();
-        let queue_family_indices = physical_device_info.get_queue_family_indices();
+        let queue_family_indices = physical_device_info.queue_family_indices();
         unique_device_queues.push_back(queue_family_indices.get_graphics_index());
-        unique_device_queues.push_back(queue_family_indices.get_transfer_index());
-        unique_device_queues.push_back(queue_family_indices.get_compute_index());
+        unique_device_queues.push_back_if_unique(queue_family_indices.get_transfer_index());
+        unique_device_queues.push_back_if_unique(queue_family_indices.get_compute_index());
         let mut device_queue_create_infos = ArrayVec::<vk::DeviceQueueCreateInfo, 3>::new();
         let queue_priority = 1.0;
         for queue_family_index in &unique_device_queues {
@@ -179,11 +175,21 @@ impl<'mem> VulkanContext<'mem> {
         let features = vk::PhysicalDeviceFeatures {
             sample_rate_shading: vk::TRUE,
             sampler_anisotropy: vk::TRUE,
-            fill_mode_non_solid: physical_device_info.features.sample_rate_shading,
+            fill_mode_non_solid: physical_device_info.features().sample_rate_shading,
+            ..Default::default()
+        };
+        let mut features_13 = vk::PhysicalDeviceVulkan13Features {
+            dynamic_rendering: vk::TRUE,
+            ..Default::default()
+        };
+        let mut features_12 = vk::PhysicalDeviceVulkan12Features {
+            p_next: (&mut features_13 as *mut _) as _,
+            timeline_semaphore: vk::TRUE,
             ..Default::default()
         };
         let device_create_info = vk::DeviceCreateInfo {
             s_type: vk::StructureType::DEVICE_CREATE_INFO,
+            p_next: (&mut features_12 as *mut _) as _,
             queue_create_info_count: device_queue_create_infos.len() as u32,
             p_queue_create_infos: device_queue_create_infos.as_ptr() as *const _,
             enabled_extension_count: 3,
@@ -259,14 +265,14 @@ impl<'mem> VulkanContext<'mem> {
         &mut self,
         framebuffer_size: PhysicalSize<u32>,
         graphics_command_pool: vk::CommandPool,
-        vulkan_memory: &mut VulkanMemory<'mem>,
+        memory: &mut Memory<'mem>,
     ) -> Result<(), LargeError> {
         if let Some(mut context) = self.swapchain_context.take() {
             context.destroy(&self.device, &self.swapchain_loader, self.graphics_queue, Some(graphics_command_pool));
         }
-        let allocator = &mut vulkan_memory.swapchain_allocator;
+        let allocator = &mut memory.swapchain_allocator;
         allocator.clear();
-        let Some(region) = StackRegion::new(allocator.size(), allocator) else {
+        let Some(region) = StackRegion::new(allocator.size() / 4, allocator) else {
             return Err(String::from_str("failed to create local swapchain allocator"))
         };
         self.swapchain_context = match SwapchainContext::new(
@@ -279,7 +285,7 @@ impl<'mem> VulkanContext<'mem> {
             graphics_command_pool,
             self.queue_family_indices().get_graphics_index(),
             region,
-            &mut vulkan_memory.init_allocator,
+            &mut memory.init_allocator,
         ) {
             Ok(context) => ManuallyDrop::new(context),
             Err(err) => return Err(err),
@@ -291,13 +297,13 @@ impl<'mem> VulkanContext<'mem> {
     pub fn get_swapchain_context(
         &mut self,
         graphics_command_pool: vk::CommandPool,
-        vulkan_memory: &mut VulkanMemory<'mem>,
+        memory: &mut Memory<'mem>,
     ) -> Result<&mut SwapchainContext<'mem>, LargeError> {
         match self.swapchain_state {
             SwapchainState::Valid => {},
             SwapchainState::OutOfDate(framebuffer_size) => {
                 self 
-                    .update_swapchain(framebuffer_size, graphics_command_pool, vulkan_memory)
+                    .update_swapchain(framebuffer_size, graphics_command_pool, memory)
                     .map_err(|e| {
                         e
                     })?;

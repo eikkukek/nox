@@ -86,7 +86,7 @@ impl<'a, K, V> FixedMap<'a, K, V> {
         Some(&mut self.vec.insert((key, f1()), left)?.1)
     }
 
-    pub fn get(&self, key: K) -> Option<&V>
+    pub fn get(&self, key: &K) -> Option<&V>
         where
             K: PartialOrd 
     {
@@ -106,7 +106,7 @@ impl<'a, K, V> FixedMap<'a, K, V> {
         None
     }
 
-    pub fn get_mut(&mut self, key: K) -> Option<&mut V>
+    pub fn get_mut(&mut self, key: &K) -> Option<&mut V>
         where
             K: PartialOrd 
     {

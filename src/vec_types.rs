@@ -277,8 +277,11 @@ impl<'a, T> VecOperations<T> for FixedVec<'a, T> {
     }
 
     fn insert(&mut self, value: T, index: usize) -> Option<&mut T> {
-        if index >= self.len || self.len == self.size {
+        if index > self.len || self.len == self.size {
             None
+        }
+        else if index == self.len {
+            self.push_back(value)
         }
         else {
             unsafe {

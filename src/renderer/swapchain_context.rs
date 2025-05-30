@@ -22,6 +22,8 @@ pub struct FrameData {
     pub command_buffer: vk::CommandBuffer,
     pub image_index: u32,
     pub image_state: ImageState,
+    pub format: vk::Format,
+    pub extent: vk::Extent2D,
     pub suboptimal: bool,
 }
 
@@ -33,6 +35,8 @@ impl FrameData {
         command_buffer: vk::CommandBuffer,
         image_index: u32,
         image_state: ImageState,
+        format: vk::Format,
+        extent: vk::Extent2D,
         suboptimal: bool,
     ) -> Self {
         Self {
@@ -41,6 +45,8 @@ impl FrameData {
             command_buffer,
             image_index,
             image_state,
+            format,
+            extent,
             suboptimal,
         }
     }
@@ -304,10 +310,11 @@ pub struct SwapchainContext<'a> {
     resources: Resources<'a>,
     images: FixedVec<'a, vk::Image>,
     image_states: FixedVec<'a, ImageState>,
-    pub handle: vk::SwapchainKHR,
-    pub current_image_index: u32,
     local_allocator: StackRegion<'a>,
-    //pub image_usage: vk::ImageUsageFlags,
+    handle: vk::SwapchainKHR,
+    current_image_index: u32,
+    surface_format: vk::SurfaceFormatKHR,
+    image_extent: vk::Extent2D,
 }
 
 impl<'a> SwapchainContext<'a> {
@@ -453,12 +460,14 @@ impl<'a> SwapchainContext<'a> {
         Ok(
             Some(
                 Self {
-                    local_allocator,
-                    handle: swapchain_handle,
                     resources,
                     images,
                     image_states,
+                    local_allocator,
+                    handle: swapchain_handle,
                     current_image_index: 0,
+                    surface_format,
+                    image_extent,
                 }
             )
         )
@@ -538,6 +547,8 @@ impl<'a> SwapchainContext<'a> {
                 *command_buffer,
                 next_image.0,
                 self.image_states[image_index],
+                self.surface_format.format,
+                self.image_extent,
                 next_image.1,
             )
         ))

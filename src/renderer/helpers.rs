@@ -57,6 +57,7 @@ pub fn begin_command_buffer(
     unsafe { device.begin_command_buffer(command_buffer, &begin_info) }
 }
 
+#[derive(Clone)]
 pub struct Handle<'a, T> {
     handle: T,
     _marker: PhantomData<&'a T>,

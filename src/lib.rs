@@ -15,4 +15,4 @@ mod stack_allocator;
 pub use nox::{Nox, InitSettings, AppName, Memory, Extent};
 pub use version::Version;
 pub use string::String;
-pub use renderer::DeviceName;
+pub use renderer::{Renderer, DeviceName};

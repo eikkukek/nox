@@ -2,22 +2,22 @@ use crate::string::{String, SmallError};
 
 use super::{
     physical_device,
-    helpers,
+    helpers::{self, Handle},
 };
 
 use ash::vk;
 
-pub struct ThreadContext {
-    device: ash::Device,
+pub struct ThreadContext<'r> {
+    device: Handle<'r, ash::Device>,
     graphics_pool: vk::CommandPool,
     transfer_pool: vk::CommandPool,
     compute_pool: vk::CommandPool,
 }
 
-impl ThreadContext {
+impl<'r> ThreadContext<'r> {
 
     pub fn new(
-        device: ash::Device,
+        device: Handle<'r, ash::Device>,
         queue_families: &physical_device::QueueFamilyIndices,
     ) -> Result<Self, SmallError> {
         let flags = vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER;
@@ -59,11 +59,11 @@ impl ThreadContext {
         self.graphics_pool
     }
 
-    pub fn transfer_pool(&self) -> vk::CommandPool {
+    pub fn _transfer_pool(&self) -> vk::CommandPool {
         self.transfer_pool
     }
 
-    pub fn compute_pool(&self) -> vk::CommandPool {
+    pub fn _compute_pool(&self) -> vk::CommandPool {
         self.compute_pool
     }
 

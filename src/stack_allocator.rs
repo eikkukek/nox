@@ -130,6 +130,14 @@ impl<'stack, 'mem> StackGuard<'stack, 'mem> {
             pos_rollback,
         }
     }
+
+    pub fn size(&self) -> usize {
+        self.stack.size()
+    }
+
+    pub fn reminaing(&self) -> usize {
+        self.stack.remaining()
+    }
 }
 
 impl<'stack, 'mem> AllocateExt<'stack> for StackGuard<'stack, 'mem> {
