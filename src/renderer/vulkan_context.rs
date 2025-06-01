@@ -9,7 +9,7 @@ use super::{
 use crate::{
     stack_allocator::{StackGuard, StackRegion},
     string::{LargeError, SmallError, String},
-    vec_types::{ArrayVec, FixedVec, VecOperations},
+    vec_types::{Vector, ArrayVec, FixedVec},
     version::Version, AppName
 };
 
@@ -238,7 +238,7 @@ impl<'mem> VulkanContext<'mem> {
     }
 
     pub fn queue_family_indices(&self) -> &physical_device::QueueFamilyIndices {
-        &self.physical_device_info.queue_family_indices
+        &self.physical_device_info.queue_family_indices()
     }
 
     pub fn graphics_queue(&self) -> Handle<'mem, vk::Queue> {
@@ -254,7 +254,7 @@ impl<'mem> VulkanContext<'mem> {
     }
 
     pub fn physical_device_name(&self) -> DeviceName {
-        self.physical_device_info.device_name
+        *self.physical_device_info.device_name()
     }
 
     pub fn request_resize(&mut self, size: PhysicalSize<u32>) {

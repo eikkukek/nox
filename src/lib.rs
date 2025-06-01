@@ -4,6 +4,7 @@ pub mod renderer;
 pub mod version;
 pub mod utility;
 pub mod string;
+pub mod marker_types;
 pub mod vec_types;
 pub mod map_types;
 pub mod interface;

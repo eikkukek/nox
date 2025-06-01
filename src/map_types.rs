@@ -1,6 +1,6 @@
 use super::{
     allocator_traits::AllocateExt,
-    vec_types::{FixedVec, VecOperations, VecIter, MutVecIter},
+    vec_types::{Vector, FixedVec, Iter, IterMut},
 };
 
 use std::cmp::Ordering;
@@ -126,11 +126,11 @@ impl<'a, K, V> FixedMap<'a, K, V> {
         None
     }
 
-    pub fn iter(&'a self) -> VecIter<'a, (K, V)> {
+    pub fn iter(&'a self) -> Iter<'a, (K, V)> {
         self.vec.iter()
     }
 
-    pub fn mut_iter(&'a self) -> MutVecIter<'a, (K, V)> {
-        self.vec.mut_iter()
+    pub fn iter_mut(&'a mut self) -> IterMut<'a, (K, V)> {
+        self.vec.iter_mut()
     }
 }

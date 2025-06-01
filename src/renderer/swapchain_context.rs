@@ -8,7 +8,7 @@ use crate::{
     stack_allocator::{StackAllocator, StackGuard, StackRegion},
     string::{LargeError, SmallError, String},
     utility::{clamp, has_bit, has_not_bit},
-    vec_types::{FixedVec, VecOperations},
+    vec_types::{FixedVec, Vector},
 };
 
 use ash::{khr::{surface, swapchain}, vk::{self, Handle}};

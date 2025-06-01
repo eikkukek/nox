@@ -7,7 +7,7 @@ use crate::{
     allocator_traits::AllocateExt,
     map_types::FixedMap,
     string::{String, SmallError},
-    vec_types::{FixedVec, VecOperations}
+    vec_types::{Vector, FixedVec}
 };
 
 use ash::vk;

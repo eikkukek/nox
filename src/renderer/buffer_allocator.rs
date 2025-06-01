@@ -6,7 +6,7 @@ use super::{
 use crate::{
     string::{SmallError, String},
     utility::{has_bit, has_not_bit},
-    vec_types::{VecOperations, FixedVec},
+    vec_types::DynamicVector,
     allocator_traits::AllocateExt,
 };
 
@@ -65,7 +65,7 @@ impl<'r> GpuMemory<'r> {
     }
 }
 
-struct Block {
+pub struct Block {
     offset: vk::DeviceSize,
     size: vk::DeviceSize,
 }
@@ -97,29 +97,28 @@ impl<'r, 'gpu> Allocation<'r, 'gpu> {
     }
 }
 
-pub struct BufferAllocator<'r, 'gpu, 'cpu> {
+pub struct BufferAllocator<'r, 'gpu, 'cpu, V: DynamicVector<'cpu, Block>> {
     memory: Handle<'gpu, vk::DeviceMemory>,
     size: vk::DeviceSize,
     device: Handle<'r, ash::Device>,
-    free_list: FixedVec<'cpu, Block>,
+    free_list: V,
     properties: vk::MemoryPropertyFlags,
+    _marker: PhantomData<&'cpu ()>,
 }
 
-impl<'r, 'gpu, 'cpu> BufferAllocator<'r, 'gpu, 'cpu>
+impl<'r, 'gpu, 'cpu, V: DynamicVector<'cpu, Block>> BufferAllocator<'r, 'gpu, 'cpu, V>
     where
         'r: 'gpu
 {
 
     pub fn new<A: AllocateExt<'cpu>>(
         memory: &mut GpuMemory,
-        free_list_size: usize,
+        free_list_capacity: usize,
         cpu_allocator: &mut A,
     ) -> Result<Self, SmallError> {
-        let mut free_list = FixedVec
-            ::new(free_list_size, cpu_allocator)
-            .ok_or_else(||
-                String::from_str("failed to allocate free list"
-            ))?;
+        let mut free_list = V
+            ::new_with_size(free_list_capacity, cpu_allocator).
+            ok_or_else(|| String::from_str("failed to create free list"))?;
         free_list.push_back(Block::new(0, memory.size));
         Ok(Self {
             memory: Handle::new(*memory.memory),
@@ -127,6 +126,7 @@ impl<'r, 'gpu, 'cpu> BufferAllocator<'r, 'gpu, 'cpu>
             device: Handle::new((*memory.device).clone()),
             free_list,
             properties: memory.properties,
+            _marker: PhantomData,
         })
     }
 

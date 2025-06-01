@@ -1,6 +1,6 @@
 use std::ptr::NonNull;
 
-pub trait AllocateExt<'allocator> {
+pub trait AllocateExt<'mem> {
 
     unsafe fn allocate_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>>;
 
@@ -31,4 +31,8 @@ pub trait AllocateExt<'allocator> {
         }
         Some(ptr)
     }
+}
+
+pub trait _FreeExt<'allocator> {
+    unsafe fn free(&mut self, ptr: *const (), size: usize, align: usize) -> Option<NonNull<u8>>;
 }

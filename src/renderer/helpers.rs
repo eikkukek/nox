@@ -1,4 +1,4 @@
-use crate::vec_types::VecOperations;
+use crate::vec_types::Vector;
 
 use ash::vk;
 
@@ -13,7 +13,7 @@ pub fn allocate_command_buffers<V>(
     out: &mut V,
 ) -> Result<(), vk::Result>
     where
-        V: VecOperations<vk::CommandBuffer>,
+        V: Vector<vk::CommandBuffer>,
 {
     if info.command_buffer_count > out.len() as u32 {
         panic!("out len smaller than command buffer count!");

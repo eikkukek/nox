@@ -1,11 +1,11 @@
 use crate::{
-    string::{String, SmallError},
-    version::Version,
+    string::{SmallError, String},
     utility::{has_bit, has_not_bit},
+    vec_types::{Vector, ArrayVec},
+    version::Version,
 };
 
-use ash::{ext::memory_priority, khr::{self, surface}, vk};
-use arrayvec::ArrayVec;
+use ash::{khr::{self, surface}, vk};
 
 use super::DeviceName;
 
@@ -260,7 +260,7 @@ pub fn rate_physical_device(
         return Ok(-1)
     }
     let mut required_extensions = ArrayVec::<String::<{vk::MAX_EXTENSION_NAME_SIZE}>, 3>::new();
-    required_extensions.push(
+    required_extensions.push_back(
         String::from_str(
             match khr::swapchain::NAME.to_str() {
                 Ok(s) => s,
@@ -269,7 +269,7 @@ pub fn rate_physical_device(
         )
     );
     if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_2 {
-        required_extensions.push(
+        required_extensions.push_back(
             String::from_str(
                 match khr::dynamic_rendering::NAME.to_str() {
                     Ok(s) => s,
@@ -277,7 +277,7 @@ pub fn rate_physical_device(
                 }
             )
         );
-        required_extensions.push(
+        required_extensions.push_back(
             String::from_str(
                 match khr::timeline_semaphore::NAME.to_str() {
                     Ok(s) => s,
@@ -287,7 +287,7 @@ pub fn rate_physical_device(
         );
     }
     else if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_3 {
-        required_extensions.push(
+        required_extensions.push_back(
             String::from_str(
                 match khr::dynamic_rendering::NAME.to_str() {
                     Ok(s) => s,
