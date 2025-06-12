@@ -1,19 +1,15 @@
-use crate::vec_types::Vector;
-
 use ash::vk;
 
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-};
+use crate::vec_types::Vector;
 
-pub fn allocate_command_buffers<V>(
+
+pub fn allocate_command_buffers<Vec>(
     device: &ash::Device,
     info: &vk::CommandBufferAllocateInfo,
-    out: &mut V,
+    out: &mut Vec,
 ) -> Result<(), vk::Result>
     where
-        V: Vector<vk::CommandBuffer>,
+        Vec: Vector<vk::CommandBuffer>,
 {
     if info.command_buffer_count > out.len() as u32 {
         panic!("out len smaller than command buffer count!");
@@ -55,34 +51,4 @@ pub fn begin_command_buffer(
         ..Default::default()
     };
     unsafe { device.begin_command_buffer(command_buffer, &begin_info) }
-}
-
-#[derive(Clone)]
-pub struct Handle<'a, T> {
-    handle: T,
-    _marker: PhantomData<&'a T>,
-}
-
-impl<'a, T> Handle<'a, T> {
-
-    pub fn new(h: T) -> Self {
-        Self {
-            handle: h,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<'a, T> Deref for Handle<'a, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.handle
-    }
-}
-
-impl<'a, T> DerefMut for Handle<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.handle
-    }
 }

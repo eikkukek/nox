@@ -1,20 +1,21 @@
-use super::{
-    image_state::ImageState,
-    helpers::allocate_command_buffers,
-};
+use super::{image_state::ImageState, helpers};
 
 use crate::{
-    allocator_traits::AllocateExt,
-    stack_allocator::{StackAllocator, StackGuard, StackRegion},
-    string::{LargeError, SmallError, String},
-    utility::{clamp, has_bit, has_not_bit},
+    allocator_traits::Allocate,
+    stack_alloc::{StackAlloc, StackGuard},
+    string_types::{ArrayString, array_format, LargeError, SmallError},
+    utility::{clamp, has_bits, has_not_bits},
     vec_types::{FixedVec, Vector},
 };
 
 use ash::{khr::{surface, swapchain}, vk::{self, Handle}};
 
 use core::panic;
-use std::{slice, mem::ManuallyDrop};
+use core::{
+    slice,
+    mem::ManuallyDrop,
+    cell::RefCell,
+};
 
 pub struct FrameData {
     pub image: vk::Image,
@@ -52,7 +53,7 @@ impl FrameData {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 struct TiedResources {
     image_view: vk::ImageView,
     present_wait_semaphore: vk::Semaphore,
@@ -87,18 +88,18 @@ impl TiedResources {
         };
         let image_view = unsafe { device
             .create_image_view(&image_view_create_info, None)
-            .map_err(|e| {
-                String::format(format_args!("failed to create image view {}", e))
-            })?};
+            .map_err(|e|
+                array_format!("failed to create image view {}", e)
+            )?};
         let semaphore_create_info = vk::SemaphoreCreateInfo {
             s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
             ..Default::default()
         };
         let present_wait_semaphore = unsafe { device
             .create_semaphore(&semaphore_create_info, None)
-            .map_err(|e| {
-                String::format(format_args!("failed to create semaphore {}", e))
-        })?};
+            .map_err(|e| 
+                array_format!("failed to create semaphore {}", e)
+        )?};
         Ok(
             Self {
                 image_view,
@@ -125,7 +126,7 @@ impl TiedResources {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 struct UntiedResources {
     frame_ready_fence: vk::Fence,
     image_ready_semaphore: vk::Semaphore,
@@ -142,7 +143,7 @@ impl UntiedResources {
         let frame_ready_fence = unsafe { device
             .create_fence(&fence_create_info, None)
             .map_err(|e| {
-                String::format(format_args!("failed to create fence {}", e))
+                array_format!("failed to create fence {}", e)
             })?
         };
         let semaphore_create_info = vk::SemaphoreCreateInfo {
@@ -152,7 +153,7 @@ impl UntiedResources {
         let image_ready_semaphore = unsafe { device
             .create_semaphore(&semaphore_create_info, None)
             .map_err(|e| {
-                String::format(format_args!("failed to create semaphore {}", e))
+                array_format!("failed to create semaphore {}", e)
             })?
         };
         Ok(Self {
@@ -179,27 +180,29 @@ impl UntiedResources {
     }
 }
 
-struct Resources<'a> {
-    tied_resources: FixedVec<'a, ManuallyDrop<TiedResources>>,
-    untied_resources: FixedVec<'a, ManuallyDrop<UntiedResources>>,
-    command_buffers: FixedVec<'a, vk::CommandBuffer>,
+struct Resources<'mem> {
+    tied_resources: FixedVec<'mem, ManuallyDrop<TiedResources>, StackAlloc>,
+    untied_resources: FixedVec<'mem, ManuallyDrop<UntiedResources>, StackAlloc>,
+    command_buffers: FixedVec<'mem, vk::CommandBuffer, StackAlloc>,
     untied_resource_index: usize,
 }
 
-impl<'a> Resources<'a> {
+impl<'mem> Resources<'mem> {
 
     pub fn new(
         device: &ash::Device,
-        images: &FixedVec<'a, vk::Image>,
+        images: &FixedVec<'mem, vk::Image, StackAlloc>,
         image_format: vk::Format,
         command_pool: vk::CommandPool,
-        allocator: &mut StackRegion<'a>
+        allocator: &'mem RefCell<StackAlloc>
     ) -> Result<Self, SmallError>
     {
         let image_count = images.len();
-        let Some(mut command_buffers) = FixedVec::new_with_default(image_count, image_count, allocator) else {
-            return Err(String::from_str("failed to allocate CPU resources"))
-        };
+        let Some(mut command_buffers) = FixedVec
+            ::with_capacity(image_count, allocator) else {
+                return Err(ArrayString::from_str("failed to allocate CPU resources"))
+            };
+        command_buffers.resize(image_count, Default::default()).expect("should not happen");
         let command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
             command_pool,
@@ -207,19 +210,19 @@ impl<'a> Resources<'a> {
             command_buffer_count: image_count as u32,
             ..Default::default()
         };
-        if let Err(e) = allocate_command_buffers(device, &command_buffer_alloc_info, &mut command_buffers) {
-            return Err(String::format(format_args!(
-                "failed to allocate command buffers {:?}", e,
-            )))
+        if let Err(e) = helpers::allocate_command_buffers(device, &command_buffer_alloc_info, &mut command_buffers) {
+            return Err(array_format!("failed to allocate command buffers {:?}", e))
         }
-        let Some(mut tied_resources) = FixedVec::<ManuallyDrop<TiedResources>>::new(image_count, allocator) else {
-            return Err(String::from_str("failed to allocate CPU resources"))
-        };
-        let Some(mut untied_resources) = FixedVec::<ManuallyDrop<UntiedResources>>::new(image_count, allocator) else {
-            return Err(String::from_str("failed to allocate"))
-        };
+        let Some(mut tied_resources) = FixedVec::<ManuallyDrop<TiedResources>, StackAlloc>
+            ::with_capacity(image_count, allocator) else {
+                return Err(ArrayString::from_str("failed to allocate CPU resources"))
+            };
+        let Some(mut untied_resources) = FixedVec::<ManuallyDrop<UntiedResources>, StackAlloc>
+            ::with_capacity(image_count, allocator) else {
+            return Err(ArrayString::from_str("failed to allocate"))
+            };
         for i in 0..image_count {
-            tied_resources.push_back(
+            tied_resources.push(
                 match TiedResources::new(device, images[i], image_format) {
                     Ok(r) => ManuallyDrop::new(r),
                     Err(e) => {
@@ -234,7 +237,7 @@ impl<'a> Resources<'a> {
                     },
                 }
             );
-            untied_resources.push_back(
+            untied_resources.push(
                 match UntiedResources::new(device) {
                     Ok(r) => ManuallyDrop::new(r),
                     Err(e) => {
@@ -280,7 +283,9 @@ impl<'a> Resources<'a> {
         self.untied_resources.clear();
         if let Some(command_pool) = command_pool {
             if self.command_buffers.len() != 0 {
-                unsafe { device.free_command_buffers(command_pool, self.command_buffers.as_slice()); }
+                unsafe {
+                    device.free_command_buffers(command_pool, self.command_buffers.as_slice());
+                }
             }
             self.command_buffers.clear();
         }
@@ -306,18 +311,17 @@ pub enum PresentResult {
     OutOfDate,
 }
 
-pub struct SwapchainContext<'a> {
-    resources: Resources<'a>,
-    images: FixedVec<'a, vk::Image>,
-    image_states: FixedVec<'a, ImageState>,
-    local_allocator: StackRegion<'a>,
+pub struct SwapchainContext<'mem> {
+    resources: Resources<'mem>,
+    images: FixedVec<'mem, vk::Image, StackAlloc>,
+    image_states: FixedVec<'mem, ImageState, StackAlloc>,
     handle: vk::SwapchainKHR,
     current_image_index: u32,
     surface_format: vk::SurfaceFormatKHR,
     image_extent: vk::Extent2D,
 }
 
-impl<'a> SwapchainContext<'a> {
+impl<'mem> SwapchainContext<'mem> {
 
     pub fn new(
         device: &ash::Device,
@@ -328,8 +332,8 @@ impl<'a> SwapchainContext<'a> {
         framebuffer_extent: vk::Extent2D,
         graphics_command_pool: vk::CommandPool,
         graphics_queue_family_index: u32,
-        mut local_allocator: StackRegion<'a>,
-        init_allocator: &mut StackAllocator,
+        local_allocator: &'mem RefCell<StackAlloc>,
+        init_allocator: &RefCell<StackAlloc>,
     ) -> Result<Option<Self>, LargeError>
     {
         if framebuffer_extent.width == 0 || framebuffer_extent.height == 0 {
@@ -337,17 +341,17 @@ impl<'a> SwapchainContext<'a> {
         }
         let surface_format = match find_surface_format(surface_loader, physical_device, surface_handle, init_allocator) {
             Ok(format) => format,
-            Err(err) => return Err(String::from_str(err.as_str())),
+            Err(err) => return Err(ArrayString::from_str(err.as_str())),
         };
         let present_mode = match find_present_mode(surface_loader, physical_device, surface_handle, init_allocator) {
             Ok(mode) => mode,
-            Err(err) => return Err(String::from_str(err.as_str())),
+            Err(err) => return Err(ArrayString::from_str(err.as_str())),
         };
         let capabilities = unsafe {
             surface_loader
                 .get_physical_device_surface_capabilities(physical_device, surface_handle)
                 .map_err(|e| {
-                    String::format(format_args!("failed to get surface capabilities {:?}", e))
+                    array_format!("failed to get surface capabilities {:?}", e)
                 })?
         };
         let mut image_extent = capabilities.current_extent;
@@ -364,23 +368,23 @@ impl<'a> SwapchainContext<'a> {
             );
         }
         if image_extent.width == 0 || image_extent.height == 0 {
-            return Err(String::from_str("swapchain extent size was zero"));
+            return Err(ArrayString::from_str("swapchain extent size was zero"));
         }
         let mut min_image_count = capabilities.min_image_count + 1;
         if capabilities.max_image_count > 0 && min_image_count > capabilities.max_image_count {
             min_image_count = capabilities.max_image_count;
         }
         let mut pre_transform = capabilities.current_transform;
-        if has_bit!(capabilities.supported_transforms, vk::SurfaceTransformFlagsKHR::IDENTITY) {
+        if has_bits!(capabilities.supported_transforms, vk::SurfaceTransformFlagsKHR::IDENTITY) {
             pre_transform = vk::SurfaceTransformFlagsKHR::IDENTITY;
         }
         let mut composite_alpha = vk::CompositeAlphaFlagsKHR::OPAQUE;
-        if has_bit!(capabilities.supported_composite_alpha, vk::CompositeAlphaFlagsKHR::INHERIT) {
+        if has_bits!(capabilities.supported_composite_alpha, vk::CompositeAlphaFlagsKHR::INHERIT) {
             composite_alpha = vk::CompositeAlphaFlagsKHR::INHERIT;
         }
         let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
-        if has_not_bit!(capabilities.supported_usage_flags, image_usage) {
-            return Err(String::from_str("swapchain does not support color attachment usage"))
+        if has_not_bits!(capabilities.supported_usage_flags, image_usage) {
+            return Err(ArrayString::from_str("swapchain does not support color attachment usage"))
         }
         //image_usage |= capabilities.supported_usage_flags & vk::ImageUsageFlags::TRANSFER_DST;
         let create_info = vk::SwapchainCreateInfoKHR {
@@ -401,7 +405,7 @@ impl<'a> SwapchainContext<'a> {
         let swapchain_handle = unsafe {
             match swapchain_loader.create_swapchain(&create_info, None) {
                 Ok(swapchain) => swapchain,
-                Err(result) => return Err(String::format(format_args!("failed to create swapchain {:?}", result))),
+                Err(result) => return Err(array_format!("failed to create swapchain {:?}", result)),
             }
         };
         let get_swapchain_images_khr = swapchain_loader.fp().get_swapchain_images_khr;
@@ -409,68 +413,70 @@ impl<'a> SwapchainContext<'a> {
         let mut result = unsafe { get_swapchain_images_khr(device.handle(), swapchain_handle, &mut image_count, std::ptr::null_mut()) };
         if image_count == 0 || result != vk::Result::SUCCESS {
             unsafe { swapchain_loader.destroy_swapchain(swapchain_handle, None); }
-            return Err(String::format(format_args!("failed to get swapchain image count {:?}", result)))
+            return Err(array_format!("failed to get swapchain image count {:?}", result))
         }
         let Some(mut images) = FixedVec
-            ::new_with_default(
+            ::with_capacity(
                 image_count as usize,
-                image_count as usize,
-                &mut local_allocator
+                &local_allocator,
             ) else {
                 unsafe {
                     swapchain_loader.destroy_swapchain(swapchain_handle, None);
                 }
-                return Err(String::from_str("failed to allocate image handles")
+                return Err(ArrayString::from_str("failed to allocate image handles")
             )};
-        let Some(image_states) = FixedVec
-            ::new_with(
-                image_count as usize,
-                image_count as usize,
-                |_i| {
-                    ImageState::new(
-                        vk::AccessFlags::NONE,
-                        vk::ImageLayout::UNDEFINED,
-                        graphics_queue_family_index, 
-                        vk::PipelineStageFlags::TOP_OF_PIPE
-                    )},
-                &mut local_allocator
+        images.resize(image_count as usize, Default::default()).expect("should not happen");
+        let Some(mut image_states) = FixedVec
+            ::with_capacity(
+                images.len(),
+                &local_allocator
             ) else {
                 unsafe {
                     swapchain_loader.destroy_swapchain(swapchain_handle, None);
                 }
-                return Err(String::from_str("failed to allocate image states")
+                return Err(ArrayString::from_str("failed to allocate image states")
             )};
-        result = unsafe { get_swapchain_images_khr(device.handle(), swapchain_handle, &mut image_count, images.as_mut_ptr() as _) };
+        image_states.resize(images.len(),
+            ImageState::new(
+                vk::AccessFlags::NONE,
+                vk::ImageLayout::UNDEFINED,
+                graphics_queue_family_index, 
+                vk::PipelineStageFlags::TOP_OF_PIPE
+            )
+        ).expect("should not happen");
+        result = unsafe {
+            get_swapchain_images_khr(
+                device.handle(),
+                swapchain_handle,
+                &mut image_count,
+                images.as_mut_ptr() as _
+            )
+        };
         if result != vk::Result::SUCCESS {
             unsafe { swapchain_loader.destroy_swapchain(swapchain_handle, None); }
-            return Err(String::format(format_args!("failed to get swapchain ")))
+            return Err(array_format!("failed to get swapchain "))
         }
         let resources = Resources::new(
             &device,
             &images,
             surface_format.format,
             graphics_command_pool,
-            &mut local_allocator,
+            &local_allocator,
         ).map_err(|e| {
             unsafe { swapchain_loader.destroy_swapchain(swapchain_handle, None); }
-            String::format(format_args!(
-                "failed to create resources ( {} )", e
-            ))
+            array_format!("failed to create resources ( {} )", e)
         })?;
-        Ok(
-            Some(
-                Self {
-                    resources,
-                    images,
-                    image_states,
-                    local_allocator,
-                    handle: swapchain_handle,
-                    current_image_index: 0,
-                    surface_format,
-                    image_extent,
-                }
-            )
-        )
+        Ok(Some(
+            Self {
+                resources,
+                images,
+                image_states,
+                handle: swapchain_handle,
+                current_image_index: 0,
+                surface_format,
+                image_extent,
+            }
+        ))
     }
 
     pub fn destroy(
@@ -478,12 +484,11 @@ impl<'a> SwapchainContext<'a> {
         device: &ash::Device,
         swapchain_loader: &swapchain::Device,
         grapchis_queue: vk::Queue,
-        graphics_command_pool: Option<vk::CommandPool>
+        graphics_command_pool: Option<vk::CommandPool>,
     )
     {
         self.resources.destroy(device, grapchis_queue, graphics_command_pool);
         unsafe { swapchain_loader.destroy_swapchain(self.handle, None); }
-        self.local_allocator.clear();
     }
 
     pub const fn image_subresource_range() -> vk::ImageSubresourceRange {
@@ -503,7 +508,7 @@ impl<'a> SwapchainContext<'a> {
     pub fn setup_image(
         &mut self,
         device: &ash::Device,
-        swapchain_loader: &swapchain::Device
+        swapchain_loader: &swapchain::Device,
     ) -> Result<Option<FrameData>, SmallError>
     {
         self.resources.increment_untied_resource_index();
@@ -514,14 +519,14 @@ impl<'a> SwapchainContext<'a> {
                 fences,
                 true,
                 Self::frame_timeout())
-            .map_err(|e| {
-                String::format(format_args!("failed to wait for fence {:?}", e))
-            })?};
+            .map_err(|e|
+                array_format!("failed to wait for fence {:?}", e)
+            )?};
         unsafe { device
             .reset_fences(fences)
-            .map_err(|e| {
-                String::format(format_args!("failed to reset fence {:?}", e))
-            })?};
+            .map_err(|e|
+                array_format!("failed to reset fence {:?}", e)
+            )?};
         let next_image = unsafe { match swapchain_loader
             .acquire_next_image(
                 self.handle,
@@ -534,7 +539,7 @@ impl<'a> SwapchainContext<'a> {
                     if e == vk::Result::ERROR_OUT_OF_DATE_KHR {
                         return Ok(None)
                     }
-                    return Err(String::format(format_args!("failed to acquire next image {:?}", e)))
+                    return Err(array_format!("failed to acquire next image {:?}", e))
                 }
             }};
         self.current_image_index = next_image.0;
@@ -628,7 +633,7 @@ impl<'a> SwapchainContext<'a> {
                         Ok(PresentResult::OutOfDate)
                     }
                     else {
-                        Err(String::format(format_args!("queue present failed {:?}", e)))
+                        Err(array_format!("queue present failed {:?}", e))
                     }
                 }
             }
@@ -640,7 +645,7 @@ fn find_surface_format(
     surface_loader: &surface::Instance,
     physical_device: vk::PhysicalDevice,
     surface_handle: vk::SurfaceKHR,
-    allocator: &mut StackAllocator,
+    allocator: &RefCell<StackAlloc>,
 ) -> Result<vk::SurfaceFormatKHR, SmallError>
 {
     unsafe {
@@ -654,11 +659,11 @@ fn find_surface_format(
             std::ptr::null_mut(),
         );
         if count == 0 || result != vk::Result::SUCCESS {
-            return Err(SmallError::format(format_args!("failed to get surface format count {:?}", result)))
+            return Err(array_format!("failed to get surface format count {:?}", result))
         }
-        let formats_ptr: *mut vk::SurfaceFormatKHR = match stack.allocate_uninit(count as usize) {
+        let formats_ptr = match stack.allocate_uninit::<vk::SurfaceFormatKHR>(count as usize) {
             Some(formats) => formats.as_ptr(),
-            None => return Err(SmallError::from_str("main thread stack out of memory")),
+            None => return Err(ArrayString::from_str("main thread stack out of memory")),
         };
         result = get_physical_device_surface_formats_khr(
             physical_device,
@@ -667,9 +672,9 @@ fn find_surface_format(
             formats_ptr,
         );
         if result != vk::Result::SUCCESS {
-            return Err(SmallError::format(format_args!("failed to get surface formats {:?}", result)))
+            return Err(array_format!("failed to get surface formats {:?}", result))
         }
-        let formats: &[vk::SurfaceFormatKHR] = std::slice::from_raw_parts(formats_ptr, count as usize);
+        let formats = std::slice::from_raw_parts(formats_ptr, count as usize);
         for format in formats {
             if format.format == vk::Format::R8G8B8A8_SRGB &&
                 format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR {
@@ -684,7 +689,7 @@ fn find_present_mode(
     surface_loader: &surface::Instance,
     physical_device: vk::PhysicalDevice,
     surface_handle: vk::SurfaceKHR,
-    allocator: &mut StackAllocator,
+    allocator: &RefCell<StackAlloc>,
 ) -> Result<vk::PresentModeKHR, SmallError>
 {
     unsafe {
@@ -698,11 +703,11 @@ fn find_present_mode(
             std::ptr::null_mut(),
         );
         if count == 0 || result != vk::Result::SUCCESS {
-            return Err(SmallError::format(format_args!("failed to get surface present mode count {:?}", result)))
+            return Err(array_format!("failed to get surface present mode count {:?}", result))
         }
         let modes_ptr: *mut vk::PresentModeKHR = match stack.allocate_uninit(count as usize) {
             Some(modes) => modes.as_ptr(),
-            None => return Err(SmallError::from_str("main thread stack out of memory")),
+            None => return Err(ArrayString::from_str("main thread stack out of memory")),
         };
         result = get_physical_device_surface_present_modes_khr(
             physical_device,
@@ -711,7 +716,7 @@ fn find_present_mode(
             modes_ptr,
         );
         if result != vk::Result::SUCCESS {
-            return Err(SmallError::format(format_args!("failed to get surface present modes {:?}", result)))
+            return Err(array_format!("failed to get surface present modes {:?}", result))
         }
         let modes: &[vk::PresentModeKHR] = std::slice::from_raw_parts(modes_ptr, count as usize);
         for mode in modes {

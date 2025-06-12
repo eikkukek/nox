@@ -1,10 +1,5 @@
-use super::{
-    interface::Interface,
-    backend::{self, Backend},
-    renderer::Renderer,
-    string::String,
-    version::Version,
-};
+mod memory_layout;
+mod init_settings;
 
 use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
@@ -14,82 +9,61 @@ use winit::{
     dpi::LogicalSize,
 };
 
-pub type AppName = String<64>;
-pub type Memory<'mem> = backend::Memory<'mem>;
+use crate::string_types::SmallError;
 
-pub struct Extent<T> {
-    pub width: T,
-    pub height: T,
+use super::{
+    stack_alloc::StackAlloc,
+    interface::Interface,
+    backend::{self},
+    renderer::Renderer,
+    string_types::{ArrayString, LargeError},
+};
+
+pub use memory_layout::MemoryLayout;
+pub use init_settings::InitSettings;
+
+pub use backend::Memory;
+
+
+pub type AppName = ArrayString<128>;
+
+pub type ShaderID = u64;
+
+pub struct Allocators {
+    temp_alloc: StackAlloc,
 }
 
-impl<T> Extent<T>
+impl Allocators {
+
+    pub fn new(memory_layout: MemoryLayout) -> Option<Self> {
+        Some(Self{
+            temp_alloc: StackAlloc::new(memory_layout.temp_size())?
+        })
+    }
+}
+
+pub struct Nox<'interface, 'mem, I>
     where
-        T: Copy,
-{
-
-    pub fn new(width: T, height: T) -> Self {
-        Self {
-            width,
-            height
-        }
-    }
-
-    pub fn width(&mut self, width: T) {
-        self.width = width;
-    }
-
-    pub fn height(&mut self, height: T) {
-        self.height = height;
-    }
-    
-    pub fn as_logical_size(&self) -> LogicalSize<T> {
-        LogicalSize::new(self.width, self.height)
-    }
-}
-
-pub struct InitSettings {
-    pub app_name: AppName,
-    pub app_version: Version,
-    pub window_size: Extent<f32>
-}
-
-impl InitSettings {
-
-    pub fn new(
-        app_name: &str,
-        app_version: Version,
-        window_size: Extent<f32>
-    ) -> Self
-    {
-        InitSettings {
-            app_name: String::from_str(app_name),
-            app_version,
-            window_size,
-        }
-    }
-}
-
-pub struct Nox<'interface, I>
-    where
+        'mem: 'interface,
         I: Interface,
 {
     interface: Option<&'interface mut I>,
     window: Option<Window>,
-    renderer: Option<Renderer<'interface>>,
-    backend: Backend<'interface>, // contains memory for renderer
+    memory: &'mem Memory,
+    renderer: Option<Renderer<'mem>>,
 }
 
-impl<'interface, I: Interface> Nox<'interface, I> {
+impl<'interface, 'mem, I: Interface> Nox<'interface, 'mem, I>
+    where
+        'mem: 'interface
+{
 
-    pub fn new(interface: &'interface mut I) -> Option<Self> {
-        let backend = Backend::new(
-            I::create_memory(),
-        )?;
+    pub fn new(interface: &'interface mut I, memory: &'mem mut Memory) -> Option<Self> {
         Some(
             Nox {
                 interface: Some(interface),
                 window: None,
-                backend,
+                memory,
                 renderer: None,
             }
         )
@@ -101,21 +75,28 @@ impl<'interface, I: Interface> Nox<'interface, I> {
         event_loop.run_app(&mut self).expect("failed to run event loop");
     }
 
-    pub fn get_renderer(&mut self) -> Option<&mut Renderer<'interface>> {
+    pub fn get_renderer(&mut self) -> Option<&mut Renderer<'mem>> {
         Some(self.renderer.as_mut()?)
+    }
+
+    pub fn load_shader(input_filename: &str) -> Result<ShaderID, LargeError> {
+
     }
 }
 
-impl<'interface, I: Interface> Drop for Nox<'interface, I> {
+impl<'interface, 'mem, I: Interface> Drop for Nox<'interface, 'mem, I> {
 
     fn drop(&mut self) {
         if let Some(mut renderer) = self.renderer.take() {
-            renderer.destroy();
+            renderer.clean_up(self.memory.renderer_allocators());
         }
     }
 }
 
-impl<'interface, I: Interface> ApplicationHandler for Nox<'interface, I> {
+impl<'interface, 'mem, I: Interface> ApplicationHandler for Nox<'interface, 'mem, I>
+    where
+        'mem: 'interface
+{
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
         match event {
@@ -127,10 +108,11 @@ impl<'interface, I: Interface> ApplicationHandler for Nox<'interface, I> {
             },
             WindowEvent::RedrawRequested => {
                 let Some(interface) = self.interface.take() else { return };
+                let renderer_allocators = self.memory.renderer_allocators();
                 if let Some(window) = &self.window {
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
-                        if let Err(e) = renderer.render(&window, interface, self.backend.renderer_memory()) {
+                        if let Err(e) = renderer.render(&window, interface, renderer_allocators) {
                             eprintln!("Nox renderer error: {}", e);
                             event_loop.exit();
                         }
@@ -148,7 +130,7 @@ impl<'interface, I: Interface> ApplicationHandler for Nox<'interface, I> {
         if self.window.is_none() {
             let window_attributes = Window::default_attributes()
                 .with_title(init_settings.app_name.as_str())
-                .with_inner_size(init_settings.window_size.as_logical_size())
+                .with_inner_size(init_settings.window_size)
                 .with_min_inner_size(LogicalSize::new(1.0, 1.0));
             let window = match event_loop.create_window(window_attributes) {
                 Ok(window) => window,
@@ -160,6 +142,7 @@ impl<'interface, I: Interface> ApplicationHandler for Nox<'interface, I> {
             };
             println!("Nox message: created window {}", init_settings.app_name);
             event_loop.set_control_flow(ControlFlow::Poll);
+            let renderer_allocators = self.memory.renderer_allocators();
             window.request_redraw();
             self.renderer = match Renderer
                 ::new(
@@ -167,7 +150,8 @@ impl<'interface, I: Interface> ApplicationHandler for Nox<'interface, I> {
                     &init_settings.app_name,
                     init_settings.app_version,
                     true,
-                    self.backend.renderer_memory(),
+                    *self.memory.renderer_layout(),
+                    renderer_allocators,
                 ) {
                 Ok(r) => Some(r),
                 Err(e) => {

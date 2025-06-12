@@ -1,6 +1,6 @@
 use crate::{
-    string::{SmallError, String},
-    utility::{has_bit, has_not_bit},
+    string_types::{ArrayString, array_format, SmallError},
+    utility::{has_bits, has_not_bits},
     vec_types::{Vector, ArrayVec},
     version::Version,
 };
@@ -47,13 +47,14 @@ impl QueueFamilyIndices {
     }
 }
 
+#[derive(Clone)]
 pub struct PhysicalDeviceInfo {
     properties: vk::PhysicalDeviceProperties,
     features: vk::PhysicalDeviceFeatures,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     queue_family_indices: QueueFamilyIndices,
     api_version: Version,
-    device_name: String<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>,
+    device_name: ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>,
 }
 
 impl PhysicalDeviceInfo {
@@ -67,9 +68,9 @@ impl PhysicalDeviceInfo {
     {
         let properties = unsafe { instance.get_physical_device_properties(physical_device) };
         let device_name =
-            match String::from_ascii(&properties.device_name) {
+            match ArrayString::from_ascii(&properties.device_name) {
                 Ok(device_name) => device_name,
-                Err(_) => return Err(String::from_str("failed to convert device name to string")),
+                Err(_) => return Err(ArrayString::from_str("failed to convert device name to string")),
             };
         let api_version = Version::from(properties.api_version);
         let queue_family_indices =
@@ -146,14 +147,14 @@ impl QueueFamilyIndices {
                 break;
             }
             if !graphics.1 &&
-                has_bit!(property.queue_flags, vk::QueueFlags::GRAPHICS)
+                has_bits!(property.queue_flags, vk::QueueFlags::GRAPHICS)
             {
                 let present_supported = unsafe {
                     match surface_loader.get_physical_device_surface_support(physical_device, i as u32, surface_khr) {
                         Ok(present_supported) => present_supported,
                         Err(result) =>  {
                             return Err(
-                                String::format(format_args!("failed to get physical device surface support {:?}", result))
+                                array_format!("failed to get physical device surface support {:?}", result)
                             )
                         },
                     }
@@ -164,9 +165,9 @@ impl QueueFamilyIndices {
                 }
             }
             if !transfer.1 &&
-                has_bit!(property.queue_flags, vk::QueueFlags::TRANSFER) 
+                has_bits!(property.queue_flags, vk::QueueFlags::TRANSFER) 
             {
-                if has_not_bit!(property.queue_flags, vk::QueueFlags::GRAPHICS) {
+                if has_not_bits!(property.queue_flags, vk::QueueFlags::GRAPHICS) {
                     transfer = (i as u32, true);
                     continue;
                 }
@@ -175,9 +176,9 @@ impl QueueFamilyIndices {
                 }
             }
             if !compute.1 &&
-                has_bit!(property.queue_flags, vk::QueueFlags::COMPUTE)
+                has_bits!(property.queue_flags, vk::QueueFlags::COMPUTE)
             {
-                if has_not_bit!(property.queue_flags, vk::QueueFlags::GRAPHICS) {
+                if has_not_bits!(property.queue_flags, vk::QueueFlags::GRAPHICS) {
                     compute = (i as u32, true);
                 }
                 else if !compute_secondary.1 {
@@ -222,11 +223,11 @@ impl QueueFamilyIndices {
         // fall back to accepting shared queues
         for (i, property) in properties.iter().enumerate() {
             if !transfer.1 &&
-                has_bit!(property.queue_flags, vk::QueueFlags::TRANSFER) {
+                has_bits!(property.queue_flags, vk::QueueFlags::TRANSFER) {
                 transfer = (i as u32, true);
             }
             if !compute.1 &&
-                has_bit!(property.queue_flags, vk::QueueFlags::COMPUTE) {
+                has_bits!(property.queue_flags, vk::QueueFlags::COMPUTE) {
                 compute  = (i as u32, true);
             }
             if transfer.1 && compute.1 {
@@ -259,9 +260,9 @@ pub fn rate_physical_device(
         physical_device_info.features.sampler_anisotropy == vk::FALSE {
         return Ok(-1)
     }
-    let mut required_extensions = ArrayVec::<String::<{vk::MAX_EXTENSION_NAME_SIZE}>, 3>::new();
-    required_extensions.push_back(
-        String::from_str(
+    let mut required_extensions = ArrayVec::<ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>, 3>::new();
+    required_extensions.push(
+        ArrayString::from_str(
             match khr::swapchain::NAME.to_str() {
                 Ok(s) => s,
                 Err(_) => return Err(SmallError::from_str("failed to convert extension name to str"))
@@ -269,16 +270,16 @@ pub fn rate_physical_device(
         )
     );
     if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_2 {
-        required_extensions.push_back(
-            String::from_str(
+        required_extensions.push(
+            ArrayString::from_str(
                 match khr::dynamic_rendering::NAME.to_str() {
                     Ok(s) => s,
                     Err(_) => return Err(SmallError::from_str("failed to convert extension name to str")),
                 }
             )
         );
-        required_extensions.push_back(
-            String::from_str(
+        required_extensions.push(
+            ArrayString::from_str(
                 match khr::timeline_semaphore::NAME.to_str() {
                     Ok(s) => s,
                     Err(_) => return Err(SmallError::from_str("failed to convert extension name to str")),
@@ -287,8 +288,8 @@ pub fn rate_physical_device(
         );
     }
     else if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_3 {
-        required_extensions.push_back(
-            String::from_str(
+        required_extensions.push(
+            ArrayString::from_str(
                 match khr::dynamic_rendering::NAME.to_str() {
                     Ok(s) => s,
                     Err(_) => return Err(SmallError::from_str("failed to convert extension name to str")),
@@ -299,14 +300,14 @@ pub fn rate_physical_device(
     let available_extensions = unsafe {
         match instance.enumerate_device_extension_properties(physical_device) {
             Ok(available_extension) => available_extension,
-            Err(result) => return Err(SmallError::format(format_args!("failed to enumerate device extensions: {:?}", result)))
+            Err(result) => return Err(array_format!("failed to enumerate device extensions: {:?}", result))
         }
     };
     let mut found_extensions = false;
     for extension in &required_extensions {
         found_extensions = false;
         for available_extension in &available_extensions {
-            let other = String::<{vk::MAX_EXTENSION_NAME_SIZE}>::from_ascii(&available_extension.extension_name)?;
+            let other = ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>::from_ascii(&available_extension.extension_name)?;
             if extension == &other {
                 found_extensions = true;
                 break;
@@ -359,7 +360,7 @@ pub fn find_suitable_physical_device(
         match instance.enumerate_physical_devices() {
             Ok(physical_devices) => physical_devices,
             Err(result) => {
-                return Err(String::format(format_args!("failed to enumerate physical devices {:?}", result)));
+                return Err(array_format!("failed to enumerate physical devices {:?}", result));
             },
         }
     };
@@ -394,6 +395,6 @@ pub fn find_suitable_physical_device(
     }
     match best_physical_device {
         Some(physical_device) => Ok(physical_device),
-        None => Err(SmallError::from_str("failed to find suitable physical device")),
+        None => Err(ArrayString::from_str("failed to find suitable physical device")),
     }
 }

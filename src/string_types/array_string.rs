@@ -1,14 +1,16 @@
-use std::fmt::Write;
-use std::ffi::CStr;
-use std::cmp::PartialEq;
+use core::fmt::Write;
+use core::ffi::CStr;
+use core::cmp::PartialEq;
+
+use super::SmallError;
 
 #[derive(Copy, Clone)]
-pub struct String<const N: usize> {
+pub struct ArrayString<const N: usize> {
     string: [u8; N],
     len: usize,
 }
 
-impl<const N: usize> String<N> {
+impl<const N: usize> ArrayString<N> {
 
     pub fn new() -> Self {
         Self { string: [0u8; N], len: 0 }
@@ -34,7 +36,7 @@ impl<const N: usize> String<N> {
         for c in *s {
             if c < 0 {
                 return Err(
-                    String::from_str("invalid ascii"),
+                    ArrayString::from_str("invalid ascii"),
                 );
             }
             if c == b'\0' as i8 || len == N {
@@ -58,7 +60,7 @@ impl<const N: usize> String<N> {
         while c != b'\0' as i8  && len != N {
             if c < 0 {
                 return Err(
-                    String::from_str("invalid ascii"),
+                    ArrayString::from_str("invalid ascii"),
                 );
             }
             string[len] = c as u8;
@@ -84,36 +86,36 @@ impl<const N: usize> String<N> {
     pub fn format(args: std::fmt::Arguments<'_>) -> Self {
         let mut s = Self { string: [0u8; N], len: 0 };
         s.write_fmt(args).expect("this shouldn't happen");
-            s
-        }
+        s
+    }
 
-        pub fn len(&self) -> usize {
-            self.len
-        }
+    pub fn len(&self) -> usize {
+        self.len
+    }
 }
 
-impl<const N: usize, const M: usize> PartialEq<String::<M>> for String::<N> {
+impl<const N: usize, const M: usize> PartialEq<ArrayString::<M>> for ArrayString::<N> {
 
-    fn eq(&self, other: &String<M>) -> bool {
+    fn eq(&self, other: &ArrayString<M>) -> bool {
         return self.as_bytes() == other.as_bytes();
     }
 }
 
-impl<const N: usize> std::fmt::Debug for String<N> {
+impl<const N: usize> std::fmt::Debug for ArrayString<N> {
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "String<{}>({:?})", N, self.as_str())
+        write!(f, "ArrayString<{}>({:?})", N, self.as_str())
     }
 }
 
-impl<const N: usize> std::fmt::Display for String<N> {
+impl<const N: usize> std::fmt::Display for ArrayString<N> {
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl<const N: usize> std::fmt::Write for String<N> {
+impl<const N: usize> std::fmt::Write for ArrayString<N> {
 
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
         let available = N - self.len;
@@ -131,6 +133,3 @@ impl<const N: usize> std::fmt::Write for String<N> {
 pub fn cstr_eq(a: &CStr, b: &CStr) -> bool {
     a.to_bytes() == b.to_bytes()
 }
-
-pub type SmallError = String<64>;
-pub type LargeError = String<256>;

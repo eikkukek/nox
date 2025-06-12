@@ -1,36 +1,49 @@
 use super::{
     renderer,
-    stack_allocator::StackMemory,
+    nox,
 };
 
-pub struct Memory<'mem> {
-    _pool: StackMemory,
-    renderer_memory: renderer::Memory<'mem>,
+pub struct Memory {
+    nox_layout: nox::MemoryLayout,
+    nox_allocators: nox::Allocators,
+    renderer_layout: renderer::MemoryLayout,
+    renderer_allocators: renderer::Allocators,
 }
 
-impl<'mem> Memory<'mem> {
+impl Memory {
 
     pub fn default() -> Option<Self> {
+        let nox_layout = nox::MemoryLayout::default();
+        let nox_allocators = nox::Allocators::new(nox_layout)?;
         let renderer_layout = renderer::MemoryLayout::default();
-        let mut pool = StackMemory::new(renderer_layout.alloc_size())?;
-        let renderer_memory = renderer::Memory::new(renderer_layout, &mut pool)?;
+        let renderer_allocators = renderer::Allocators::new(renderer_layout)?;
         Some(
             Self {
-                _pool: pool,
-                renderer_memory,
+                nox_layout,
+                nox_allocators,
+                renderer_layout,
+                renderer_allocators,
             }
         )
+    }
+
+    pub fn renderer_layout(&self) -> &renderer::MemoryLayout {
+        &self.renderer_layout
+    }
+
+    pub fn renderer_allocators(&self) -> &renderer::Allocators {
+        &self.renderer_allocators
     }
 }
 
 pub struct Backend<'mem> {
-    memory: Memory<'mem>,
+    pub memory: &'mem mut Memory,
 }
 
 impl<'mem> Backend<'mem> {
 
     pub fn new(
-        memory: Memory<'mem>,
+        memory: &'mem mut Memory,
     ) -> Option<Self>
     {
         Some(
@@ -39,13 +52,9 @@ impl<'mem> Backend<'mem> {
             }
         )
     }
-
-    pub fn renderer_memory(&mut self) -> &mut renderer::Memory<'mem> {
-        &mut self.memory.renderer_memory
-    }
 }
 
-impl<'mem> Drop for Backend<'mem> {
+impl<'i> Drop for Backend<'i> {
 
     fn drop(&mut self) {
         println!("Nox backend message: terminating backend");

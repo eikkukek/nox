@@ -1,19 +1,14 @@
 use core::marker::PhantomData;
 
-pub trait IterConstruct<'a, T> {
-
-    fn new(ptr: *mut T, end: *mut T, marker: PhantomData<&'a T>) -> Self;
-}
-
 pub struct Iter<'a, T> {
     ptr: *const T,
     end: *const T,
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T> IterConstruct<'a, T> for Iter<'a, T> {
+impl<'a, T> Iter<'a, T> {
 
-    fn new(ptr: *mut T, end: *mut T, marker: PhantomData<&'a T>) -> Self {
+    pub unsafe fn new(ptr: *const T, end: *const T, marker: PhantomData<&'a T>) -> Self {
         Self {
             ptr,
             end,
@@ -57,9 +52,9 @@ pub struct IterMut<'a, T> {
     _marker: PhantomData<&'a T>,
 }
 
-impl<'a, T> IterConstruct<'a, T> for IterMut<'a, T> {
+impl<'a, T> IterMut<'a, T> {
 
-    fn new(ptr: *mut T, end: *mut T, marker: PhantomData<&'a T>) -> Self {
+    pub unsafe fn new(ptr: *mut T, end: *mut T, marker: PhantomData<&'a T>) -> Self {
         Self {
             ptr,
             end,

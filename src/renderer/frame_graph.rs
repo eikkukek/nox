@@ -1,21 +1,24 @@
 use super::{
     ImageState,
-    helpers::Handle,
+    handle::Handle,
 };
 
 use crate::{
-    allocator_traits::AllocateExt,
+    allocator_traits::{Allocate, Free},
     map_types::FixedMap,
-    string::{String, SmallError},
-    vec_types::{Vector, FixedVec}
+    string_types::{ArrayString, SmallError},
+    vec_types::{CapacityError, Vector, FixedVec},
 };
 
 use ash::vk;
 
-use std::slice;
+use core::{
+    slice,
+    cell::RefCell,
+};
 
 pub type UID = u64;
-pub type PassName = String<64>;
+pub type PassName = ArrayString<64>;
 
 #[derive(Clone)]
 pub struct ImageResource<'r> {
@@ -72,28 +75,41 @@ impl<'r> ImageResource<'r> {
     }
 }
 
-pub struct ResourcePool<'a, 'r> {
+pub struct ResourcePool<'mem, 'r, A>
+    where
+        A: Allocate + Free,
+        'mem: 'r,
+{
     next_uid: UID,
-    image_resources: FixedMap<'a, UID, ImageResource<'r>>,
+    image_resources: FixedMap<'mem, UID, ImageResource<'r>, A>,
 }
 
-impl<'a, 'r> ResourcePool<'a, 'r> {
+impl<'mem, 'r, A> ResourcePool<'mem, 'r, A>
+    where
+        A: Allocate + Free,
+        'mem: 'r,
+{
 
-    pub fn new<A: AllocateExt<'a>>(
+    pub fn new(
         max_images: usize,
-        allocator: &mut A,
-    ) -> Option<Self> {
-        Some(Self{
-            image_resources: FixedMap::new(max_images, allocator)?,
+        allocator: &'mem RefCell<A>,
+    ) -> Result<Self, CapacityError>
+    {
+        Ok(Self{
+            image_resources: FixedMap::with_capacity(max_images, allocator)?,
             next_uid: 0,
         })
     }
 
-    pub fn add_image_resource(&mut self, resource: ImageResource<'r>) -> Option<UID> {
+    pub fn add_image_resource(
+        &mut self,
+        resource: ImageResource<'r>
+    ) -> Result<UID, CapacityError>
+    {
         let uid = self.next_uid;
         self.image_resources.insert(uid, resource)?;
         self.next_uid = uid + 1;
-        Some(uid)
+        Ok(uid)
     }
 }
 
@@ -125,52 +141,73 @@ impl WriteInfo {
     }
 }
 
-pub struct Pass<'a> {
-    reads: Option<FixedVec<'a, (UID, ImageState)>>,
-    color_writes: Option<FixedVec<'a, WriteInfo>>,
+pub struct Pass<'mem, A: Allocate + Free> {
+    reads: Option<FixedVec<'mem, (UID, ImageState), A>>,
+    color_writes: Option<FixedVec<'mem, WriteInfo, A>>,
     depth_write: Option<WriteInfo>,
     stencil_write: Option<WriteInfo>,
-    dependencies: Option<FixedVec<'a, UID>>,
+    dependencies: Option<FixedVec<'mem, UID, A>>,
     render_area: Option<vk::Rect2D>,
     pub name: PassName,
 }
 
-impl<'a> Pass<'a> {
+impl<'mem, A: Allocate + Free> Pass<'mem, A> {
     
-    pub fn new<A: AllocateExt<'a>>(
+    pub fn new(
         name: PassName,
         max_reads: usize,
         max_color_writes: usize,
         max_dependencies: usize,
-        allocator: &mut A,
-    ) -> Option<Self> {
-        Some(Self {
-            reads: if max_reads != 0 { Some(FixedVec::new(max_reads, allocator)?) } else { None },
-            color_writes: if max_color_writes != 0 { Some(FixedVec::new(max_color_writes, allocator)?) } else { None },
+        allocator: &'mem RefCell<A>,
+    ) -> Result<Self, CapacityError> {
+        let reads =
+            if max_reads != 0 {
+                Some(FixedVec::with_capacity(max_reads, allocator)?)
+            }
+            else {
+                None
+            };
+        let color_writes =
+            if max_color_writes != 0 {
+                Some(FixedVec::with_capacity(max_color_writes, allocator)?)
+            }
+            else {
+                None
+            };
+        let dependencies =
+            if max_dependencies != 0 {
+                Some(FixedVec::with_capacity(max_color_writes, allocator)?)
+            }
+            else {
+                None
+            };
+        Ok(Self {
+            reads,
+            color_writes,
             depth_write: None,
             stencil_write: None,
-            dependencies: if max_dependencies != 0 { Some(FixedVec::new(max_dependencies, allocator)?) } else { None },
+            dependencies,
             render_area: None,
             name,
         })
     }
 
     pub fn name(&mut self, name: &str) {
-        self.name = String::from_str(name);
+        self.name = ArrayString::from_str(name);
     }
 
-    pub fn add_read(&mut self, uid: UID, dst_image_state: ImageState) -> Option<&mut Self> {
+    pub fn add_read(&mut self, uid: UID, dst_image_state: ImageState) -> Result<&mut Self, CapacityError> {
         if let Some(reads) = &mut self.reads {
-            reads.push_back((uid, dst_image_state))?;
+            reads.push((uid, dst_image_state))?;
         }
-        return Some(self)
+        Ok(self)
     }
 
-    pub fn add_color_write(&mut self, write: WriteInfo) -> Option<&mut Self> {
+    pub fn add_color_write(&mut self, write: WriteInfo) -> Result<&mut Self, CapacityError> {
         if let Some(writes) = &mut self.color_writes {
-            writes.push_back(write)?;
+            writes.push(write)?;
         }
-        Some(self)
+        Ok(self)
     }
 
     pub fn depth_write(&mut self, write: WriteInfo) -> &mut Self {
@@ -188,44 +225,47 @@ impl<'a> Pass<'a> {
         self
     }
 
-    pub fn add_dependency(&mut self, uid: UID) -> Option<&mut Self> {
+    pub fn add_dependency(&mut self, uid: UID) -> Result<&mut Self, CapacityError> {
         if let Some(dependencies) = &mut self.dependencies {
-            dependencies.push_back(uid)?;
+            dependencies.push(uid)?;
         }
-        Some(self)
+        Ok(self)
     }
 }
 
-pub trait Exec<'a> {
+pub trait Execute<'mem, 'r, A: Allocate + Free, B: Allocate + Free>
+    where
+        'mem: 'r,
+{
 
-    fn execute<'r, 'b, B: AllocateExt<'b>>(
+    fn execute(
         &self,
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
-        resource_pool: &mut ResourcePool<'a, 'r>,
-        swapchain_image_resource: &mut ImageResource<'r>,
-        funs: Option<&FixedMap<'a, UID, fn(UID)>>,
-        temp_allocator: &mut B,
-    ) -> Option<()>;
+        resource_pool: &mut ResourcePool<'mem, 'r, A>,
+        swapchain_image_resource: &RefCell<ImageResource<'r>>,
+        funs: Option<&FixedMap<'mem, UID, fn(UID), A>>,
+        temp_allocator: &RefCell<B>,
+    ) -> bool;
 }
 
-pub struct FrameGraph<'a> {
-    passes: FixedMap<'a, UID, Pass<'a>>, // ordered map
-    sorted: FixedVec<'a, UID>,
+pub struct FrameGraph<'mem, A: Allocate + Free> {
+    passes: FixedMap<'mem, UID, Pass<'mem, A>, A>,
+    sorted: FixedVec<'mem, UID, A>,
 }
 
-impl<'a> FrameGraph<'a> {
+impl<'mem, A: Allocate + Free> FrameGraph<'mem, A> {
 
-    pub fn new<'b, A: AllocateExt<'a>, B: AllocateExt<'b>>(
-        passes: FixedMap<'a, UID, Pass<'a>>,
-        allocator: &mut A,
-        temp_allocator: &mut B,
+    pub fn new<B: Allocate + Free>(
+        passes: FixedMap<'mem, UID, Pass<'mem, A>, A>,
+        allocator: &'mem RefCell<A>,
+        temp_allocator: &'mem RefCell<B>,
     ) -> Result<Self, SmallError> {
-        let Some(mut in_degree) = FixedMap::<UID, usize>::new(passes.size(), temp_allocator) else {
-            return Err(String::from_str("allocation failed"))
+        let Some(mut in_degree) = FixedMap::<UID, usize, B>::new(passes.size(), temp_allocator) else {
+            return Err(ArrayString::from_str("allocation failed"))
         };
-        let Some(mut dependents) = FixedMap::<UID, FixedVec<UID>>::new(passes.size(), temp_allocator) else {
-            return Err(String::from_str("allocation failed"))
+        let Some(mut dependents) = FixedMap::<UID, FixedVec<UID, B>, B>::new(passes.size(), temp_allocator) else {
+            return Err(ArrayString::from_str("allocation failed"))
         };
         for (uid, pass) in passes.iter() {
             if let Some(deps) = &pass.dependencies {
@@ -236,54 +276,54 @@ impl<'a> FrameGraph<'a> {
                             *dep,
                             match FixedVec::new(passes.size(), temp_allocator) {
                                 Some(r) => r,
-                                None => return Err(String::from_str("allocation failed"))
+                                None => return Err(ArrayString::from_str("allocation failed"))
                         })
                         else {
-                            return Err(String::from_str("allocation failed"))
+                            return Err(ArrayString::from_str("allocation failed"))
                         };
-                    dependent_list.push_back(*uid);
+                    dependent_list.push(*uid);
                 }
             }
             
         }
         if in_degree.len() == 0 {
             let Some(mut sorted) = FixedVec::new(passes.size(), allocator) else {
-                return Err(String::from_str("allocation failed"))
+                return Err(ArrayString::from_str("allocation failed"))
             };
             for pass in passes.iter() {
-                sorted.push_back(pass.0);
+                sorted.push(pass.0);
             }
             return Ok(Self {
                 passes,
                 sorted,
             })
         }
-        let Some(mut pending) = FixedVec::<UID>::new(passes.size(), temp_allocator) else {
-            return Err(String::from_str("allocation failed"))
+        let Some(mut pending) = FixedVec::<UID, B>::new(passes.size(), temp_allocator) else {
+            return Err(ArrayString::from_str("allocation failed"))
         };
         for (uid, deg) in in_degree.iter() {
             if *deg == 0 {
-                pending.push_back(*uid);
+                pending.push(*uid);
             }
         }
         let Some(mut sorted) = FixedVec::new(passes.size(), allocator) else {
-            return Err(String::from_str("allocation failed"))
+            return Err(ArrayString::from_str("allocation failed"))
         };
-        while let Some(uid) = pending.pop_back() {
+        while let Some(uid) = pending.pop() {
             //let pass = passes.get(uid).expect("UID not found");
-            sorted.push_back(uid);
+            sorted.push(uid);
             if let Some(dependents) = dependents.get(&uid) {
                 for dep_uid in dependents {
                     let count = in_degree.get_mut(dep_uid).unwrap();
                     *count -= 1;
                     if *count == 0 {
-                        pending.push_back(*dep_uid);
+                        pending.push(*dep_uid);
                     }
                 }
             }
         }
         if sorted.len() != passes.len() {
-            Err(String::from_str("cycle detected"))
+            Err(ArrayString::from_str("cycle detected"))
         }
         else {
             Ok(Self {
@@ -294,17 +334,23 @@ impl<'a> FrameGraph<'a> {
     } 
 }
 
-impl<'a> Exec<'a> for FrameGraph<'a> {
+impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
+    where
+        A: Allocate + Free,
+        B: Allocate + Free,
+        'mem: 'r,
+{
 
-    fn execute<'r, 'b, B: AllocateExt<'b>>(
+    fn execute(
         &self,
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
-        resource_pool: &mut ResourcePool<'a, 'r>,
-        swapchain_image_resource: &mut ImageResource<'r>,
-        funs: Option<&FixedMap<'a, UID, fn(UID)>>,
-        temp_allocator: &mut B,
-    ) -> Option<()> {
+        resource_pool: &mut ResourcePool<'mem, 'r, A>,
+        swapchain_image_resource: &RefCell<ImageResource<'r>>,
+        funs: Option<&FixedMap<'mem, UID, fn(UID), A>>,
+        temp_allocator: &RefCell<B>,
+    ) -> bool
+    {
         for uid in &self.sorted {
             let pass = self.passes.get(uid).expect("couldn't find pass");
             if let Some(reads) = &pass.reads {
@@ -353,8 +399,8 @@ impl<'a> Exec<'a> for FrameGraph<'a> {
                 render_extent.width = render_extent.width.min(image_resource.extent.width);
                 render_extent.height = render_extent.height.min(image_resource.extent.height);
                 image_resource.state = write.image_state;
-                if *image_resource.handle == *swapchain_image_resource.handle {
-                    *swapchain_image_resource = image_resource.clone();
+                if *image_resource.handle == *swapchain_image_resource.borrow().handle {
+                    *swapchain_image_resource.borrow_mut() = image_resource.clone();
                 }
                 vk::RenderingAttachmentInfo {
                     s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
@@ -368,7 +414,11 @@ impl<'a> Exec<'a> for FrameGraph<'a> {
             };
             let mut color_outputs =
                 if let Some(writes) = &pass.color_writes {
-                    Some(FixedVec::<vk::RenderingAttachmentInfo>::new(writes.len(), temp_allocator)?)
+                    match FixedVec::<vk::RenderingAttachmentInfo, B>
+                            ::new(writes.len(), temp_allocator) {
+                        Some(r) => Some(r),
+                        None => return false,
+                    }
                 }
                 else {
                     None
@@ -376,7 +426,7 @@ impl<'a> Exec<'a> for FrameGraph<'a> {
             if let Some(writes) = &pass.color_writes {
                 let attachments = color_outputs.as_mut().unwrap();
                 for write in writes {
-                    attachments.push_back(
+                    attachments.push(
                         process_write(write)
                     );
                 }
@@ -419,6 +469,6 @@ impl<'a> Exec<'a> for FrameGraph<'a> {
             }
             unsafe { device.cmd_end_rendering(command_buffer); }
         }
-        Some(())
+        true
     }
 }

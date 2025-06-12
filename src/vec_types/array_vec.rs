@@ -1,17 +1,23 @@
-use super::Vector;
-
-use crate::marker_types::False;
-
 use core::{
     mem::MaybeUninit, ops::{Index, IndexMut}, ptr, slice
 };
 
-pub struct ArrayVec<T, const N: usize> {
+use super::{
+    traits::MemoryStrategy, CapacityError, Fixed, Vector
+};
+
+pub struct ArrayVec<T, const N: usize>
+    where
+        T: MemoryStrategy
+{
     data: [MaybeUninit<T>; N],
     len: usize,
 }
 
-impl<T, const N: usize> ArrayVec<T, N> {
+impl<T, const N: usize> ArrayVec<T, N>
+    where
+        T: MemoryStrategy,
+{
 
     pub fn new() -> Self {
         Self {
@@ -19,26 +25,14 @@ impl<T, const N: usize> ArrayVec<T, N> {
             len: 0,
         }
     }
-
-    pub fn new_with_len<'short, U>(len: usize) -> Option<Self>
-        where
-            T: Default,
-    {
-        if N < len { return None }
-        let mut data = unsafe { MaybeUninit::<[MaybeUninit<T>; N]>::uninit().assume_init() };
-        for i in 0..len {
-            data[i].write(T::default());
-        }
-        Some(
-            Self {
-                data,
-                len,
-            }
-        )
-    }
 }
 
-impl<T, const N: usize> Vector<T> for ArrayVec<T, N> {
+impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
+    where
+        T: MemoryStrategy
+{
+
+    type CapacityPol = Fixed;
 
     type Iter<'a> = slice::Iter<'a, T>
         where T: 'a, Self: 'a;
@@ -52,7 +46,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N> {
     }
 
     #[inline(always)]
-    fn size(&self) -> usize {
+    fn capacity(&self) -> usize {
         N
     }
 
@@ -76,15 +70,19 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N> {
         unsafe { slice::from_raw_parts_mut(self.data.as_ptr() as *mut T, self.len) }
     }
 
-    fn resize(&mut self, len: usize) -> bool
+    fn reserve(&mut self, _: usize) -> Result<(), CapacityError> {
+        Err(CapacityError::Fixed)
+    }
+
+    fn resize(&mut self, len: usize, value: T) -> Result<(), CapacityError>
         where
-            T: Default
+            T: Clone
     {
-        if len > N { panic!("given length was larger than vector size") }
+        if len > N { return Err(CapacityError::Fixed) }
         let ptr = self.as_mut_ptr();
         if len > self.len {
             for i in self.len..len {
-                unsafe { (*ptr.add(i)).write(T::default()) };
+                unsafe { (*ptr.add(i)).write(value.clone()) };
             }
         }
         else if len < self.len {
@@ -93,18 +91,38 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N> {
             }
         }
         self.len = len;
-        true
+        Ok(())
     }
 
-    fn push_back(&mut self, value: T) -> Option<&mut T> {
-        if self.len == N { return None }
+    fn resize_with<F>(&mut self, len: usize, mut f: F) -> Result<(), CapacityError>
+        where
+            F: FnMut() -> T
+    {
+        if len > N { return Err(CapacityError::Fixed) }
+        let ptr = self.as_mut_ptr();
+        if len > self.len {
+            for i in self.len..len {
+                unsafe { (*ptr.add(i)).write(f()) };
+            }
+        }
+        else if len < self.len {
+            for i in len..self.len {
+                unsafe { ptr::drop_in_place((*ptr.add(i)).as_mut_ptr()); }
+            }
+        }
+        self.len = len;
+        Ok(())
+    }
+
+    fn push(&mut self, value: T) -> Result<&mut T, CapacityError> {
+        if self.len >= N { return Err(CapacityError::Fixed) }
         let ptr = unsafe { self.as_mut_ptr().add(self.len) };
         unsafe { std::ptr::write(ptr, MaybeUninit::new(value)) };
         self.len += 1;
-        Some(unsafe { &mut *(ptr as *mut T) })
+        Ok(unsafe { &mut *(ptr as *mut T) })
     }
 
-    fn pop_back(&mut self) -> Option<T> {
+    fn pop(&mut self) -> Option<T> {
         if self.len == 0 { return None }
         let ptr = unsafe { self.as_mut_ptr().add(self.len).cast::<T>() };
         self.len -= 1;
@@ -129,20 +147,20 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N> {
         }       
     }
 
-    fn insert(&mut self, value: T, index: usize) -> Option<&mut T> {
-        if index >= self.len || self.len == N {
-            None
+    fn insert(&mut self, value: T, index: usize) -> Result<&mut T, CapacityError> {
+        if index >= self.len {
+            panic!("index {} was out of bounds with len {} when inserting", index, self.len)
         }
-        else {
-            unsafe {
-                let data = self.as_mut_ptr();
-                for i in (index + 1..=self.len).rev() {
-                    data.add(i).write(data.add(i - 1).read());
-                }
-                let ptr = data.add(index) as *mut T;
-                ptr.write(value);
-                Some(ptr.as_mut()?)
+        if self.len == N { return Err(CapacityError::Fixed) }
+        unsafe {
+            let data = self.as_mut_ptr();
+            for i in (index + 1..=self.len).rev() {
+                data.add(i).write(data.add(i - 1).read());
             }
+            let ptr = data.add(index) as *mut T;
+            ptr.write(value);
+            self.len += 1;
+            Ok(&mut *ptr)
         }
     }
 
@@ -177,11 +195,13 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N> {
         self.len = 0;
     }
 
-    fn clone_from<V: Vector<T>>(&mut self, from: &V) -> bool
-            where
-                T: Clone + Default {
-        if self.size() < from.len() {
-            return false
+    fn clone_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
+        where
+            V: Vector<T>,
+            T: Clone + Default,
+    {
+        if N < from.len() {
+            return Err(CapacityError::Fixed)
         }
         self.clear();
         let ptr = self.as_mut_ptr();
@@ -189,29 +209,28 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N> {
             unsafe { ptr.add(i).write(MaybeUninit::new(val.clone())) }
         }
         self.len = from.len();
-        true
+        Ok(())
     }
 
-    fn copy_from<V: Vector<T>>(&mut self, from: &V) -> bool
-            where
-                T: Copy + Default {
-        if self.size() < from.len() {
-            return false
+    fn copy_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
+        where
+            V: Vector<T>,
+            T: Copy + Default,
+    {
+        if N < from.len() {
+            return Err(CapacityError::Fixed)
         }
         self.len = from.len();
         self.as_mut_slice().copy_from_slice(from.as_slice());
-        true
+        Ok(())
     }
 
-    fn contains(
-        &self,
-        value: &T
-    ) -> bool
+    fn contains(&self, value: &T) -> bool
         where
             T: Eq
     {
         let ptr = self.as_ptr() as *const T;
-        for i in 0..self.len - 1 {
+        for i in 0..self.len {
             if unsafe { *ptr.add(i) == *value } {
                 return true 
             }
@@ -228,7 +247,10 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N> {
     }
 }
 
-impl<T, const N: usize> Drop for ArrayVec<T, N> {
+impl<T, const N: usize> Drop for ArrayVec<T, N>
+    where
+        T: MemoryStrategy
+{
 
     fn drop(&mut self) {
         debug_assert!(self.len <= N);
@@ -239,7 +261,10 @@ impl<T, const N: usize> Drop for ArrayVec<T, N> {
     }
 }
 
-impl<T, const N: usize> Index<usize> for ArrayVec<T, N> {
+impl<T, const N: usize> Index<usize> for ArrayVec<T, N>
+    where
+        T: MemoryStrategy
+{
 
     type Output = T;
 
@@ -251,7 +276,10 @@ impl<T, const N: usize> Index<usize> for ArrayVec<T, N> {
     }
 }
 
-impl<T, const N: usize> IndexMut<usize> for ArrayVec<T, N> {
+impl<T, const N: usize> IndexMut<usize> for ArrayVec<T, N>
+    where
+        T: MemoryStrategy
+{
 
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         if index >= self.len {
@@ -261,7 +289,10 @@ impl<T, const N: usize> IndexMut<usize> for ArrayVec<T, N> {
     }
 }
 
-impl<'a, T, const N: usize> IntoIterator for &'a ArrayVec<T, N> {
+impl<'a, T, const N: usize> IntoIterator for &'a ArrayVec<T, N>
+    where
+        T: MemoryStrategy
+{
 
     type Item = &'a T;
     type IntoIter = slice::Iter<'a, T>;
@@ -271,7 +302,10 @@ impl<'a, T, const N: usize> IntoIterator for &'a ArrayVec<T, N> {
     }
 }
 
-impl<'a, T, const N: usize> IntoIterator for &'a mut ArrayVec<T, N> {
+impl<'a, T, const N: usize> IntoIterator for &'a mut ArrayVec<T, N>
+    where
+        T: MemoryStrategy
+{
 
     type Item = &'a T;
     type IntoIter = slice::Iter<'a, T>;

@@ -1,15 +1,14 @@
 use super::{
-    helpers::Handle,
+    Allocators,
     physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo},
     swapchain_context::SwapchainContext,
     DeviceName,
-    Memory,
 };
 
 use crate::{
-    stack_allocator::{StackGuard, StackRegion},
-    string::{LargeError, SmallError, String},
-    vec_types::{Vector, ArrayVec, FixedVec},
+    stack_alloc::StackGuard,
+    string_types::{ArrayString, array_format, LargeError, SmallError},
+    vec_types::{ArrayVec, FixedVec, Vector},
     version::Version, AppName
 };
 
@@ -21,7 +20,8 @@ use ash::{
 };
 use ash_window;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle,};
-use std::{ffi::CString, mem::ManuallyDrop};
+use std::ffi::CString;
+use core::cell::RefCell;
 
 pub enum SwapchainState {
     Valid,
@@ -41,8 +41,8 @@ pub struct VulkanContext<'mem> {
     graphics_queue: vk::Queue,
     _transfer_queue: vk::Queue,
     _compute_queue: vk::Queue,
+    swapchain_context: Option<SwapchainContext<'mem>>,
     pub swapchain_state: SwapchainState,
-    swapchain_context: ManuallyDrop<Option<SwapchainContext<'mem>>>,
 }
 
 impl<'mem> VulkanContext<'mem> {
@@ -52,9 +52,9 @@ impl<'mem> VulkanContext<'mem> {
         app_name: &AppName,
         app_version: Version,
         enable_validation: bool,
-        memory: &mut Memory,
+        allocators: &'mem Allocators,
     ) -> Result<VulkanContext<'mem>, LargeError> {
-        let mut init_allocator = StackGuard::new(&mut memory.init_allocator);
+        let init_allocator = &RefCell::new(StackGuard::new(&allocators.init));
         let entry = unsafe { Entry::load().unwrap() };
         match unsafe { entry.try_enumerate_instance_version() } {
             Ok(v) => {
@@ -85,30 +85,30 @@ impl<'mem> VulkanContext<'mem> {
             engine_version: vk::make_api_version(0, 1, 0, 0),
             ..Default::default()
         };
-        let Some(mut instance_extensions) = FixedVec::<*const i8>::new(8, &mut init_allocator) else {
-            return Err(String::from_str("init stack was out of memory"))
+        let Some(mut instance_extensions) = FixedVec::<*const i8, StackGuard>::new(8, init_allocator) else {
+            return Err(ArrayString::from_str("init stack was out of memory"))
         };
-        let Some(mut layers) = FixedVec::<*const i8>::new(8, &mut init_allocator) else {
-            return Err(String::from_str("init stack was out of memory"))
+        let Some(mut layers) = FixedVec::<*const i8, StackGuard>::new(8, init_allocator) else {
+            return Err(ArrayString::from_str("init stack was out of memory"))
         };
         get_required_instance_extensions(window, &mut instance_extensions)
-            .map_err(|e| String::format(format_args!(
-                "failed to get required vulkan instance extensions ( {} )", e
-            )))?;
+            .map_err(|e|
+                array_format!("failed to get required vulkan instance extensions ( {} )", e)
+            )?;
         let validation_layer_name = CString::new("VK_LAYER_KHRONOS_validation").unwrap();
         let ext_debug_utils = CString::new("VK_EXT_debug_utils").unwrap();
         if enable_validation {
-            instance_extensions.push_back(ext_debug_utils.as_ptr());
-            layers.push_back(validation_layer_name.as_ptr());
+            instance_extensions.push(ext_debug_utils.as_ptr());
+            layers.push(validation_layer_name.as_ptr());
         }
         verify_instance_layers(&entry, &layers)
-            .map_err(|e| String::format(format_args!(
-                "failed to verify instance layers ( {} )", e
-            )))?;
+            .map_err(|e|
+                array_format!("failed to verify instance layers ( {} )", e)
+            )?;
         verify_instance_extensions(&entry, &instance_extensions)
-            .map_err(|e| String::format(format_args!(
-                "failed to verify instance extensions ( {} )", e
-            )))?;
+            .map_err(|e|
+                array_format!("failed to verify instance extensions ( {} )", e)
+            )?;
         let instance_create_info = vk::InstanceCreateInfo {
             s_type: vk::StructureType::INSTANCE_CREATE_INFO,
             p_application_info: &application_info,
@@ -121,9 +121,9 @@ impl<'mem> VulkanContext<'mem> {
         let instance = unsafe {
             entry
                 .create_instance(&instance_create_info, None)
-                .map_err(|e| String::format(format_args!(
-                    "failed to create vulkan instance {:?}", e
-                )))?
+                .map_err(|e|
+                    array_format!("failed to create vulkan instance {:?}", e)
+                )?
         };
         let surface_loader = surface::Instance::new(&entry, &instance);
         let surface_handle = unsafe {
@@ -137,7 +137,7 @@ impl<'mem> VulkanContext<'mem> {
             )
             .map_err(|e| {
                 instance.destroy_instance(None);
-                String::format(format_args!("failed to create vulkan surface {:?}", e))
+                array_format!("failed to create vulkan surface {:?}", e)
             })?
         };
         let (physical_device, physical_device_info) =
@@ -147,17 +147,17 @@ impl<'mem> VulkanContext<'mem> {
                     surface_loader.destroy_surface(surface_handle, None);
                     instance.destroy_instance(None);
                 }
-                String::format(format_args!("failed to find suitable physical device ( {} )", e))
+                array_format!("failed to find suitable physical device ( {} )", e)
             })?;
         let mut unique_device_queues = ArrayVec::<u32, 3>::new();
         let queue_family_indices = physical_device_info.queue_family_indices();
-        unique_device_queues.push_back(queue_family_indices.get_graphics_index());
-        unique_device_queues.push_back_if_unique(queue_family_indices.get_transfer_index());
-        unique_device_queues.push_back_if_unique(queue_family_indices.get_compute_index());
+        unique_device_queues.push(queue_family_indices.get_graphics_index());
+        unique_device_queues.push_if_unique(queue_family_indices.get_transfer_index());
+        unique_device_queues.push_if_unique(queue_family_indices.get_compute_index());
         let mut device_queue_create_infos = ArrayVec::<vk::DeviceQueueCreateInfo, 3>::new();
         let queue_priority = 1.0;
         for queue_family_index in &unique_device_queues {
-            device_queue_create_infos.push_back(
+            device_queue_create_infos.push(
                 vk::DeviceQueueCreateInfo {
                     s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
                     queue_count: 1,
@@ -191,7 +191,7 @@ impl<'mem> VulkanContext<'mem> {
             s_type: vk::StructureType::DEVICE_CREATE_INFO,
             p_next: (&mut features_12 as *mut _) as _,
             queue_create_info_count: device_queue_create_infos.len() as u32,
-            p_queue_create_infos: device_queue_create_infos.as_ptr() as *const _,
+            p_queue_create_infos: device_queue_create_infos.as_ptr() as _,
             enabled_extension_count: 3,
             pp_enabled_extension_names: ENABLED_DEVICE_EXTENSION_NAMES.as_ptr(),
             p_enabled_features: &features,
@@ -203,7 +203,7 @@ impl<'mem> VulkanContext<'mem> {
                 .map_err(|e| {
                     surface_loader.destroy_surface(surface_handle, None);
                     instance.destroy_instance(None);
-                    String::format(format_args!("failed to create vulkan device {:?}", e))
+                    array_format!("failed to create vulkan device {:?}", e)
                 })?
         };
         let graphics_queue = unsafe { device.get_device_queue(queue_family_indices.get_graphics_index(), 0) };
@@ -223,38 +223,42 @@ impl<'mem> VulkanContext<'mem> {
                 graphics_queue,
                 _transfer_queue: transfer_queue,
                 _compute_queue: compute_queue,
+                swapchain_context: None,
                 swapchain_state: SwapchainState::OutOfDate(window.inner_size()),
-                swapchain_context: ManuallyDrop::new(None),
             },
         )
     }
 
-    pub fn device(&self) -> Handle<'mem, ash::Device> {
-        Handle::new(self.device.clone())
+    pub fn device(&self) -> &ash::Device {
+        &self.device
     }
 
-    pub fn swapchain_loader(&self) -> Handle<'mem, swapchain::Device> {
-        Handle::new(self.swapchain_loader.clone())
+    pub fn swapchain_loader(&self) -> &swapchain::Device {
+        &self.swapchain_loader
     }
 
     pub fn queue_family_indices(&self) -> &physical_device::QueueFamilyIndices {
         &self.physical_device_info.queue_family_indices()
     }
 
-    pub fn graphics_queue(&self) -> Handle<'mem, vk::Queue> {
-        Handle::new(self.graphics_queue)
+    pub fn graphics_queue(&self) -> vk::Queue {
+        self.graphics_queue
     }
 
-    pub fn transfer_queue(&self) -> Handle<'mem, vk::Queue> {
-        Handle::new(self.graphics_queue)
+    pub fn _transfer_queue(&self) -> vk::Queue {
+        self.graphics_queue
     }
 
-    pub fn compute_queue(&self) -> Handle<'mem, vk::Queue> {
-        Handle::new(self.graphics_queue)
+    pub fn _compute_queue(&self) -> vk::Queue {
+        self.graphics_queue
     }
 
     pub fn physical_device_name(&self) -> DeviceName {
         *self.physical_device_info.device_name()
+    }
+
+    pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
+        &self.physical_device_info
     }
 
     pub fn request_resize(&mut self, size: PhysicalSize<u32>) {
@@ -265,16 +269,17 @@ impl<'mem> VulkanContext<'mem> {
         &mut self,
         framebuffer_size: PhysicalSize<u32>,
         graphics_command_pool: vk::CommandPool,
-        memory: &mut Memory<'mem>,
+        allocators: &'mem Allocators,
     ) -> Result<(), LargeError> {
         if let Some(mut context) = self.swapchain_context.take() {
-            context.destroy(&self.device, &self.swapchain_loader, self.graphics_queue, Some(graphics_command_pool));
+            context.destroy(
+                &self.device,
+                &self.swapchain_loader,
+                self.graphics_queue,
+                Some(graphics_command_pool),
+            );
         }
-        let allocator = &mut memory.swapchain_allocator;
-        allocator.clear();
-        let Some(region) = StackRegion::new(allocator.size() / 4, allocator) else {
-            return Err(String::from_str("failed to create local swapchain allocator"))
-        };
+        allocators.swapchain.borrow_mut().clear();
         self.swapchain_context = match SwapchainContext::new(
             &self.device,
             &self.surface_loader,
@@ -284,10 +289,10 @@ impl<'mem> VulkanContext<'mem> {
             vk::Extent2D { width: framebuffer_size.width, height: framebuffer_size.height },
             graphics_command_pool,
             self.queue_family_indices().get_graphics_index(),
-            region,
-            &mut memory.init_allocator,
+            &allocators.swapchain,
+            &allocators.init,
         ) {
-            Ok(context) => ManuallyDrop::new(context),
+            Ok(context) => context,
             Err(err) => return Err(err),
         };
         self.swapchain_state = SwapchainState::Valid;
@@ -297,13 +302,13 @@ impl<'mem> VulkanContext<'mem> {
     pub fn get_swapchain_context(
         &mut self,
         graphics_command_pool: vk::CommandPool,
-        memory: &mut Memory<'mem>,
+        allocators: &'mem Allocators,
     ) -> Result<&mut SwapchainContext<'mem>, LargeError> {
         match self.swapchain_state {
             SwapchainState::Valid => {},
             SwapchainState::OutOfDate(framebuffer_size) => {
                 self 
-                    .update_swapchain(framebuffer_size, graphics_command_pool, memory)
+                    .update_swapchain(framebuffer_size, graphics_command_pool, allocators)
                     .map_err(|e| {
                         e
                     })?;
@@ -318,14 +323,24 @@ impl<'mem> VulkanContext<'mem> {
 
     pub fn destroy_swapchain(
         &mut self,
-        graphics_command_pool: vk::CommandPool
+        graphics_command_pool: vk::CommandPool,
+        allocators: &'mem Allocators,
     ) {
         if let Some(mut context) = self.swapchain_context.take() {
-            context.destroy(&self.device, &self.swapchain_loader, self.graphics_queue, Some(graphics_command_pool));
+            context.destroy(
+                &self.device,
+                &self.swapchain_loader,
+                self.graphics_queue,
+                Some(graphics_command_pool),
+            );
+            allocators.swapchain.borrow_mut().clear();
         }
     }
+}
 
-    pub fn destroy(&mut self) {
+impl<'mem> Drop for VulkanContext<'mem> {
+
+    fn drop(&mut self) {
         unsafe {
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface_handle, None);
@@ -337,12 +352,12 @@ impl<'mem> VulkanContext<'mem> {
 
 fn get_required_instance_extensions<W>(
     window: &W,
-    out: &mut FixedVec::<*const i8>
+    out: &mut FixedVec::<*const i8, StackGuard>
 ) -> Result<(), SmallError> 
     where
         W: HasWindowHandle + HasDisplayHandle
 {
-    out.push_back(surface::NAME.as_ptr());
+    out.push(surface::NAME.as_ptr());
     let ext = match window.display_handle().unwrap().as_raw() {
         raw_window_handle::RawDisplayHandle::Wayland(_) => wayland_surface::NAME.as_ptr(),
         raw_window_handle::RawDisplayHandle::Windows(_) => win32_surface::NAME.as_ptr(),
@@ -352,40 +367,40 @@ fn get_required_instance_extensions<W>(
             return Err(SmallError::from_str("unsupported platform"));
         },
     };
-    out.push_back(ext);
+    out.push(ext);
     Ok(())
 }
 
 fn verify_instance_layers(
     entry: &Entry,
-    layers: &FixedVec::<*const i8>
+    layers: &FixedVec::<*const i8, StackGuard>,
 ) -> Result<(), SmallError>
 {
     let available = unsafe {
         entry
             .enumerate_instance_layer_properties()
-            .map_err(|e| String::format(format_args!(
-                "failed to enumerate layer properties {:?}", e,
-            )))?
+            .map_err(|e|
+                array_format!("failed to enumerate layer properties {:?}", e)
+            )?
     };
     for layer in layers {
         let string = unsafe {
-            String::<{vk::MAX_EXTENSION_NAME_SIZE}>
+            ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>
                 ::from_ascii_ptr(*layer)
-                .map_err(|e| String::format(format_args!(
-                    "failed to convert required layer to string ( {} )", e,
-                )))?
+                .map_err(|e|
+                    array_format!("failed to convert required layer to string ( {} )", e)
+                )?
         };
         if available
             .iter()
             .find(|a| {
-                match String::<{vk::MAX_EXTENSION_NAME_SIZE}>::from_ascii(&a.layer_name) {
+                match ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>::from_ascii(&a.layer_name) {
                     Ok(s) => string == s,
                     Err(_) => false,
                 }
             }).is_none()
         {
-            return Err(String::format(format_args!("failed to find layer {}", string)))
+            return Err(array_format!("failed to find layer {}", string))
         }
     }
     Ok(())
@@ -393,34 +408,34 @@ fn verify_instance_layers(
 
 fn verify_instance_extensions(
     entry: &Entry,
-    extensions: &FixedVec::<*const i8>
+    extensions: &FixedVec::<*const i8, StackGuard>
 ) -> Result<(), SmallError>
 {
     let available = unsafe {
         entry
             .enumerate_instance_extension_properties(None)
-            .map_err(|e| String::format(format_args!(
-                "failed to enumerate extension properties {:?}", e,
-            )))?
+            .map_err(|e|
+                array_format!("failed to enumerate extension properties {:?}", e)
+            )?
     };
     for extension in extensions {
         let string = unsafe {
-            String::<{vk::MAX_EXTENSION_NAME_SIZE}>
+            ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>
                 ::from_ascii_ptr(*extension)
-                .map_err(|e| String::format(format_args!(
-                    "failed to convert required extension to string ( {} )", e,
-                )))?
+                .map_err(|e|
+                    array_format!("failed to convert required extension to string ( {} )", e)
+                )?
         };
         if available
             .iter()
             .find(|a| {
-                match String::<{vk::MAX_EXTENSION_NAME_SIZE}>::from_ascii(&a.extension_name) {
+                match ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>::from_ascii(&a.extension_name) {
                     Ok(s) => string == s,
                     Err(_) => false,
                 }
             }).is_none()
         {
-            return Err(String::format(format_args!("failed to find extension {}", string)))
+            return Err(array_format!("failed to find extension {}", string))
         }
     }
     Ok(())
