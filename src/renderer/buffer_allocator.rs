@@ -37,7 +37,7 @@ pub trait BufferAllocator<'r> {
 
     unsafe fn allocate(&mut self, size: vk::DeviceSize, align: vk::DeviceSize ) -> Option<Block>;
 
-    unsafe fn free(&mut self, allocation: Block) -> Result<(), SmallError>;
+    unsafe fn free(&mut self, allocation: Block) -> Result<(), CapacityError>;
 
     fn device(&self) -> &'_ Handle<'r, ash::Device>;
 
@@ -118,9 +118,11 @@ impl<'alloc, 'r, Alloc> Drop for DeviceMemory<'alloc, 'r, Alloc>
 
     fn drop(&mut self) {
         unsafe {
+            let _ =
             self.allocator
                 .borrow_mut()
-                .free(self.block);
+                .free(self.block)
+                .map_err(|e| eprintln!("failed to free GPU memory ( {:?} )", e));
         }
     }
 }
@@ -173,7 +175,7 @@ impl<'r, DynVec> BufferAlloc<'r, DynVec>
                     array_format!("failed to allocate memory {:?}", e)
                 })?
         });
-        free_list.resize(0, Default::default());
+        free_list.resize(0, Default::default()).expect("should not happen");
         free_list
             .push(Block::new(0, size))
             .map_err(|e|
@@ -232,7 +234,7 @@ impl<'r, DynVec> BufferAllocator<'r> for BufferAlloc<'r, DynVec>
         None
     }
 
-    unsafe fn free(&mut self, allocation: Block) -> Result<(), SmallError> {
+    unsafe fn free(&mut self, allocation: Block) -> Result<(), CapacityError> {
         let end = allocation.offset + allocation.size;
         let mut i = 0;
         while i < self.free_list.len() {
@@ -267,9 +269,7 @@ impl<'r, DynVec> BufferAllocator<'r> for BufferAlloc<'r, DynVec>
                 self.free_list.remove(i);
             }
         }
-        self.free_list
-            .insert(Block::new(new_offset, new_size), i)
-            .map_err(|e| array_format!("free list insertion failed {:?}", e))?;
+        self.free_list.insert(Block::new(new_offset, new_size), i)?;
         Ok(())
     }
 

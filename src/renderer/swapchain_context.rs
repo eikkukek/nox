@@ -1,4 +1,10 @@
-use super::{image_state::ImageState, helpers};
+use core::{
+    slice,
+    mem::ManuallyDrop,
+    cell::RefCell,
+};
+
+use ash::{khr::{surface, swapchain}, vk};
 
 use crate::{
     allocator_traits::Allocate,
@@ -8,13 +14,10 @@ use crate::{
     vec_types::{FixedVec, Vector},
 };
 
-use ash::{khr::{surface, swapchain}, vk::{self, Handle}};
-
-use core::panic;
-use core::{
-    slice,
-    mem::ManuallyDrop,
-    cell::RefCell,
+use super::{
+    handle::Handle,
+    image_state::ImageState,
+    helpers
 };
 
 pub struct FrameData {
@@ -114,11 +117,11 @@ impl TiedResources {
     )
     {
         unsafe {
-            if !self.image_view.is_null() {
+            if !<vk::ImageView as vk::Handle>::is_null(self.image_view) {
                 device.destroy_image_view(self.image_view, None);
                 self.image_view = vk::ImageView::null();
             }
-            if !self.present_wait_semaphore.is_null() {
+            if !<vk::Semaphore as vk::Handle>::is_null(self.present_wait_semaphore) {
                 device.destroy_semaphore(self.present_wait_semaphore, None);
                 self.present_wait_semaphore = vk::Semaphore::null();
             }
@@ -168,11 +171,11 @@ impl UntiedResources {
     )
     {
         unsafe {
-            if !self.frame_ready_fence.is_null() {
+            if !<vk::Fence as vk::Handle>::is_null(self.frame_ready_fence) {
                 device.destroy_fence(self.frame_ready_fence, None);
                 self.frame_ready_fence = vk::Fence::null();
             }
-            if !self.image_ready_semaphore.is_null() {
+            if !<vk::Semaphore as vk::Handle>::is_null(self.image_ready_semaphore) {
                 device.destroy_semaphore(self.image_ready_semaphore, None);
                 self.image_ready_semaphore = vk::Semaphore::null();
             }
@@ -198,10 +201,9 @@ impl<'mem> Resources<'mem> {
     ) -> Result<Self, SmallError>
     {
         let image_count = images.len();
-        let Some(mut command_buffers) = FixedVec
-            ::with_capacity(image_count, allocator) else {
-                return Err(ArrayString::from_str("failed to allocate CPU resources"))
-            };
+        let mut command_buffers = FixedVec
+            ::with_capacity(image_count, allocator)
+            .map_err(|e| array_format!("failed to create 'command buffers' ( {:?} )", e))?;
         command_buffers.resize(image_count, Default::default()).expect("should not happen");
         let command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
@@ -213,46 +215,48 @@ impl<'mem> Resources<'mem> {
         if let Err(e) = helpers::allocate_command_buffers(device, &command_buffer_alloc_info, &mut command_buffers) {
             return Err(array_format!("failed to allocate command buffers {:?}", e))
         }
-        let Some(mut tied_resources) = FixedVec::<ManuallyDrop<TiedResources>, StackAlloc>
-            ::with_capacity(image_count, allocator) else {
-                return Err(ArrayString::from_str("failed to allocate CPU resources"))
-            };
-        let Some(mut untied_resources) = FixedVec::<ManuallyDrop<UntiedResources>, StackAlloc>
-            ::with_capacity(image_count, allocator) else {
-            return Err(ArrayString::from_str("failed to allocate"))
-            };
+        let mut tied_resources = FixedVec::<ManuallyDrop<TiedResources>, StackAlloc>
+            ::with_capacity(image_count, allocator)
+            .map_err(|e| array_format!("failed to create 'tied resources' ( {:?} )", e))?;
+        let mut untied_resources = FixedVec::<ManuallyDrop<UntiedResources>, StackAlloc>
+            ::with_capacity(image_count, allocator)
+            .map_err(|e| array_format!("failed to create 'untied resources' ( {:?} )", e))?;
         for i in 0..image_count {
-            tied_resources.push(
-                match TiedResources::new(device, images[i], image_format) {
-                    Ok(r) => ManuallyDrop::new(r),
-                    Err(e) => {
-                        unsafe {
-                            device.free_command_buffers(command_pool, command_buffers.as_slice());
-                        }
-                        for j in 0..i {
-                            tied_resources[j].destroy(device);
-                            untied_resources[j].destroy(device);
-                        }
-                        return Err(e)
-                    },
-                }
-            );
-            untied_resources.push(
-                match UntiedResources::new(device) {
-                    Ok(r) => ManuallyDrop::new(r),
-                    Err(e) => {
-                        unsafe {
-                            device.free_command_buffers(command_pool, command_buffers.as_slice());
-                        }
-                        for j in 0..i {
-                            tied_resources[j].destroy(device);
-                            untied_resources[j].destroy(device);
-                        }
-                        tied_resources[i].destroy(device);
-                        return Err(e)
-                    },
-                }
-            );
+            tied_resources
+                .push(
+                    match TiedResources::new(device, images[i], image_format) {
+                        Ok(r) => ManuallyDrop::new(r),
+                        Err(e) => {
+                            unsafe {
+                                device.free_command_buffers(command_pool, command_buffers.as_slice());
+                            }
+                            for j in 0..i {
+                                tied_resources[j].destroy(device);
+                                untied_resources[j].destroy(device);
+                            }
+                            return Err(e)
+                        },
+                    })
+                .map_err(|e| array_format!("failed to push to 'tied resources' ( {:?} )", e
+            ))?;
+            untied_resources
+                .push(
+                    match UntiedResources::new(device) {
+                        Ok(r) => ManuallyDrop::new(r),
+                        Err(e) => {
+                            unsafe {
+                                device.free_command_buffers(command_pool, command_buffers.as_slice());
+                            }
+                            for j in 0..i {
+                                tied_resources[j].destroy(device);
+                                untied_resources[j].destroy(device);
+                            }
+                            tied_resources[i].destroy(device);
+                            return Err(e)
+                        },
+                    })
+                .map_err(|e| array_format!("failed to push to 'untied resources' ( {:?} )",e
+            ))?;
         }
         Ok(Self {
             tied_resources,
@@ -415,27 +419,27 @@ impl<'mem> SwapchainContext<'mem> {
             unsafe { swapchain_loader.destroy_swapchain(swapchain_handle, None); }
             return Err(array_format!("failed to get swapchain image count {:?}", result))
         }
-        let Some(mut images) = FixedVec
+        let mut images = FixedVec
             ::with_capacity(
                 image_count as usize,
-                &local_allocator,
-            ) else {
+                &local_allocator)
+            .map_err(|e| {
                 unsafe {
                     swapchain_loader.destroy_swapchain(swapchain_handle, None);
                 }
-                return Err(ArrayString::from_str("failed to allocate image handles")
-            )};
+                array_format!("failed to create 'images' ( {:?} )", e)
+            })?;
         images.resize(image_count as usize, Default::default()).expect("should not happen");
-        let Some(mut image_states) = FixedVec
+        let mut image_states = FixedVec
             ::with_capacity(
                 images.len(),
-                &local_allocator
-            ) else {
+                &local_allocator)
+            .map_err(|e| {
                 unsafe {
                     swapchain_loader.destroy_swapchain(swapchain_handle, None);
                 }
-                return Err(ArrayString::from_str("failed to allocate image states")
-            )};
+                array_format!("failed to create 'image states' ( {:?} )", e)
+            })?;
         image_states.resize(images.len(),
             ImageState::new(
                 vk::AccessFlags::NONE,
@@ -559,12 +563,12 @@ impl<'mem> SwapchainContext<'mem> {
         ))
     }
 
-    pub fn setup_submit(
+    pub fn setup_submit<'r>(
         &mut self,
-        device: &ash::Device,
+        device: Handle<'r, ash::Device>,
         src_image_state: ImageState,
         graphics_queue_index: u32,
-    ) -> (vk::SubmitInfo, vk::Fence) {
+    ) -> (vk::SubmitInfo<'r>, vk::Fence) {
         let tied_resources = self.resources.get_tied_resources(self.current_image_index);
         let (untied_resources, command_buffer) = self.resources.get_current_untied_resources();
         let image_index = self.current_image_index as usize;
@@ -575,7 +579,7 @@ impl<'mem> SwapchainContext<'mem> {
             vk::PipelineStageFlags::BOTTOM_OF_PIPE,
         );
         let memory_barrier = src_image_state.to_memory_barrier(
-            self.images[image_index],
+            Handle::new(self.images[image_index]),
             &dst_image_state,
             Self::image_subresource_range()
         );

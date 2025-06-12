@@ -1,5 +1,7 @@
 use ash::vk;
 
+use super::handle::Handle;
+
 #[derive(Clone, Copy)]
 pub struct ImageState {
     pub access_flags: vk::AccessFlags,
@@ -41,12 +43,12 @@ impl ImageState {
         self.pipeline_stage = pipeline_stage
     }
 
-    pub fn to_memory_barrier(
+    pub fn to_memory_barrier<'r>(
         &self,
-        image: vk::Image,
+        image: Handle<'r, vk::Image>,
         to: &Self,
         subresource_range: vk::ImageSubresourceRange,
-    ) -> vk::ImageMemoryBarrier
+    ) -> vk::ImageMemoryBarrier<'r>
     {
         vk::ImageMemoryBarrier {
             s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
@@ -56,7 +58,7 @@ impl ImageState {
             new_layout: to.layout,
             src_queue_family_index: self.queue_family_index,
             dst_queue_family_index: to.queue_family_index,
-            image,
+            image: *image,
             subresource_range,
             ..Default::default()
         }

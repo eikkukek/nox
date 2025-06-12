@@ -1,4 +1,4 @@
-use std::{alloc::{alloc, dealloc, Layout}, fmt::Alignment};
+use std::alloc::{alloc, dealloc, Layout};
 
 use core::{
     mem,
@@ -6,8 +6,6 @@ use core::{
     ptr::NonNull,
     marker::PhantomData,
 };
-
-use crate::allocator_traits;
 
 use super::{
     allocator_traits::{Allocate, Free},
@@ -139,16 +137,16 @@ impl<'alloc> Drop for StackGuard<'alloc> {
     }
 }
 
-pub struct StackReg<'alloc> {
+pub struct _StackReg<'alloc> {
     data: NonNull<u8>,
     size: usize,
     pos: usize,
     _marker: PhantomData<&'alloc ()>,
 }
 
-impl<'alloc> StackReg<'alloc> {
+impl<'alloc> _StackReg<'alloc> {
 
-    pub fn new<'stack>(size: usize, stack: &'alloc RefCell<StackAlloc>) -> Option<Self>
+    pub fn _new<'stack>(size: usize, stack: &'alloc RefCell<StackAlloc>) -> Option<Self>
     {
         let mut a = stack.borrow_mut();
         let ptr = unsafe { a.allocate_raw(size, align_of::<usize>())? };
@@ -162,12 +160,12 @@ impl<'alloc> StackReg<'alloc> {
         )
     }
 
-    pub fn clear(&mut self) {
+    pub fn _clear(&mut self) {
         self.pos = 0;
     }
 }
 
-impl<'alloc> Allocate for StackReg<'alloc> {
+impl<'alloc> Allocate for _StackReg<'alloc> {
 
     unsafe fn allocate_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         let start = self.data.as_ptr() as usize + self.pos;
@@ -185,7 +183,7 @@ impl<'alloc> Allocate for StackReg<'alloc> {
     }
 }
 
-impl<'alloc> Free for StackReg<'alloc> {
+impl<'alloc> Free for _StackReg<'alloc> {
 
     unsafe fn free_raw(&mut self, _ptr: NonNull<u8>, _size: usize, _align: usize) {}
     unsafe fn free_uninit<T>(&mut self, _ptr: NonNull<T>, _count: usize) {}

@@ -1,17 +1,21 @@
 use core::{
     ops::{Index, IndexMut},
-    mem::MaybeUninit,
+    mem::{MaybeUninit, needs_drop},
     ptr,
 };
 
 #[derive(Debug)]
 pub enum CapacityError {
-    Fixed,
+    Fixed {
+        capacity: usize,
+    },
     InvalidReservation {
         current: usize,
         requested: usize,
     },
-    AllocFailed,
+    AllocFailed {
+        new_capacity: usize,
+    },
 }
 
 pub trait CapacityPolicy {
@@ -20,10 +24,14 @@ pub trait CapacityPolicy {
     fn grow(current: usize, required: usize) -> Option<usize>;
 }
 
-pub trait MemoryStrategy: Clone {
-    unsafe fn copy(src: *const Self, dst: *mut Self, count: usize);
+pub trait MemoryStrategy {
+    unsafe fn move_elements(src: *const Self, dst: *mut Self, len: usize);
     unsafe fn insert(ptr: *mut Self, value: Self, index: usize, len: usize) -> *mut Self;
-    unsafe fn drop_in_place(ptr: *mut Self, count: usize);
+    unsafe fn drop_in_place(ptr: *mut Self, len: usize);
+}
+
+pub trait DuplicateStrategy: Clone {
+    unsafe fn duplicate(src: *const Self, dst: *mut Self, len: usize);
 }
 
 pub trait Vector<T>
@@ -81,15 +89,10 @@ pub trait Vector<T>
 
     fn clear(&mut self);
 
-    fn clone_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
+    fn duplicate_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
         where
             V: Vector<T>,
-            T: Clone + Default;
-
-    fn copy_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
-        where
-            V: Vector<T>,
-            T: Copy + Default;
+            T: DuplicateStrategy;
 
     fn contains(&self, value: &T) -> bool
         where
@@ -150,58 +153,73 @@ impl CapacityPolicy for Fixed {
     }
 }
 
-impl<T: Clone> MemoryStrategy for T {
+impl<T> MemoryStrategy for T {
 
-    #[inline(always)]
-    default unsafe fn copy(src: *const Self, dst: *mut Self, count: usize) {
-        unsafe {
-            for i in 0..count {
-                dst.add(i).write(src.add(i).read());
+    #[inline(always)] 
+    unsafe fn move_elements(src: *const Self, dst: *mut Self, len: usize) {
+        if needs_drop::<T>() {
+            unsafe {
+                for i in 0..len {
+                    dst.add(i).write(src.add(i).read())
+                }
             }
         }
-    }
-
-    #[inline(always)]
-    default unsafe fn insert(ptr: *mut Self, value: Self, index: usize, len: usize) -> *mut Self {
-        assert!(len >= index);
-        unsafe {
-            for i in (index + 1..=len).rev() {
-                ptr.add(i).write(ptr.add(i - 1).read());
-            }
-            let res = ptr.add(index);
-            res.write(value);
-            res
+        else {
+            unsafe { ptr::copy_nonoverlapping(src, dst, len); }
         }
-    }
-
-    #[inline(always)]
-    default unsafe fn drop_in_place(ptr: *mut Self, count: usize) {
-        unsafe {
-            for i in 0..count {
-                ptr::drop_in_place(ptr.add(i));
-            }
-        }
-    }
-}
-
-impl<T: Copy> MemoryStrategy for T {
-
-    #[inline(always)]
-    unsafe fn copy(src: *const Self, dst: *mut Self, count: usize) {
-        unsafe { ptr::copy_nonoverlapping(src, dst, count); }
     }
 
     #[inline(always)]
     unsafe fn insert(ptr: *mut Self, value: Self, index: usize, len: usize) -> *mut Self {
         assert!(len >= index);
-        unsafe {
-            ptr::copy(ptr, ptr.add(1), len - index);
-            let res = ptr.add(index);
-            res.write(value);
-            res
+        if needs_drop::<T>() {
+            unsafe {
+                for i in (index + 1..=len).rev() {
+                    ptr.add(i).write(ptr.add(i - 1).read());
+                }
+                let res = ptr.add(index);
+                res.write(value);
+                res
+            }
+        }
+        else {
+            unsafe {
+                ptr::copy(ptr, ptr.add(1), len - index);
+                let res = ptr.add(index);
+                res.write(value);
+                res
+            }
         }
     }
 
     #[inline(always)]
-    unsafe fn drop_in_place(_: *mut Self, _: usize) {}
+    unsafe fn drop_in_place(ptr: *mut Self, len: usize) {
+        if needs_drop::<T>() {
+            unsafe {
+                for i in 0..len {
+                    ptr::drop_in_place(ptr.add(i));
+                }
+            }
+        }
+    }
+}
+
+impl<T: Clone> DuplicateStrategy for T {
+
+    #[inline(always)]
+    default unsafe fn duplicate(src: *const Self, dst: *mut Self, len: usize) {
+        unsafe {
+            for i in 0..len {
+                dst.add(i).write(src.add(i).read().clone());
+            }
+        }
+    }
+}
+
+impl<T: Copy> DuplicateStrategy for T {
+
+    #[inline(always)]
+    unsafe fn duplicate(src: *const Self, dst: *mut Self, len: usize) {
+        unsafe { ptr::copy_nonoverlapping(src, dst, len); }
+    }
 }

@@ -35,7 +35,7 @@ pub use handle::Handle;
 pub use frame_graph::{UID, Pass, WriteInfo, FrameGraph, ResourcePool, ImageResource};
 pub use frame::Frame;
 pub use image_state::ImageState;
-pub use buffer_allocator::{BufferAllocator, BufferAlloc};
+pub use buffer_allocator::{BufferAllocator, DeviceMemory, BufferAlloc};
 
 use device_allocators::DeviceAllocators;
 use vulkan_context::{VulkanContext, SwapchainState};
@@ -70,7 +70,7 @@ impl Allocators {
 
 pub struct Renderer<'mem> {
     main_thread_context: ThreadContext,
-    device_allocators: DeviceAllocators<'mem, DynVec<'mem, buffer_allocator::Block, GlobalAlloc>>,
+    _device_allocators: DeviceAllocators<'mem, DynVec<'mem, buffer_allocator::Block, GlobalAlloc>>,
     vulkan_context: VulkanContext<'mem>,
     _memory_layout: MemoryLayout,
 }
@@ -105,18 +105,18 @@ impl<'mem> Renderer<'mem> {
         Ok(Self {
             vulkan_context,
             main_thread_context,
-            device_allocators: DeviceAllocators::new(
+            _device_allocators: DeviceAllocators::new(
                 &memory_layout,
                 device,
                 &physical_device_info,
                 DynVec::with_capacity(256, &allocators.global_alloc)
-                    .ok_or_else(|| ArrayString::from_str("global alloc failed"))?,
+                    .map_err(|e| array_format!("global alloc failed ( {:?} )", e))?,
                 DynVec::with_capacity(256, &allocators.global_alloc)
-                    .ok_or_else(|| ArrayString::from_str("global alloc failed"))?,
+                    .map_err(|e| array_format!("global alloc failed ( {:?} )", e))?,
                 DynVec::with_capacity(256, &allocators.global_alloc)
-                    .ok_or_else(|| ArrayString::from_str("global alloc failed"))?)
+                    .map_err(|e| array_format!("global alloc failed ( {:?} )", e))?)
                 .map_err(|e|
-                    array_format!("failed to create buffer allocators ( {} )", e)
+                    array_format!("failed to create device allocators ( {} )", e)
                 )?,
             _memory_layout: memory_layout,
         })
@@ -173,15 +173,15 @@ impl<'mem> Renderer<'mem> {
             )),
             StackGuard::new(&allocators.swapchain),
             StackGuard::new(&allocators.init),
-            queue_family_indices);
+            queue_family_indices,
+            frame_data.image_index
+        );
         interface
             .render(&frame)
-            .map_err(|e| {
-                array_format!("interface failed to render ( {} )", e)
-            })?;
+            .map_err(|e| array_format!("interface failed to render ( {} )", e))?;
         let (submit_info, fence) = swapchain_context
             .setup_submit(
-                &device,
+                Handle::new(device.clone()),
                 frame.swapchain_image_resource().state(),
                 queue_family_indices.get_graphics_index()
             );
@@ -193,8 +193,7 @@ impl<'mem> Renderer<'mem> {
         }
         let present_result = swapchain_context
             .present_submit(&swapchain_loader, graphics_queue)
-            .map_err(|e| array_format!("queue present failed {}", e
-            ))?;
+            .map_err(|e| array_format!("queue present failed {}", e))?;
         if present_result != PresentResult::Success || frame_data.suboptimal {
             self.vulkan_context.swapchain_state(SwapchainState::OutOfDate(window.inner_size()))
         }

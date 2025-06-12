@@ -15,9 +15,9 @@ use super::{
 };
 
 pub struct DeviceAllocators<'mem, DynVec: Vector<Block, CapacityPol = Dyn>> {
-    device_local: RefCell<BufferAlloc<'mem, DynVec>>,
-    device_staging: RefCell<BufferAlloc<'mem, DynVec>>,
-    device_uniform: RefCell<BufferAlloc<'mem, DynVec>>,
+    _device_local: RefCell<BufferAlloc<'mem, DynVec>>,
+    _device_staging: RefCell<BufferAlloc<'mem, DynVec>>,
+    _device_uniform: RefCell<BufferAlloc<'mem, DynVec>>,
 }
 
 impl<'p, DynVec> DeviceAllocators<'p, DynVec>
@@ -59,9 +59,9 @@ impl<'p, DynVec> DeviceAllocators<'p, DynVec>
             ).map_err(|e| array_format!("failed to create allocator ( {} )", e)
         )?;
         Ok(Self {
-            device_local: RefCell::new(device_local),
-            device_staging: RefCell::new(device_staging),
-            device_uniform: RefCell::new(device_uniform),
+            _device_local: RefCell::new(device_local),
+            _device_staging: RefCell::new(device_staging),
+            _device_uniform: RefCell::new(device_uniform),
         })
     }
 }

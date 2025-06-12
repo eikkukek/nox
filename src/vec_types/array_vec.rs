@@ -3,7 +3,7 @@ use core::{
 };
 
 use super::{
-    traits::MemoryStrategy, CapacityError, Fixed, Vector
+    MemoryStrategy, DuplicateStrategy, CapacityError, Fixed, Vector
 };
 
 pub struct ArrayVec<T, const N: usize>
@@ -71,14 +71,14 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     }
 
     fn reserve(&mut self, _: usize) -> Result<(), CapacityError> {
-        Err(CapacityError::Fixed)
+        Err(CapacityError::Fixed { capacity: N })
     }
 
     fn resize(&mut self, len: usize, value: T) -> Result<(), CapacityError>
         where
             T: Clone
     {
-        if len > N { return Err(CapacityError::Fixed) }
+        if len > N { return Err(CapacityError::Fixed { capacity: N }) }
         let ptr = self.as_mut_ptr();
         if len > self.len {
             for i in self.len..len {
@@ -98,7 +98,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         where
             F: FnMut() -> T
     {
-        if len > N { return Err(CapacityError::Fixed) }
+        if len > N { return Err(CapacityError::Fixed { capacity: N }) }
         let ptr = self.as_mut_ptr();
         if len > self.len {
             for i in self.len..len {
@@ -115,7 +115,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     }
 
     fn push(&mut self, value: T) -> Result<&mut T, CapacityError> {
-        if self.len >= N { return Err(CapacityError::Fixed) }
+        if self.len >= N { return Err(CapacityError::Fixed { capacity: N }) }
         let ptr = unsafe { self.as_mut_ptr().add(self.len) };
         unsafe { std::ptr::write(ptr, MaybeUninit::new(value)) };
         self.len += 1;
@@ -151,7 +151,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         if index >= self.len {
             panic!("index {} was out of bounds with len {} when inserting", index, self.len)
         }
-        if self.len == N { return Err(CapacityError::Fixed) }
+        if self.len == N { return Err(CapacityError::Fixed { capacity: N }) }
         unsafe {
             let data = self.as_mut_ptr();
             for i in (index + 1..=self.len).rev() {
@@ -195,33 +195,19 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         self.len = 0;
     }
 
-    fn clone_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
+    fn duplicate_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
         where
             V: Vector<T>,
-            T: Clone + Default,
-    {
+            T: super::DuplicateStrategy {
         if N < from.len() {
-            return Err(CapacityError::Fixed)
+            return Err(CapacityError::Fixed { capacity: N })
         }
-        self.clear();
-        let ptr = self.as_mut_ptr();
-        for (i, val) in from.iter().enumerate() {
-            unsafe { ptr.add(i).write(MaybeUninit::new(val.clone())) }
+        else {
+            unsafe { <T as MemoryStrategy>::drop_in_place(self.data.as_ptr() as _, self.len); }
+            self.len = 0;
         }
+        unsafe { <T as DuplicateStrategy>::duplicate(from.as_ptr() as _, self.data.as_ptr() as _, from.len()); }
         self.len = from.len();
-        Ok(())
-    }
-
-    fn copy_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
-        where
-            V: Vector<T>,
-            T: Copy + Default,
-    {
-        if N < from.len() {
-            return Err(CapacityError::Fixed)
-        }
-        self.len = from.len();
-        self.as_mut_slice().copy_from_slice(from.as_slice());
         Ok(())
     }
 

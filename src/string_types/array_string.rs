@@ -1,5 +1,4 @@
 use core::fmt::Write;
-use core::ffi::CStr;
 use core::cmp::PartialEq;
 
 use super::SmallError;
@@ -128,8 +127,4 @@ impl<const N: usize> std::fmt::Write for ArrayString<N> {
         self.len += end;
         Ok(())
     }
-}
-
-pub fn cstr_eq(a: &CStr, b: &CStr) -> bool {
-    a.to_bytes() == b.to_bytes()
 }

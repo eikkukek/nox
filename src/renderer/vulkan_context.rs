@@ -2,7 +2,6 @@ use super::{
     Allocators,
     physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo},
     swapchain_context::SwapchainContext,
-    DeviceName,
 };
 
 use crate::{
@@ -85,12 +84,12 @@ impl<'mem> VulkanContext<'mem> {
             engine_version: vk::make_api_version(0, 1, 0, 0),
             ..Default::default()
         };
-        let Some(mut instance_extensions) = FixedVec::<*const i8, StackGuard>::new(8, init_allocator) else {
-            return Err(ArrayString::from_str("init stack was out of memory"))
-        };
-        let Some(mut layers) = FixedVec::<*const i8, StackGuard>::new(8, init_allocator) else {
-            return Err(ArrayString::from_str("init stack was out of memory"))
-        };
+        let mut instance_extensions = FixedVec::<*const i8, StackGuard>
+            ::with_capacity(8, init_allocator)
+            .map_err(|e| array_format!("failed to create 'instance extensions' ( {:?} )", e))?;
+        let mut layers = FixedVec::<*const i8, StackGuard>
+            ::with_capacity(8, init_allocator)
+            .map_err(|e| array_format!("failed to create vec {} ( {:?} )", 8, e))?;
         get_required_instance_extensions(window, &mut instance_extensions)
             .map_err(|e|
                 array_format!("failed to get required vulkan instance extensions ( {} )", e)
@@ -98,8 +97,12 @@ impl<'mem> VulkanContext<'mem> {
         let validation_layer_name = CString::new("VK_LAYER_KHRONOS_validation").unwrap();
         let ext_debug_utils = CString::new("VK_EXT_debug_utils").unwrap();
         if enable_validation {
-            instance_extensions.push(ext_debug_utils.as_ptr());
-            layers.push(validation_layer_name.as_ptr());
+            instance_extensions
+                .push(ext_debug_utils.as_ptr())
+                .map_err(|e| array_format!("failed to push to 'instance extensions' ( {:?} )", e))?;
+            layers
+                .push(validation_layer_name.as_ptr())
+                .map_err(|e| array_format!("failed to push to 'validation layers' ( {:?} )", e))?;
         }
         verify_instance_layers(&entry, &layers)
             .map_err(|e|
@@ -151,21 +154,29 @@ impl<'mem> VulkanContext<'mem> {
             })?;
         let mut unique_device_queues = ArrayVec::<u32, 3>::new();
         let queue_family_indices = physical_device_info.queue_family_indices();
-        unique_device_queues.push(queue_family_indices.get_graphics_index());
-        unique_device_queues.push_if_unique(queue_family_indices.get_transfer_index());
-        unique_device_queues.push_if_unique(queue_family_indices.get_compute_index());
+        unique_device_queues
+            .push(queue_family_indices.get_graphics_index())
+            .map_err(|e| array_format!("failed to push to 'unque device queues' ( {:?} )", e))?;
+        unique_device_queues
+            .push_if_unique(queue_family_indices.get_transfer_index())
+            .map_err(|e| array_format!("failed to push to 'unique device queues' ( {:?} )", e))?;
+        unique_device_queues
+            .push_if_unique(queue_family_indices.get_compute_index())
+            .map_err(|e| array_format!("failed to push to 'unique device queues' ( {:?} )", e))?;
         let mut device_queue_create_infos = ArrayVec::<vk::DeviceQueueCreateInfo, 3>::new();
         let queue_priority = 1.0;
         for queue_family_index in &unique_device_queues {
-            device_queue_create_infos.push(
-                vk::DeviceQueueCreateInfo {
-                    s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
-                    queue_count: 1,
-                    queue_family_index: *queue_family_index,
-                    p_queue_priorities: &queue_priority,
-                    ..Default::default()
-                }
-            );
+            device_queue_create_infos
+                .push(
+                    vk::DeviceQueueCreateInfo {
+                        s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
+                        queue_count: 1,
+                        queue_family_index: *queue_family_index,
+                        p_queue_priorities: &queue_priority,
+                        ..Default::default()
+                    })
+                .map_err(|e| array_format!("failed to push to 'device queue create infos' ( {:?} )", e
+            ))?;
         }
         const ENABLED_DEVICE_EXTENSION_NAMES: [*const i8; 3] = [
             ash::khr::swapchain::NAME.as_ptr(),
@@ -251,10 +262,6 @@ impl<'mem> VulkanContext<'mem> {
 
     pub fn _compute_queue(&self) -> vk::Queue {
         self.graphics_queue
-    }
-
-    pub fn physical_device_name(&self) -> DeviceName {
-        *self.physical_device_info.device_name()
     }
 
     pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
@@ -357,7 +364,8 @@ fn get_required_instance_extensions<W>(
     where
         W: HasWindowHandle + HasDisplayHandle
 {
-    out.push(surface::NAME.as_ptr());
+    out.push(surface::NAME.as_ptr())
+        .map_err(|e| array_format!("failed to push to 'out' ( {:?} )", e))?;
     let ext = match window.display_handle().unwrap().as_raw() {
         raw_window_handle::RawDisplayHandle::Wayland(_) => wayland_surface::NAME.as_ptr(),
         raw_window_handle::RawDisplayHandle::Windows(_) => win32_surface::NAME.as_ptr(),
@@ -367,7 +375,8 @@ fn get_required_instance_extensions<W>(
             return Err(SmallError::from_str("unsupported platform"));
         },
     };
-    out.push(ext);
+    out.push(ext)
+        .map_err(|e| array_format!("failed to push to 'out' ( {:?} )", e))?;
     Ok(())
 }
 

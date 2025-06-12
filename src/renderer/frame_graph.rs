@@ -5,9 +5,10 @@ use super::{
 
 use crate::{
     allocator_traits::{Allocate, Free},
+    array_format,
     map_types::FixedMap,
-    string_types::{ArrayString, SmallError},
-    vec_types::{CapacityError, Vector, FixedVec},
+    string_types::{ArrayString, LargeError},
+    vec_types::{CapacityError, FixedVec, Vector}
 };
 
 use ash::vk;
@@ -246,7 +247,7 @@ pub trait Execute<'mem, 'r, A: Allocate + Free, B: Allocate + Free>
         swapchain_image_resource: &RefCell<ImageResource<'r>>,
         funs: Option<&FixedMap<'mem, UID, fn(UID), A>>,
         temp_allocator: &RefCell<B>,
-    ) -> bool;
+    ) -> Result<(), CapacityError>;
 }
 
 pub struct FrameGraph<'mem, A: Allocate + Free> {
@@ -260,64 +261,75 @@ impl<'mem, A: Allocate + Free> FrameGraph<'mem, A> {
         passes: FixedMap<'mem, UID, Pass<'mem, A>, A>,
         allocator: &'mem RefCell<A>,
         temp_allocator: &'mem RefCell<B>,
-    ) -> Result<Self, SmallError> {
-        let Some(mut in_degree) = FixedMap::<UID, usize, B>::new(passes.size(), temp_allocator) else {
-            return Err(ArrayString::from_str("allocation failed"))
-        };
-        let Some(mut dependents) = FixedMap::<UID, FixedVec<UID, B>, B>::new(passes.size(), temp_allocator) else {
-            return Err(ArrayString::from_str("allocation failed"))
-        };
+    ) -> Result<Self, LargeError> {
+        let mut in_degree = FixedMap::<UID, usize, B>
+            ::with_capacity(passes.capacity(), temp_allocator)
+            .map_err(|e| array_format!("failed to create 'in degree' ( {:?} )", e))?;
+        let mut dependents = FixedMap::<UID, FixedVec<UID, B>, B>
+            ::with_capacity(passes.len(), temp_allocator)
+            .map_err(|e| array_format!("failed to create 'dependents' ( {:?} )", e))?;
         for (uid, pass) in passes.iter() {
             if let Some(deps) = &pass.dependencies {
                 for dep in deps {
-                    in_degree.insert_or_modify(*uid, || 1, |v| *v += 1);
-                    let Some(dependent_list) = &mut dependents
+                    in_degree
+                        .insert_or_modify(*uid, || 1, |v| *v += 1)
+                        .map_err(|e| array_format!("failed to insert to 'in degree' ( {:?} )", e))?;
+                    let dependent_list = &mut dependents
                         .insert(
                             *dep,
-                            match FixedVec::new(passes.size(), temp_allocator) {
-                                Some(r) => r,
-                                None => return Err(ArrayString::from_str("allocation failed"))
-                        })
-                        else {
-                            return Err(ArrayString::from_str("allocation failed"))
-                        };
-                    dependent_list.push(*uid);
+                            FixedVec
+                                ::with_capacity(passes.capacity(), temp_allocator)
+                                .map_err(|e| array_format!("failed to create 'dependent list' ( {:?} )", e))?
+                        )
+                        .map_err(|e| array_format!("failed to insert to 'dependents' ( {:?} )", e))?
+                        .unwrap();
+                    dependent_list
+                        .push(*uid)
+                        .map_err(|e| array_format!("failed to push to 'dependent list' ( {:?} )", e))?;
                 }
             }
             
         }
         if in_degree.len() == 0 {
-            let Some(mut sorted) = FixedVec::new(passes.size(), allocator) else {
-                return Err(ArrayString::from_str("allocation failed"))
-            };
+            let mut sorted = FixedVec
+                ::with_capacity(passes.capacity(), allocator)
+                .map_err(|e| array_format!("failed to create 'sorted' ( {:?} )", e))?;
             for pass in passes.iter() {
-                sorted.push(pass.0);
+                sorted
+                    .push(*pass.0)
+                    .map_err(|e| array_format!("failed to push to 'sorted' ( {:?} )", e))?;
             }
             return Ok(Self {
                 passes,
                 sorted,
             })
         }
-        let Some(mut pending) = FixedVec::<UID, B>::new(passes.size(), temp_allocator) else {
-            return Err(ArrayString::from_str("allocation failed"))
-        };
+        let mut pending = FixedVec::<UID, B>
+            ::with_capacity(passes.capacity(), temp_allocator)
+            .map_err(|e| array_format!("failed to create 'pending' ( {:?} )", e))?;
         for (uid, deg) in in_degree.iter() {
             if *deg == 0 {
-                pending.push(*uid);
+                pending
+                    .push(*uid)
+                    .map_err(|e| array_format!("failed to push to 'pending' ( {:?} )", e))?;
             }
         }
-        let Some(mut sorted) = FixedVec::new(passes.size(), allocator) else {
-            return Err(ArrayString::from_str("allocation failed"))
-        };
+        let mut sorted = FixedVec
+            ::with_capacity(passes.capacity(), allocator)
+            .map_err(|e| array_format!("failed to create 'sorted' ( {:?} )", e))?;
         while let Some(uid) = pending.pop() {
             //let pass = passes.get(uid).expect("UID not found");
-            sorted.push(uid);
+            sorted
+                .push(uid)
+                .map_err(|e| array_format!("failed to push to 'sorted' ( {:?} )", e))?;
             if let Some(dependents) = dependents.get(&uid) {
                 for dep_uid in dependents {
                     let count = in_degree.get_mut(dep_uid).unwrap();
                     *count -= 1;
                     if *count == 0 {
-                        pending.push(*dep_uid);
+                        pending
+                            .push(*dep_uid)
+                            .map_err(|e| array_format!("failed to push to 'pending' ( {:?} )", e))?;
                     }
                 }
             }
@@ -349,7 +361,7 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
         swapchain_image_resource: &RefCell<ImageResource<'r>>,
         funs: Option<&FixedMap<'mem, UID, fn(UID), A>>,
         temp_allocator: &RefCell<B>,
-    ) -> bool
+    ) -> Result<(), CapacityError> 
     {
         for uid in &self.sorted {
             let pass = self.passes.get(uid).expect("couldn't find pass");
@@ -358,7 +370,7 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
                     let image_resource = resource_pool.image_resources.get_mut(&read.0).expect("couldn't find resource");
                     let memory_barrier = image_resource.state
                         .to_memory_barrier(
-                            *image_resource.handle,
+                            image_resource.handle.clone(),
                             &read.1,
                             image_resource.subresource_range,
                         );
@@ -381,7 +393,7 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
                 let image_resource = resource_pool.image_resources.get_mut(&write.resource_uid).expect("couldn't find resource");
                 let memory_barrier = image_resource.state
                     .to_memory_barrier(
-                        *image_resource.handle,
+                        image_resource.handle.clone(),
                         &write.image_state,
                         image_resource.subresource_range,
                     );
@@ -414,11 +426,10 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
             };
             let mut color_outputs =
                 if let Some(writes) = &pass.color_writes {
-                    match FixedVec::<vk::RenderingAttachmentInfo, B>
-                            ::new(writes.len(), temp_allocator) {
-                        Some(r) => Some(r),
-                        None => return false,
-                    }
+                    Some(FixedVec::<vk::RenderingAttachmentInfo, B>
+                        ::with_capacity(writes.len(), temp_allocator)
+                        .map_err(|e| e)?
+                    )
                 }
                 else {
                     None
@@ -426,9 +437,8 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
             if let Some(writes) = &pass.color_writes {
                 let attachments = color_outputs.as_mut().unwrap();
                 for write in writes {
-                    attachments.push(
-                        process_write(write)
-                    );
+                    attachments
+                        .push(process_write(write))?;
                 }
             }
             let depth_output =
@@ -469,6 +479,6 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
             }
             unsafe { device.cmd_end_rendering(command_buffer); }
         }
-        true
+        Ok(())
     }
 }

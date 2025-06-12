@@ -4,8 +4,8 @@ use super::{
 };
 
 pub struct Memory {
-    nox_layout: nox::MemoryLayout,
-    nox_allocators: nox::Allocators,
+    _nox_layout: nox::MemoryLayout,
+    _nox_allocators: nox::Allocators,
     renderer_layout: renderer::MemoryLayout,
     renderer_allocators: renderer::Allocators,
 }
@@ -19,8 +19,8 @@ impl Memory {
         let renderer_allocators = renderer::Allocators::new(renderer_layout)?;
         Some(
             Self {
-                nox_layout,
-                nox_allocators,
+                _nox_layout: nox_layout,
+                _nox_allocators: nox_allocators,
                 renderer_layout,
                 renderer_allocators,
             }
@@ -33,30 +33,5 @@ impl Memory {
 
     pub fn renderer_allocators(&self) -> &renderer::Allocators {
         &self.renderer_allocators
-    }
-}
-
-pub struct Backend<'mem> {
-    pub memory: &'mem mut Memory,
-}
-
-impl<'mem> Backend<'mem> {
-
-    pub fn new(
-        memory: &'mem mut Memory,
-    ) -> Option<Self>
-    {
-        Some(
-            Backend {
-                memory,
-            }
-        )
-    }
-}
-
-impl<'i> Drop for Backend<'i> {
-
-    fn drop(&mut self) {
-        println!("Nox backend message: terminating backend");
     }
 }

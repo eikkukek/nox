@@ -3,9 +3,7 @@ use core::cell::RefCell;
 use ash::vk;
 
 use crate::{
-    allocator_traits::{Allocate, Free},
-    stack_alloc::StackGuard,
-    map_types::FixedMap,
+    allocator_traits::{Allocate, Free}, map_types::FixedMap, stack_alloc::StackGuard, vec_types::CapacityError
 };
 
 use super::{
@@ -23,6 +21,7 @@ pub trait Construct<'mem, 'r> {
         allocator: StackGuard<'mem>,
         temp_allocator: StackGuard<'mem>,
         queue_family_indices: QueueFamilyIndices,
+        image_index: u32,
     ) -> Self;
 }
 
@@ -33,6 +32,7 @@ pub struct Frame<'mem, 'r> {
     allocator: RefCell<StackGuard<'mem>>,
     temp_allocator: RefCell<StackGuard<'mem>>,
     queue_family_indices: QueueFamilyIndices,
+    image_index: u32,
 }
 
 impl<'mem, 'r> Frame<'mem, 'r> {
@@ -61,12 +61,16 @@ impl<'mem, 'r> Frame<'mem, 'r> {
         &self.temp_allocator
     }
 
+    pub fn image_index(&self) -> u32 {
+        self.image_index
+    }
+
     pub fn render<'s, 'a, A>(
         &self,
         frame_graph: &'s FrameGraph<'a, A>,
         resource_pool: &'s mut ResourcePool<'a, 'r, A>,
         callbacks: Option<&'s FixedMap<'a, UID, fn(UID), A>>,
-    )
+    ) -> Result<(), CapacityError>
         where
             A: Allocate + Free,
             'mem: 'r,
@@ -79,7 +83,7 @@ impl<'mem, 'r> Frame<'mem, 'r> {
             &self.swapchain_image_resource,
             callbacks,
             &self.temp_allocator,
-        );
+        )
     }
 }
 
@@ -92,6 +96,7 @@ impl<'mem, 'r> Construct<'mem, 'r> for Frame<'mem, 'r> {
         allocator: StackGuard<'mem>,
         temp_allocator: StackGuard<'mem>,
         queue_family_indices: QueueFamilyIndices,
+        image_index: u32,
     ) -> Self
     {
         Self {
@@ -101,6 +106,7 @@ impl<'mem, 'r> Construct<'mem, 'r> for Frame<'mem, 'r> {
             allocator: RefCell::new(allocator),
             temp_allocator: RefCell::new(temp_allocator),
             queue_family_indices,
+            image_index,
         }
     }
 }

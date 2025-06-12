@@ -10,7 +10,7 @@ use core::{
 use crate::allocator_traits::{Allocate, Free};
 
 use super::{
-    CapacityError, CapacityPolicy, Iter, IterConstruct, IterMut, MemoryStrategy, Vector
+    CapacityError, CapacityPolicy, Vector, MemoryStrategy, DuplicateStrategy, Iter, IterMut,
 };
 
 pub struct AllocVec<'alloc, T, Alloc, CapacityPol>
@@ -39,7 +39,7 @@ impl<'alloc, T, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPol>
         }
         else {
             Some(Self {
-                data: std::ptr::dangling::<T>() as *mut T,
+                data: core::ptr::dangling::<T>() as *mut T,
                 capacity: 0,
                 len: 0,
                 alloc,
@@ -67,7 +67,7 @@ impl<'alloc, T, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPol>
         let mut a = alloc.borrow_mut();
         let data: *mut T = unsafe { a
             .allocate_uninit(true_capacity)
-            .ok_or_else(|| CapacityError::AllocFailed)? }
+            .ok_or_else(|| CapacityError::AllocFailed { new_capacity: true_capacity })? }
             .as_ptr();
         Ok(Self {
             data,
@@ -125,14 +125,12 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
     }
 
     fn reserve(&mut self, capacity: usize) -> Result<(), CapacityError>
-        where
-            T: MemoryStrategy,
     {
         if capacity <= self.capacity {
             return Ok(())
         }
         if !CapacityPol::can_grow() {
-            return Err(CapacityError::Fixed)
+            return Err(CapacityError::Fixed { capacity: self.capacity })
         }
         let new_capacity = match CapacityPol::grow(self.capacity, capacity) {
             Some(r) => r,
@@ -141,11 +139,11 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
         let mut a = self.alloc.borrow_mut();
         let tmp: *mut T = match unsafe { a.allocate_uninit(new_capacity) } {
             Some(r) => r.as_ptr(),
-            None => return Err(CapacityError::AllocFailed),
+            None => return Err(CapacityError::AllocFailed { new_capacity }),
         };
         debug_assert!(self.len <= self.capacity);
         unsafe {
-            <T as MemoryStrategy>::copy(self.data, tmp, self.len);
+            <T as MemoryStrategy>::move_elements(self.data, tmp, self.len);
         }
         if self.capacity != 0 {
             unsafe { a.free_uninit(NonNull::new(self.data).unwrap(), self.capacity); }
@@ -164,7 +162,7 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
         }
         if len > self.len {
             for i in self.len..len {
-                unsafe { std::ptr::write(self.data.add(i), value.clone()) }
+                unsafe { core::ptr::write(self.data.add(i), value.clone()) }
             }
         }
         else if len < self.len {
@@ -185,7 +183,7 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
         }
         if len > self.len {
             for i in self.len..len {
-                unsafe { std::ptr::write(self.data.add(i), f()) }
+                unsafe { core::ptr::write(self.data.add(i), f()) }
             }
         }
         else if len < self.len {
@@ -207,7 +205,7 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
             }
         }
         let ptr = unsafe { self.data.add(self.len) };
-        unsafe { std::ptr::write(ptr, value) };
+        unsafe { core::ptr::write(ptr, value) };
         self.len += 1;
         Ok(unsafe { &mut *ptr })
     }
@@ -262,9 +260,9 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
 
     fn remove(&mut self, index: usize) -> Option<T> {
         if index == self.len { debug_assert!(false); return None }
-        let removed = unsafe { std::ptr::read(self.data.add(index)) };
+        let removed = unsafe { core::ptr::read(self.data.add(index)) };
         for i in index..self.len - 1 {
-            unsafe { std::ptr::write(self.data.add(i), std::ptr::read(self.data.add(i + 1))) }
+            unsafe { core::ptr::write(self.data.add(i), core::ptr::read(self.data.add(i + 1))) }
         }
         self.len -= 1;
         Some(removed)
@@ -272,10 +270,10 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
 
     fn swap_remove(&mut self, index: usize) -> Option<T> {
         if index == self.len { return None }
-        let removed = unsafe { std::ptr::read(self.data.add(index)) };
+        let removed = unsafe { core::ptr::read(self.data.add(index)) };
         self.len -= 1;
         if index != self.len {
-            unsafe { std::ptr::write(self.data.add(index), std::ptr::read(self.data.add(self.len))) }
+            unsafe { core::ptr::write(self.data.add(index), core::ptr::read(self.data.add(self.len))) }
         }
         Some(removed)
     }
@@ -293,40 +291,23 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
         }
         self.len = 0;
         self.capacity = 0;
-        self.data = std::ptr::dangling::<T>() as _;
+        self.data = core::ptr::dangling::<T>() as _;
     }
 
-    fn clone_from<V: Vector<T>>(&mut self, from: &V) -> Result<(), CapacityError>
+    fn duplicate_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
         where
-            T: Clone + Default
-    {
+            V: Vector<T>,
+            T: DuplicateStrategy {
         if self.capacity < from.len() {
             self.clear();
             self.reserve(from.len())?
         }
         else {
-            self.resize(0, Default::default());
+            unsafe { <T as MemoryStrategy>::drop_in_place(self.data, self.len); }
+            self.len = 0;
         }
-        for (i, val) in from.iter().enumerate() {
-            unsafe { self.data.add(i).write(val.clone()) }
-        }
+        unsafe { <T as DuplicateStrategy>::duplicate(from.as_ptr() as _, self.data, from.len()); }
         self.len = from.len();
-        Ok(())
-    }
-
-    fn copy_from<V: Vector<T>>(&mut self, from: &V) -> Result<(), CapacityError>
-        where
-            T: Copy + Default
-    {
-        if self.capacity < from.len() {
-            self.clear();
-            self.reserve(from.len())?
-        }
-        self.len = from.len();
-        debug_assert!(self.len <= self.capacity);
-        unsafe {
-            <T as MemoryStrategy>::copy(from.as_ptr() as _, self.data, self.len);
-        }
         Ok(())
     }
 
@@ -342,6 +323,7 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
         return false
     }
 
+    #[inline(always)]
     fn iter(&self) -> Iter<'_, T> {
         unsafe {
             let ptr = self.data;
@@ -350,6 +332,7 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
         }
     }
 
+    #[inline(always)]
     fn iter_mut(&mut self) -> IterMut<'_, T> {
         unsafe {
             let ptr = self.data;
@@ -399,6 +382,7 @@ impl<'vec, 'alloc, T, Alloc, CapacityPol> IntoIterator for &'vec AllocVec<'alloc
     type Item = &'vec T;
     type IntoIter = Iter<'vec, T>;
 
+    #[inline(always)]
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
@@ -414,6 +398,7 @@ impl<'vec, 'alloc, T, Alloc, CapacityPol> IntoIterator for &'vec mut AllocVec<'a
     type Item = &'vec mut T;
     type IntoIter = IterMut<'vec, T>;
 
+    #[inline(always)]
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }

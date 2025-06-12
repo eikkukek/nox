@@ -9,12 +9,10 @@ use winit::{
     dpi::LogicalSize,
 };
 
-use crate::string_types::SmallError;
-
 use super::{
     stack_alloc::StackAlloc,
     interface::Interface,
-    backend::{self},
+    memory::Memory,
     renderer::Renderer,
     string_types::{ArrayString, LargeError},
 };
@@ -22,22 +20,20 @@ use super::{
 pub use memory_layout::MemoryLayout;
 pub use init_settings::InitSettings;
 
-pub use backend::Memory;
-
 
 pub type AppName = ArrayString<128>;
 
 pub type ShaderID = u64;
 
 pub struct Allocators {
-    temp_alloc: StackAlloc,
+    _temp_alloc: StackAlloc,
 }
 
 impl Allocators {
 
     pub fn new(memory_layout: MemoryLayout) -> Option<Self> {
         Some(Self{
-            temp_alloc: StackAlloc::new(memory_layout.temp_size())?
+            _temp_alloc: StackAlloc::new(memory_layout.temp_size())?
         })
     }
 }
@@ -79,8 +75,8 @@ impl<'interface, 'mem, I: Interface> Nox<'interface, 'mem, I>
         Some(self.renderer.as_mut()?)
     }
 
-    pub fn load_shader(input_filename: &str) -> Result<ShaderID, LargeError> {
-
+    pub fn load_shader(_input_filename: &str) -> Result<ShaderID, LargeError> {
+        Err(LargeError::new())
     }
 }
 

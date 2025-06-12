@@ -10,14 +10,15 @@ pub mod marker_types;
 pub mod vec_types;
 pub mod map_types;
 pub mod interface;
-pub mod shader;
+//pub mod shader;
 
-mod backend;
+mod memory;
 mod allocator_traits;
 mod stack_alloc;
 mod dyn_alloc;
 mod global_alloc;
 
 pub use version::Version;
-pub use nox::{Nox, InitSettings, AppName, Memory};
-pub use renderer::{Renderer, DeviceName};
+pub use memory::Memory;
+pub use nox::{Nox, InitSettings, AppName};
+pub use renderer::{Renderer, DeviceName, DeviceMemory};

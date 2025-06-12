@@ -267,7 +267,7 @@ pub fn rate_physical_device(
                 Ok(s) => s,
                 Err(_) => return Err(SmallError::from_str("failed to convert extension name to str"))
             }
-        )
+        )).expect("should not happen"
     );
     if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_2 {
         required_extensions.push(
@@ -276,7 +276,7 @@ pub fn rate_physical_device(
                     Ok(s) => s,
                     Err(_) => return Err(SmallError::from_str("failed to convert extension name to str")),
                 }
-            )
+            )).expect("should not happen"
         );
         required_extensions.push(
             ArrayString::from_str(
@@ -284,7 +284,7 @@ pub fn rate_physical_device(
                     Ok(s) => s,
                     Err(_) => return Err(SmallError::from_str("failed to convert extension name to str")),
                 }
-            )
+            )).expect("should not happen"
         );
     }
     else if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_3 {
@@ -294,7 +294,7 @@ pub fn rate_physical_device(
                     Ok(s) => s,
                     Err(_) => return Err(SmallError::from_str("failed to convert extension name to str")),
                 }
-            )
+            )).expect("should not happen"
         );
     }
     let available_extensions = unsafe {
