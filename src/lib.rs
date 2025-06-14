@@ -29,3 +29,4 @@ pub use nox::{Nox, InitSettings, AppName};
 pub use renderer::{Renderer, DeviceName, DeviceMemory};
 pub use memory::Memory;
 pub use asset_importer::AssetType;
+pub use global_alloc::GlobalAlloc;

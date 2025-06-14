@@ -18,14 +18,14 @@ use super::{
     MetaFile,
 };
 
-pub struct AssetImporter<A: AssetType, B: BinGen<A>> {
-    meta: DynVec<'static, MetaFile<A>, GlobalAlloc>,
+pub struct AssetImporter<'alloc, A: AssetType, B: BinGen<A>> {
+    meta: DynVec<'alloc, MetaFile<A>, GlobalAlloc>,
     _gen: PhantomData<B>,
 }
 
-impl<A: AssetType, B: BinGen<A>> AssetImporter<A, B> {
+impl<'alloc, A: AssetType, B: BinGen<A>> AssetImporter<'alloc, A, B> {
 
-    pub fn new(initial_capacity: Option<usize>, allocator: &'static RefCell<GlobalAlloc>) -> Result<Self, CapacityError> {
+    pub fn new(initial_capacity: Option<usize>, allocator: &'alloc RefCell<GlobalAlloc>) -> Result<Self, CapacityError> {
         let capacity = initial_capacity.unwrap_or(128);
         Ok(Self {
             meta: DynVec::with_capacity(capacity, allocator)?,
