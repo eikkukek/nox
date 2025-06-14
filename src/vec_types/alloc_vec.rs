@@ -313,7 +313,7 @@ impl<'alloc, T, Alloc, CapacityPol> Vector<T> for AllocVec<'alloc, T, Alloc, Cap
 
     fn contains(&self, value: &T) -> bool
         where
-            T: Eq
+            T: PartialEq
     {
         for i in 0..self.len {
             if unsafe { *self.data.add(i) == *value } {

@@ -213,7 +213,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
 
     fn contains(&self, value: &T) -> bool
         where
-            T: Eq
+            T: PartialEq
     {
         let ptr = self.as_ptr() as *const T;
         for i in 0..self.len {
