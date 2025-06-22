@@ -15,7 +15,7 @@ pub mod map_types;
 //pub mod shader;
 
 pub mod pod {
-    pub use crate::serialization::{Pod, is_pod};
+    pub use crate::serialization::{Pod, MaybePod, is_pod};
 }
 
 mod memory;
