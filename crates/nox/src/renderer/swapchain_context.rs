@@ -1,6 +1,4 @@
-use core::{
-    slice,
-};
+use core::slice;
 
 use ash::{khr::{surface, swapchain}, vk};
 
@@ -57,6 +55,7 @@ impl FrameData {
 #[derive(Default, Clone, Copy)]
 struct TiedResources {
     image_view: vk::ImageView,
+    present_wait_semaphore: vk::Semaphore,
 }
 
 impl TiedResources {
@@ -91,8 +90,20 @@ impl TiedResources {
             .map_err(|e|
                 array_format!("failed to create image view {}", e)
             )?};
+        let semaphore_create_info = vk::SemaphoreCreateInfo {
+            s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
+            ..Default::default()
+        };
+        let present_wait_semaphore = unsafe { device
+            .create_semaphore(&semaphore_create_info, None)
+            .map_err(|e| {
+                device.destroy_image_view(image_view, None);
+                array_format!("failed to create semaphore {}", e)
+            }
+        )?};
         Ok(Self {
             image_view,
+            present_wait_semaphore,
         })
     }
 
@@ -103,6 +114,7 @@ impl TiedResources {
     {
         unsafe {
             device.destroy_image_view(self.image_view, None);
+            device.destroy_semaphore(self.present_wait_semaphore, None);
         }
     }
 }
@@ -111,7 +123,6 @@ impl TiedResources {
 struct UntiedResources {
     frame_ready_fence: vk::Fence,
     image_ready_semaphore: vk::Semaphore,
-    present_wait_semaphore: vk::Semaphore,
 }
 
 impl UntiedResources {
@@ -139,18 +150,9 @@ impl UntiedResources {
                 array_format!("failed to create semaphore {}", e)
             })?
         };
-        let present_wait_semaphore = unsafe { device
-            .create_semaphore(&semaphore_create_info, None)
-            .map_err(|e| {
-                device.destroy_fence(frame_ready_fence, None);
-                device.destroy_semaphore(image_ready_semaphore, None);
-                array_format!("failed to create semaphore {}", e)
-            }
-        )?};
         Ok(Self {
             frame_ready_fence,
             image_ready_semaphore,
-            present_wait_semaphore,
         })
     }
 
@@ -162,7 +164,6 @@ impl UntiedResources {
         unsafe {
             device.destroy_fence(self.frame_ready_fence, None);
             device.destroy_semaphore(self.image_ready_semaphore, None);
-            device.destroy_semaphore(self.present_wait_semaphore, None);
         }
     }
 }
@@ -281,8 +282,8 @@ impl<'mem> Resources<'mem> {
     }
 
     #[inline(always)]
-    fn get_tied_resources(&self, image_index: u32) -> TiedResources {
-        self.tied_resources[image_index as usize]
+    fn get_tied_resources(&self, image_index: u32) -> &TiedResources {
+        &self.tied_resources[image_index as usize]
     }
 
     #[inline(always)]
@@ -291,9 +292,9 @@ impl<'mem> Resources<'mem> {
     }
 
     #[inline(always)]
-    fn get_untied_resources(&self, frame_index: u32) -> (UntiedResources, &vk::CommandBuffer) {
+    fn get_untied_resources(&self, frame_index: u32) -> (&UntiedResources, &vk::CommandBuffer) {
         let index = frame_index as usize;
-        (self.untied_resources[index], &self.command_buffers[index])
+        (&self.untied_resources[index], &self.command_buffers[index])
     }
 }
 
@@ -310,7 +311,7 @@ pub struct SwapchainContext<'mem> {
     image_states: FixedVec<'mem, ImageState, StackAlloc>,
     handle: vk::SwapchainKHR,
     frame_index: u32,
-    current_image_index: u32,
+    image_index: u32,
     surface_format: vk::SurfaceFormatKHR,
     image_extent: vk::Extent2D,
 }
@@ -473,7 +474,7 @@ impl<'mem> SwapchainContext<'mem> {
                 image_states,
                 handle: swapchain_handle,
                 frame_index: 0,
-                current_image_index: 0,
+                image_index: 0,
                 surface_format,
                 image_extent,
             }
@@ -542,9 +543,9 @@ impl<'mem> SwapchainContext<'mem> {
                     return Err(array_format!("failed to acquire next image {:?}", e))
                 }
             }};
-        self.current_image_index = next_image.0;
-        let tied_resources = self.resources.get_tied_resources(self.current_image_index);
-        let image_index = self.current_image_index as usize;
+        self.image_index = next_image.0;
+        let tied_resources = self.resources.get_tied_resources(self.image_index);
+        let image_index = self.image_index as usize;
         Ok(Some(
             FrameData::new(
                 self.images[image_index],
@@ -566,7 +567,8 @@ impl<'mem> SwapchainContext<'mem> {
         graphics_queue_index: u32,
     ) -> (vk::SubmitInfo<'_>, vk::Fence) {
         let (untied_resources, command_buffer) = self.resources.get_untied_resources(self.frame_index);
-        let image_index = self.current_image_index as usize;
+        let tied_resources = self.resources.get_tied_resources(self.image_index);
+        let image_index = self.image_index as usize;
         let dst_image_state = ImageState::new(
             vk::AccessFlags::NONE,
             vk::ImageLayout::PRESENT_SRC_KHR,
@@ -600,7 +602,7 @@ impl<'mem> SwapchainContext<'mem> {
                 command_buffer_count: 1,
                 p_command_buffers: command_buffer,
                 signal_semaphore_count: 1,
-                p_signal_semaphores: &untied_resources.present_wait_semaphore,
+                p_signal_semaphores: &tied_resources.present_wait_semaphore,
                 ..Default::default()
             },
             untied_resources.frame_ready_fence,
@@ -612,14 +614,14 @@ impl<'mem> SwapchainContext<'mem> {
         swapchain_loader: &swapchain::Device,
         queue: vk::Queue,
     ) -> Result<PresentResult, SmallError> {
-        let untied_resources = self.resources.untied_resources[self.frame_index as usize];
+        let tied_resources = self.resources.get_tied_resources(self.image_index);
         let present_info = vk::PresentInfoKHR {
             s_type: vk::StructureType::PRESENT_INFO_KHR,
             wait_semaphore_count: 1,
-            p_wait_semaphores: &untied_resources.present_wait_semaphore,
+            p_wait_semaphores: &tied_resources.present_wait_semaphore,
             swapchain_count: 1,
             p_swapchains: &self.handle,
-            p_image_indices: &self.current_image_index,
+            p_image_indices: &self.image_index,
             ..Default::default()
         };
         unsafe {

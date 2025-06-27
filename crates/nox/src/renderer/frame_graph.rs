@@ -230,6 +230,13 @@ impl Drop for Image {
 #[derive(Clone, Copy)]
 pub struct ResourceID(u32);
 
+impl ResourceID {
+
+    pub const fn render_image_id() -> Self {
+        Self(0)
+    }
+}
+
 pub struct ResourcePool<'alloc, Alloc>
     where
         Alloc: Allocator
@@ -274,7 +281,7 @@ impl<'alloc, Alloc> ResourcePool<'alloc, Alloc>
 #[derive(Clone)]
 pub struct WriteInfo {
     resource_id: ResourceID,
-    image_state: ImageState,
+    dst_state: ImageState,
     load_op: vk::AttachmentLoadOp,
     store_op: vk::AttachmentStoreOp,
     clear_value: vk::ClearValue,
@@ -284,14 +291,14 @@ impl WriteInfo {
 
     pub fn new(
         resource_id: ResourceID,
-        image_state: ImageState,
+        dst_state: ImageState,
         load_op: vk::AttachmentLoadOp,
         store_op: vk::AttachmentStoreOp,
         clear_value: vk::ClearValue,
     ) -> Self {
         Self {
             resource_id,
-            image_state,
+            dst_state,
             load_op,
             store_op,
             clear_value,
@@ -312,30 +319,30 @@ pub struct Pass<'alloc, Alloc: Allocator> {
 
 impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
     
-    pub fn new(
+    fn new(
         name: PassName,
         max_reads: u32,
         max_color_writes: u32,
         max_dependencies: u32,
-        allocator: &'alloc Alloc,
+        alloc: &'alloc Alloc
     ) -> Result<Self, CapacityError> {
         let reads =
             if max_reads != 0 {
-                Some(FixedVec::with_capacity(max_reads as usize, allocator)?)
+                Some(FixedVec::with_capacity(max_reads as usize, alloc)?)
             }
             else {
                 None
             };
         let writes =
             if max_color_writes != 0 {
-                Some(FixedVec::with_capacity(max_color_writes as usize, allocator)?)
+                Some(FixedVec::with_capacity(max_color_writes as usize, alloc)?)
             }
             else {
                 None
             };
         let dependencies =
             if max_dependencies != 0 {
-                Some(FixedVec::with_capacity(max_color_writes as usize, allocator)?)
+                Some(FixedVec::with_capacity(max_color_writes as usize, alloc)?)
             }
             else {
                 None
@@ -365,13 +372,13 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
         self
     }
 
-    pub fn with_write(&mut self, write: WriteInfo) -> Result<&mut Self, CapacityError> {
+    pub fn with_write(&mut self, write: WriteInfo) -> &mut Self {
         self.writes
             .as_mut()
             .expect("no writes set")
             .push(write)
             .expect("write capacity exceeded");
-        Ok(self)
+        self
     }
 
     pub fn with_depth_write(&mut self, write: WriteInfo) -> &mut Self {
@@ -442,8 +449,12 @@ pub fn new<'alloc, Alloc: Allocator>(
 impl<'alloc, Alloc: Allocator> FrameGraphInit<'alloc, Alloc> {
 
     pub fn init(mut self, max_passes: u32, max_resources: u32) -> Result<FrameGraph<'alloc, Alloc>, CapacityError> {
-        self.frame_graph.passes = FixedVec::with_capacity(max_passes as usize, self.frame_graph.alloc)?;
-        self.frame_graph.resource_pool.images = FixedVec::with_capacity(max_resources as usize, self.frame_graph.alloc)?;
+        if max_passes != 0 {
+            self.frame_graph.passes = FixedVec::with_capacity(max_passes as usize, self.frame_graph.alloc)?;
+        }
+        if max_resources != 0 {
+            self.frame_graph.resource_pool.images = FixedVec::with_capacity(max_resources as usize, self.frame_graph.alloc)?;
+        }
         Ok(self.frame_graph)
     }
 }
@@ -456,6 +467,24 @@ impl<'alloc, Alloc: Allocator> FrameGraph<'alloc, Alloc> {
 
     pub fn queue_family_indices(&self) -> &QueueFamilyIndices {
         &self.queue_family_indices
+    }
+
+    pub fn add_pass(&mut self,
+        name: &str,
+        max_reads: u32,
+        max_color_writes: u32,
+        max_dependencies: u32
+    ) -> Result<&mut Pass<'alloc, Alloc>, CapacityError> {
+        let pass = Pass::new(
+            ArrayString::from_str(name),
+            max_reads,
+            max_color_writes,
+            max_dependencies,
+            self.alloc
+        )?;
+        Ok(self.passes
+            .push(pass)
+            .expect("pass capacity exceeded"))
     }
 
     pub fn render(&mut self) -> Result<(), RenderError> {
@@ -495,18 +524,19 @@ impl<'alloc, Alloc: Allocator> FrameGraph<'alloc, Alloc> {
                 if image.resource.is_none() {
                     image.create_resource(self.device_alloc)?;
                 }
+                let dst_state = write.dst_state;
                 let mut image_resource = image.resource.unwrap();
                 let memory_barrier = image_resource.state
                     .to_memory_barrier(
                         image_resource.image,
-                        &write.image_state,
+                        &dst_state,
                         image.subresource_range,
                     );
                 unsafe {
                     self.device.cmd_pipeline_barrier(
                         self.command_buffer,
                         image_resource.state.pipeline_stage,
-                        write.image_state.pipeline_stage,
+                        dst_state.pipeline_stage,
                         Default::default(),
                         Default::default(),
                         Default::default(),
@@ -515,12 +545,12 @@ impl<'alloc, Alloc: Allocator> FrameGraph<'alloc, Alloc> {
                 }
                 render_extent.width = render_extent.width.min(image.extent.width);
                 render_extent.height = render_extent.height.min(image.extent.height);
-                image_resource.state = write.image_state;
+                image_resource.state = dst_state;
                 image.resource = Some(image_resource);
                 Ok(vk::RenderingAttachmentInfo {
                     s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
                     image_view: image_resource.image_view,
-                    image_layout: write.image_state.layout,
+                    image_layout: image_resource.state.layout,
                     load_op: write.load_op,
                     store_op: write.store_op,
                     clear_value: write.clear_value,

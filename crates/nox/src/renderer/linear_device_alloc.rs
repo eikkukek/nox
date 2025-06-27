@@ -93,3 +93,15 @@ impl LinearDeviceAlloc {
         Ok(())
     }
 }
+
+impl Drop for LinearDeviceAlloc {
+
+    fn drop(&mut self) {
+        unsafe {
+            self.device.free_memory(
+                self.device_memory,
+                None
+            );
+        }
+    }
+}

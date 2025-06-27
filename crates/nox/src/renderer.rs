@@ -31,7 +31,7 @@ use super::{
 
 pub use memory_layout::MemoryLayout;
 pub use handle::Handle;
-pub use frame_graph::{FrameGraph, FrameGraphInit, RenderError, Pass, WriteInfo, ResourcePool, Image, ImageResource};
+pub use frame_graph::{FrameGraph, FrameGraphInit, RenderError, ResourceID, Pass, WriteInfo, ResourcePool, Image, ImageResource};
 pub use image_state::ImageState;
 pub use buffer_allocator::{BufferAllocator, DeviceMemory, BufferAlloc};
 
@@ -67,8 +67,8 @@ impl Allocators {
 pub struct Renderer<'mem> {
     main_thread_context: ThreadContext,
     _device_allocators: DeviceAllocators<'mem, GlobalVec<buffer_allocator::Block>>,
-    vulkan_context: VulkanContext<'mem>,
     frame_device_allocs: GlobalVec<LinearDeviceAlloc>,
+    vulkan_context: VulkanContext<'mem>,
     _memory_layout: MemoryLayout,
     buffered_frame_count: u32,
 }

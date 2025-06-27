@@ -21,6 +21,8 @@ pub mod pod {
 mod memory;
 pub mod stack_alloc;
 
+pub use nox_mem as mem;
+
 pub use version::Version;
 pub use nox::{Nox, InitSettings, AppName};
 pub use renderer::{Renderer, DeviceName, DeviceMemory};

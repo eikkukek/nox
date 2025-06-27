@@ -167,12 +167,7 @@ impl<'alloc> Allocator for StackGuard<'alloc> {
 
     #[inline(always)]
     unsafe fn allocate_raw(&self, size: usize, align: usize) -> Option<NonNull<u8>> {
-        unsafe { self.stack.allocate_raw(size, align) }
-    }
-
-    #[inline(always)]
-    unsafe fn allocate_uninit<T>(&self, count: usize) -> Option<NonNull<T>> {
-        unsafe { self.stack.allocate_uninit(count) }
+        unsafe { self.stack.allocate_raw_internal(size, align) }
     }
 
     #[inline(always)]
