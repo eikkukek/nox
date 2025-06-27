@@ -1,14 +1,8 @@
 use std::path::Path;
 
-use core::{
-    cell::RefCell,
-    marker::PhantomData,
-};
+use core::marker::PhantomData;
 
-use crate::{
-    global_alloc::GlobalAlloc,
-    vec_types::{Vector, DynVec, CapacityError},
-};
+use nox_mem::{Vector, GlobalVec, CapacityError};
 
 use super::{
     LoadError,
@@ -18,17 +12,17 @@ use super::{
     MetaFile,
 };
 
-pub struct AssetImporter<'alloc, A: AssetType, B: BinGen<A>> {
-    meta: DynVec<'alloc, MetaFile<A>, GlobalAlloc>,
+pub struct AssetImporter<A: AssetType, B: BinGen<A>> {
+    meta: GlobalVec<MetaFile<A>>,
     _gen: PhantomData<B>,
 }
 
-impl<'alloc, A: AssetType, B: BinGen<A>> AssetImporter<'alloc, A, B> {
+impl<A: AssetType, B: BinGen<A>> AssetImporter<A, B> {
 
-    pub fn new(initial_capacity: Option<usize>, allocator: &'alloc RefCell<GlobalAlloc>) -> Result<Self, CapacityError> {
+    pub fn new(initial_capacity: Option<usize>) -> Result<Self, CapacityError> {
         let capacity = initial_capacity.unwrap_or(128);
         Ok(Self {
-            meta: DynVec::with_capacity(capacity, allocator)?,
+            meta: GlobalVec::with_capacity(capacity)?,
             _gen: PhantomData,
         })
     }

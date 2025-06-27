@@ -1,5 +1,3 @@
-use crate::string_types::{array_format, SmallError};
-
 use super::{
     physical_device,
     helpers::{self},
@@ -19,25 +17,22 @@ impl ThreadContext {
     pub fn new(
         device: &ash::Device,
         queue_families: &physical_device::QueueFamilyIndices,
-    ) -> Result<Self, SmallError> {
+    ) -> Result<Self, vk::Result> {
         let flags = vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER;
         let graphics_pool =
-            helpers::create_command_pool(&device, flags, queue_families.get_graphics_index())
-            .map_err(|e|
-                array_format!("failed to create command pool {:?}", e)
-            )?;
+            helpers::create_command_pool(&device, flags, queue_families.get_graphics_index())?;
         let transfer_pool =
             helpers::create_command_pool(&device, flags, queue_families.get_graphics_index())
             .map_err(|e| {
                 unsafe { device.destroy_command_pool(graphics_pool, None); }
-                array_format!("failed to create command pool {:?}", e)
+                e
             })?;
         let compute_pool =
             helpers::create_command_pool(&device, flags, queue_families.get_graphics_index())
             .map_err(|e| {
                 unsafe { device.destroy_command_pool(graphics_pool, None); }
                 unsafe { device.destroy_command_pool(transfer_pool, None); }
-                array_format!("failed to create command pool {:?}", e)
+                e
             })?;
         Ok(
             Self {

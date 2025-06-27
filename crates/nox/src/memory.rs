@@ -1,11 +1,6 @@
-use super::{
-    renderer,
-    nox,
-};
+use super::renderer;
 
 pub struct Memory {
-    _nox_layout: nox::MemoryLayout,
-    _nox_allocators: nox::Allocators,
     renderer_layout: renderer::MemoryLayout,
     renderer_allocators: renderer::Allocators,
 }
@@ -13,14 +8,10 @@ pub struct Memory {
 impl Memory {
 
     pub fn default() -> Option<Self> {
-        let nox_layout = nox::MemoryLayout::default();
-        let nox_allocators = nox::Allocators::new(nox_layout)?;
         let renderer_layout = renderer::MemoryLayout::default();
         let renderer_allocators = renderer::Allocators::new(renderer_layout)?;
         Some(
             Self {
-                _nox_layout: nox_layout,
-                _nox_allocators: nox_allocators,
                 renderer_layout,
                 renderer_allocators,
             }

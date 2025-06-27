@@ -2,8 +2,9 @@ use core::cell::RefCell;
 
 use ash::vk;
 
+use nox_mem::{Vector, capacity_policy::Dyn};
+
 use crate::{
-    vec_types::{Dyn, Vector},
     string_types::{array_format, LargeError},
 };
 

@@ -6,17 +6,18 @@ mod physical_device;
 mod vulkan_context;
 mod swapchain_context;
 mod thread_context;
-mod frame;
 mod frame_graph;
+//mod transient_allocator;
+mod linear_device_alloc;
 mod buffer_allocator;
 mod image_state;
 
-use core::{
-    slice,
-    cell::RefCell,
-};
+use core::slice;
 
 pub use ash;
+
+use ash::vk;
+use nox_mem::{GlobalVec, Vector};
 
 use crate::stack_alloc::StackAlloc;
 
@@ -24,25 +25,22 @@ use super::{
     interface::Interface,
     Version,
     string_types::{ArrayString, array_format, LargeError},
-    global_alloc::GlobalAlloc,
     stack_alloc::StackGuard,
-    vec_types::DynVec,
     AppName
 };
 
 pub use memory_layout::MemoryLayout;
 pub use handle::Handle;
-pub use frame_graph::{UID, Pass, WriteInfo, FrameGraph, ResourcePool, ImageResource};
-pub use frame::Frame;
+pub use frame_graph::{FrameGraph, FrameGraphInit, RenderError, Pass, WriteInfo, ResourcePool, Image, ImageResource};
 pub use image_state::ImageState;
 pub use buffer_allocator::{BufferAllocator, DeviceMemory, BufferAlloc};
 
 use device_allocators::DeviceAllocators;
-use vulkan_context::{VulkanContext, SwapchainState};
+use linear_device_alloc::LinearDeviceAlloc;
+use vulkan_context::VulkanContext;
 use physical_device::PhysicalDeviceInfo;
 use swapchain_context::{PresentResult, SwapchainContext};
 use thread_context::ThreadContext;
-use frame::Construct;
 
 use winit::{
     dpi::PhysicalSize,
@@ -52,27 +50,27 @@ use winit::{
 pub type DeviceName = ArrayString<{ash::vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 
 pub struct Allocators {
-    init: RefCell<StackAlloc>,
-    swapchain: RefCell<StackAlloc>,
-    global_alloc: RefCell<GlobalAlloc>,
+    init: StackAlloc,
+    swapchain: StackAlloc,
 }
 
 impl Allocators {
 
     pub fn new(memory_layout: MemoryLayout) -> Option<Self> {
         Some(Self {
-            init: RefCell::new(StackAlloc::new(memory_layout.init_size())?),
-            swapchain: RefCell::new(StackAlloc::new(memory_layout.swapchain_size())?),
-            global_alloc: RefCell::new(GlobalAlloc::default()),
+            init: StackAlloc::new(memory_layout.init_size())?,
+            swapchain: StackAlloc::new(memory_layout.swapchain_size())?,
         })
     }
 }
 
 pub struct Renderer<'mem> {
     main_thread_context: ThreadContext,
-    _device_allocators: DeviceAllocators<'mem, DynVec<'mem, buffer_allocator::Block, GlobalAlloc>>,
+    _device_allocators: DeviceAllocators<'mem, GlobalVec<buffer_allocator::Block>>,
     vulkan_context: VulkanContext<'mem>,
+    frame_device_allocs: GlobalVec<LinearDeviceAlloc>,
     _memory_layout: MemoryLayout,
+    buffered_frame_count: u32,
 }
 
 impl<'mem> Renderer<'mem> {
@@ -83,6 +81,7 @@ impl<'mem> Renderer<'mem> {
         app_version: Version,
         enable_validation: bool,
         memory_layout: MemoryLayout,
+        buffered_frame_count: u32,
         allocators: &'mem Allocators,
     ) -> Result<Self, LargeError> {
         let vulkan_context = VulkanContext
@@ -90,6 +89,7 @@ impl<'mem> Renderer<'mem> {
                 window,
                 &app_name,
                 app_version,
+                buffered_frame_count,
                 enable_validation,
                 allocators)
             .map_err(|e| e)?;
@@ -98,10 +98,27 @@ impl<'mem> Renderer<'mem> {
                 vulkan_context.device(),
                 vulkan_context.queue_family_indices())
             .map_err(|e|
-                array_format!("failed to create main thread context ( {} )", e)
+                array_format!("failed to create main thread context ( {:?} )", e)
             )?;
         let device = vulkan_context.device().clone();
         let physical_device_info = vulkan_context.physical_device_info().clone();
+        let mut frame_device_allocs = GlobalVec
+            ::with_capacity(buffered_frame_count as usize)
+            .map_err(|e |array_format!("global alloc failed ( {:?} )", e))?;
+        for _ in 0..buffered_frame_count {
+            frame_device_allocs
+                .push(
+                    LinearDeviceAlloc
+                        ::new(
+                            device.clone(),
+                            memory_layout.device_frame_size(),
+                            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                            &physical_device_info,
+                        )
+                        .map_err(|e| array_format!("failed to create device allocator ( {:?} )", e))?
+                )
+                .map_err(|e| array_format!("global alloc failed ( {:?} )", e))?;
+        }
         Ok(Self {
             vulkan_context,
             main_thread_context,
@@ -109,16 +126,18 @@ impl<'mem> Renderer<'mem> {
                 &memory_layout,
                 device,
                 &physical_device_info,
-                DynVec::with_capacity(256, &allocators.global_alloc)
+                GlobalVec::with_capacity(256)
                     .map_err(|e| array_format!("global alloc failed ( {:?} )", e))?,
-                DynVec::with_capacity(256, &allocators.global_alloc)
+                GlobalVec::with_capacity(256)
                     .map_err(|e| array_format!("global alloc failed ( {:?} )", e))?,
-                DynVec::with_capacity(256, &allocators.global_alloc)
+                GlobalVec::with_capacity(256)
                     .map_err(|e| array_format!("global alloc failed ( {:?} )", e))?)
                 .map_err(|e|
                     array_format!("failed to create device allocators ( {} )", e)
                 )?,
+            frame_device_allocs,
             _memory_layout: memory_layout,
+            buffered_frame_count,
         })
     }
 
@@ -127,7 +146,7 @@ impl<'mem> Renderer<'mem> {
     }
 
     pub fn request_resize(&mut self, size: PhysicalSize<u32>) {
-        self.vulkan_context.request_resize(size);
+        self.vulkan_context.request_swapchain_update(self.buffered_frame_count, size);
     }
 
     pub fn render<I: Interface>(
@@ -136,11 +155,9 @@ impl<'mem> Renderer<'mem> {
         interface: &mut I,
         allocators: &'mem Allocators,
     ) -> Result<(), LargeError> {
-
         let device = self.vulkan_context.device().clone();
         let swapchain_loader = self.vulkan_context.swapchain_loader().clone();
         let queue_family_indices = *self.vulkan_context.queue_family_indices();
-
         let graphics_queue = self.vulkan_context.graphics_queue();
         let swapchain_context = self.vulkan_context
             .get_swapchain_context(
@@ -149,40 +166,47 @@ impl<'mem> Renderer<'mem> {
             .map_err(|e| {
                 array_format!("failed to get swapchain context ( {} )", e)
             })?;
-        let Some(frame_data) = swapchain_context
+        let frame_data = match swapchain_context
             .setup_image(&device, &swapchain_loader)
             .map_err(|e| {
                 array_format!("failed to setup render image ( {} )", e)
-            })? else {
-                self.vulkan_context.swapchain_state(SwapchainState::OutOfDate(window.inner_size()));
-                return Ok(())
+            })? {
+                Some(r) => r,
+                None => return Ok(())
             };
         if let Err(e) = helpers::begin_command_buffer(&device, frame_data.command_buffer) {
             return Err(array_format!("failed to begin command buffer {:?}", e))
         }
-        let frame = Frame::new(
-            Handle::new(device.clone()),
-            Handle::new(frame_data.command_buffer),
-            RefCell::new(ImageResource::new(
-                Handle::new(frame_data.image),
-                Handle::new(frame_data.image_view),
-                SwapchainContext::image_subresource_range(),
-                frame_data.image_state,
+        let mut render_image =
+            Image::with_resource(
+                ImageResource::new(
+                    frame_data.image,
+                    frame_data.image_view,
+                    frame_data.image_state,
+                ),
                 frame_data.format,
                 frame_data.extent,
-            )),
-            StackGuard::new(&allocators.swapchain),
-            StackGuard::new(&allocators.init),
+                vk::ImageUsageFlags::SAMPLED,
+                vk::SampleCountFlags::TYPE_1,
+                SwapchainContext::image_subresource_range(),
+            );
+        let alloc = StackGuard::new(&allocators.swapchain);
+        let frame_graph = frame_graph::new(
+            device.clone(),
+            frame_data.command_buffer,
+            &mut render_image,
+            &alloc,
+            &self.frame_device_allocs[frame_data.frame_index as usize],
             queue_family_indices,
-            frame_data.image_index
+            frame_data.frame_index,
         );
         interface
-            .render(&frame)
-            .map_err(|e| array_format!("interface failed to render ( {} )", e))?;
+            .render(frame_graph)
+            .map_err(|e| array_format!("interface failed to render ( {:?} )", e))?;
         let (submit_info, fence) = swapchain_context
             .setup_submit(
-                Handle::new(device.clone()),
-                frame.swapchain_image_resource().state(),
+                device.clone(),
+                render_image.resource().unwrap().state(),
                 queue_family_indices.get_graphics_index()
             );
         if let Err(e) = unsafe { device.end_command_buffer(frame_data.command_buffer) } {
@@ -195,7 +219,7 @@ impl<'mem> Renderer<'mem> {
             .present_submit(&swapchain_loader, graphics_queue)
             .map_err(|e| array_format!("queue present failed {}", e))?;
         if present_result != PresentResult::Success || frame_data.suboptimal {
-            self.vulkan_context.swapchain_state(SwapchainState::OutOfDate(window.inner_size()))
+            self.vulkan_context.request_swapchain_update(self.buffered_frame_count, window.inner_size());
         }
         Ok(())
     }

@@ -1,6 +1,6 @@
 #[derive(Debug)]
 pub enum CapacityError {
-    Fixed {
+    FixedCapacity {
         capacity: usize,
     },
     InvalidReservation {

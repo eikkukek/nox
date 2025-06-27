@@ -1,11 +1,12 @@
+use ash::{khr::{self, surface}, vk};
+
+use nox_mem::vec_types::{Vector, ArrayVec};
+
 use crate::{
     string_types::{ArrayString, array_format, SmallError},
-    utility::{has_bits, has_not_bits},
-    vec_types::{Vector, ArrayVec},
+    has_bits, has_not_bits,
     version::Version,
 };
-
-use ash::{khr::{self, surface}, vk};
 
 use super::DeviceName;
 

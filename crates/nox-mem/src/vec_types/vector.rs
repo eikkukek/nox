@@ -1,5 +1,6 @@
 use core::{
     ops::{Index, IndexMut, Deref, DerefMut},
+    ptr::NonNull,
 };
 
 use crate::capacity_policy::CapacityPolicy;
@@ -29,6 +30,8 @@ pub trait Vector<T>:
     fn as_ptr(&self) -> *const T;
 
     fn as_mut_ptr(&mut self) -> *mut T;
+
+    fn as_non_null(&self) -> NonNull<T>;
 
     fn as_slice(&self) -> &[T];
 

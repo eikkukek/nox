@@ -1,6 +1,6 @@
 use ash::vk;
 
-use crate::vec_types::Vector;
+use nox_mem::Vector;
 
 
 pub fn allocate_command_buffers<Vec>(

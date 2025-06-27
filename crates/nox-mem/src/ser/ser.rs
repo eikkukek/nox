@@ -72,6 +72,6 @@ fn test<W: Writer, V: crate::vec_types::Vector<u32>>(writer: &mut W) {
     a.ser(writer).unwrap();
     let vec = vec![10, 10, 10];
     vec.ser(writer).unwrap();
-    let vec2 = crate::vec_types::GlobalVec::<&str>::new().unwrap();
+    let vec2 = crate::vec_types::GlobalVec::<&str>::new();
     vec2.ser(writer).unwrap();
 }

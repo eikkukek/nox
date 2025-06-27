@@ -1,16 +1,3 @@
-use super::{
-    Allocators,
-    physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo},
-    swapchain_context::SwapchainContext,
-};
-
-use crate::{
-    stack_alloc::StackGuard,
-    string_types::{ArrayString, array_format, LargeError, SmallError},
-    vec_types::{ArrayVec, FixedVec, Vector},
-    version::Version, AppName
-};
-
 use winit::{dpi::PhysicalSize, window::Window};
 use ash::{
     khr::{surface, swapchain, wayland_surface, win32_surface, xcb_surface, xlib_surface},
@@ -20,11 +7,25 @@ use ash::{
 use ash_window;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle,};
 use std::ffi::CString;
-use core::cell::RefCell;
 
-pub enum SwapchainState {
+use nox_mem::{Vector, FixedVec, ArrayVec};
+
+use super::{
+    Allocators,
+    physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo},
+    swapchain_context::SwapchainContext,
+};
+
+use crate::{
+    stack_alloc::StackGuard,
+    string_types::{array_format, ArrayString, LargeError, SmallError},
+    version::Version, AppName,
+};
+
+#[derive(Clone, Copy)]
+enum SwapchainState {
     Valid,
-    OutOfDate(PhysicalSize<u32>),
+    OutOfDate(u32, PhysicalSize<u32>),
 }
 
 pub struct VulkanContext<'mem> {
@@ -41,7 +42,7 @@ pub struct VulkanContext<'mem> {
     _transfer_queue: vk::Queue,
     _compute_queue: vk::Queue,
     swapchain_context: Option<SwapchainContext<'mem>>,
-    pub swapchain_state: SwapchainState,
+    swapchain_state: SwapchainState,
 }
 
 impl<'mem> VulkanContext<'mem> {
@@ -50,10 +51,11 @@ impl<'mem> VulkanContext<'mem> {
         window: &Window,
         app_name: &AppName,
         app_version: Version,
+        buffered_frame_count: u32,
         enable_validation: bool,
         allocators: &'mem Allocators,
     ) -> Result<VulkanContext<'mem>, LargeError> {
-        let init_allocator = &RefCell::new(StackGuard::new(&allocators.init));
+        let init_allocator = &StackGuard::new(&allocators.init);
         let entry = unsafe { Entry::load().unwrap() };
         match unsafe { entry.try_enumerate_instance_version() } {
             Ok(v) => {
@@ -189,18 +191,18 @@ impl<'mem> VulkanContext<'mem> {
             fill_mode_non_solid: physical_device_info.features().sample_rate_shading,
             ..Default::default()
         };
-        let mut features_13 = vk::PhysicalDeviceVulkan13Features {
+        let features_13 = vk::PhysicalDeviceVulkan13Features {
             dynamic_rendering: vk::TRUE,
             ..Default::default()
         };
-        let mut features_12 = vk::PhysicalDeviceVulkan12Features {
-            p_next: (&mut features_13 as *mut _) as _,
+        let features_12 = vk::PhysicalDeviceVulkan12Features {
+            p_next: (&features_13 as *const _) as _,
             timeline_semaphore: vk::TRUE,
             ..Default::default()
         };
         let device_create_info = vk::DeviceCreateInfo {
             s_type: vk::StructureType::DEVICE_CREATE_INFO,
-            p_next: (&mut features_12 as *mut _) as _,
+            p_next: (&features_12 as *const _) as _,
             queue_create_info_count: device_queue_create_infos.len() as u32,
             p_queue_create_infos: device_queue_create_infos.as_ptr() as _,
             enabled_extension_count: 3,
@@ -235,7 +237,7 @@ impl<'mem> VulkanContext<'mem> {
                 _transfer_queue: transfer_queue,
                 _compute_queue: compute_queue,
                 swapchain_context: None,
-                swapchain_state: SwapchainState::OutOfDate(window.inner_size()),
+                swapchain_state: SwapchainState::OutOfDate(buffered_frame_count, window.inner_size()),
             },
         )
     }
@@ -268,14 +270,15 @@ impl<'mem> VulkanContext<'mem> {
         &self.physical_device_info
     }
 
-    pub fn request_resize(&mut self, size: PhysicalSize<u32>) {
-        self.swapchain_state = SwapchainState::OutOfDate(size);
+    pub fn request_swapchain_update(&mut self, buffered_frame_count: u32, size: PhysicalSize<u32>) {
+        self.swapchain_state = SwapchainState::OutOfDate(buffered_frame_count, size);
     }
 
     pub fn update_swapchain(
         &mut self,
         framebuffer_size: PhysicalSize<u32>,
         graphics_command_pool: vk::CommandPool,
+        buffered_frame_count: u32,
         allocators: &'mem Allocators,
     ) -> Result<(), LargeError> {
         if let Some(mut context) = self.swapchain_context.take() {
@@ -286,7 +289,9 @@ impl<'mem> VulkanContext<'mem> {
                 Some(graphics_command_pool),
             );
         }
-        allocators.swapchain.borrow_mut().clear();
+        unsafe {
+            allocators.swapchain.force_clear();
+        }
         self.swapchain_context = match SwapchainContext::new(
             &self.device,
             &self.surface_loader,
@@ -294,6 +299,7 @@ impl<'mem> VulkanContext<'mem> {
             self.physical_device,
             self.surface_handle,
             vk::Extent2D { width: framebuffer_size.width, height: framebuffer_size.height },
+            buffered_frame_count,
             graphics_command_pool,
             self.queue_family_indices().get_graphics_index(),
             &allocators.swapchain,
@@ -313,19 +319,15 @@ impl<'mem> VulkanContext<'mem> {
     ) -> Result<&mut SwapchainContext<'mem>, LargeError> {
         match self.swapchain_state {
             SwapchainState::Valid => {},
-            SwapchainState::OutOfDate(framebuffer_size) => {
+            SwapchainState::OutOfDate(buffered_frame_count, framebuffer_size) => {
                 self 
-                    .update_swapchain(framebuffer_size, graphics_command_pool, allocators)
+                    .update_swapchain(framebuffer_size, graphics_command_pool, buffered_frame_count, allocators)
                     .map_err(|e| {
                         e
                     })?;
             },
         }
-        Ok(self.swapchain_context.as_mut().expect("swapchain context was None"))
-    }
-
-    pub fn swapchain_state(&mut self, state: SwapchainState) {
-        self.swapchain_state = state
+        Ok(self.swapchain_context.as_mut().unwrap())
     }
 
     pub fn destroy_swapchain(
@@ -340,7 +342,9 @@ impl<'mem> VulkanContext<'mem> {
                 self.graphics_queue,
                 Some(graphics_command_pool),
             );
-            allocators.swapchain.borrow_mut().clear();
+            unsafe {
+                allocators.swapchain.force_clear();
+            }
         }
     }
 }

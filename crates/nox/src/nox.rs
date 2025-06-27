@@ -1,4 +1,3 @@
-mod memory_layout;
 mod init_settings;
 
 use winit::{
@@ -10,33 +9,18 @@ use winit::{
 };
 
 use super::{
-    stack_alloc::StackAlloc,
     interface::Interface,
     memory::Memory,
     renderer::Renderer,
     string_types::{ArrayString, LargeError},
 };
 
-pub use memory_layout::MemoryLayout;
 pub use init_settings::InitSettings;
 
 
 pub type AppName = ArrayString<128>;
 
 pub type ShaderID = u64;
-
-pub struct Allocators {
-    _temp_alloc: StackAlloc,
-}
-
-impl Allocators {
-
-    pub fn new(memory_layout: MemoryLayout) -> Option<Self> {
-        Some(Self{
-            _temp_alloc: StackAlloc::new(memory_layout.temp_size())?
-        })
-    }
-}
 
 pub struct Nox<'interface, 'mem, I>
     where
@@ -147,6 +131,7 @@ impl<'interface, 'mem, I: Interface> ApplicationHandler for Nox<'interface, 'mem
                     init_settings.app_version,
                     true,
                     *self.memory.renderer_layout(),
+                    3,
                     renderer_allocators,
                 ) {
                 Ok(r) => Some(r),

@@ -6,14 +6,14 @@ macro_rules! impl_traits {
             $(type $stype_this:ident = $sty_this:ty;)*
             $(
                 $(#[$macro_this:ident $(($macro_spec_this:ident))?])*
-                fn $met_this:ident($($arg_this:tt)*) -> $ret_this:ty $body_this:block
+                fn $met_this:ident($($arg_this:tt)*) $(-> $ret_this:ty)? $body_this:block
             )*
         ,
         $($trait:ident $(<$($trt:tt),*>)? $(&$lifetime:tt $($mut:ident)?)? =>
             $(type $stype:ident = $sty:ty;)*
             $(
                 $(#[$macro:ident $(($macro_spec:ident))?])*
-                fn $met:ident($($arg:tt)*) -> $ret:ty $body:block
+                fn $met:ident($($arg:tt)*) $(-> $ret:ty)? $body:block
             )*
         ),*
         $(,)?
@@ -27,16 +27,16 @@ macro_rules! impl_traits {
 
             $(
                 $(#[$macro_this $(($macro_spec_this))?])*
-                fn $met_this($($arg_this)*) -> $ret_this $body_this
+                fn $met_this($($arg_this)*) $(-> $ret_this)? $body_this
             )*
         }
-        crate::impl_traits! {
+        impl_traits! {
             for $type $(<$($gen $(: $bounds)? $([$gen_q])?),*>)?
             $($trait $(<$($trt),*>)? $(&$lifetime $($mut)?)? =>
                 $(type $stype = $sty;)*
                 $(
                     $(#[$macro $(($macro_spec))?])*
-                    fn $met($($arg)*) -> $ret $body
+                    fn $met($($arg)*) $(-> $ret)? $body
                 )*
             ),*
             ,

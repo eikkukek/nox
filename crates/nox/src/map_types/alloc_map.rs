@@ -1,50 +1,50 @@
 use core::{
     slice,
     ptr::NonNull,
-    cell::RefCell,
     marker::PhantomData,
     cmp::Ordering,
 };
 
-use crate::{
-    allocator_traits::{Allocate, Free},
-    utility::next_align,
-    vec_types::{self, CapacityError, CapacityPolicy, MemoryStrategy},
+use nox_mem::{
+    const_fn::align_up,
+    vec_types::{self, GlobalVec, MemoryStrategy},
+    Allocator,
+    CapacityError,
+    CapacityPolicy,
+    impl_traits,
 };
 
 use super::{Iter, IterMut};
 
 pub struct AllocMap<'alloc, Key, Val, Alloc, CapacityPol>
     where
-        Key: PartialOrd + MemoryStrategy,
-        Val: MemoryStrategy,
-        Alloc: Allocate + Free,
+        Key: PartialOrd,
+        Alloc: Allocator,
         CapacityPol: CapacityPolicy,
 {
-    data: *mut u8,
+    data: NonNull<u8>,
     capacity: usize,
     len: usize,
-    alloc: &'alloc RefCell<Alloc>,
+    allocator: &'alloc Alloc,
     _marker: PhantomData<(Key, Val)>,
     _cap_pol: PhantomData<CapacityPol>,
 }
 
 impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, CapacityPol>
     where
-        Key: PartialOrd + MemoryStrategy,
-        Val: MemoryStrategy,
-        Alloc: Allocate + Free,
+        Key: PartialOrd,
+        Alloc: Allocator,
         CapacityPol: CapacityPolicy,
 {
-    pub fn new(alloc: &'alloc RefCell<Alloc>) -> Option<Self> {
+    pub fn new(allocator: &'alloc Alloc) -> Option<Self> {
         if !CapacityPol::can_grow() {
             return None
         }
         Some(Self {
-            data: core::ptr::null::<u8>() as _,
+            data: NonNull::dangling(),
             capacity: 0,
             len: 0,
-            alloc,
+            allocator,
             _marker: PhantomData,
             _cap_pol: PhantomData,
         })
@@ -52,7 +52,7 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
 
     pub fn with_capacity(
         capacity: usize,
-        alloc: &'alloc RefCell<Alloc>
+        allocator: &'alloc Alloc,
     ) -> Result<Self, CapacityError> {
         if capacity == 0 {
             return Err(CapacityError::InvalidReservation {
@@ -66,16 +66,14 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
             else {
                 capacity
             };
-        let mut a = alloc.borrow_mut();
-        let data = unsafe { a
+        let data = unsafe { allocator
             .allocate_raw(Self::alloc_size(true_capacity), Self::align())
-            .ok_or_else(|| CapacityError::AllocFailed { new_capacity: true_capacity })? }
-            .as_ptr();
+            .ok_or_else(|| CapacityError::AllocFailed { new_capacity: true_capacity })? };
         Ok(Self{
             data,
             capacity: true_capacity,
             len: 0,
-            alloc,
+            allocator,
             _marker: PhantomData,
             _cap_pol: PhantomData,
         })
@@ -96,30 +94,29 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
             return Ok(())
         }
         if !CapacityPol::can_grow() {
-            return Err(CapacityError::Fixed { capacity: self.capacity })
+            return Err(CapacityError::FixedCapacity { capacity: self.capacity })
         }
         let new_capacity = match CapacityPol::grow(self.capacity, capacity) {
             Some(r) => r,
             None => return Err(CapacityError::InvalidReservation { current: self.capacity, requested: capacity }),
         };
-        let mut a = self.alloc.borrow_mut();
-        let tmp = match unsafe { a.allocate_raw(Self::alloc_size(new_capacity), Self::align()) } {
-            Some(r) => r.as_ptr(),
+        let tmp = match unsafe { self.allocator.allocate_raw(Self::alloc_size(new_capacity), Self::align()) } {
+            Some(r) => r,
             None => return Err(CapacityError::AllocFailed { new_capacity }),
         };
         debug_assert!(self.len <= self.capacity);
         unsafe {
-            <Key as MemoryStrategy>::move_elements(self.data as _, tmp as _, self.len);
-            <Val as MemoryStrategy>::move_elements(
-                self.data.add(Self::val_offset(self.capacity)) as _,
-                tmp.add(Self::val_offset(new_capacity)) as _,
+            GlobalVec::<Key>::move_elements(self.data.cast(), tmp.cast(), self.len);
+            GlobalVec::<Val>::move_elements(
+                self.data.add(Self::val_offset(self.capacity)).cast(),
+                tmp.add(Self::val_offset(new_capacity)).cast(),
                 self.len,
             );
         }
         if self.capacity != 0 {
             unsafe {
-                a.free_raw(
-                    NonNull::new(self.data).unwrap(),
+                self.allocator.free_raw(
+                    self.data,
                     Self::alloc_size(self.capacity),
                     Self::align()
                 );
@@ -189,7 +186,6 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
                         .cast::<Val>()
                         .add(index)
                         .as_mut()
-                        .unwrap()
                     };
                     modify(
                         elem
@@ -205,16 +201,14 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
     pub fn get(&self, key: &Key) -> Option<&Val>
     {
         unsafe {
-            let ptr = self.get_ptr(key)?;
-            Some(&*ptr)
+            Some(self.get_ptr(key)?.cast().as_ref())
         }
     }
 
     pub fn get_mut(&mut self, key: &Key) -> Option<&mut Val>
     {
         unsafe {
-            let ptr = self.get_ptr(key)? as *mut Val;
-            Some(&mut *ptr)
+            Some(self.get_ptr(key)?.cast().as_mut())
         }
     }
 
@@ -222,28 +216,27 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
         debug_assert!(self.len <= self.capacity);
         if self.capacity == 0 { return }
         unsafe {
-            <Key as MemoryStrategy>::drop_in_place(self.data as _, self.len);
-            <Val as MemoryStrategy>::drop_in_place(
-                self.data.add(Self::val_offset(self.capacity)) as _, self.len
+            GlobalVec::<Key>::drop_in_place(self.data.cast(), self.len);
+            GlobalVec::<Val>::drop_in_place(
+                self.data.add(Self::val_offset(self.capacity)).cast(), self.len
             );
         }
-        let mut a = self.alloc.borrow_mut();
         unsafe {
-            a.free_raw(
-                NonNull::new(self.data).unwrap(),
+            self.allocator.free_raw(
+                self.data,
                 Self::alloc_size(self.capacity),
                 Self::align()
             );
         }
         self.len = 0;
         self.capacity = 0;
-        self.data = core::ptr::null::<u8>() as _;
+        self.data = NonNull::dangling();
     }
 
     #[inline(always)]
     fn val_offset(capacity: usize) -> usize {
         let key_size = size_of::<Key>() * capacity;
-        next_align(key_size, align_of::<Val>())
+        align_up(key_size, align_of::<Val>())
     }
 
     #[inline(always)]
@@ -258,7 +251,7 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
 
     #[inline(always)]
     fn keys_as_slice(&self) -> &[Key] {
-        unsafe { slice::from_raw_parts(self.data as _, self.len) }
+        unsafe { slice::from_raw_parts(self.data.cast().as_ptr(), self.len) }
     }
 
     #[inline]
@@ -278,20 +271,20 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
             }
         }
         unsafe {
-            <Key as MemoryStrategy>::insert(self.data as _, key, index, self.len);
-            let res = <Val as MemoryStrategy>::insert(
-                self.data.add(Self::val_offset(self.capacity)) as _,
+            GlobalVec::<Key>::insert_element(self.data.cast(), key, index, self.len);
+            let mut res = GlobalVec::<Val>::insert_element(
+                self.data.add(Self::val_offset(self.capacity)).cast(),
                 value,
                 index,
                 self.len
             );
             self.len += 1;
-            Ok(&mut *res)
+            Ok(res.as_mut())
         }
     }
 
     #[inline]
-    unsafe fn get_ptr(&self, key: &Key) -> Option<*const Val> {
+    unsafe fn get_ptr(&self, key: &Key) -> Option<NonNull<Val>> {
         let keys = self.keys_as_slice();
         let mut left: usize = 0;
         let mut right = self.len;
@@ -317,10 +310,10 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
     #[inline(always)]
     pub fn iter(&self) -> Iter<'_, Key, Val> {
         unsafe {
-            let key_ptr = self.data as *const Key;
-            let key_iter = vec_types::Iter::new(key_ptr, key_ptr.add(self.len), PhantomData);
-            let val_ptr = self.data.add(Self::val_offset(self.capacity)) as *const Val;
-            let val_iter = vec_types::Iter::new(val_ptr, val_ptr.add(self.len), PhantomData);
+            let key_ptr = self.data.cast();
+            let key_iter = vec_types::Iter::new(key_ptr, key_ptr.add(self.len));
+            let val_ptr = self.data.add(Self::val_offset(self.capacity)).cast();
+            let val_iter = vec_types::Iter::new(val_ptr, val_ptr.add(self.len));
             Iter::new(key_iter, val_iter)
         }
     }
@@ -328,60 +321,40 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
     #[inline(always)]
     pub fn iter_mut(&mut self) -> IterMut<'_, Key, Val> {
         unsafe {
-            let key_ptr = self.data as *const Key;
-            let key_iter = vec_types::Iter::new(key_ptr, key_ptr.add(self.len), PhantomData);
-            let val_ptr = self.data.add(Self::val_offset(self.capacity)) as *mut Val;
-            let val_iter = vec_types::IterMut::new(val_ptr, val_ptr.add(self.len), PhantomData);
+            let key_ptr = self.data.cast();
+            let key_iter = vec_types::Iter::new(key_ptr, key_ptr.add(self.len));
+            let val_ptr = self.data.add(Self::val_offset(self.capacity)).cast();
+            let val_iter = vec_types::IterMut::new(val_ptr, val_ptr.add(self.len));
             IterMut::new(key_iter, val_iter)
         }
     }
 }
 
-impl<'map, 'alloc, Key, Val, Alloc, CapacityPol> IntoIterator for
-        &'map AllocMap<'alloc, Key, Val, Alloc, CapacityPol>
-    where
-        Key: PartialOrd + MemoryStrategy,
-        Val: MemoryStrategy,
-        Alloc: Allocate + Free,
-        CapacityPol: CapacityPolicy,
-{
+impl_traits! {
+    for AllocMap<'alloc, Key: PartialOrd, Val, Alloc: Allocator, CapacityPol: CapacityPolicy>
+    Drop =>
+        fn drop(&mut self) {
+            self.clear();
+        }
+    ,
+    IntoIterator &'map =>
 
-    type Item = (&'map Key, &'map Val);
-    type IntoIter = Iter<'map, Key, Val>;
+        type Item = (&'map Key, &'map Val);
+        type IntoIter = Iter<'map, Key, Val>;
 
-    #[inline(always)]
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
+        #[inline(always)]
+        fn into_iter(self) -> Self::IntoIter {
+            self.iter()
+        }
+    ,
+    IntoIterator &'map mut =>
 
-impl<'map, 'alloc, Key, Val, Alloc, CapacityPol> IntoIterator for
-        &'map mut AllocMap<'alloc, Key, Val, Alloc, CapacityPol>
-    where
-        Key: PartialOrd + MemoryStrategy,
-        Val: MemoryStrategy,
-        Alloc: Allocate + Free,
-        CapacityPol: CapacityPolicy,
-{
+        type Item = (&'map Key, &'map mut Val);
+        type IntoIter = IterMut<'map, Key, Val>;
 
-    type Item = (&'map Key, &'map mut Val);
-    type IntoIter = IterMut<'map, Key, Val>;
-
-    #[inline(always)]
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter_mut()
-    }
-}
-
-impl<'alloc, Key, Val, Alloc, CapacityPol> Drop for AllocMap<'alloc, Key, Val, Alloc, CapacityPol>
-    where
-        Key: PartialOrd + MemoryStrategy,
-        Val: MemoryStrategy,
-        Alloc: Allocate + Free,
-        CapacityPol: CapacityPolicy,
-{
-
-    fn drop(&mut self) {
-        self.clear();
-    }
+        #[inline(always)]
+        fn into_iter(self) -> Self::IntoIter {
+            self.iter_mut()
+        }
+    ,
 }

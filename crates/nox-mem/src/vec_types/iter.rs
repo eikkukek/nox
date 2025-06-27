@@ -1,22 +1,30 @@
-use core::marker::PhantomData;
+use core::{
+    ptr::NonNull,
+    marker::PhantomData,
+};
 
-pub struct Iter<'a, T> {
-    ptr: *const T,
-    end: *const T,
-    _marker: PhantomData<&'a T>,
+use crate::conditional::{Conditional, True, False};
+
+pub struct IterBase<'a, T, IsMut: Conditional> {
+    ptr: NonNull<T>,
+    end: NonNull<T>,
+    _markers: PhantomData<(&'a T, IsMut)>,
 }
 
-impl<'a, T> Iter<'a, T> {
+impl<'a, T, IsMut: Conditional> IterBase<'a, T, IsMut> {
 
     #[inline(always)]
-    pub unsafe fn new(ptr: *const T, end: *const T, marker: PhantomData<&'a T>) -> Self {
+    pub unsafe fn new(ptr: NonNull<T>, end: NonNull<T>) -> Self {
         Self {
             ptr,
             end,
-            _marker: marker,
+            _markers: PhantomData,
         }
     }
 }
+
+pub type Iter<'a, T> = IterBase<'a, T, False>;
+pub type IterMut<'a, T> = IterBase<'a, T, True>;
 
 impl<'a, T> Iterator for Iter<'a, T> {
 
@@ -27,7 +35,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
             None
         }
         else {
-            let item = unsafe { &*self.ptr };
+            let item = unsafe { self.ptr.as_ref() };
             self.ptr = unsafe { self.ptr.add(1) };
             Some(item)
         }
@@ -42,25 +50,7 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
         }
         else {
             self.end = unsafe { self.ptr.sub(1) };
-            Some(unsafe { &*self.end })
-        }
-    }
-}
-
-pub struct IterMut<'a, T> {
-    ptr: *mut T,
-    end: *mut T,
-    _marker: PhantomData<&'a T>,
-}
-
-impl<'a, T> IterMut<'a, T> {
-
-    #[inline(always)]
-    pub unsafe fn new(ptr: *mut T, end: *mut T, marker: PhantomData<&'a T>) -> Self {
-        Self {
-            ptr,
-            end,
-            _marker: marker,
+            Some(unsafe { self.end.as_ref() })
         }
     }
 }
@@ -74,7 +64,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             None
         }
         else {
-            let item = unsafe { &mut *self.ptr };
+            let item = unsafe { self.ptr.as_mut() };
             self.ptr = unsafe { self.ptr.add(1) };
             Some(item)
         }
@@ -89,7 +79,7 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
         }
         else {
             self.end = unsafe { self.ptr.sub(1) };
-            Some(unsafe { &mut *self.end })
+            Some(unsafe { self.end.as_mut() })
         }
     }
 }

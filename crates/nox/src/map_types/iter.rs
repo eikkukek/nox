@@ -1,14 +1,13 @@
-use crate::vec_types::Iter as VecIter;
-use crate::vec_types::IterMut as VecIterMut;
+use nox_mem::vec_types;
 
 pub struct Iter<'a, Key, Val> {
-    key_iter: VecIter<'a, Key>,
-    val_iter: VecIter<'a, Val>,
+    key_iter: vec_types::Iter<'a, Key>,
+    val_iter: vec_types::Iter<'a, Val>,
 }
 
 impl <'a, Key, Val> Iter<'a, Key, Val> {
 
-    pub unsafe fn new(key_iter: VecIter<'a, Key>, val_iter: VecIter<'a, Val>) -> Self {
+    pub unsafe fn new(key_iter: vec_types::Iter<'a, Key>, val_iter: vec_types::Iter<'a, Val>) -> Self {
         Self {
             key_iter,
             val_iter,
@@ -37,13 +36,13 @@ impl<'a, Key, Val> DoubleEndedIterator for Iter<'a, Key, Val> {
 }
 
 pub struct IterMut<'a, Key, Val> {
-    key_iter: VecIter<'a, Key>,
-    val_iter: VecIterMut<'a, Val>,
+    key_iter: vec_types::Iter<'a, Key>,
+    val_iter: vec_types::IterMut<'a, Val>,
 }
 
 impl <'a, Key, Val> IterMut<'a, Key, Val> {
 
-    pub unsafe fn new(key_iter: VecIter<'a, Key>, val_iter: VecIterMut<'a, Val>) -> Self {
+    pub unsafe fn new(key_iter: vec_types::Iter<'a, Key>, val_iter: vec_types::IterMut<'a, Val>) -> Self {
         Self {
             key_iter,
             val_iter,

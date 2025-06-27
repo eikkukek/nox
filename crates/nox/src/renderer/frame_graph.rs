@@ -1,122 +1,279 @@
-use super::{
-    ImageState,
-    handle::Handle,
-};
-
-use crate::{
-    allocator_traits::{Allocate, Free},
-    array_format,
-    map_types::FixedMap,
-    string_types::{ArrayString, LargeError},
-    vec_types::{CapacityError, FixedVec, Vector}
-};
+use core::slice;
 
 use ash::vk;
 
-use core::{
-    slice,
-    cell::RefCell,
+use nox_mem::{Allocator, CapacityError, FixedVec, Vector};
+
+use crate::{renderer::linear_device_alloc, string_types::ArrayString};
+
+use super::{
+    ImageState,
+    physical_device::QueueFamilyIndices,
+    linear_device_alloc::LinearDeviceAlloc,
 };
 
-pub type UID = u64;
 pub type PassName = ArrayString<64>;
 
-#[derive(Clone)]
-pub struct ImageResource<'r> {
-    handle: Handle<'r, vk::Image>,
-    view: Handle<'r, vk::ImageView>,
-    subresource_range: vk::ImageSubresourceRange,
-    state: ImageState,
-    format: vk::Format,
-    extent: vk::Extent2D,
+#[derive(Debug)]
+pub enum RenderError {
+    CapacityError(CapacityError),
+    DeviceAllocError(linear_device_alloc::Error),
 }
 
-impl<'r> ImageResource<'r> {
+impl From<CapacityError> for RenderError {
 
+    fn from(value: CapacityError) -> Self {
+        Self::CapacityError(value)
+    }
+}
+
+impl From<linear_device_alloc::Error> for RenderError {
+
+    fn from(value: linear_device_alloc::Error) -> Self {
+        Self::DeviceAllocError(value)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ImageResource {
+    image: vk::Image,
+    image_view: vk::ImageView,
+    state: ImageState,
+}
+
+impl ImageResource {
+
+    #[inline(always)]
     pub fn new(
-        handle: Handle<'r, vk::Image>,
-        view: Handle<'r, vk::ImageView>,
-        subresource_range: vk::ImageSubresourceRange,
+        image: vk::Image,
+        image_view: vk::ImageView,
         state: ImageState,
-        format: vk::Format,
-        extent: vk::Extent2D,
-    ) -> Self {
+    ) -> Self
+    {
         Self {
-            handle,
-            view,
-            subresource_range,
+            image,
+            image_view,
             state,
-            format,
-            extent,
         }
     }
 
-    pub fn handle(&self) -> Handle<'r, vk::Image> {
-        self.handle.clone()
-    }
-
-    pub fn view(&self) -> Handle<'r, vk::ImageView> {
-        self.view.clone()
-    }
-
-    pub fn subresource_range(&self) -> &vk::ImageSubresourceRange {
-        &self.subresource_range
-    }
-
+    #[inline(always)]
     pub fn state(&self) -> ImageState {
         self.state
     }
+}
 
+#[derive(Clone)]
+pub struct Image {
+    resource: Option<ImageResource>,
+    device: Option<ash::Device>, // if Some, resource destroyed on drop
+    format: vk::Format,
+    extent: vk::Extent2D,
+    usage: vk::ImageUsageFlags,
+    samples: vk::SampleCountFlags,
+    subresource_range: vk::ImageSubresourceRange,
+}
+
+impl Image {
+
+    #[inline(always)]
+    pub fn new(
+        format: vk::Format,
+        extent: vk::Extent2D,
+        usage: vk::ImageUsageFlags,
+        samples: vk::SampleCountFlags,
+        subresource_range: vk::ImageSubresourceRange,
+    ) -> Self {
+        Self {
+            resource: None,
+            device: None,
+            format,
+            extent,
+            usage,
+            samples,
+            subresource_range,
+        }
+    }
+
+    #[inline(always)]
+    pub fn with_resource(
+        resource: ImageResource,
+        format: vk::Format,
+        extent: vk::Extent2D,
+        usage: vk::ImageUsageFlags,
+        samples: vk::SampleCountFlags,
+        subresource_range: vk::ImageSubresourceRange,
+    ) -> Self {
+        Self {
+            resource: Some(resource),
+            device: None,
+            format,
+            extent,
+            usage,
+            samples,
+            subresource_range,
+        }
+    }
+
+    #[inline(always)]
+    pub fn create_resource<'alloc>(&mut self, device_alloc: &'alloc LinearDeviceAlloc) -> linear_device_alloc::Result<()> {
+        assert!(self.resource.is_none(), "attempting to override resource");
+        let image_create_info = vk::ImageCreateInfo {
+            s_type: vk::StructureType::IMAGE_CREATE_INFO,
+            image_type: vk::ImageType::TYPE_2D,
+            format: self.format,
+            extent: vk::Extent3D {
+                width: self.extent.width,
+                height: self.extent.height,
+                depth: 1,
+                },
+            mip_levels: 1,
+            array_layers: 1,
+            samples: self.samples,
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage: self.usage,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            initial_layout: vk::ImageLayout::UNDEFINED,
+            ..Default::default()
+        };
+        let device = device_alloc.device();
+        let image = unsafe { device
+            .create_image(&image_create_info, None)?
+        };
+        device_alloc
+            .bind_image_memory(image)
+            .map_err(|e| {
+                unsafe {
+                    device.destroy_image(image, None);
+                }
+                e
+            })?;
+        let view_create_info = vk::ImageViewCreateInfo {
+            s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
+            image,
+            view_type: vk::ImageViewType::TYPE_2D,
+            format: self.format,
+            components: vk::ComponentMapping {
+                r: vk::ComponentSwizzle::IDENTITY,
+                g: vk::ComponentSwizzle::IDENTITY,
+                b: vk::ComponentSwizzle::IDENTITY,
+                a: vk::ComponentSwizzle::IDENTITY,
+                },
+            subresource_range: self.subresource_range,
+            ..Default::default()
+        };
+        let view = unsafe { device
+            .create_image_view(&view_create_info, None)
+            .map_err(|e| {
+                device.destroy_image(image, None);
+                e
+            })?
+        };
+        self.resource = Some(ImageResource::new(
+            image,
+            view,
+            ImageState::new(
+                vk::AccessFlags::NONE,
+                vk::ImageLayout::UNDEFINED,
+                vk::QUEUE_FAMILY_IGNORED,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+            ),
+        ));
+        self.device = Some(device);
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn resource(&self) -> Option<ImageResource> {
+        self.resource
+    }
+
+    #[inline(always)]
     pub fn format(&self) -> vk::Format {
         self.format
     }
 
+    #[inline(always)]
     pub fn extent(&self) -> vk::Extent2D {
         self.extent
     }
-}
 
-pub struct ResourcePool<'mem, 'r, A>
-    where
-        A: Allocate + Free,
-        'mem: 'r,
-{
-    next_uid: UID,
-    image_resources: FixedMap<'mem, UID, ImageResource<'r>, A>,
-}
-
-impl<'mem, 'r, A> ResourcePool<'mem, 'r, A>
-    where
-        A: Allocate + Free,
-        'mem: 'r,
-{
-
-    pub fn new(
-        max_images: usize,
-        allocator: &'mem RefCell<A>,
-    ) -> Result<Self, CapacityError>
-    {
-        Ok(Self{
-            image_resources: FixedMap::with_capacity(max_images, allocator)?,
-            next_uid: 0,
-        })
+    #[inline(always)]
+    pub fn usage(&self) -> vk::ImageUsageFlags {
+        self.usage
     }
 
-    pub fn add_image_resource(
-        &mut self,
-        resource: ImageResource<'r>
-    ) -> Result<UID, CapacityError>
+    #[inline(always)]
+    pub fn samples(&self) -> vk::SampleCountFlags {
+        self.samples
+    }
+
+    #[inline(always)]
+    pub fn subresource_range(&self) -> &vk::ImageSubresourceRange {
+        &self.subresource_range
+    }
+}
+
+impl Drop for Image {
+
+    fn drop(&mut self) {
+        if let Some(device) = self.device.take() {
+            unsafe {
+                let resource = self.resource.unwrap_unchecked();
+                device.destroy_image_view(resource.image_view, None);
+                device.destroy_image(resource.image, None);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ResourceID(u32);
+
+pub struct ResourcePool<'alloc, Alloc>
+    where
+        Alloc: Allocator
+{
+    images: FixedVec<'alloc, Image, Alloc>,
+    render_image: &'alloc mut Image,
+}
+
+impl<'alloc, Alloc> ResourcePool<'alloc, Alloc>
+    where
+        Alloc: Allocator
+{
+
+    #[inline(always)]
+    fn new(render_image: &'alloc mut Image) -> Self
     {
-        let uid = self.next_uid;
-        self.image_resources.insert(uid, resource)?;
-        self.next_uid = uid + 1;
-        Ok(uid)
+        Self{
+            images: FixedVec::with_no_alloc(),
+            render_image,
+        }
+    }
+
+    #[inline(always)]
+    pub fn add_image(&mut self, image: Image) -> Result<ResourceID, CapacityError>
+    {
+        let index = self.images.len();
+        self.images.push(image)?;
+        Ok(ResourceID(index as u32 + 1))
+    }
+
+    #[inline(always)]
+    pub fn get_mut(&mut self, id: ResourceID) -> &mut Image {
+        if id.0 == 0 {
+            self.render_image
+        }
+        else {
+            &mut self.images[id.0 as usize - 1]
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct WriteInfo {
-    resource_uid: UID,
+    resource_id: ResourceID,
     image_state: ImageState,
     load_op: vk::AttachmentLoadOp,
     store_op: vk::AttachmentStoreOp,
@@ -126,14 +283,14 @@ pub struct WriteInfo {
 impl WriteInfo {
 
     pub fn new(
-        resource_uid: UID,
+        resource_id: ResourceID,
         image_state: ImageState,
         load_op: vk::AttachmentLoadOp,
         store_op: vk::AttachmentStoreOp,
         clear_value: vk::ClearValue,
     ) -> Self {
         Self {
-            resource_uid,
+            resource_id,
             image_state,
             load_op,
             store_op,
@@ -142,53 +299,55 @@ impl WriteInfo {
     }
 }
 
-pub struct Pass<'mem, A: Allocate + Free> {
-    reads: Option<FixedVec<'mem, (UID, ImageState), A>>,
-    color_writes: Option<FixedVec<'mem, WriteInfo, A>>,
+pub struct Pass<'alloc, Alloc: Allocator> {
+    reads: Option<FixedVec<'alloc, (ResourceID, ImageState), Alloc>>,
+    writes: Option<FixedVec<'alloc, WriteInfo, Alloc>>,
     depth_write: Option<WriteInfo>,
     stencil_write: Option<WriteInfo>,
-    dependencies: Option<FixedVec<'mem, UID, A>>,
+    dependencies: Option<FixedVec<'alloc, usize, Alloc>>,
     render_area: Option<vk::Rect2D>,
+    callback: Option<fn(usize)>,
     pub name: PassName,
 }
 
-impl<'mem, A: Allocate + Free> Pass<'mem, A> {
+impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
     
     pub fn new(
         name: PassName,
-        max_reads: usize,
-        max_color_writes: usize,
-        max_dependencies: usize,
-        allocator: &'mem RefCell<A>,
+        max_reads: u32,
+        max_color_writes: u32,
+        max_dependencies: u32,
+        allocator: &'alloc Alloc,
     ) -> Result<Self, CapacityError> {
         let reads =
             if max_reads != 0 {
-                Some(FixedVec::with_capacity(max_reads, allocator)?)
+                Some(FixedVec::with_capacity(max_reads as usize, allocator)?)
             }
             else {
                 None
             };
-        let color_writes =
+        let writes =
             if max_color_writes != 0 {
-                Some(FixedVec::with_capacity(max_color_writes, allocator)?)
+                Some(FixedVec::with_capacity(max_color_writes as usize, allocator)?)
             }
             else {
                 None
             };
         let dependencies =
             if max_dependencies != 0 {
-                Some(FixedVec::with_capacity(max_color_writes, allocator)?)
+                Some(FixedVec::with_capacity(max_color_writes as usize, allocator)?)
             }
             else {
                 None
             };
         Ok(Self {
             reads,
-            color_writes,
+            writes,
             depth_write: None,
             stencil_write: None,
             dependencies,
             render_area: None,
+            callback: None,
             name,
         })
     }
@@ -197,186 +356,127 @@ impl<'mem, A: Allocate + Free> Pass<'mem, A> {
         self.name = ArrayString::from_str(name);
     }
 
-    pub fn add_read(&mut self, uid: UID, dst_image_state: ImageState) -> Result<&mut Self, CapacityError> {
-        if let Some(reads) = &mut self.reads {
-            reads.push((uid, dst_image_state))?;
-        }
+    pub fn with_read(&mut self, resource_id: ResourceID, dst_image_state: ImageState) -> &mut Self {
+        self.reads
+            .as_mut()
+            .expect("no reads set")
+            .push((resource_id, dst_image_state))
+            .expect("read capacity exceeded");
+        self
+    }
+
+    pub fn with_write(&mut self, write: WriteInfo) -> Result<&mut Self, CapacityError> {
+        self.writes
+            .as_mut()
+            .expect("no writes set")
+            .push(write)
+            .expect("write capacity exceeded");
         Ok(self)
     }
 
-    pub fn add_color_write(&mut self, write: WriteInfo) -> Result<&mut Self, CapacityError> {
-        if let Some(writes) = &mut self.color_writes {
-            writes.push(write)?;
-        }
-        Ok(self)
-    }
-
-    pub fn depth_write(&mut self, write: WriteInfo) -> &mut Self {
+    pub fn with_depth_write(&mut self, write: WriteInfo) -> &mut Self {
         self.depth_write = Some(write);
         self
     }
 
-    pub fn stencil_write(&mut self, write: WriteInfo) -> &mut Self {
+    pub fn with_stencil_write(&mut self, write: WriteInfo) -> &mut Self {
         self.stencil_write = Some(write);
         self
     }
 
-    pub fn render_area(&mut self, offset: vk::Offset2D, extent: vk::Extent2D) -> &mut Self {
+    pub fn with_render_area(&mut self, offset: vk::Offset2D, extent: vk::Extent2D) -> &mut Self {
         self.render_area = Some(vk::Rect2D { offset, extent });
         self
     }
 
-    pub fn add_dependency(&mut self, uid: UID) -> Result<&mut Self, CapacityError> {
-        if let Some(dependencies) = &mut self.dependencies {
-            dependencies.push(uid)?;
-        }
-        Ok(self)
+    pub fn with_dependency(&mut self, pass_index: usize) -> &mut Self {
+        self.dependencies
+            .as_mut()
+            .expect("no dependencies set")
+            .push(pass_index)
+            .expect("dependency capacity exceeded");
+        self
     }
 }
 
-pub trait Execute<'mem, 'r, A: Allocate + Free, B: Allocate + Free>
-    where
-        'mem: 'r,
+pub struct FrameGraph<'alloc, Alloc: Allocator> {
+    device: ash::Device,
+    command_buffer: vk::CommandBuffer,
+    alloc: &'alloc Alloc,
+    device_alloc: &'alloc LinearDeviceAlloc,
+    resource_pool: ResourcePool<'alloc, Alloc>,
+    queue_family_indices: QueueFamilyIndices,
+    passes: FixedVec<'alloc, Pass<'alloc, Alloc>, Alloc>,
+    frame_index: u32,
+}
+
+pub struct FrameGraphInit<'alloc, Alloc: Allocator> {
+    frame_graph: FrameGraph<'alloc, Alloc>,
+}
+
+pub fn new<'alloc, Alloc: Allocator>(
+    device: ash::Device,
+    command_buffer: vk::CommandBuffer,
+    render_image: &'alloc mut Image,
+    alloc: &'alloc Alloc,
+    device_alloc: &'alloc LinearDeviceAlloc,
+    queue_family_indices: QueueFamilyIndices,
+    frame_index: u32,
+) -> FrameGraphInit<'alloc, Alloc>
 {
-
-    fn execute(
-        &self,
-        device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        resource_pool: &mut ResourcePool<'mem, 'r, A>,
-        swapchain_image_resource: &RefCell<ImageResource<'r>>,
-        funs: Option<&FixedMap<'mem, UID, fn(UID), A>>,
-        temp_allocator: &RefCell<B>,
-    ) -> Result<(), CapacityError>;
+    FrameGraphInit {
+        frame_graph: FrameGraph
+        {
+            device,
+            command_buffer,
+            alloc,
+            device_alloc,
+            resource_pool: ResourcePool::new(render_image),
+            queue_family_indices,
+            passes: FixedVec::with_no_alloc(),
+            frame_index,
+        }
+    }
 }
 
-pub struct FrameGraph<'mem, A: Allocate + Free> {
-    passes: FixedMap<'mem, UID, Pass<'mem, A>, A>,
-    sorted: FixedVec<'mem, UID, A>,
+impl<'alloc, Alloc: Allocator> FrameGraphInit<'alloc, Alloc> {
+
+    pub fn init(mut self, max_passes: u32, max_resources: u32) -> Result<FrameGraph<'alloc, Alloc>, CapacityError> {
+        self.frame_graph.passes = FixedVec::with_capacity(max_passes as usize, self.frame_graph.alloc)?;
+        self.frame_graph.resource_pool.images = FixedVec::with_capacity(max_resources as usize, self.frame_graph.alloc)?;
+        Ok(self.frame_graph)
+    }
 }
 
-impl<'mem, A: Allocate + Free> FrameGraph<'mem, A> {
+impl<'alloc, Alloc: Allocator> FrameGraph<'alloc, Alloc> {
 
-    pub fn new<B: Allocate + Free>(
-        passes: FixedMap<'mem, UID, Pass<'mem, A>, A>,
-        allocator: &'mem RefCell<A>,
-        temp_allocator: &'mem RefCell<B>,
-    ) -> Result<Self, LargeError> {
-        let mut in_degree = FixedMap::<UID, usize, B>
-            ::with_capacity(passes.capacity(), temp_allocator)
-            .map_err(|e| array_format!("failed to create 'in degree' ( {:?} )", e))?;
-        let mut dependents = FixedMap::<UID, FixedVec<UID, B>, B>
-            ::with_capacity(passes.len(), temp_allocator)
-            .map_err(|e| array_format!("failed to create 'dependents' ( {:?} )", e))?;
-        for (uid, pass) in passes.iter() {
-            if let Some(deps) = &pass.dependencies {
-                for dep in deps {
-                    in_degree
-                        .insert_or_modify(*uid, || 1, |v| *v += 1)
-                        .map_err(|e| array_format!("failed to insert to 'in degree' ( {:?} )", e))?;
-                    let dependent_list = &mut dependents
-                        .insert(
-                            *dep,
-                            FixedVec
-                                ::with_capacity(passes.capacity(), temp_allocator)
-                                .map_err(|e| array_format!("failed to create 'dependent list' ( {:?} )", e))?
-                        )
-                        .map_err(|e| array_format!("failed to insert to 'dependents' ( {:?} )", e))?
-                        .unwrap();
-                    dependent_list
-                        .push(*uid)
-                        .map_err(|e| array_format!("failed to push to 'dependent list' ( {:?} )", e))?;
-                }
-            }
-            
-        }
-        if in_degree.len() == 0 {
-            let mut sorted = FixedVec
-                ::with_capacity(passes.capacity(), allocator)
-                .map_err(|e| array_format!("failed to create 'sorted' ( {:?} )", e))?;
-            for pass in passes.iter() {
-                sorted
-                    .push(*pass.0)
-                    .map_err(|e| array_format!("failed to push to 'sorted' ( {:?} )", e))?;
-            }
-            return Ok(Self {
-                passes,
-                sorted,
-            })
-        }
-        let mut pending = FixedVec::<UID, B>
-            ::with_capacity(passes.capacity(), temp_allocator)
-            .map_err(|e| array_format!("failed to create 'pending' ( {:?} )", e))?;
-        for (uid, deg) in in_degree.iter() {
-            if *deg == 0 {
-                pending
-                    .push(*uid)
-                    .map_err(|e| array_format!("failed to push to 'pending' ( {:?} )", e))?;
-            }
-        }
-        let mut sorted = FixedVec
-            ::with_capacity(passes.capacity(), allocator)
-            .map_err(|e| array_format!("failed to create 'sorted' ( {:?} )", e))?;
-        while let Some(uid) = pending.pop() {
-            //let pass = passes.get(uid).expect("UID not found");
-            sorted
-                .push(uid)
-                .map_err(|e| array_format!("failed to push to 'sorted' ( {:?} )", e))?;
-            if let Some(dependents) = dependents.get(&uid) {
-                for dep_uid in dependents {
-                    let count = in_degree.get_mut(dep_uid).unwrap();
-                    *count -= 1;
-                    if *count == 0 {
-                        pending
-                            .push(*dep_uid)
-                            .map_err(|e| array_format!("failed to push to 'pending' ( {:?} )", e))?;
-                    }
-                }
-            }
-        }
-        if sorted.len() != passes.len() {
-            Err(ArrayString::from_str("cycle detected"))
-        }
-        else {
-            Ok(Self {
-                passes,
-                sorted,
-            })
-        }
-    } 
-}
+    pub fn frame_index(&self) -> u32 {
+        self.frame_index
+    }
 
-impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
-    where
-        A: Allocate + Free,
-        B: Allocate + Free,
-        'mem: 'r,
-{
+    pub fn queue_family_indices(&self) -> &QueueFamilyIndices {
+        &self.queue_family_indices
+    }
 
-    fn execute(
-        &self,
-        device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        resource_pool: &mut ResourcePool<'mem, 'r, A>,
-        swapchain_image_resource: &RefCell<ImageResource<'r>>,
-        funs: Option<&FixedMap<'mem, UID, fn(UID), A>>,
-        temp_allocator: &RefCell<B>,
-    ) -> Result<(), CapacityError> 
-    {
-        for uid in &self.sorted {
-            let pass = self.passes.get(uid).expect("couldn't find pass");
+    pub fn render(&mut self) -> Result<(), RenderError> {
+        let sorted = self.sort()?;
+        for index in sorted.iter().map(|i| *i) {
+            let pass = &self.passes[index];
             if let Some(reads) = &pass.reads {
                 for read in reads {
-                    let image_resource = resource_pool.image_resources.get_mut(&read.0).expect("couldn't find resource");
+                    let image = self.resource_pool.get_mut(read.0);
+                    let Some(mut image_resource) = image.resource.take() else {
+                        panic!("read image resource was none")
+                    };
                     let memory_barrier = image_resource.state
                         .to_memory_barrier(
-                            image_resource.handle.clone(),
+                            image_resource.image,
                             &read.1,
-                            image_resource.subresource_range,
+                            image.subresource_range,
                         );
                     unsafe {
-                        device.cmd_pipeline_barrier(
-                            command_buffer,
+                        self.device.cmd_pipeline_barrier(
+                            self.command_buffer,
                             image_resource.state.pipeline_stage,
                             read.1.pipeline_stage,
                             Default::default(),
@@ -386,20 +486,25 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
                         );
                     }
                     image_resource.state = read.1;
+                    image.resource = Some(image_resource);
                 }
             }
             let mut render_extent = vk::Extent2D { width: u32::MAX, height: u32::MAX };
-            let mut process_write = |write: &WriteInfo| {
-                let image_resource = resource_pool.image_resources.get_mut(&write.resource_uid).expect("couldn't find resource");
+            let mut process_write = |write: &WriteInfo| -> Result<vk::RenderingAttachmentInfo, linear_device_alloc::Error> {
+                let image = self.resource_pool.get_mut(write.resource_id);
+                if image.resource.is_none() {
+                    image.create_resource(self.device_alloc)?;
+                }
+                let mut image_resource = image.resource.unwrap();
                 let memory_barrier = image_resource.state
                     .to_memory_barrier(
-                        image_resource.handle.clone(),
+                        image_resource.image,
                         &write.image_state,
-                        image_resource.subresource_range,
+                        image.subresource_range,
                     );
                 unsafe {
-                    device.cmd_pipeline_barrier(
-                        command_buffer,
+                    self.device.cmd_pipeline_barrier(
+                        self.command_buffer,
                         image_resource.state.pipeline_stage,
                         write.image_state.pipeline_stage,
                         Default::default(),
@@ -408,47 +513,52 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
                         slice::from_ref(&memory_barrier),
                     );
                 }
-                render_extent.width = render_extent.width.min(image_resource.extent.width);
-                render_extent.height = render_extent.height.min(image_resource.extent.height);
+                render_extent.width = render_extent.width.min(image.extent.width);
+                render_extent.height = render_extent.height.min(image.extent.height);
                 image_resource.state = write.image_state;
-                if *image_resource.handle == *swapchain_image_resource.borrow().handle {
-                    *swapchain_image_resource.borrow_mut() = image_resource.clone();
-                }
-                vk::RenderingAttachmentInfo {
+                image.resource = Some(image_resource);
+                Ok(vk::RenderingAttachmentInfo {
                     s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
-                    image_view: *image_resource.view,
+                    image_view: image_resource.image_view,
                     image_layout: write.image_state.layout,
                     load_op: write.load_op,
                     store_op: write.store_op,
                     clear_value: write.clear_value,
                     ..Default::default()
-                }
+                })
             };
             let mut color_outputs =
-                if let Some(writes) = &pass.color_writes {
-                    Some(FixedVec::<vk::RenderingAttachmentInfo, B>
-                        ::with_capacity(writes.len(), temp_allocator)
-                        .map_err(|e| e)?
+                if let Some(writes) = &pass.writes {
+                    Some(FixedVec::<vk::RenderingAttachmentInfo, Alloc>
+                        ::with_capacity(writes.len(), self.alloc)?
                     )
                 }
                 else {
                     None
                 };
-            if let Some(writes) = &pass.color_writes {
+            if let Some(writes) = &pass.writes {
                 let attachments = color_outputs.as_mut().unwrap();
                 for write in writes {
                     attachments
-                        .push(process_write(write))?;
+                        .push(process_write(write)?)?;
                 }
             }
             let depth_output =
                 if let Some(write) = &pass.depth_write {
-                    Some(process_write(write))
+                    Some(process_write(write)?)
                 } else { None };
             let stencil_output =
                 if let Some(write) = &pass.stencil_write {
-                    Some(process_write(write))
+                    Some(process_write(write)?)
                 } else { None };
+            let (color_attachment_count, p_color_attachments) = match &color_outputs {
+                Some(r) => {
+                    (r.len() as u32, r.as_ptr())
+                },
+                None => {
+                    (0, core::ptr::null())
+                },
+            };
             if color_outputs.is_some() || depth_output.is_some() || stencil_output.is_some() {
                 let rendering_info = vk::RenderingInfo {
                     s_type: vk::StructureType::RENDERING_INFO,
@@ -462,23 +572,89 @@ impl<'mem, 'r, A, B> Execute<'mem, 'r, A, B> for FrameGraph<'mem, A>
                             }
                         },
                     layer_count: 1,
-                    color_attachment_count: if let Some(attachments) = &color_outputs { attachments.len() as u32 } else { 0 },
-                    p_color_attachments: if let Some(attachments) = &color_outputs { attachments.as_ptr() as _ } else { 0 as _ },
+                    color_attachment_count,
+                    p_color_attachments,
                     p_depth_attachment: if let Some(attachment) = &depth_output { attachment } else { 0 as _ },
                     p_stencil_attachment: if let Some(attachment) = &stencil_output { attachment } else { 0 as _ },
                     ..Default::default()
                 };
                 unsafe {
-                    device.cmd_begin_rendering(command_buffer, &rendering_info);
+                    self.device.cmd_begin_rendering(self.command_buffer, &rendering_info);
                 }
             }
-            if let Some(funs) = funs {
-                if let Some(fun) = funs.get(uid) {
-                    fun(*uid);
-                }
+            if let Some(callback) = pass.callback {
+                callback(index)
             }
-            unsafe { device.cmd_end_rendering(command_buffer); }
+            unsafe { self.device.cmd_end_rendering(self.command_buffer); }
         }
         Ok(())
+    }
+
+    #[inline(always)]
+    fn sort(&self) -> Result<FixedVec<'alloc, usize, Alloc>, CapacityError> {
+        if self.passes.len() == 0 {
+            return Ok(FixedVec::with_no_alloc())
+        }
+        let mut in_degree = FixedVec::<usize, Alloc>
+            ::with_len(self.passes.len(), 0, self.alloc)?;
+        let mut dependents = FixedVec::<FixedVec<usize, Alloc>, Alloc>
+            ::with_len_with(self.passes.len(), FixedVec::with_no_alloc, self.alloc)?;
+        for (i, pass) in self.passes.iter().enumerate() {
+            if let Some(deps) = &pass.dependencies {
+                in_degree[i] = deps.len();
+                for index in deps {
+                    let list = &mut dependents[*index];
+                    if list.capacity() == 0 {
+                        *list =
+                            FixedVec::with_capacity(self.passes.len(), self.alloc)?;
+                    }
+                    list.push(i)?;
+                }
+            }
+            
+        }
+        if in_degree.len() == 0 {
+            let mut i = 0;
+            return
+                FixedVec
+                ::with_len_with(self.passes.capacity(),
+                    || {
+                        let index = i;
+                        i += 1;
+                        index
+                    },
+                    self.alloc
+                )
+        }
+        let mut pending = FixedVec::<usize, Alloc>
+            ::with_capacity(self.passes.capacity(), self.alloc)?;
+        for (i, deg) in in_degree.iter().enumerate() {
+            if *deg == 0 {
+                pending
+                    .push(i)?;
+            }
+        }
+        let mut sorted = FixedVec
+            ::with_capacity(self.passes.capacity(), self.alloc)?;
+        while let Some(index) = pending.pop() {
+            //let pass = passes.get(uid).expect("UID not found");
+            sorted.push(index)?;
+            let list = &dependents[index];
+            if list.capacity() != 0 {
+                for index in list.iter().map(|i| *i) {
+                    let count = &mut in_degree[index];
+                    *count -= 1;
+                    if *count == 0 {
+                        pending.push(index)?;
+                    }
+                }
+            }
+        }
+        if sorted.len() != self.passes.len() {
+            panic!("cycle detected")
+        }
+        else {
+            Ok(sorted)
+        }
     }
 }

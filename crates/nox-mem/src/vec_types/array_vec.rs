@@ -1,7 +1,7 @@
 use core::{
     mem::MaybeUninit,
     ops::{Index, IndexMut, Deref, DerefMut},
-    ptr,
+    ptr::{self, NonNull},
     slice
 };
 
@@ -65,6 +65,13 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     }
 
     #[inline(always)]
+    fn as_non_null(&self) -> NonNull<T> {
+        unsafe {
+            NonNull::new_unchecked(self.data.as_ptr() as _)
+        }
+    }
+
+    #[inline(always)]
     fn as_slice(&self) -> &[T] {
         unsafe { slice::from_raw_parts(self.data.as_ptr() as *const T, self.len) }
     }
@@ -82,14 +89,14 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
 
     #[inline(always)]
     fn reserve(&mut self, _: usize) -> Result<(), CapacityError> {
-        Err(CapacityError::Fixed { capacity: N })
+        Err(CapacityError::FixedCapacity { capacity: N })
     }
 
     fn resize(&mut self, len: usize, value: T) -> Result<(), CapacityError>
         where
             T: Clone
     {
-        if len > N { return Err(CapacityError::Fixed { capacity: N }) }
+        if len > N { return Err(CapacityError::FixedCapacity { capacity: N }) }
         let ptr = self.data.as_mut_ptr();
         if len > self.len {
             for i in self.len..len {
@@ -109,7 +116,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         where
             F: FnMut() -> T
     {
-        if len > N { return Err(CapacityError::Fixed { capacity: N }) }
+        if len > N { return Err(CapacityError::FixedCapacity { capacity: N }) }
         let ptr = self.data.as_mut_ptr();
         if len > self.len {
             for i in self.len..len {
@@ -127,7 +134,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
 
     #[inline(always)]
     fn push(&mut self, value: T) -> Result<&mut T, CapacityError> {
-        if self.len >= N { return Err(CapacityError::Fixed { capacity: N }) }
+        if self.len >= N { return Err(CapacityError::FixedCapacity { capacity: N }) }
         let ptr = unsafe { self.as_mut_ptr().add(self.len) };
         unsafe { ptr::write(ptr, value) };
         self.len += 1;
@@ -166,12 +173,11 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         if index >= self.len {
             panic!("index {} was out of bounds with len {} when inserting", index, self.len)
         }
-        if self.len == N { return Err(CapacityError::Fixed { capacity: N }) }
+        if self.len == N { return Err(CapacityError::FixedCapacity { capacity: N }) }
         unsafe {
-            let data = self.as_mut_ptr();
-            let ptr = Self::insert_element(data as _, value, index, self.len);
+            let mut ptr = Self::insert_element(self.as_non_null(), value, index, self.len);
             self.len += 1;
-            Ok(&mut *ptr)
+            Ok(ptr.as_mut())
         }
     }
 
@@ -201,7 +207,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     #[inline(always)]
     fn clear(&mut self) {
         debug_assert!(self.len <= N);
-        unsafe { Self::drop_in_place(self.as_mut_ptr(), self.len); }
+        unsafe { Self::drop_in_place(self.as_non_null(), self.len); }
         self.len = 0;
     }
 
@@ -211,13 +217,12 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
             V: Vector<T>,
     {
         if N < from.len() {
-            return Err(CapacityError::Fixed { capacity: N })
+            return Err(CapacityError::FixedCapacity { capacity: N })
         }
-        else {
-            unsafe { Self::drop_in_place(self.as_mut_ptr(), self.len); }
-            self.len = 0;
-        }
-        unsafe { V::clone_elements(from.as_ptr(), self.as_mut_ptr(), from.len()); }
+        let ptr = self.as_non_null();
+        unsafe { Self::drop_in_place(ptr, self.len); }
+        self.len = 0;
+        unsafe { V::clone_elements(from.as_non_null(), ptr, from.len()); }
         self.len = from.len();
         Ok(())
     }
@@ -227,13 +232,12 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
             V: Vector<T>
     {
         if N < from.len() {
-            return Err(CapacityError::Fixed { capacity: N })
+            return Err(CapacityError::FixedCapacity { capacity: N })
         }
-        else {
-            unsafe { Self::drop_in_place(self.as_mut_ptr(), self.len); }
-            self.len = 0;
-        }
-        unsafe { V::move_elements(from.as_ptr(), self.as_mut_ptr(), from.len()); }
+        let ptr = self.as_non_null();
+        unsafe { Self::drop_in_place(ptr, self.len); }
+        self.len = 0;
+        unsafe { V::move_elements(from.as_non_null(), ptr, from.len()); }
         self.len = from.len();
         unsafe { from.set_len(0); }
         Ok(())
@@ -270,7 +274,7 @@ impl_traits! {
         #[inline(always)]
         fn drop(&mut self) -> () {
             debug_assert!(self.len <= N);
-            unsafe { Self::drop_in_place(self.as_mut_ptr(), self.len); }
+            unsafe { Self::drop_in_place(self.as_non_null(), self.len); }
             self.len = 0;
         }
     ,

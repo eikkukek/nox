@@ -3,7 +3,7 @@ use core::{
     mem,
 };
 
-pub trait Allocator {
+pub trait Allocator: Sized {
 
     unsafe fn allocate_raw(&self, size: usize, align: usize) -> Option<NonNull<u8>>;
 

@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::vec_types::CapacityError;
+use nox_mem::CapacityError;
 
 pub enum LoadError {
     IoError(io::Error),

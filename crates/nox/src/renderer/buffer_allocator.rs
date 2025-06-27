@@ -1,3 +1,5 @@
+use nox_mem::{Vector, CapacityError, capacity_policy::Dyn};
+
 use super::{
     physical_device::PhysicalDeviceInfo,
     handle::Handle,
@@ -6,8 +8,8 @@ use super::{
 use crate::{
     array_format,
     string_types::{ArrayString, SmallError},
-    utility::{has_bits, has_not_bits},
-    vec_types::{Dyn, Vector, CapacityError}
+    has_bits,
+    has_not_bits,
 };
 
 use ash::vk;
@@ -131,9 +133,9 @@ pub struct BufferAlloc<'r, DynVec>
     where
         DynVec: Vector<Block, CapacityPol = Dyn>,
 {
+    device: Handle<'r, ash::Device>,
     memory: Handle<'r, vk::DeviceMemory>,
     size: vk::DeviceSize,
-    device: Handle<'r, ash::Device>,
     free_list: DynVec,
     properties: vk::MemoryPropertyFlags,
 }
