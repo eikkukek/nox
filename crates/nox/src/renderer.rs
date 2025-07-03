@@ -6,6 +6,7 @@ mod physical_device;
 mod vulkan_context;
 mod swapchain_context;
 mod thread_context;
+mod pipeline_cache;
 mod frame_graph;
 //mod transient_allocator;
 mod linear_device_alloc;
