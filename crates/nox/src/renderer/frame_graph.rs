@@ -1,4 +1,7 @@
-use core::slice;
+use core::{
+    slice,
+};
+use std::num::NonZero;
 
 use ash::vk;
 
@@ -8,8 +11,7 @@ use crate::string_types::ArrayString;
 
 use super::{
     ImageState,
-    pipeline_cache::{PipelineID, PipelineCache},
-    physical_device::QueueFamilyIndices,
+    pipeline::{PipelineID, PipelineCache},
     linear_device_alloc::{self, LinearDeviceAlloc},
 };
 
@@ -229,60 +231,50 @@ impl Drop for Image {
 }
 
 #[derive(Clone, Copy)]
-pub struct ResourceID(u32);
-
-impl ResourceID {
-
-    pub const fn render_image_id() -> Self {
-        Self(0)
-    }
+pub struct ResourceID {
+    index: u32,
 }
 
-pub struct ResourcePool<'alloc, Alloc>
+pub struct ResourcePool<'a, Alloc>
     where
         Alloc: Allocator
 {
-    images: FixedVec<'alloc, Image, Alloc>,
-    render_image: &'alloc mut Image,
+    images: FixedVec<'a, Image, Alloc>,
 }
 
-impl<'alloc, Alloc> ResourcePool<'alloc, Alloc>
+impl<'a, Alloc> ResourcePool<'a, Alloc>
     where
         Alloc: Allocator
 {
 
     #[inline(always)]
-    fn new(render_image: &'alloc mut Image) -> Self
+    fn new() -> Self
     {
         Self{
             images: FixedVec::with_no_alloc(),
-            render_image,
         }
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, image: Image) -> Result<ResourceID, CapacityError>
+    pub fn add_image(&mut self, image: Image) -> ResourceID
     {
         let index = self.images.len();
-        self.images.push(image)?;
-        Ok(ResourceID(index as u32 + 1))
+        self.images
+            .push(image)
+            .expect("resource capacity exceeded");
+        ResourceID { index: index as u32 }
     }
 
     #[inline(always)]
     pub fn get_mut(&mut self, id: ResourceID) -> &mut Image {
-        if id.0 == 0 {
-            self.render_image
-        }
-        else {
-            &mut self.images[id.0 as usize - 1]
-        }
+        &mut self.images[id.index as usize]
     }
 }
 
 #[derive(Clone)]
 pub struct WriteInfo {
     resource_id: ResourceID,
-    format: vk::Format,
+    format: NonZero<i32>,
     dst_state: ImageState,
     load_op: vk::AttachmentLoadOp,
     store_op: vk::AttachmentStoreOp,
@@ -300,59 +292,92 @@ impl WriteInfo {
         store_op: vk::AttachmentStoreOp,
         clear_value: vk::ClearValue,
         msaa_samples: vk::SampleCountFlags
-    ) -> Self {
-        Self {
+    ) -> Option<Self> {
+        Some(Self {
             resource_id,
-            format,
+            format: NonZero::new(format.as_raw())?,
             dst_state,
             load_op,
             store_op,
             clear_value,
             msaa_samples,
+        })
+    }
+
+    pub fn format(&self) -> vk::Format {
+        vk::Format::from_raw(self.format.get())
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct PassInfo {
+    pub max_reads: u32,
+    pub max_writes: u32,
+    pub max_dependencies: u32,
+    pub max_pipelines: u32,
+    pub msaa_samples: vk::SampleCountFlags,
+}
+
+impl Default for PassInfo {
+
+    fn default() -> Self {
+        Self {
+            max_reads: 0,
+            max_writes: 0,
+            max_dependencies: 0,
+            max_pipelines: 0,
+            msaa_samples: vk::SampleCountFlags::TYPE_1,
         }
     }
 }
 
-pub struct Pass<'alloc, Alloc: Allocator> {
+struct Pass<'alloc, Alloc: Allocator, Alloc2: Allocator> {
     reads: Option<FixedVec<'alloc, (ResourceID, ImageState), Alloc>>,
     writes: Option<FixedVec<'alloc, WriteInfo, Alloc>>,
     depth_write: Option<WriteInfo>,
     stencil_write: Option<WriteInfo>,
     dependencies: Option<FixedVec<'alloc, usize, Alloc>>,
     render_area: Option<vk::Rect2D>,
+    pipeline_cache: &'alloc PipelineCache<'alloc, Alloc2>,
     pipelines: Option<FixedVec<'alloc, PipelineID, Alloc>>,
     callback: Option<fn(usize)>,
+    last_pipeline_type_index: Option<u32>,
     msaa_samples: vk::SampleCountFlags,
-    pub name: PassName,
+    pub _name: PassName,
 }
 
-impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
+impl<'alloc, Alloc: Allocator, Alloc2: Allocator> Pass<'alloc, Alloc, Alloc2> {
     
     fn new(
         name: PassName,
-        max_reads: u32,
-        max_color_writes: u32,
-        max_dependencies: u32,
-        msaa_samples: vk::SampleCountFlags,
+        info: PassInfo,
+        pipeline_cache: &'alloc PipelineCache<'alloc, Alloc2>,
         alloc: &'alloc Alloc
     ) -> Result<Self, CapacityError> {
         let reads =
-            if max_reads != 0 {
-                Some(FixedVec::with_capacity(max_reads as usize, alloc)?)
+            if info.max_reads != 0 {
+                Some(FixedVec::with_capacity(info.max_reads as usize, alloc)?)
             }
             else {
                 None
             };
         let writes =
-            if max_color_writes != 0 {
-                Some(FixedVec::with_capacity(max_color_writes as usize, alloc)?)
+            if info.max_writes != 0 {
+                Some(FixedVec::with_capacity(info.max_writes as usize, alloc)?)
             }
             else {
                 None
             };
         let dependencies =
-            if max_dependencies != 0 {
-                Some(FixedVec::with_capacity(max_color_writes as usize, alloc)?)
+            if info.max_dependencies != 0 {
+                Some(FixedVec::with_capacity(info.max_dependencies as usize, alloc)?)
+            }
+            else {
+                None
+            };
+        let pipelines =
+            if info.max_pipelines != 0 {
+                Some(FixedVec::with_capacity(info.max_pipelines as usize, alloc)?)
             }
             else {
                 None
@@ -360,191 +385,261 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
         Ok(Self {
             reads,
             writes,
-            depth_write: None,
-            stencil_write: None,
+            depth_write: None.into(),
+            stencil_write: None.into(),
             dependencies,
             render_area: None,
-            pipelines: None,
+            pipeline_cache,
+            pipelines,
             callback: None,
-            msaa_samples,
-            name,
+            last_pipeline_type_index: None,
+            msaa_samples: info.msaa_samples,
+            _name: name,
         })
     }
 }
 
-pub struct PassPipelineBuilder<'pass, Alloc: Allocator> {
-    pass: &'pass mut Pass<'pass, Alloc>,
-    last_pipeline_type_id: Option<PipelineID>,
+pub trait PassPipelineBuilder<'a> {
+
+    fn with_pipeline(&mut self, id: PipelineID) -> &mut dyn PassPipelineBuilder<'a>;
 }
 
-impl<'pass, Alloc: Allocator> PassPipelineBuilder<'pass, Alloc> {
+pub trait PassAttachmentBuilder<'a> {
 
-    pub fn finish(self) {}
+    fn with_read(&mut self, resource_id: ResourceID, dst_image_state: ImageState) -> &mut dyn PassAttachmentBuilder<'a>;
+
+    fn with_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
+
+    fn with_depth_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
+
+    fn with_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
+
+    fn with_render_area(&mut self, offset: vk::Offset2D, extent: vk::Extent2D) -> &mut dyn PassAttachmentBuilder<'a>;
+
+    fn with_dependency(&mut self, pass_index: usize) -> &mut dyn PassAttachmentBuilder<'a>;
+
+    fn as_pipeline_builder(&mut self) -> &mut dyn PassPipelineBuilder<'a>;
 }
 
-pub struct PassAttachmentBuilder<'pass, Alloc: Allocator> {
-    pass: &'pass mut Pass<'pass, Alloc>,
-    pipeline_cache: &'pass PipelineCache<'pass>,
-}
+impl<'a, Alloc: Allocator, Alloc2: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc, Alloc2> {
 
-impl<'pass, Alloc: Allocator> PassAttachmentBuilder<'pass, Alloc> {
-
-    pub fn finish(self) -> PassPipelineBuilder<'pass, Alloc> {
-        PassPipelineBuilder {
-            pass: self.pass,
-            last_pipeline_type_id: None,
-        }
+    fn as_pipeline_builder(&mut self) -> &mut dyn PassPipelineBuilder<'a> {
+        self
     }
 
-    pub fn with_read(&mut self, resource_id: ResourceID, dst_image_state: ImageState) -> &mut Self {
-        self.pass.reads
+    fn with_read(&mut self, resource_id: ResourceID, dst_image_state: ImageState) -> &mut dyn PassAttachmentBuilder<'a> {
+        self.reads
             .as_mut()
-            .expect("no reads set")
+            .expect("read capacity exceeded")
             .push((resource_id, dst_image_state))
             .expect("read capacity exceeded");
         self
     }
 
-    pub fn with_write(&mut self, write: WriteInfo) -> &mut Self {
-        assert!(write.msaa_samples == self.pass.msaa_samples, "write MSAA sample count must match pass sample count");
-        self.pass.writes
+    fn with_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a> {
+        assert!(write.msaa_samples == self.msaa_samples,
+            "write MSAA sample count must match pass sample count ( write: {:?}, pass: {:?} )",
+            write.msaa_samples, self.msaa_samples);
+        self.writes
             .as_mut()
-            .expect("no writes set")
+            .expect("write capacity exceeded")
             .push(write)
             .expect("write capacity exceeded");
         self
     }
 
-    pub fn with_depth_write(&mut self, write: WriteInfo) -> &mut Self {
-        assert!(write.msaa_samples == self.pass.msaa_samples, "write MSAA sample count must match pass sample count");
-        self.pass.depth_write = Some(write);
+    fn with_depth_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a> {
+        assert!(write.msaa_samples == self.msaa_samples, "write MSAA sample count must match pass sample count");
+        self.depth_write = Some(write);
         self
     }
 
-    pub fn with_stencil_write(&mut self, write: WriteInfo) -> &mut Self {
-        assert!(write.msaa_samples == self.pass.msaa_samples, "write MSAA sample count must match pass sample count");
-        self.pass.stencil_write = Some(write);
+    fn with_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a> {
+        assert!(write.msaa_samples == self.msaa_samples, "write MSAA sample count must match pass sample count");
+        self.stencil_write = Some(write);
         self
     }
 
-    pub fn with_render_area(&mut self, offset: vk::Offset2D, extent: vk::Extent2D) -> &mut Self {
-        self.pass.render_area = Some(vk::Rect2D { offset, extent });
+    fn with_render_area(&mut self, offset: vk::Offset2D, extent: vk::Extent2D) -> &mut dyn PassAttachmentBuilder<'a> {
+        self.render_area = Some(vk::Rect2D { offset, extent });
         self
     }
 
-    pub fn with_dependency(&mut self, pass_index: usize) -> &mut Self {
-        self.pass.dependencies
+    fn with_dependency(&mut self, pass_index: usize) -> &mut dyn PassAttachmentBuilder<'a> {
+        self.dependencies
             .as_mut()
-            .expect("no dependencies set")
+            .expect("dependency capacity exceeded")
             .push(pass_index)
             .expect("dependency capacity exceeded");
         self
     }
 }
 
-pub struct FrameGraph<'alloc, Alloc: Allocator> {
-    device: ash::Device,
-    command_buffer: vk::CommandBuffer,
-    alloc: &'alloc Alloc,
-    pipeline_cache: &'alloc PipelineCache<'alloc, Alloc>,
-    device_alloc: &'alloc LinearDeviceAlloc,
-    resource_pool: ResourcePool<'alloc, Alloc>,
-    queue_family_indices: QueueFamilyIndices,
-    passes: FixedVec<'alloc, Pass<'alloc, Alloc>, Alloc>,
-    frame_index: u32,
-}
+impl<'pass, Alloc: Allocator, Alloc2: Allocator> PassPipelineBuilder<'pass> for Pass<'pass, Alloc, Alloc2> {
 
-pub struct FrameGraphInit<'alloc, Alloc: Allocator> {
-    frame_graph: FrameGraph<'alloc, Alloc>,
-}
-
-pub fn new<'alloc, Alloc: Allocator>(
-    device: ash::Device,
-    command_buffer: vk::CommandBuffer,
-    render_image: &'alloc mut Image,
-    alloc: &'alloc Alloc,
-    pipeline_cache: &'alloc PipelineCache<'alloc, Alloc>,
-    device_alloc: &'alloc LinearDeviceAlloc,
-    queue_family_indices: QueueFamilyIndices,
-    frame_index: u32,
-) -> FrameGraphInit<'alloc, Alloc>
-{
-    FrameGraphInit {
-        frame_graph: FrameGraph
+    fn with_pipeline(&mut self, id: PipelineID) -> &mut dyn PassPipelineBuilder<'pass> {
+        if self.last_pipeline_type_index.is_none_or(|v| v != id.type_index())
         {
+            let type_info = self.pipeline_cache.get_type_info(id);
+            assert!(type_info.msaa_samples() == self.msaa_samples, "pipeline MSAA sample count must match pass sample count");
+            assert!(type_info.depth_format() == self.depth_write.as_ref().map_or(vk::Format::UNDEFINED, |r| r.format()),
+                "pipeline depth format must match pass depth format");
+            assert!(type_info.stencil_format() == self.stencil_write.as_ref().map_or(vk::Format::UNDEFINED, |r| r.format()),
+                "pipeline stencil format must match pass stencil format");
+            if let Some(writes) = &self.writes {
+                let formats_len = type_info.color_formats().len();
+                let writes_len = writes.len();
+                assert!(formats_len <= writes_len, "pipeline color format count must be less or equal to pass color write count");
+                for (i, format) in type_info.color_formats()[0..formats_len].iter().enumerate() {
+                    assert!(writes[i].format() == *format, "pipeline color formats must match with pass color write formats");
+                }
+            }
+            else {
+                assert!(type_info.color_formats().len() == 0, "pipeline color format count must be less or equal to pass color write count");
+            }
+            self.last_pipeline_type_index = Some(id.type_index());
+        } 
+        self.pipelines
+            .as_mut()
+            .expect("pipeline capacity exceeded")
+            .push(id)
+            .expect("pipeline capacity exceeded");
+        self
+    }
+}
+
+pub trait FrameGraph<'a> {
+
+    fn frame_index(&self) -> u32;
+
+    fn set_render_image(&mut self, image: Image) -> ResourceID;
+
+    fn add_resource(&mut self, image: Image) -> ResourceID;
+
+    fn add_pass(
+        &mut self,
+        name: &str,
+        info: PassInfo,
+    ) -> Result<&mut dyn PassAttachmentBuilder<'a>, CapacityError>;
+
+    fn with_pass(
+        &mut self,
+        name: &str,
+        info: PassInfo,
+        f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder) -> Result<(), CapacityError>,
+    ) -> Result<&mut dyn FrameGraph<'a>, CapacityError>;
+}
+
+pub trait FrameGraphInit<'a> {
+    
+    fn init(&mut self, max_passes: u32, max_resources: u32) -> Result<&mut dyn FrameGraph<'a>, CapacityError>;
+}
+
+pub struct FrameGraphImpl<'a, Alloc: Allocator, Alloc2: Allocator> {
+    device: ash::Device,
+    command_buffer: vk::CommandBuffer,
+    alloc: &'a Alloc,
+    pipeline_cache: &'a PipelineCache<'a, Alloc2>,
+    device_alloc: &'a LinearDeviceAlloc,
+    resource_pool: ResourcePool<'a, Alloc>,
+    passes: FixedVec<'a, Pass<'a, Alloc, Alloc2>, Alloc>,
+    render_image_id: Option<ResourceID>,
+    frame_index: u32,
+}
+
+impl<'a, Alloc: Allocator, Alloc2: Allocator> FrameGraphImpl<'a, Alloc, Alloc2> {
+
+    pub fn new(
+        device: ash::Device,
+        command_buffer: vk::CommandBuffer,
+        alloc: &'a Alloc,
+        pipeline_cache: &'a PipelineCache<'a, Alloc2>,
+        device_alloc: &'a LinearDeviceAlloc,
+        frame_index: u32,
+    ) -> FrameGraphImpl<'a, Alloc, Alloc2>
+    {
+        FrameGraphImpl {
             device,
             command_buffer,
             alloc,
             pipeline_cache,
             device_alloc,
-            resource_pool: ResourcePool::new(render_image),
-            queue_family_indices,
+            resource_pool: ResourcePool::new(),
             passes: FixedVec::with_no_alloc(),
+            render_image_id: None,
             frame_index,
         }
     }
 }
 
-impl<'alloc, Alloc: Allocator> FrameGraphInit<'alloc, Alloc> {
+impl<'a, Alloc: Allocator, Alloc2: Allocator> FrameGraphInit<'a> for FrameGraphImpl<'a, Alloc, Alloc2> {
 
-    pub fn init(mut self, max_passes: u32, max_resources: u32) -> Result<FrameGraph<'alloc, Alloc>, CapacityError> {
+    fn init(&mut self, max_passes: u32, max_resources: u32) -> Result<&mut dyn FrameGraph<'a>, CapacityError> {
         if max_passes != 0 {
-            self.frame_graph.passes = FixedVec::with_capacity(max_passes as usize, self.frame_graph.alloc)?;
+            self.passes = FixedVec::with_capacity(max_passes as usize, self.alloc)?;
         }
         if max_resources != 0 {
-            self.frame_graph.resource_pool.images = FixedVec::with_capacity(max_resources as usize, self.frame_graph.alloc)?;
+            self.resource_pool.images = FixedVec::with_capacity(max_resources as usize, self.alloc)?;
         }
-        Ok(self.frame_graph)
+        Ok(self)
     }
 }
 
-impl<'alloc, Alloc: Allocator> FrameGraph<'alloc, Alloc> {
+impl<'a, Alloc: Allocator, Alloc2: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc, Alloc2> {
 
-    pub fn frame_index(&self) -> u32 {
+    fn frame_index(&self) -> u32 {
         self.frame_index
     }
 
-    pub fn queue_family_indices(&self) -> &QueueFamilyIndices {
-        &self.queue_family_indices
+    fn set_render_image(&mut self, image: Image) -> ResourceID {
+        assert!(self.render_image_id.is_none(), "render image already set");
+        let id = self.resource_pool.add_image(image);
+        self.render_image_id = Some(id);
+        id
     }
 
-    pub fn add_pass(
+    fn add_resource(&mut self, image: Image) -> ResourceID {
+        self.resource_pool.add_image(image)
+    }
+
+    fn add_pass(
         &mut self,
         name: &str,
-        max_reads: u32,
-        max_color_writes: u32,
-        max_dependencies: u32,
-        msaa_samples: vk::SampleCountFlags
-    ) -> Result<PassAttachmentBuilder<'_, 'alloc, Alloc>, CapacityError> {
+        info: PassInfo,
+    ) -> Result<&mut dyn PassAttachmentBuilder<'a>, CapacityError>
+    {
         let pass = Pass::new(
             ArrayString::from_str(name),
-            max_reads,
-            max_color_writes,
-            max_dependencies,
-            msaa_samples,
+            info,
+            self.pipeline_cache,
             self.alloc
         )?;
-        Ok(PassAttachmentBuilder { pass: self.passes
+        Ok(self.passes
             .push(pass)
             .expect("pass capacity exceeded")
-        })
+        )
     }
 
-    pub fn add_pass_fn<F>(
+    fn with_pass(
         &mut self,
-        max_reads: u32,
-        max_color_writes: u32,
-        max_dependencies: u32,
-        msaa_samples: vk::SampleCountFlags,
-
-    ) -> Result<(), CapacityError>
-        where
-            F: FnMut(PassAttachmentBuilder<'_, 'alloc, Alloc>) -> Result<(), CapacityError>
-    {
-        todo!()
+        name: &str,
+        info: PassInfo,
+        f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder) -> Result<(), CapacityError>,
+    ) -> Result<&mut dyn FrameGraph<'a>, CapacityError> {
+        let pass = self.passes.push(Pass::new(
+            ArrayString::from_str(name),
+            info,
+            self.pipeline_cache,
+            self.alloc
+        )?).expect("pass capacity exceeded");
+        f(pass)?;
+        Ok(self)
     }
+}
 
-    pub fn render(&mut self) -> Result<(), RenderError> {
+impl<'alloc, Alloc: Allocator, Alloc2: Allocator> FrameGraphImpl<'alloc, Alloc, Alloc2> {
+
+    pub fn render(&mut self) -> Result<Option<&mut Image>, RenderError> {
         let sorted = self.sort()?;
         for index in sorted.iter().map(|i| *i) {
             let pass = &self.passes[index];
@@ -632,12 +727,16 @@ impl<'alloc, Alloc: Allocator> FrameGraph<'alloc, Alloc> {
             }
             let depth_output =
                 if let Some(write) = &pass.depth_write {
-                    Some(process_write(write)?)
-                } else { None };
+                    Some(process_write(&write)?)
+                } else {
+                    None
+                };
             let stencil_output =
                 if let Some(write) = &pass.stencil_write {
                     Some(process_write(write)?)
-                } else { None };
+                } else {
+                    None
+                };
             let (color_attachment_count, p_color_attachments) = match &color_outputs {
                 Some(r) => {
                     (r.len() as u32, r.as_ptr())
@@ -674,7 +773,7 @@ impl<'alloc, Alloc: Allocator> FrameGraph<'alloc, Alloc> {
             }
             unsafe { self.device.cmd_end_rendering(self.command_buffer); }
         }
-        Ok(())
+        Ok(self.render_image_id.map(|v| self.resource_pool.get_mut(v)))
     }
 
     #[inline(always)]

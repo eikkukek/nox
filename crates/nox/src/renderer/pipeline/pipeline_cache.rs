@@ -9,10 +9,40 @@ pub struct PipelineTypeInfo<'alloc, Alloc: Allocator> {
     stencil_format: vk::Format,
 }
 
+impl<'alloc, Alloc: Allocator> PipelineTypeInfo<'alloc, Alloc> {
+
+    pub fn msaa_samples(&self) -> vk::SampleCountFlags {
+        self.msaa_samples
+    }
+
+    pub fn color_formats(&self) -> &FixedVec<'alloc, vk::Format, Alloc> {
+        &self.color_formats
+    }
+
+    pub fn depth_format(&self) -> vk::Format {
+        self.depth_format
+    }
+
+    pub fn stencil_format(&self) -> vk::Format {
+        self.stencil_format
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct PipelineID {
     type_index: u32,
     pipeline_index: u32,
+}
+
+impl PipelineID {
+
+    pub fn type_index(&self) -> u32 {
+        self.type_index
+    }
+
+    pub fn pipeline_index(&self) -> u32 {
+        self.pipeline_index
+    }
 }
 
 pub struct PipelineCache<'alloc, Alloc: Allocator> {

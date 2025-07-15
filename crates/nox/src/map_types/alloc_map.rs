@@ -7,7 +7,7 @@ use core::{
 
 use nox_mem::{
     const_fn::align_up,
-    vec_types::{self, GlobalVec, MemoryStrategy},
+    vec_types::{self, GlobalVec, Pointer},
     Allocator,
     CapacityError,
     CapacityPolicy,
@@ -106,12 +106,14 @@ impl<'alloc, Key, Val, Alloc, CapacityPol> AllocMap<'alloc, Key, Val, Alloc, Cap
         };
         debug_assert!(self.len <= self.capacity);
         unsafe {
-            GlobalVec::<Key>::move_elements(self.data.cast(), tmp.cast(), self.len);
-            GlobalVec::<Val>::move_elements(
-                self.data.add(Self::val_offset(self.capacity)).cast(),
-                tmp.add(Self::val_offset(new_capacity)).cast(),
-                self.len,
-            );
+            Pointer
+                ::from(self.data.cast::<Key>())
+                .move_elements(Pointer::from(tmp.cast()), self.len);
+            Pointer
+                ::from(self.data
+                    .add(Self::val_offset(self.capacity)).cast::<Val>()
+                )
+                .move_elements(Pointer::from(tmp.add(Self::val_offset(new_capacity)).cast()), self.len);
         }
         if self.capacity != 0 {
             unsafe {
@@ -337,7 +339,7 @@ impl_traits! {
             self.clear();
         }
     ,
-    IntoIterator &'map =>
+    IntoIterator for &'map =>
 
         type Item = (&'map Key, &'map Val);
         type IntoIter = Iter<'map, Key, Val>;
@@ -347,7 +349,7 @@ impl_traits! {
             self.iter()
         }
     ,
-    IntoIterator &'map mut =>
+    IntoIterator for mut &'map =>
 
         type Item = (&'map Key, &'map mut Val);
         type IntoIter = IterMut<'map, Key, Val>;

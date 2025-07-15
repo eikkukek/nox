@@ -1,15 +1,15 @@
 use core::{
-    ops::{Index, IndexMut, Deref, DerefMut},
+    ops::{Deref, DerefMut},
     ptr::NonNull,
 };
 
 use crate::capacity_policy::CapacityPolicy;
 use crate::errors::CapacityError;
 
+use super::{Iter, IterMut};
+
 pub trait Vector<T>:
     Sized +
-    Index<usize, Output = T> +
-    IndexMut<usize, Output = T> +
     AsRef<[T]> +
     Deref<Target = [T]> +
     DerefMut
@@ -49,6 +49,14 @@ pub trait Vector<T>:
         where
             F: FnMut() -> T;
 
+    fn append(&mut self, slice: &[T]) -> Result<(), CapacityError>
+        where
+            T: Clone;
+
+    fn append_map<U, F>(&mut self, slice: &[U], f: F) -> Result<(), CapacityError>
+        where
+            F: FnMut(&U) -> T;
+
     fn push(&mut self, value: T) -> Result<&mut T, CapacityError>;
 
     fn pop(&mut self) -> Option<T>;
@@ -65,10 +73,9 @@ pub trait Vector<T>:
 
     fn clear(&mut self);
 
-    fn clone_from<V>(&mut self, from: &V) -> Result<(), CapacityError>
+    fn clone_from(&mut self, from: &[T]) -> Result<(), CapacityError>
         where
-            T: Clone,
-            V: Vector<T>;
+            T: Clone;
 
     fn move_from<V>(&mut self, from: &mut V) -> Result<(), CapacityError>
         where

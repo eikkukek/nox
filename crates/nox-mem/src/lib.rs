@@ -11,6 +11,7 @@ pub mod type_registery;
 pub mod const_fn;
 
 mod macros;
+mod as_raw;
 mod errors;
 mod allocator;
 mod option_alloc;
@@ -23,3 +24,5 @@ pub use option_alloc::OptionAlloc;
 //pub use slot_alloc::SlotAlloc;
 pub use capacity_policy::CapacityPolicy;
 pub use vec_types::{Vector, AllocVec, GlobalVec, DynVec, FixedVec, ArrayVec};
+pub use as_raw::AsRaw;
+pub use nox_mem_derive::AsRaw;

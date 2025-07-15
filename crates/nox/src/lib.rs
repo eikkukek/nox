@@ -5,13 +5,14 @@ pub mod nox;
 pub mod renderer;
 pub mod interface;
 pub mod asset_importer;
+pub mod byte_hash;
 
 pub mod version;
 pub mod utility;
 pub mod serialization;
 pub mod string_types;
 pub mod marker_types;
-pub mod map_types;
+//pub mod map_types;
 //pub mod shader;
 
 pub mod pod {

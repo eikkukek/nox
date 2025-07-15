@@ -15,11 +15,19 @@ impl<'a, T, IsMut: Conditional> IterBase<'a, T, IsMut> {
 
     #[inline(always)]
     pub unsafe fn new(ptr: NonNull<T>, end: NonNull<T>) -> Self {
+        debug_assert!(ptr <= end);
         Self {
             ptr,
             end,
             _markers: PhantomData,
         }
+    }
+
+    fn count(self) -> usize
+    {
+        let begin = self.ptr.as_ptr() as usize;
+        let end = self.end.as_ptr() as usize;
+        (end - begin) / size_of::<T>()
     }
 }
 
@@ -39,6 +47,13 @@ impl<'a, T> Iterator for Iter<'a, T> {
             self.ptr = unsafe { self.ptr.add(1) };
             Some(item)
         }
+    }
+
+    fn count(self) -> usize
+        where
+            Self: Sized
+    {
+        self.count()
     }
 }
 
@@ -68,6 +83,13 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             self.ptr = unsafe { self.ptr.add(1) };
             Some(item)
         }
+    }
+
+    fn count(self) -> usize
+        where
+            Self: Sized
+    {
+        self.count()
     }
 }
 
