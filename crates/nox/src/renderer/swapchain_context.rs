@@ -1,8 +1,8 @@
-use core::slice;
+use core::{slice, ptr};
 
 use ash::{khr::{surface, swapchain}, vk};
 
-use nox_mem::{Allocator, Vector, FixedVec};
+use nox_mem::{Allocator, Vector, FixedVec, slice};
 
 use crate::{
     stack_alloc::{StackAlloc, StackGuard},
@@ -411,7 +411,7 @@ impl<'mem> SwapchainContext<'mem> {
         let get_swapchain_images_khr = swapchain_loader.fp().get_swapchain_images_khr;
         let mut image_count = 0u32;
         let mut result = unsafe {
-            get_swapchain_images_khr(device.handle(), swapchain_handle, &mut image_count, std::ptr::null_mut())
+            get_swapchain_images_khr(device.handle(), swapchain_handle, &mut image_count, ptr::null_mut())
         };
         if image_count == 0 || result != vk::Result::SUCCESS {
             unsafe { swapchain_loader.destroy_swapchain(swapchain_handle, None); }
@@ -588,7 +588,7 @@ impl<'mem> SwapchainContext<'mem> {
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                slice::from_ref(&memory_barrier)
+                slice![memory_barrier]
             );
         }
         self.image_states[image_index] = dst_image_state;
@@ -658,7 +658,7 @@ fn find_surface_format(
             physical_device,
             surface_handle,
             &mut count,
-            std::ptr::null_mut(),
+            ptr::null_mut(),
         );
         if count == 0 || result != vk::Result::SUCCESS {
             return Err(array_format!("failed to get surface format count {:?}", result))
@@ -676,7 +676,7 @@ fn find_surface_format(
         if result != vk::Result::SUCCESS {
             return Err(array_format!("failed to get surface formats {:?}", result))
         }
-        let formats = std::slice::from_raw_parts(formats_ptr, count as usize);
+        let formats = slice::from_raw_parts(formats_ptr, count as usize);
         for format in formats {
             if format.format == vk::Format::R8G8B8A8_SRGB &&
                 format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR {
@@ -702,7 +702,7 @@ fn find_present_mode(
             physical_device,
             surface_handle,
             &mut count,
-            std::ptr::null_mut(),
+            ptr::null_mut(),
         );
         if count == 0 || result != vk::Result::SUCCESS {
             return Err(array_format!("failed to get surface present mode count {:?}", result))
@@ -720,7 +720,7 @@ fn find_present_mode(
         if result != vk::Result::SUCCESS {
             return Err(array_format!("failed to get surface present modes {:?}", result))
         }
-        let modes: &[vk::PresentModeKHR] = std::slice::from_raw_parts(modes_ptr, count as usize);
+        let modes: &[vk::PresentModeKHR] = slice::from_raw_parts(modes_ptr, count as usize);
         for mode in modes {
             if *mode == vk::PresentModeKHR::MAILBOX {
                 return Ok(vk::PresentModeKHR::MAILBOX); // low latency and no tearing

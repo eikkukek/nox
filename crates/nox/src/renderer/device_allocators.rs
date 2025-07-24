@@ -28,7 +28,7 @@ impl<'p, DynVec> DeviceAllocators<'p, DynVec>
 
     pub fn new(
         layout: &MemoryLayout,
-        device: ash::Device,
+        device: &ash::Device,
         physical_device_info: &PhysicalDeviceInfo,
         device_local_free_list: DynVec,
         device_staging_free_list: DynVec,
@@ -36,7 +36,7 @@ impl<'p, DynVec> DeviceAllocators<'p, DynVec>
     ) -> Result<Self, LargeError>
     {
         let device_local = BufferAlloc::new(
-            Handle::new(device.clone()),
+            device,
             physical_device_info,
             layout.device_local_size(),
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -44,7 +44,7 @@ impl<'p, DynVec> DeviceAllocators<'p, DynVec>
             ).map_err(|e| array_format!("failed to create allocator ( {} )", e)
         )?;
         let device_staging = BufferAlloc::new(
-            Handle::new(device.clone()),
+            device,
             physical_device_info,
             layout.device_staging_size(),
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_VISIBLE,
@@ -52,7 +52,7 @@ impl<'p, DynVec> DeviceAllocators<'p, DynVec>
             ).map_err(|e| array_format!("failed to create allocator ( {} )", e)
         )?;
         let device_uniform = BufferAlloc::new(
-            Handle::new(device.clone()),
+            device,
             physical_device_info,
             layout.device_uniform_size(),
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_VISIBLE,

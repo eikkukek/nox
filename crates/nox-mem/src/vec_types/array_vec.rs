@@ -255,7 +255,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         self.len = 0;
     }
 
-    fn clone_from(&mut self, from: &[T]) -> Result<(), CapacityError>
+    fn clone_from(mut self, from: &[T]) -> Result<Self, CapacityError>
         where
             T: Clone
     {
@@ -270,10 +270,10 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
             .unwrap()
             .clone_elements(ptr, from.len()); }
         self.len = from.len();
-        Ok(())
+        Ok(self)
     }
 
-    fn move_from<V>(&mut self, from: &mut V) -> Result<(), CapacityError>
+    fn move_from<V>(mut self, from: &mut V) -> Result<Self, CapacityError>
         where
             V: Vector<T>
     {
@@ -291,7 +291,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         }
         self.len = slice.len();
         unsafe { from.set_len(0); }
-        Ok(())
+        Ok(self)
     }
 
     fn contains(&self, value: &T) -> bool

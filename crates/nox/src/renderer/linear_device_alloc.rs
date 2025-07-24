@@ -6,26 +6,12 @@ use crate::{has_bits, has_not_bits};
 
 use super::PhysicalDeviceInfo;
 
-#[derive(Debug)]
-pub enum Error {
-    IncompatibleMemoryRequirements,
-    OutOfMemory { size: vk::DeviceSize, align: vk::DeviceSize },
-    VkError(vk::Result),
-}
-
-impl From<vk::Result> for Error {
-
-    fn from(value: vk::Result) -> Self {
-        VkError(value)
-    }
-}
-
-use Error::{IncompatibleMemoryRequirements, OutOfMemory, VkError};
+use super::Error::{self, OutOfDeviceMemory, IncompatibleMemoryRequirements};
 
 pub type Result<T> = core::result::Result<T, Error>;
 
 pub struct LinearDeviceAlloc {
-    device: ash::Device,
+    device: *const ash::Device,
     device_memory: vk::DeviceMemory,
     size: vk::DeviceSize,
     used: UnsafeCell<vk::DeviceSize>,
@@ -36,7 +22,7 @@ pub struct LinearDeviceAlloc {
 impl LinearDeviceAlloc {
 
     pub fn new(
-        device: ash::Device,
+        device: &ash::Device,
         size: vk::DeviceSize,
         properties: vk::MemoryPropertyFlags,
         physical_device_info: &PhysicalDeviceInfo,
@@ -70,12 +56,8 @@ impl LinearDeviceAlloc {
         })
     }
 
-    pub fn device(&self) -> ash::Device {
-        self.device.clone()
-    }
-
     pub fn bind_image_memory(&self, image: vk::Image) -> Result<()> {
-        let memory_requirements = unsafe { self.device.get_image_memory_requirements(image) };
+        let memory_requirements = unsafe { (*self.device).get_image_memory_requirements(image) };
         if has_not_bits!(self.properties.as_raw(), memory_requirements.memory_type_bits) {
             return Err(IncompatibleMemoryRequirements)
         }
@@ -84,10 +66,10 @@ impl LinearDeviceAlloc {
         let offset = (used + align - 1) & !(align - 1);
         let end = offset + memory_requirements.size;
         if self.size < end {
-            return Err(OutOfMemory { size: memory_requirements.size, align } )
+            return Err(OutOfDeviceMemory { size: memory_requirements.size, align, avail: self.size - used } )
         }
         unsafe {
-            self.device.bind_image_memory(image, self.device_memory, offset)?;
+            (*self.device).bind_image_memory(image, self.device_memory, offset)?;
             *self.used.get() = end;
         };
         Ok(())
@@ -98,7 +80,7 @@ impl Drop for LinearDeviceAlloc {
 
     fn drop(&mut self) {
         unsafe {
-            self.device.free_memory(
+            (*self.device).free_memory(
                 self.device_memory,
                 None
             );

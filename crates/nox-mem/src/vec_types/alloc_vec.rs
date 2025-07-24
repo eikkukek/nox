@@ -612,7 +612,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         self.data = Pointer::dangling();
     }
 
-    fn clone_from(&mut self, from: &[T]) -> Result<(), CapacityError>
+    fn clone_from(mut self, from: &[T]) -> Result<Self, CapacityError>
         where
             T: Clone
     {
@@ -634,10 +634,10 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
                 .clone_elements(self.data, from.len());
         }
         self.len = from.len();
-        Ok(())
+        Ok(self)
     }
 
-    fn move_from<V>(&mut self, from: &mut V) -> Result<(), CapacityError>
+    fn move_from<V>(mut self, from: &mut V) -> Result<Self, CapacityError>
         where
             V: Vector<T>
     {
@@ -658,7 +658,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         }
         self.len = slice.len();
         unsafe { from.set_len(0); }
-        Ok(())
+        Ok(self)
     }
 
     fn contains(&self, value: &T) -> bool
@@ -697,7 +697,7 @@ impl_traits!{
     Drop =>
 
         #[inline(always)]
-        fn drop(&mut self) -> () {
+        fn drop(&mut self) {
             self.clear()
         }
     ,
@@ -797,7 +797,7 @@ impl_traits!{
         }
     ,
     From<&[T]> where T: Clone =>
-       
+        
         #[inline(always)]
         fn from(value: &[T]) -> Self {
             let len = value.len();

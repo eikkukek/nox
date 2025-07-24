@@ -50,72 +50,72 @@ impl GraphicsPipelineInfo {
         }
     }
 
-    pub fn with_depth_clamp(&mut self, enabled: bool) -> &mut Self {
+    pub fn with_depth_clamp(mut self, enabled: bool) -> Self {
         self.depth_clamp = enabled;
         self
     }
 
-    pub fn with_rasterizer_discard(&mut self, enabled: bool) -> &mut Self {
+    pub fn with_rasterizer_discard(mut self, enabled: bool) -> Self {
         self.rasterizer_discard = enabled;
         self
     }
 
-    pub fn with_polygon_mode(&mut self, polygon_mode: PolygonMode) -> &mut Self {
+    pub fn with_polygon_mode(mut self, polygon_mode: PolygonMode) -> Self {
         self.polygon_mode = polygon_mode;
         self
     }
 
-    pub fn with_cull_mode(&mut self, cull_mode: CullMode) -> &mut Self {
+    pub fn with_cull_mode(mut self, cull_mode: CullMode) -> Self {
         self.cull_mode = cull_mode;
         self
     }
 
-    pub fn with_front_face(&mut self, front_face: FrontFace) -> &mut Self {
+    pub fn with_front_face(mut self, front_face: FrontFace) -> Self {
         self.front_face = front_face;
         self
     }
 
-    pub fn with_depth_bias(&mut self, depth_bias_info: Option<DepthBiasInfo>) -> &mut Self {
+    pub fn with_depth_bias(mut self, depth_bias_info: Option<DepthBiasInfo>) -> Self {
         self.depth_bias_info = depth_bias_info;
         self
     }
 
-    pub fn with_primitive_topology(&mut self, topology: PrimitiveTopology, restart_enable: bool) -> &mut Self {
+    pub fn with_primitive_topology(mut self, topology: PrimitiveTopology, restart_enable: bool) -> Self {
         self.primitive_topology = (topology, restart_enable);
         self
     }
 
-    pub fn with_sample_shading(&mut self, sample_shading_info: Option<SampleShadingInfo>) -> &mut Self {
+    pub fn with_sample_shading(mut self, sample_shading_info: Option<SampleShadingInfo>) -> Self {
         self.sample_shading_info = sample_shading_info;
         self
     }
 
     /// Blend constants are used with color attachments that use 'ConstColor' or 'ConstAlpha' BlendFactors.
     /// The default constants are [0.0, 0.0, 0.0, 0.0]
-    pub fn with_blend_constants(&mut self, blend_constants: BlendConstants) -> &mut Self {
+    pub fn with_blend_constants(mut self, blend_constants: BlendConstants) -> Self {
         self.color_blend_info.blend_constants = blend_constants;
         self
     }
 
     /// Appends a color output to the pipeline.
     /// The number of color outputs of a pipeline must match exactly with the number of outputs in the fragment shader.
-    pub fn with_color_output(&mut self, format: Format, write_mask: WriteMask, blend_state: Option<ColorOutputBlendState>) -> &mut Self {
+    pub fn with_color_output(mut self, format: Format, write_mask: WriteMask, blend_state: Option<ColorOutputBlendState>) -> Self {
         self.color_output_formats.push(format).unwrap();
         self.color_blend_info.add_attachment(write_mask, blend_state);
         self
     }
 
-    pub fn with_depth_output(&mut self, format: Format) -> &mut Self {
+    pub fn with_depth_output(mut self, format: Format) -> Self {
         self.depth_output_format = format;
         self
     }
 
-    pub fn with_stencil_output(&mut self, format: Format) -> &mut Self {
+    pub fn with_stencil_output(mut self, format: Format) -> Self {
         self.stencil_output_format = format;
         self
     }
 
-    pub fn with_dynamic_states(&mut self, dynamic_state: &[DynamicState]) -> &mut Self {
+    pub fn with_dynamic_states(mut self, dynamic_state: &[DynamicState]) -> Self {
         self.dynamic_states.append_map(dynamic_state, |v| (*v).into()).unwrap();
         self
     }

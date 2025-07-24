@@ -6,7 +6,7 @@ use super::{
 use ash::vk;
 
 pub struct ThreadContext {
-    device: ash::Device,
+    device: *const ash::Device,
     graphics_pool: vk::CommandPool,
     transfer_pool: vk::CommandPool,
     compute_pool: vk::CommandPool,

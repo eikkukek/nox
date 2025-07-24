@@ -26,6 +26,6 @@ pub use nox_mem as mem;
 
 pub use version::Version;
 pub use nox::{Nox, InitSettings, AppName};
-pub use renderer::{Renderer, DeviceName, DeviceMemory};
+pub use renderer::frame_graph;
 pub use memory::Memory;
 pub use asset_importer::AssetType;

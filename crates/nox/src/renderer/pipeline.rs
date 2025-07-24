@@ -2,29 +2,55 @@ pub mod graphics;
 pub mod layout;
 mod pipeline_cache;
 
+pub(crate) use layout::{
+    ShaderStage,
+    PipelineLayoutInfo,
+    DescriptorSetLayoutInfo,
+    DescriptorBindingInfo,
+    PushConstantRange,
+    DescriptorType,
+};
+
+pub use graphics::{
+    GraphicsPipelineInfo,
+    WriteMask
+};
+
 pub use pipeline_cache::{PipelineID, PipelineCache};
 
 use ash::vk;
 
-use nox_mem::{Allocator, Vector, FixedVec};
+use nox_mem::{Vector, GlobalVec};
 
 use crate::renderer::Error;
 
-pub fn create_transient_graphics_pipelines<'alloc, Alloc: Allocator>(
-    device: ash::Device,
+#[inline(always)]
+pub(crate) fn create_shader_module(device: &ash::Device, spirv: &[u32]) -> Result<vk::ShaderModule, vk::Result> {
+    let create_info = vk::ShaderModuleCreateInfo {
+        s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
+        code_size: spirv.len() * size_of::<u32>(),
+        p_code: spirv.as_ptr(),
+        ..Default::default()
+    };
+    unsafe {
+        Ok(device.create_shader_module(&create_info, None)?)
+    }
+}
+
+pub(crate) fn create_transient_graphics_pipelines(
+    device: &ash::Device,
     pipeline_infos: &[(graphics::CreateInfos, u32, u32, u32)],
     vertex_input_state_infos: &[vk::PipelineVertexInputStateCreateInfo],
-    stages: &[&[vk::PipelineShaderStageCreateInfo]],
+    stages: &[GlobalVec<vk::PipelineShaderStageCreateInfo>],
     layouts: &[vk::PipelineLayout],
-    alloc: &'alloc Alloc,
-) -> Result<FixedVec<'alloc, vk::Pipeline, Alloc>, Error>
+) -> Result<GlobalVec<vk::Pipeline>, Error>
 {
     let pipeline_count = pipeline_infos.len();
-    let mut create_infos = FixedVec::with_capacity(pipeline_count, alloc)?;
+    let mut create_infos = GlobalVec::with_capacity(pipeline_count).unwrap();
     for info in pipeline_infos {
         let create_info = &info.0;
         let vertex_input_state = &vertex_input_state_infos[info.1 as usize];
-        let stages = stages[info.2 as usize];
+        let stages = &stages[info.2 as usize];
         let layout = layouts[info.3 as usize];
         let vk_create_info = vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
@@ -45,7 +71,7 @@ pub fn create_transient_graphics_pipelines<'alloc, Alloc: Allocator>(
         };
         create_infos.push(vk_create_info).unwrap();
     }
-    let mut pipelines = FixedVec::with_capacity(create_infos.len(), alloc)?;
+    let mut pipelines = GlobalVec::with_capacity(create_infos.len()).unwrap();
     unsafe {
         let create_graphics_pipelines = device.fp_v1_0().create_graphics_pipelines;
         let result = create_graphics_pipelines(

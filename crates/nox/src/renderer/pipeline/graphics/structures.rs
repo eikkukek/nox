@@ -321,8 +321,11 @@ impl ByteHash for ColorBlendInfo {
         let hash1 = hasher.clone().finalize();
         let hash2 = self.hasher.clone().finalize();
         *hasher = blake3::Hasher::new();
+        hasher.update(b"combine_v1{");
         hasher.update(hash1.as_bytes());
+        hasher.update(b"}{");
         hasher.update(hash2.as_bytes());
+        hasher.update(b"}");
         self.blend_constants.0.as_slice().byte_hash(hasher);
         self.logic_op.byte_hash(hasher);
     }

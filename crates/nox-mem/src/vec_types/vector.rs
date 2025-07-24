@@ -6,8 +6,6 @@ use core::{
 use crate::capacity_policy::CapacityPolicy;
 use crate::errors::CapacityError;
 
-use super::{Iter, IterMut};
-
 pub trait Vector<T>:
     Sized +
     AsRef<[T]> +
@@ -73,11 +71,11 @@ pub trait Vector<T>:
 
     fn clear(&mut self);
 
-    fn clone_from(&mut self, from: &[T]) -> Result<(), CapacityError>
+    fn clone_from(self, from: &[T]) -> Result<Self, CapacityError>
         where
             T: Clone;
 
-    fn move_from<V>(&mut self, from: &mut V) -> Result<(), CapacityError>
+    fn move_from<V>(self, from: &mut V) -> Result<Self, CapacityError>
         where
             V: Vector<T>;
 

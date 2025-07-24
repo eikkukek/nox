@@ -1,273 +1,129 @@
+use std::collections::HashMap;
+
 use core::{
     slice,
+    num::NonZero,
 };
-use std::num::NonZero;
 
 use ash::vk;
 
-use nox_mem::{Allocator, CapacityError, FixedVec, Vector};
+use nox_mem::{Allocator, CapacityError, FixedVec, GlobalVec, Vector};
 
-use crate::string_types::ArrayString;
+use crate::byte_hash::ByteHash;
 
 use super::{
-    ImageState,
+    Renderer,
+    Error,
+    ID,
+    image::{ImageState, ImageSubresourceRangeInfo, ImageBuilder},
     pipeline::{PipelineID, PipelineCache},
-    linear_device_alloc::{self, LinearDeviceAlloc},
+    linear_device_alloc::LinearDeviceAlloc,
 };
 
-pub type PassName = ArrayString<64>;
-
-#[derive(Debug)]
-pub enum RenderError {
-    AllocError(CapacityError),
-    DeviceAllocError(linear_device_alloc::Error),
-}
-
-impl From<CapacityError> for RenderError {
-
-    fn from(value: CapacityError) -> Self {
-        Self::AllocError(value)
-    }
-}
-
-impl From<linear_device_alloc::Error> for RenderError {
-
-    fn from(value: linear_device_alloc::Error) -> Self {
-        Self::DeviceAllocError(value)
-    }
+pub struct LifetimePoint {
+    point: u64,
 }
 
 #[derive(Clone, Copy)]
-pub struct ImageResource {
-    image: vk::Image,
-    image_view: vk::ImageView,
-    state: ImageState,
+pub enum ResourceID {
+    Transient(blake3::Hash),
+    Persistent(u32),
 }
 
-impl ImageResource {
+pub trait ResourcePool {
 
-    #[inline(always)]
-    pub fn new(
-        image: vk::Image,
-        image_view: vk::ImageView,
-        state: ImageState,
-    ) -> Self
-    {
-        Self {
-            image,
-            image_view,
-            state,
-        }
-    }
+    fn add_image(
+        &mut self,
+        image: ID,
+        subresource: Option<ImageSubresourceRangeInfo>
+    ) -> ResourceID;
 
-    #[inline(always)]
-    pub fn state(&self) -> ImageState {
-        self.state
-    }
+    fn add_transient_image<F: FnMut(&mut ImageBuilder)>(
+        &mut self,
+        lifetime_point: LifetimePoint,
+        f: F,
+    ) -> ResourceID;
 }
 
-#[derive(Clone)]
-pub struct Image {
-    resource: Option<ImageResource>,
-    device: Option<ash::Device>, // if Some, resource destroyed on drop
-    format: vk::Format,
-    extent: vk::Extent2D,
-    usage: vk::ImageUsageFlags,
-    samples: vk::SampleCountFlags,
-    subresource_range: vk::ImageSubresourceRange,
+pub trait PassPipelineBuilder<'a> {
+
+    fn with_pipeline(&mut self, id: PipelineID) -> &mut dyn PassPipelineBuilder<'a>;
 }
 
-impl Image {
+pub trait PassAttachmentBuilder<'a> {
 
-    #[inline(always)]
-    pub fn new(
-        format: vk::Format,
-        extent: vk::Extent2D,
-        usage: vk::ImageUsageFlags,
-        samples: vk::SampleCountFlags,
-        subresource_range: vk::ImageSubresourceRange,
-    ) -> Self {
-        Self {
-            resource: None,
-            device: None,
-            format,
-            extent,
-            usage,
-            samples,
-            subresource_range,
-        }
-    }
+    fn with_read(&mut self, resource_id: ResourceID, dst_image_state: ImageState) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    #[inline(always)]
-    pub fn with_resource(
-        resource: ImageResource,
-        format: vk::Format,
-        extent: vk::Extent2D,
-        usage: vk::ImageUsageFlags,
-        samples: vk::SampleCountFlags,
-        subresource_range: vk::ImageSubresourceRange,
-    ) -> Self {
-        Self {
-            resource: Some(resource),
-            device: None,
-            format,
-            extent,
-            usage,
-            samples,
-            subresource_range,
-        }
-    }
+    fn with_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    #[inline(always)]
-    pub fn create_resource<'alloc>(&mut self, device_alloc: &'alloc LinearDeviceAlloc) -> linear_device_alloc::Result<()> {
-        assert!(self.resource.is_none(), "attempting to override resource");
-        let image_create_info = vk::ImageCreateInfo {
-            s_type: vk::StructureType::IMAGE_CREATE_INFO,
-            image_type: vk::ImageType::TYPE_2D,
-            format: self.format,
-            extent: vk::Extent3D {
-                width: self.extent.width,
-                height: self.extent.height,
-                depth: 1,
-                },
-            mip_levels: 1,
-            array_layers: 1,
-            samples: self.samples,
-            tiling: vk::ImageTiling::OPTIMAL,
-            usage: self.usage,
-            sharing_mode: vk::SharingMode::EXCLUSIVE,
-            initial_layout: vk::ImageLayout::UNDEFINED,
-            ..Default::default()
-        };
-        let device = device_alloc.device();
-        let image = unsafe { device
-            .create_image(&image_create_info, None)?
-        };
-        device_alloc
-            .bind_image_memory(image)
-            .map_err(|e| {
-                unsafe {
-                    device.destroy_image(image, None);
-                }
-                e
-            })?;
-        let view_create_info = vk::ImageViewCreateInfo {
-            s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
-            image,
-            view_type: vk::ImageViewType::TYPE_2D,
-            format: self.format,
-            components: vk::ComponentMapping {
-                r: vk::ComponentSwizzle::IDENTITY,
-                g: vk::ComponentSwizzle::IDENTITY,
-                b: vk::ComponentSwizzle::IDENTITY,
-                a: vk::ComponentSwizzle::IDENTITY,
-                },
-            subresource_range: self.subresource_range,
-            ..Default::default()
-        };
-        let view = unsafe { device
-            .create_image_view(&view_create_info, None)
-            .map_err(|e| {
-                device.destroy_image(image, None);
-                e
-            })?
-        };
-        self.resource = Some(ImageResource::new(
-            image,
-            view,
-            ImageState::new(
-                vk::AccessFlags::NONE,
-                vk::ImageLayout::UNDEFINED,
-                vk::QUEUE_FAMILY_IGNORED,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-            ),
-        ));
-        self.device = Some(device);
-        Ok(())
-    }
+    fn with_depth_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    #[inline(always)]
-    pub fn resource(&self) -> Option<ImageResource> {
-        self.resource
-    }
+    fn with_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    #[inline(always)]
-    pub fn format(&self) -> vk::Format {
-        self.format
-    }
+    fn with_render_area(&mut self, offset: vk::Offset2D, extent: vk::Extent2D) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    #[inline(always)]
-    pub fn extent(&self) -> vk::Extent2D {
-        self.extent
-    }
+    fn with_dependency(&mut self, pass_index: usize) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    #[inline(always)]
-    pub fn usage(&self) -> vk::ImageUsageFlags {
-        self.usage
-    }
-
-    #[inline(always)]
-    pub fn samples(&self) -> vk::SampleCountFlags {
-        self.samples
-    }
-
-    #[inline(always)]
-    pub fn subresource_range(&self) -> &vk::ImageSubresourceRange {
-        &self.subresource_range
-    }
+    fn as_pipeline_builder(&mut self) -> &mut dyn PassPipelineBuilder<'a>;
 }
 
-impl Drop for Image {
-
-    fn drop(&mut self) {
-        if let Some(device) = self.device.take() {
-            unsafe {
-                let resource = self.resource.unwrap_unchecked();
-                device.destroy_image_view(resource.image_view, None);
-                device.destroy_image(resource.image, None);
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ResourceID {
-    index: u32,
-}
-
-pub struct ResourcePool<'a, Alloc>
+struct ResourcePoolImpl<'a, Alloc>
     where
         Alloc: Allocator
 {
-    images: FixedVec<'a, Image, Alloc>,
+    renderer: &'a Renderer<'a>,
+    resources: FixedVec<'a, (ID, Option<ImageSubresourceRangeInfo>), Alloc>,
+    transient_resources: HashMap<ImageBuilder<'a>, GlobalVec<(u64, u64)>, blake3::Hasher>,
 }
 
-impl<'a, Alloc> ResourcePool<'a, Alloc>
+impl<'a, Alloc> ResourcePoolImpl<'a, Alloc>
     where
         Alloc: Allocator
 {
 
     #[inline(always)]
-    fn new() -> Self
+    fn new(renderer: &'a Renderer) -> Self
     {
-        Self{
-            images: FixedVec::with_no_alloc(),
+        Self {
+            renderer,
+            resources: FixedVec::with_no_alloc(),
+            transient_resources: HashMap::default(),
         }
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, image: Image) -> ResourceID
+    fn get_mut(&mut self, id: ResourceID) -> &mut Image {
+        todo!()
+    }
+}
+
+impl<'a, Alloc: Allocator> ResourcePool for ResourcePoolImpl<'a, Alloc>
+{
+
+    fn add_image(
+        &mut self,
+        image: ID,
+        subresource: Option<ImageSubresourceRangeInfo>
+    ) -> ResourceID
     {
-        let index = self.images.len();
-        self.images
-            .push(image)
+        let index = self.resources.len();
+        self.resources
+            .push((image, subresource))
             .expect("resource capacity exceeded");
-        ResourceID { index: index as u32 }
+        ResourceID::Persistent(index as u32)
     }
 
-    #[inline(always)]
-    pub fn get_mut(&mut self, id: ResourceID) -> &mut Image {
-        &mut self.images[id.index as usize]
+    fn add_transient_image<F: FnMut(&mut ImageBuilder)>(
+        &mut self,
+        lifetime_point: LifetimePoint,
+        f: F,
+    ) -> ResourceID
+    {
+        let builder = ImageBuilder::new(self.renderer);
+        f(&mut builder);
+        let mut hasher = blake3::Hasher::new();
+        builder.byte_hash(&mut hasher);
+        self.transient_resources.insert()
     }
 }
 
@@ -343,13 +199,11 @@ struct Pass<'alloc, Alloc: Allocator, Alloc2: Allocator> {
     callback: Option<fn(usize)>,
     last_pipeline_type_index: Option<u32>,
     msaa_samples: vk::SampleCountFlags,
-    pub _name: PassName,
 }
 
 impl<'alloc, Alloc: Allocator, Alloc2: Allocator> Pass<'alloc, Alloc, Alloc2> {
     
     fn new(
-        name: PassName,
         info: PassInfo,
         pipeline_cache: &'alloc PipelineCache<'alloc, Alloc2>,
         alloc: &'alloc Alloc
@@ -394,31 +248,8 @@ impl<'alloc, Alloc: Allocator, Alloc2: Allocator> Pass<'alloc, Alloc, Alloc2> {
             callback: None,
             last_pipeline_type_index: None,
             msaa_samples: info.msaa_samples,
-            _name: name,
         })
     }
-}
-
-pub trait PassPipelineBuilder<'a> {
-
-    fn with_pipeline(&mut self, id: PipelineID) -> &mut dyn PassPipelineBuilder<'a>;
-}
-
-pub trait PassAttachmentBuilder<'a> {
-
-    fn with_read(&mut self, resource_id: ResourceID, dst_image_state: ImageState) -> &mut dyn PassAttachmentBuilder<'a>;
-
-    fn with_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
-
-    fn with_depth_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
-
-    fn with_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
-
-    fn with_render_area(&mut self, offset: vk::Offset2D, extent: vk::Extent2D) -> &mut dyn PassAttachmentBuilder<'a>;
-
-    fn with_dependency(&mut self, pass_index: usize) -> &mut dyn PassAttachmentBuilder<'a>;
-
-    fn as_pipeline_builder(&mut self) -> &mut dyn PassPipelineBuilder<'a>;
 }
 
 impl<'a, Alloc: Allocator, Alloc2: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc, Alloc2> {
@@ -512,19 +343,17 @@ pub trait FrameGraph<'a> {
 
     fn frame_index(&self) -> u32;
 
-    fn set_render_image(&mut self, image: Image) -> ResourceID;
+    fn set_render_image(&mut self, image: ID) -> ResourceID;
 
-    fn add_resource(&mut self, image: Image) -> ResourceID;
+    fn add_resource(&mut self, image: ID, subresource: Option<ImageSubresourceRangeInfo>) -> ResourceID;
 
     fn add_pass(
         &mut self,
-        name: &str,
         info: PassInfo,
     ) -> Result<&mut dyn PassAttachmentBuilder<'a>, CapacityError>;
 
     fn with_pass(
         &mut self,
-        name: &str,
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder) -> Result<(), CapacityError>,
     ) -> Result<&mut dyn FrameGraph<'a>, CapacityError>;
@@ -535,13 +364,13 @@ pub trait FrameGraphInit<'a> {
     fn init(&mut self, max_passes: u32, max_resources: u32) -> Result<&mut dyn FrameGraph<'a>, CapacityError>;
 }
 
-pub struct FrameGraphImpl<'a, Alloc: Allocator, Alloc2: Allocator> {
+pub(crate) struct FrameGraphImpl<'a, Alloc: Allocator, Alloc2: Allocator> {
     device: ash::Device,
     command_buffer: vk::CommandBuffer,
     alloc: &'a Alloc,
     pipeline_cache: &'a PipelineCache<'a, Alloc2>,
     device_alloc: &'a LinearDeviceAlloc,
-    resource_pool: ResourcePool<'a, Alloc>,
+    resource_pool: ResourcePoolImpl<'a, Alloc>,
     passes: FixedVec<'a, Pass<'a, Alloc, Alloc2>, Alloc>,
     render_image_id: Option<ResourceID>,
     frame_index: u32,
@@ -564,7 +393,7 @@ impl<'a, Alloc: Allocator, Alloc2: Allocator> FrameGraphImpl<'a, Alloc, Alloc2> 
             alloc,
             pipeline_cache,
             device_alloc,
-            resource_pool: ResourcePool::new(),
+            resource_pool: ResourcePoolImpl::new(),
             passes: FixedVec::with_no_alloc(),
             render_image_id: None,
             frame_index,
@@ -579,7 +408,7 @@ impl<'a, Alloc: Allocator, Alloc2: Allocator> FrameGraphInit<'a> for FrameGraphI
             self.passes = FixedVec::with_capacity(max_passes as usize, self.alloc)?;
         }
         if max_resources != 0 {
-            self.resource_pool.images = FixedVec::with_capacity(max_resources as usize, self.alloc)?;
+            self.resource_pool.resources = FixedVec::with_capacity(max_resources as usize, self.alloc)?;
         }
         Ok(self)
     }
@@ -593,23 +422,21 @@ impl<'a, Alloc: Allocator, Alloc2: Allocator> FrameGraph<'a> for FrameGraphImpl<
 
     fn set_render_image(&mut self, image: Image) -> ResourceID {
         assert!(self.render_image_id.is_none(), "render image already set");
-        let id = self.resource_pool.add_image(image);
+        let id = self.resource_pool.add_transient_resource(image);
         self.render_image_id = Some(id);
         id
     }
 
-    fn add_resource(&mut self, image: Image) -> ResourceID {
-        self.resource_pool.add_image(image)
+    fn add_resource(&mut self, image: ID, subresource: Option<ImageSubresourceRangeInfo>) -> ResourceID {
+        self.resource_pool.add_resource(image, subresource)
     }
 
     fn add_pass(
         &mut self,
-        name: &str,
         info: PassInfo,
     ) -> Result<&mut dyn PassAttachmentBuilder<'a>, CapacityError>
     {
         let pass = Pass::new(
-            ArrayString::from_str(name),
             info,
             self.pipeline_cache,
             self.alloc
@@ -622,12 +449,10 @@ impl<'a, Alloc: Allocator, Alloc2: Allocator> FrameGraph<'a> for FrameGraphImpl<
 
     fn with_pass(
         &mut self,
-        name: &str,
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder) -> Result<(), CapacityError>,
     ) -> Result<&mut dyn FrameGraph<'a>, CapacityError> {
         let pass = self.passes.push(Pass::new(
-            ArrayString::from_str(name),
             info,
             self.pipeline_cache,
             self.alloc
@@ -639,7 +464,7 @@ impl<'a, Alloc: Allocator, Alloc2: Allocator> FrameGraph<'a> for FrameGraphImpl<
 
 impl<'alloc, Alloc: Allocator, Alloc2: Allocator> FrameGraphImpl<'alloc, Alloc, Alloc2> {
 
-    pub fn render(&mut self) -> Result<Option<&mut Image>, RenderError> {
+    pub fn render(&mut self) -> Result<Option<&mut Image>, Error> {
         let sorted = self.sort()?;
         for index in sorted.iter().map(|i| *i) {
             let pass = &self.passes[index];
@@ -652,7 +477,7 @@ impl<'alloc, Alloc: Allocator, Alloc2: Allocator> FrameGraphImpl<'alloc, Alloc, 
                     let memory_barrier = image_resource.state
                         .to_memory_barrier(
                             image_resource.image,
-                            &read.1,
+                            read.1,
                             image.subresource_range,
                         );
                     unsafe {
@@ -671,7 +496,7 @@ impl<'alloc, Alloc: Allocator, Alloc2: Allocator> FrameGraphImpl<'alloc, Alloc, 
                 }
             }
             let mut render_extent = vk::Extent2D { width: u32::MAX, height: u32::MAX };
-            let mut process_write = |write: &WriteInfo| -> Result<vk::RenderingAttachmentInfo, linear_device_alloc::Error> {
+            let mut process_write = |write: &WriteInfo| -> Result<vk::RenderingAttachmentInfo, Error> {
                 let image = self.resource_pool.get_mut(write.resource_id);
                 if image.resource.is_none() {
                     image.create_resource(self.device_alloc)?;
@@ -681,7 +506,7 @@ impl<'alloc, Alloc: Allocator, Alloc2: Allocator> FrameGraphImpl<'alloc, Alloc, 
                 let memory_barrier = image_resource.state
                     .to_memory_barrier(
                         image_resource.image,
-                        &dst_state,
+                        dst_state,
                         image.subresource_range,
                     );
                 unsafe {

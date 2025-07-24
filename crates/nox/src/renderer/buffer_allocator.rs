@@ -133,7 +133,7 @@ pub struct BufferAlloc<'r, DynVec>
     where
         DynVec: Vector<Block, CapacityPol = Dyn>,
 {
-    device: Handle<'r, ash::Device>,
+    device: *const ash::Device,
     memory: Handle<'r, vk::DeviceMemory>,
     size: vk::DeviceSize,
     free_list: DynVec,
@@ -146,7 +146,7 @@ impl<'r, DynVec> BufferAlloc<'r, DynVec>
 {
 
     pub fn new(
-        device: Handle<'r, ash::Device>,
+        device: &ash::Device,
         physical_device_info: &PhysicalDeviceInfo,
         size: vk::DeviceSize,
         properties: vk::MemoryPropertyFlags,
@@ -186,7 +186,7 @@ impl<'r, DynVec> BufferAlloc<'r, DynVec>
         Ok(Self {
             memory: Handle::new(*memory),
             size,
-            device: Handle::new((*device).clone()),
+            device,
             free_list,
             properties,
         })

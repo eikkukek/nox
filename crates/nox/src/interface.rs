@@ -2,10 +2,12 @@
 
 pub use winit::dpi::LogicalSize;
 
+use crate::renderer;
+
 use super::{
     Nox,
     InitSettings,
-    renderer::{ash::vk, QueueFamilyIndices, FrameGraphInit, RenderError},
+    renderer::{ash::vk, QueueFamilyIndices, frame_graph::FrameGraphInit},
 };
 
 pub trait Interface
@@ -20,5 +22,5 @@ pub trait Interface
         frame_graph: &'a mut dyn FrameGraphInit,
         render_image_format: vk::Format,
         queue_family_indices: QueueFamilyIndices,
-    ) -> Result<(), RenderError>;
+    ) -> Result<(), renderer::Error>;
 }
