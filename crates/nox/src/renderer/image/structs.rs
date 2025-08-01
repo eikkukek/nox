@@ -5,11 +5,9 @@ use core::{
 
 use ash::vk;
 
-use crate::byte_hash::ByteHash;
+use super::{ComponentSwizzle, Format};
 
-use super::ComponentSwizzle;
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct Dimensions {
     pub width: u32,
     pub height: u32,
@@ -31,6 +29,12 @@ impl Dimensions {
         self.height == 0 ||
         self.depth == 0
     }
+
+    pub fn texel_count(&self) -> vk::DeviceSize {
+        self.width as vk::DeviceSize *
+        self.height as vk::DeviceSize *
+        self.depth as vk::DeviceSize
+    }
 }
 
 impl From<Dimensions> for vk::Extent3D {
@@ -44,16 +48,33 @@ impl From<Dimensions> for vk::Extent3D {
     }
 }
 
-impl ByteHash for Dimensions {
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub struct Offset {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
 
-    fn byte_hash(&self, hasher: &mut blake3::Hasher) {
-        self.width.byte_hash(hasher);
-        self.height.byte_hash(hasher);
-        self.depth.byte_hash(hasher);
+impl Offset {
+
+    pub fn new(x: i32, y: i32, z: i32) -> Self
+    {
+        Self {x, y, z}
     }
 }
 
-#[derive(Default, Clone, Copy)]
+impl From<Offset> for vk::Offset3D {
+
+    fn from(value: Offset) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+            z: value.z,
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct ComponentMapping {
     r: ComponentSwizzle,
     g: ComponentSwizzle,
@@ -73,7 +94,7 @@ impl From<ComponentMapping> for vk::ComponentMapping {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 pub struct ImageSubresourceRangeInfo {
     pub aspect_mask: u32,
     pub base_mip_level: u32,
@@ -100,6 +121,17 @@ impl ImageSubresourceRangeInfo {
             layer_count: NonZeroU32::new(layer_count)?,
         })
     }
+
+    pub fn overlaps(self, other: Self) -> bool {
+        if self.base_mip_level < other.base_mip_level + other.level_count.get() &&
+            other.base_mip_level < self.base_mip_level + self.level_count.get() &&
+            self.base_array_layer < other.base_array_layer + other.layer_count.get() &&
+            other.base_array_layer < self.base_array_layer + self.layer_count.get()
+        {
+            return self.aspect_mask & other.aspect_mask != 0
+        }
+        false
+    }
 }
 
 impl From<ImageSubresourceRangeInfo> for vk::ImageSubresourceRange {
@@ -115,7 +147,84 @@ impl From<ImageSubresourceRangeInfo> for vk::ImageSubresourceRange {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct ImageSubresourceLayers {
+    pub aspect_mask: u32,
+    pub mip_level: u32,
+    pub base_array_layer: u32,
+    pub layer_count: NonZeroU32,
+}
+
+impl ImageSubresourceLayers {
+
+    pub fn new(
+        aspect_mask: u32,
+        mip_level: u32,
+        base_array_layer: u32,
+        layer_count: u32,
+    ) -> Option<Self> {
+        Some(Self {
+            aspect_mask,
+            mip_level,
+            base_array_layer,
+            layer_count: NonZeroU32::new(layer_count)?,
+        })
+    }
+}
+
+impl From<ImageSubresourceLayers> for vk::ImageSubresourceLayers {
+
+    fn from(value: ImageSubresourceLayers) -> Self {
+        Self {
+            aspect_mask: vk::ImageAspectFlags::from_raw(value.aspect_mask),
+            mip_level: value.mip_level,
+            base_array_layer: value.base_array_layer,
+            layer_count: value.layer_count.get(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct ComponentInfo {
+    pub component_mapping: ComponentMapping,
+    pub(crate) format: vk::Format,
+}
+
+impl ComponentInfo {
+
+    pub fn new<F: Format>(
+        component_mapping: ComponentMapping,
+        format: F,
+    ) -> Self
+    {
+        Self {
+            component_mapping,
+            format: format.as_vk_format(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ImageRangeInfo {
+    pub subresource_info: ImageSubresourceRangeInfo,
+    pub component_info: Option<ComponentInfo>,
+}
+
+impl ImageRangeInfo {
+
+    pub fn new(
+        subresource_info: ImageSubresourceRangeInfo,
+        component_info: Option<ComponentInfo>,
+    ) -> Self
+    {
+        Self {
+            subresource_info,
+            component_info,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
 pub struct ImageState {
     pub access_flags: vk::AccessFlags,
     pub layout: vk::ImageLayout,
@@ -157,12 +266,18 @@ impl ImageState {
     }
 
     pub fn to_memory_barrier(
-        self,
+        mut self,
         image: vk::Image,
-        to: Self,
+        mut to: Self,
         subresource_range: ImageSubresourceRangeInfo,
     ) -> vk::ImageMemoryBarrier<'static>
     {
+        if self.queue_family_index == vk::QUEUE_FAMILY_IGNORED ||
+            to.queue_family_index == vk::QUEUE_FAMILY_IGNORED
+        {
+            self.queue_family_index = vk::QUEUE_FAMILY_IGNORED;
+            to.queue_family_index = vk::QUEUE_FAMILY_IGNORED;
+        }
         vk::ImageMemoryBarrier {
             s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
             src_access_mask: self.access_flags,

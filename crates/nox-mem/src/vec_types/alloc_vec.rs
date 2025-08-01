@@ -1,34 +1,34 @@
 use core::{
     marker::PhantomData,
     ptr::NonNull,
-    slice,
-    ops::Deref,
+    slice::{self, Iter, IterMut},
+    ops::{Deref, DerefMut},
+    hash::{Hash, Hasher},
 };
-
-use std::ops::DerefMut;
 
 use crate::{
     allocator::Allocator,
     capacity_policy::{CapacityPolicy, Dyn, Fixed},
-    conditional::{Conditional, True, False},
+    conditional::{Conditional, False, True},
     errors::CapacityError,
-    option_alloc::OptionAlloc,
     global_alloc::{GlobalAlloc, GLOBAL_ALLOC},
     impl_traits,
+    option_alloc::OptionAlloc,
 };
 
 use super::{
     Vector,
     Pointer,
     CloneStrategy,
-    Iter,
-    IterMut,
 };
 
 use CapacityError::{FixedCapacity, InvalidReservation, AllocFailed, ZeroSizedElement};
 
-pub struct AllocVec<'alloc, T: Sized, Alloc, CapacityPol, IsGlobal>
+type Result<T> = core::result::Result<T, CapacityError>;
+
+pub struct AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal>
     where
+        T: Sized,
         Alloc: Allocator,
         CapacityPol: CapacityPolicy,
         IsGlobal: Conditional,
@@ -45,8 +45,9 @@ pub type DynVec<'alloc, T, Alloc> = AllocVec<'alloc, T, Alloc, Dyn, False>;
 pub type FixedVec<'alloc, T, Alloc> = AllocVec<'alloc, T, Alloc, Fixed, False>;
 pub type GlobalVec<T> = AllocVec<'static, T, GlobalAlloc, Dyn, True>;
 
-impl<'alloc, T: Sized, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPol, False>
+impl<'alloc, T, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPol, False>
     where
+        T: Sized,
         CapacityPol: CapacityPolicy,
         Alloc: Allocator,
 {
@@ -78,8 +79,11 @@ impl<'alloc, T: Sized, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPo
     pub fn with_capacity(
         capacity: usize,
         alloc: &'alloc Alloc,
-    ) -> Result<Self, CapacityError> {
+    ) -> Result<Self> {
         if capacity == 0 {
+            if CapacityPol::can_grow() {
+                return Ok(Self::new(alloc).unwrap())
+            }
             return Err(InvalidReservation {
                 current: 0, requested: 0
             })
@@ -115,11 +119,14 @@ impl<'alloc, T: Sized, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPo
         len: usize,
         value: T,
         alloc: &'alloc Alloc,
-    ) -> Result<Self, CapacityError>
+    ) -> Result<Self>
         where
             T: Clone
     {
         if len == 0 {
+            if CapacityPol::can_grow() {
+                return Ok(Self::new(alloc).unwrap())
+            }
             return Err(InvalidReservation {
                 current: 0, requested: 0
             })
@@ -158,9 +165,12 @@ impl<'alloc, T: Sized, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPo
         len: usize,
         mut f: F,
         alloc: &'alloc Alloc,
-    ) -> Result<Self, CapacityError>
+    ) -> Result<Self>
     {
         if len == 0 {
+            if CapacityPol::can_grow() {
+                return Ok(Self::new(alloc).unwrap())
+            }
             return Err(InvalidReservation {
                 current: 0, requested: 0
             })
@@ -211,11 +221,9 @@ impl<T> GlobalVec<T> {
 
     pub fn with_capacity(
         capacity: usize,
-    ) -> Result<Self, CapacityError> {
+    ) -> Result<Self> {
         if capacity == 0 {
-            return Err(InvalidReservation {
-                current: 0, requested: 0
-            })
+            return Ok(Default::default())
         }
         let true_capacity =
             if <Self as Vector<T>>::CapacityPol::power_of_two() {
@@ -247,14 +255,12 @@ impl<T> GlobalVec<T> {
     pub fn with_len(
         len: usize,
         value: T,
-    ) -> Result<Self, CapacityError>
+    ) -> Result<Self>
         where
             T: Clone
     {
         if len == 0 {
-            return Err(InvalidReservation {
-                current: 0, requested: 0
-            })
+            return Ok(Default::default())
         }
         let capacity =
             if <Self as Vector<T>>::CapacityPol::power_of_two() {
@@ -289,14 +295,12 @@ impl<T> GlobalVec<T> {
     pub fn with_len_with<F>(
         len: usize,
         mut f: F,
-    ) -> Result<Self, CapacityError>
+    ) -> Result<Self>
         where
             F: FnMut() -> T,
     {
         if len == 0 {
-            return Err(InvalidReservation {
-                current: 0, requested: 0
-            })
+            return Ok(Default::default())
         }
         let capacity =
             if <Self as Vector<T>>::CapacityPol::power_of_two() {
@@ -336,11 +340,11 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         IsGlobal: Conditional,
 {
 
-    type Iter<'a> = Iter<'a, T>
+    type Iter<'a> = slice::Iter<'a, T>
         where
             T: 'a, Self: 'a;
 
-    type IterMut<'a> = IterMut<'a, T>
+    type IterMut<'a> = slice::IterMut<'a, T>
         where
             T: 'a, Self: 'a;
 
@@ -387,11 +391,8 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         self.len = len;
     }
 
-    fn reserve(&mut self, capacity: usize) -> Result<(), CapacityError>
+    fn reserve(&mut self, capacity: usize) -> Result<()>
     {
-        if capacity <= self.capacity {
-            return Ok(())
-        }
         if !CapacityPol::can_grow() {
             return Err(FixedCapacity { capacity: self.capacity })
         }
@@ -422,7 +423,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         Ok(())
     }
 
-    fn resize(&mut self, len: usize, value: T) -> Result<(), CapacityError> 
+    fn resize(&mut self, len: usize, value: T) -> Result<()> 
         where
             T: Clone
     {
@@ -443,7 +444,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         Ok(())
     }
 
-    fn resize_with<F>(&mut self, len: usize, mut f: F) -> Result<(), CapacityError>
+    fn resize_with<F>(&mut self, len: usize, mut f: F) -> Result<()>
         where
             F: FnMut() -> T
     {
@@ -464,7 +465,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         Ok(())
     }
 
-    fn append(&mut self, slice: &[T]) -> Result<(), CapacityError>
+    fn append(&mut self, slice: &[T]) -> Result<()>
         where
             T: Clone
     {
@@ -485,7 +486,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         Ok(())
     }
 
-    fn append_map<U, F>(&mut self, slice: &[U], mut f: F) -> Result<(), CapacityError>
+    fn append_map<U, F>(&mut self, slice: &[U], mut f: F) -> Result<()>
         where
             F: FnMut(&U) -> T
     {
@@ -504,7 +505,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
     }
 
     #[inline(always)]
-    fn push(&mut self, value: T) -> Result<&mut T, CapacityError> {
+    fn push(&mut self, value: T) -> Result<&mut T> {
         if self.len >= self.capacity {
             if self.capacity == 0 {
                 self.reserve(2)?
@@ -555,17 +556,12 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         }
     }
 
-    fn insert(&mut self, value: T, index: usize) -> Result<&mut T, CapacityError> {
+    fn insert(&mut self, value: T, index: usize) -> Result<&mut T> {
         if index > self.len {
             panic!("index {} was out of bounds with len {} when inserting", index, self.len)
         }
         if self.len >= self.capacity {
-            if self.capacity == 0 {
-                self.reserve(2)?
-            }
-            else {
-                self.reserve(self.capacity * 2)?
-            }
+            self.reserve(self.capacity * 2)?;
         }
         unsafe {
             let mut ptr = self.data.insert_element(value, index, self.len);
@@ -612,7 +608,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         self.data = Pointer::dangling();
     }
 
-    fn clone_from(mut self, from: &[T]) -> Result<Self, CapacityError>
+    fn clone_from(mut self, from: &[T]) -> Result<Self>
         where
             T: Clone
     {
@@ -637,7 +633,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         Ok(self)
     }
 
-    fn move_from<V>(mut self, from: &mut V) -> Result<Self, CapacityError>
+    fn move_from<V>(mut self, from: &mut V) -> Result<Self>
         where
             V: Vector<T>
     {
@@ -675,20 +671,12 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
 
     #[inline(always)]
     fn iter(&self) -> Self::Iter<'_> {
-        unsafe {
-            let ptr = self.data;
-            let end = self.data.add(self.len);
-            Iter::new(*ptr, *end)
-        }
+        self.as_slice().iter()
     }
 
     #[inline(always)]
     fn iter_mut(&mut self) -> Self::IterMut<'_> {
-        unsafe {
-            let ptr = self.data;
-            let end = self.data.add(self.len);
-            IterMut::new(*ptr, *end)
-        }
+        self.as_mut_slice().iter_mut()
     }
 }
 
@@ -749,6 +737,31 @@ impl_traits!{
         #[inline(always)]
         fn into_iter(self) -> Self::IntoIter {
             self.iter_mut()
+        }
+    ,
+    PartialEq where T: PartialEq =>
+
+        fn eq(&self, other: &Self) -> bool {
+            if self.len != other.len {
+                return false
+            }
+            for (i, value) in self.iter().enumerate() {
+                if value != &other[i] {
+                    return false
+                }
+            }
+            return true
+        }
+    ,
+    Eq where T: Eq =>
+    ,
+    Hash where T: Hash =>
+
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.len.hash(state);
+            for value in self {
+                value.hash(state);
+            }
         }
     ,
 }
@@ -813,3 +826,19 @@ impl_traits!{
         }
     ,
 }
+
+unsafe impl<
+    'alloc,
+    Alloc: Allocator + Send,
+    T: Send,
+    CapacityPol: CapacityPolicy,
+    IsGlobal: Conditional
+> Send for AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal> {}
+
+unsafe impl<
+    'alloc,
+    Alloc: Allocator + Sync,
+    T: Sync,
+    CapacityPol: CapacityPolicy,
+    IsGlobal: Conditional
+> Sync for AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal> {}

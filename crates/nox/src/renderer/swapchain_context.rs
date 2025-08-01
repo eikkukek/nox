@@ -2,7 +2,7 @@ use core::{slice, ptr};
 
 use ash::{khr::{surface, swapchain}, vk};
 
-use nox_mem::{Allocator, Vector, FixedVec, slice};
+use nox_mem::{Allocator, Vector, vec_types::FixedVec};
 
 use crate::{
     stack_alloc::{StackAlloc, StackGuard},
@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    image_state::ImageState,
+    image::{ImageState, ImageSubresourceRangeInfo, ImageAspect},
     helpers,
 };
 
@@ -493,14 +493,10 @@ impl<'mem> SwapchainContext<'mem> {
         unsafe { swapchain_loader.destroy_swapchain(self.handle, None); }
     }
 
-    pub const fn image_subresource_range() -> vk::ImageSubresourceRange {
-        vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        }
+    pub fn subresource_range_info() -> ImageSubresourceRangeInfo {
+        ImageSubresourceRangeInfo
+            ::new(ImageAspect::Color as _, 0, 1, 0, 1)
+            .unwrap()
     }
 
     pub const fn frame_timeout() -> u64 {
@@ -562,7 +558,7 @@ impl<'mem> SwapchainContext<'mem> {
 
     pub fn setup_submit(
         &mut self,
-        device: ash::Device,
+        device: &ash::Device,
         src_image_state: ImageState,
         graphics_queue_index: u32,
     ) -> (vk::SubmitInfo<'_>, vk::Fence) {
@@ -577,8 +573,8 @@ impl<'mem> SwapchainContext<'mem> {
         );
         let memory_barrier = src_image_state.to_memory_barrier(
             self.images[image_index],
-            &dst_image_state,
-            Self::image_subresource_range()
+            dst_image_state,
+            Self::subresource_range_info()
         );
         unsafe {
             device.cmd_pipeline_barrier(
@@ -588,7 +584,7 @@ impl<'mem> SwapchainContext<'mem> {
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                slice![memory_barrier]
+                &[memory_barrier],
             );
         }
         self.image_states[image_index] = dst_image_state;

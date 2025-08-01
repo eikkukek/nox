@@ -2,25 +2,43 @@
 
 pub use winit::dpi::LogicalSize;
 
-use crate::renderer;
+use crate::renderer::{
+    self,
+    GlobalResources,
+    CommandRequests,
+    CommandRequestID,
+    TransferCommandbuffer,
+};
 
 use super::{
     Nox,
     InitSettings,
-    renderer::{ash::vk, QueueFamilyIndices, frame_graph::FrameGraphInit},
+    renderer::frame_graph::FrameGraphInit,
 };
 
 pub trait Interface
     where
-        Self: Sized
+        Self: Sized + Send + Sync + 'static
 {
-    fn init_settings(&mut self) -> &InitSettings;
+    fn init_settings(&self) -> InitSettings;
+
     fn init_callback(&mut self, nox: &mut Nox<Self>) {}
+
+    fn update(&mut self, nox: &mut Nox<Self>, renderer_resources: &mut GlobalResources);
+
     fn surface_update(&mut self, nox: &mut Nox<Self>, surface_size: LogicalSize<f32>, image_count: u32) {}
+
     fn render<'a>(
         &mut self,
         frame_graph: &'a mut dyn FrameGraphInit,
-        render_image_format: vk::Format,
-        queue_family_indices: QueueFamilyIndices,
+        pending_transfers: &[CommandRequestID],
     ) -> Result<(), renderer::Error>;
+
+    fn command_requests(&mut self, requests: &mut CommandRequests);
+
+    fn transfer_commands(
+        &mut self,
+        id: CommandRequestID,
+        command_buffer: &mut TransferCommandbuffer,
+    );
 }

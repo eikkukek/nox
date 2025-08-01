@@ -1,7 +1,7 @@
 mod enums;
-mod structures;
+mod structs;
 mod info;
 
 pub use enums::*;
-pub use structures::*;
+pub use structs::*;
 pub use info::PipelineLayoutInfo;

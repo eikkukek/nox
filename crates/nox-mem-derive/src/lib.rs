@@ -10,6 +10,7 @@ pub fn nox_pod(item: TokenStream) -> TokenStream {
     nox_pod::nox_pod(item)
 }
 
+/// A derive macro for `AsRaw`
 #[proc_macro_derive(AsRaw)]
 pub fn nox_as_raw(item: TokenStream) -> TokenStream {
     nox_as_raw::nox_as_raw(item)

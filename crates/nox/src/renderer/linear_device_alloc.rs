@@ -1,78 +1,233 @@
-use core::cell::UnsafeCell;
+use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{has_bits, has_not_bits};
+use nox_mem::{Vector, vec_types::GlobalVec};
 
-use super::PhysicalDeviceInfo;
+use crate::{has_bits, renderer::memory_binder::DeviceMemory};
 
-use super::Error::{self, OutOfDeviceMemory, IncompatibleMemoryRequirements};
+use super::{
+    PhysicalDeviceInfo,
+    memory_binder::MemoryBinder,
+    Error::{self, OutOfDeviceMemory, IncompatibleMemoryRequirements}
+};
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-pub struct LinearDeviceAlloc {
-    device: *const ash::Device,
-    device_memory: vk::DeviceMemory,
-    size: vk::DeviceSize,
-    used: UnsafeCell<vk::DeviceSize>,
+#[derive(Clone, Copy)]
+struct Block {
+    device_memory: Option<vk::DeviceMemory>,
+    used: vk::DeviceSize,
+    memory_type_index: u32,
+}
+
+unsafe impl Send for Block {}
+unsafe impl Sync for Block {}
+
+impl Block {
+
+    #[inline(always)]
+    fn new(memory_type_index: u32) -> Self {
+        Self {
+            device_memory: None,
+            used: 0,
+            memory_type_index,
+        }
+    }
+
+    #[inline(always)]
+    fn bind_image_memory(
+        &mut self,
+        device: &ash::Device,
+        image: vk::Image,
+        memory_requirements: vk::MemoryRequirements,
+        block_size: vk::DeviceSize,
+        granularity: vk::DeviceSize,
+    ) -> Result<Memory>
+    {
+        if self.device_memory.is_none() {
+            let allocate_info = vk::MemoryAllocateInfo {
+                s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
+                allocation_size: block_size,
+                memory_type_index: self.memory_type_index,
+                ..Default::default()
+            };
+            self.device_memory = Some(unsafe {
+                device.allocate_memory(&allocate_info, None)?
+            });
+        }
+        let device_memory = self.device_memory.unwrap();
+        let used = self.used;
+        let align = memory_requirements.alignment.max(granularity);
+        let offset = (used + align - 1) & !(align - 1);
+        let end = offset + memory_requirements.size;
+        if block_size < end {
+            return Err(OutOfDeviceMemory { size: memory_requirements.size, align, avail: block_size - used } )
+        }
+        unsafe {
+            device.bind_image_memory(image, device_memory, offset)?;
+            self.used = end;
+        };
+        Ok(Memory::new(device_memory, offset, memory_requirements.size))
+    }
+
+    #[inline(always)]
+    fn bind_buffer_memory(
+        &mut self,
+        device: &ash::Device,
+        buffer: vk::Buffer,
+        memory_requirements: vk::MemoryRequirements,
+        block_size: vk::DeviceSize,
+        granularity: vk::DeviceSize,
+    ) -> Result<Memory>
+    {
+        if self.device_memory.is_none() {
+            let allocate_info = vk::MemoryAllocateInfo {
+                s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
+                allocation_size: block_size,
+                memory_type_index: self.memory_type_index,
+                ..Default::default()
+            };
+            self.device_memory = Some(unsafe {
+                device.allocate_memory(&allocate_info, None)?
+            });
+        }
+        let device_memory = self.device_memory.unwrap();
+        let used = self.used;
+        let align = memory_requirements.alignment.max(granularity);
+        let offset = (used + align - 1) & !(align - 1);
+        let end = offset + memory_requirements.size;
+        if block_size < end {
+            return Err(OutOfDeviceMemory { size: memory_requirements.size, align, avail: block_size - used } )
+        }
+        unsafe {
+            device.bind_buffer_memory(buffer, device_memory, offset)?;
+            self.used = end;
+        };
+        Ok(Memory::new(device_memory, offset, memory_requirements.size))
+    }
+
+    #[inline(always)]
+    unsafe fn reset(&mut self) {
+        self.used = 0;
+    }
+
+    #[inline(always)]
+    unsafe fn free_memory(&mut self, device: &ash::Device) {
+        if let Some(memory) = self.device_memory.take() {
+            unsafe {
+                device.free_memory(memory, None);
+            }
+        }
+        self.used = 0;
+    }
+}
+
+pub(crate) struct LinearDeviceAlloc {
+    device: Arc<ash::Device>,
+    blocks: GlobalVec<Block>,
+    block_size: vk::DeviceSize,
     granularity: vk::DeviceSize,
-    properties: vk::MemoryPropertyFlags,
 }
 
 impl LinearDeviceAlloc {
 
     pub fn new(
-        device: &ash::Device,
-        size: vk::DeviceSize,
-        properties: vk::MemoryPropertyFlags,
+        device: Arc<ash::Device>,
+        block_size: vk::DeviceSize,
+        required_properties: vk::MemoryPropertyFlags,
+        forbidden_properties: vk::MemoryPropertyFlags,
         physical_device_info: &PhysicalDeviceInfo,
     ) -> Result<Self>
     {
         let memory_properties = physical_device_info.memory_properties();
-        let mut maybe_index = None;
+        let mut blocks = GlobalVec::with_capacity(4).unwrap();
         for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize].iter().enumerate() {
-            if has_bits!(memory_type.property_flags, properties) {
-                maybe_index = Some(i as u32);
-                break;
+            let property_flags = memory_type.property_flags;
+            if has_bits!(property_flags, required_properties) && !property_flags.intersects(forbidden_properties) {
+                blocks.push(Block::new(i as u32)).unwrap();
             }
         }
-        let memory_type_index = maybe_index.ok_or_else(|| IncompatibleMemoryRequirements)?;
-        let allocate_info = vk::MemoryAllocateInfo {
-            s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
-            allocation_size: size,
-            memory_type_index,
-            ..Default::default()
-        };
-        let device_memory = unsafe {
-            device.allocate_memory(&allocate_info, None)?
-        };
         Ok(Self {
             device,
-            device_memory,
-            size,
-            used: UnsafeCell::new(0),
+            blocks,
+            block_size,
             granularity: physical_device_info.properties().limits.buffer_image_granularity,
-            properties,
         })
     }
 
-    pub fn bind_image_memory(&self, image: vk::Image) -> Result<()> {
-        let memory_requirements = unsafe { (*self.device).get_image_memory_requirements(image) };
-        if has_not_bits!(self.properties.as_raw(), memory_requirements.memory_type_bits) {
-            return Err(IncompatibleMemoryRequirements)
+    pub unsafe fn reset(&mut self) {
+        for block in self.blocks.iter_mut() {
+            unsafe {
+                block.reset();
+            }
         }
-        let used = unsafe{ *self.used.get() };
-        let align = memory_requirements.alignment.max(self.granularity);
-        let offset = (used + align - 1) & !(align - 1);
-        let end = offset + memory_requirements.size;
-        if self.size < end {
-            return Err(OutOfDeviceMemory { size: memory_requirements.size, align, avail: self.size - used } )
+    }
+}
+
+pub(crate) struct Memory {
+    memory: vk::DeviceMemory,
+    offset: vk::DeviceSize,
+    size: vk::DeviceSize,
+}
+
+impl Memory {
+
+    pub fn new(
+        memory: vk::DeviceMemory,
+        offset: vk::DeviceSize,
+        size: vk::DeviceSize,
+    ) -> Self
+    {
+        Self {
+            memory,
+            offset,
+            size,
         }
-        unsafe {
-            (*self.device).bind_image_memory(image, self.device_memory, offset)?;
-            *self.used.get() = end;
-        };
-        Ok(())
+    }
+}
+
+impl DeviceMemory for Memory {
+
+    fn device_memory(&self) -> vk::DeviceMemory {
+        self.memory
+    }
+
+    fn size(&self) -> vk::DeviceSize {
+        self.size
+    }
+
+    fn offset(&self) -> vk::DeviceSize {
+        self.offset
+    }
+
+    unsafe fn free_memory(&mut self) {}
+}
+
+impl MemoryBinder for LinearDeviceAlloc {
+
+    type Memory = Memory;
+
+    fn bind_image_memory(&mut self, image: vk::Image) -> Result<Memory> {
+        let device = &self.device;
+        let memory_requirements = unsafe { device.get_image_memory_requirements(image) };
+        for block in self.blocks.iter_mut() {
+            if memory_requirements.memory_type_bits & (1 << block.memory_type_index) != 0 {
+                return block.bind_image_memory(device, image, memory_requirements, self.block_size, self.granularity);
+            }
+        }
+        Err(IncompatibleMemoryRequirements)
+    }
+
+    fn bind_buffer_memory(&mut self, buffer: vk::Buffer) -> Result<Self::Memory> {
+        let device = &self.device;
+        let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+        for block in self.blocks.iter_mut() {
+            if memory_requirements.memory_type_bits & (1 << block.memory_type_index) != 0 {
+                return block.bind_buffer_memory(device, buffer, memory_requirements, self.block_size, self.granularity);
+            }
+        }
+        return Err(IncompatibleMemoryRequirements)
     }
 }
 
@@ -80,10 +235,11 @@ impl Drop for LinearDeviceAlloc {
 
     fn drop(&mut self) {
         unsafe {
-            (*self.device).free_memory(
-                self.device_memory,
-                None
-            );
+            let device = &*self.device;
+            for block in self.blocks.iter_mut() {
+                block.free_memory(device);
+            }
+            self.blocks.clear();
         }
     }
 }

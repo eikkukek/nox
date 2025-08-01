@@ -1,21 +1,21 @@
 use ash::vk;
 
-use nox_mem::{Allocator, GlobalVec, FixedVec};
+use nox_mem::{slot_map::{SlotIndex, GlobalSlotMap}, vec_types::{GlobalVec}};
 
-pub struct PipelineTypeInfo<'alloc, Alloc: Allocator> {
+pub struct PipelineTypeInfo {
     msaa_samples: vk::SampleCountFlags,
-    color_formats: FixedVec<'alloc, vk::Format, Alloc>,
+    color_formats: GlobalVec<vk::Format>,
     depth_format: vk::Format,
     stencil_format: vk::Format,
 }
 
-impl<'alloc, Alloc: Allocator> PipelineTypeInfo<'alloc, Alloc> {
+impl PipelineTypeInfo {
 
     pub fn msaa_samples(&self) -> vk::SampleCountFlags {
         self.msaa_samples
     }
 
-    pub fn color_formats(&self) -> &FixedVec<'alloc, vk::Format, Alloc> {
+    pub fn color_formats(&self) -> &[vk::Format] {
         &self.color_formats
     }
 
@@ -28,37 +28,31 @@ impl<'alloc, Alloc: Allocator> PipelineTypeInfo<'alloc, Alloc> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct PipelineID {
-    type_index: u32,
-    pipeline_index: u32,
+    type_index: SlotIndex<PipelineTypeInfo>,
 }
 
 impl PipelineID {
-
-    pub fn type_index(&self) -> u32 {
+    
+    pub fn type_index(&self) -> SlotIndex<PipelineTypeInfo> {
         self.type_index
     }
-
-    pub fn pipeline_index(&self) -> u32 {
-        self.pipeline_index
-    }
 }
 
-pub struct PipelineCache<'alloc, Alloc: Allocator> {
-    pipeline_types: GlobalVec<PipelineTypeInfo<'alloc, Alloc>>,
+pub struct PipelineCache {
+    pipeline_types: GlobalSlotMap<PipelineTypeInfo>,
 }
 
-impl<'alloc, Alloc: Allocator> PipelineCache<'alloc, Alloc> {
+impl PipelineCache {
 
     pub fn new() -> Self {
         Self {
-            pipeline_types: GlobalVec::new(),
+            pipeline_types: GlobalSlotMap::new(),
         }
     }
 
-    pub fn get_type_info(&self, id: PipelineID) -> &PipelineTypeInfo<'alloc, Alloc> {
-        assert!(id.type_index < self.pipeline_types.len() as u32, "invalid pipeline id {:?}", id);
-        &self.pipeline_types[id.type_index as usize]
+    pub fn get_type_info(&self, id: PipelineID) -> &PipelineTypeInfo {
+        &self.pipeline_types[id.type_index]
     }
 }

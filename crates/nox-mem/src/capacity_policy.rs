@@ -20,8 +20,9 @@ impl CapacityPolicy for Dyn {
 
     #[inline]
     fn grow(current: usize, required: usize) -> Option<usize> {
-        if required <= current { None }
-        else { Some(required.max(2).next_power_of_two()) }
+        let power_of_2 = required.next_power_of_two().max(2);
+        if power_of_2 <= current { None }
+        else { Some(power_of_2) }
     }
 }
 

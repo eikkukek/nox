@@ -1,10 +1,8 @@
 use ash::vk;
 use nox_mem::AsRaw;
 
-use crate::byte_hash::ByteHash;
-
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum DynamicState {
     CullMode = vk::DynamicState::CULL_MODE.as_raw(),
     FrontFace = vk::DynamicState::FRONT_FACE.as_raw(),
@@ -26,15 +24,8 @@ impl From<DynamicState> for vk::DynamicState {
     }
 }
 
-impl ByteHash for vk::DynamicState {
-    
-    fn byte_hash(&self, hasher: &mut blake3::Hasher) {
-        self.as_raw().byte_hash(hasher);
-    }
-}
-
 #[repr(i32)]
-#[derive(Default, Clone, Copy, AsRaw)]
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum PolygonMode {
     #[default]
     Fill = vk::PolygonMode::FILL.as_raw(),
@@ -49,7 +40,7 @@ impl From<PolygonMode> for vk::PolygonMode {
 }
 
 #[repr(u32)]
-#[derive(Default, Clone, Copy, AsRaw)]
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum CullMode {
     None = vk::CullModeFlags::NONE.as_raw(),
     #[default]
@@ -66,7 +57,7 @@ impl From<CullMode> for vk::CullModeFlags {
 }
 
 #[repr(i32)]
-#[derive(Default, Clone, Copy, AsRaw)]
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum FrontFace {
     #[default]
     CounterClockwise = vk::FrontFace::COUNTER_CLOCKWISE.as_raw(),
@@ -81,7 +72,7 @@ impl From<FrontFace> for vk::FrontFace {
 }
 
 #[repr(i32)]
-#[derive(Default, Clone, Copy, AsRaw)]
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum PrimitiveTopology {
     PointList = vk::PrimitiveTopology::POINT_LIST.as_raw(),
     LineList = vk::PrimitiveTopology::LINE_LIST.as_raw(),
@@ -109,7 +100,7 @@ impl From<PrimitiveTopology> for vk::PrimitiveTopology {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum CompareOp {
     Never = vk::CompareOp::NEVER.as_raw(),
     Less = vk::CompareOp::LESS.as_raw(),
@@ -129,7 +120,7 @@ impl From<CompareOp> for vk::CompareOp {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum StencilOp {
     Keep = vk::StencilOp::KEEP.as_raw(),
     Zero = vk::StencilOp::ZERO.as_raw(),
@@ -149,7 +140,7 @@ impl From<StencilOp> for vk::StencilOp {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum BlendFactor {
     Zero = vk::BlendFactor::ZERO.as_raw(),
     One = vk::BlendFactor::ONE.as_raw(),
@@ -167,6 +158,29 @@ pub enum BlendFactor {
     OneMinusConstAlpha = vk::BlendFactor::ONE_MINUS_CONSTANT_ALPHA.as_raw(),
 }
 
+impl BlendFactor {
+
+    pub(crate) fn from_vk(value: vk::BlendFactor) -> Option<Self> {
+        match value.as_raw() {
+            x if x == Self::Zero as i32 => Some(Self::Zero),
+            x if x == Self::One as i32 => Some(Self::One),
+            x if x == Self::SrcColor as i32 => Some(Self::SrcColor),
+            x if x == Self::OneMinusSrcColor as i32 => Some(Self::OneMinusSrcColor),
+            x if x == Self::DstColor as i32 => Some(Self::DstColor),
+            x if x == Self::OneMinusDstColor as i32 => Some(Self::OneMinusDstColor),
+            x if x == Self::SrcAlpha as i32 => Some(Self::SrcAlpha),
+            x if x == Self::OneMinusSrcAlpha as i32 => Some(Self::OneMinusSrcAlpha),
+            x if x == Self::DstAlpha as i32 => Some(Self::DstAlpha),
+            x if x == Self::OneMinusDstAlpha as i32 => Some(Self::OneMinusDstAlpha),
+            x if x == Self::ConstColor as i32 => Some(Self::ConstColor),
+            x if x == Self::OneMinusConstColor as i32 => Some(Self::OneMinusConstColor),
+            x if x == Self::ConstAlpha as i32 => Some(Self::ConstAlpha),
+            x if x == Self::OneMinusConstAlpha as i32 => Some(Self::OneMinusConstAlpha),
+            _ => None,
+        }
+    }
+}
+
 impl From<BlendFactor> for vk::BlendFactor {
 
     fn from(value: BlendFactor) -> Self {
@@ -175,7 +189,7 @@ impl From<BlendFactor> for vk::BlendFactor {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum BlendOp {
     Add = vk::BlendOp::ADD.as_raw(),
     Sub = vk::BlendOp::SUBTRACT.as_raw(),
@@ -184,16 +198,23 @@ pub enum BlendOp {
     Max = vk::BlendOp::MAX.as_raw(),
 }
 
+impl BlendOp {
+
+    pub(crate) fn from_vk(value: vk::BlendOp) -> Option<Self> {
+        match value.as_raw() {
+            x if x == Self::Add as i32 => Some(Self::Add),
+            x if x == Self::Sub as i32 => Some(Self::Sub),
+            x if x == Self::SubRev as i32 => Some(Self::SubRev),
+            x if x == Self::Min as i32 => Some(Self::Min),
+            x if x == Self::Max as i32 => Some(Self::Max),
+            _ => None,
+        }
+    }
+}
+
 impl From<BlendOp> for vk::BlendOp {
 
     fn from(value: BlendOp) -> Self {
         Self::from_raw(value.as_raw())
-    }
-}
-
-impl ByteHash for vk::Format {
-
-    fn byte_hash(&self, hasher: &mut blake3::Hasher) {
-        self.as_raw().byte_hash(hasher);
     }
 }

@@ -329,6 +329,12 @@ impl_traits! {
             self.len = 0;
         }
     ,
+    Default =>
+        
+        fn default() -> Self {
+            Self::new()
+        }
+    ,
     AsRef<[T]> =>
 
         #[inline(always)]

@@ -3,7 +3,7 @@ use ash::vk;
 use nox_mem::AsRaw;
 
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum DescriptorType {
     Sampler = vk::DescriptorType::SAMPLER.as_raw(),
     CombinedImageSampler = vk::DescriptorType::COMBINED_IMAGE_SAMPLER.as_raw(),
@@ -25,7 +25,7 @@ impl From<DescriptorType> for vk::DescriptorType {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum ShaderStage {
     Unknown = 0,
     Vertex = vk::ShaderStageFlags::VERTEX.as_raw(),

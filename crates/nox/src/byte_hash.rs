@@ -1,9 +1,11 @@
-use blake3::Hasher;
-use nox_mem::AsRaw;
+pub trait ByteHasher {
+
+    fn update(&mut self, input: &[u8]);
+}
 
 pub trait ByteHash {
 
-    fn byte_hash(&self, hasher: &mut Hasher);
+    fn byte_hash<H: ByteHasher>(&self, state: &mut H);
 }
 
 macro_rules! impl_le_hash {
@@ -12,8 +14,8 @@ macro_rules! impl_le_hash {
             impl ByteHash for $t {
 
                 #[inline(always)]
-                fn byte_hash(&self, hasher: &mut Hasher) {
-                    hasher.update(self.to_le_bytes().as_slice());
+                fn byte_hash<H: ByteHasher>(&self, state: &mut H) {
+                    state.update(self.to_le_bytes().as_slice());
                 }
             }
         )+
@@ -29,18 +31,18 @@ impl_le_hash!(
 impl ByteHash for &str {
 
     #[inline(always)]
-    fn byte_hash(&self, hasher: &mut Hasher) {
-        hasher.update(self.as_bytes());
+    fn byte_hash<H: ByteHasher>(&self, state: &mut H) {
+        state.update(self.as_bytes());
     }
 }
 
 impl<T: ByteHash> ByteHash for [T] {
 
     #[inline(always)]
-    fn byte_hash(&self, hasher: &mut Hasher) {
-        (self.len() as u128).byte_hash(hasher);
+    fn byte_hash<H: ByteHasher>(&self, state: &mut H) {
+        (self.len() as u128).byte_hash(state);
         for t in self {
-            t.byte_hash(hasher);
+            t.byte_hash(state);
         }
     }
 }
@@ -48,7 +50,7 @@ impl<T: ByteHash> ByteHash for [T] {
 impl<T: ByteHash> ByteHash for Option<T> {
 
     #[inline(always)]
-    default fn byte_hash(&self, hasher: &mut Hasher) {
+    default fn byte_hash<H: ByteHasher>(&self, hasher: &mut H) {
         match self {
             None => 0u32.byte_hash(hasher),
             Some(t) => {
@@ -62,7 +64,7 @@ impl<T: ByteHash> ByteHash for Option<T> {
 impl ByteHash for bool {
 
     #[inline(always)]
-    fn byte_hash(&self, hasher: &mut Hasher) {
+    fn byte_hash<H: ByteHasher>(&self, hasher: &mut H) {
         (*self as u32).byte_hash(hasher);
     }
 }

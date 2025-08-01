@@ -1,10 +1,10 @@
 use ash::vk;
 
-use nox_mem::{Allocator, Vector, FixedVec,};
+use nox_mem::{Allocator, Vector, vec_types::FixedVec};
 
 use crate::renderer::Error;
 
-use super::DescriptorType;
+use super::pipeline::DescriptorType;
 
 #[derive(Clone, Copy)]
 pub struct DescriptorPoolSize {

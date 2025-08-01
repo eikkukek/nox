@@ -35,15 +35,15 @@ pub struct QueueFamilyIndices {
 
 impl QueueFamilyIndices {
 
-    pub fn get_graphics_index(&self) -> u32 {
+    pub fn graphics_index(&self) -> u32 {
         self.graphics.index
     }
 
-    pub fn get_transfer_index(&self) -> u32 {
+    pub fn transfer_index(&self) -> u32 {
         self.transfer.index
     }
 
-    pub fn get_compute_index(&self) -> u32 {
+    pub fn compute_index(&self) -> u32 {
         self.compute.index
     }
 }
@@ -108,8 +108,8 @@ impl PhysicalDeviceInfo {
         &self.device_name
     }
 
-    pub fn queue_family_indices(&self) -> &QueueFamilyIndices {
-        &self.queue_family_indices
+    pub fn queue_family_indices(&self) -> QueueFamilyIndices {
+        self.queue_family_indices
     }
 
     pub fn properties(&self) -> &vk::PhysicalDeviceProperties {

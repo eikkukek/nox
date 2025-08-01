@@ -1,3 +1,31 @@
+/// A trait for `repr({integer})` enums with unit-only variants.
+///
+/// This trait allows extracting the underlying integer representation of such enums
+/// using a consistent and safe interface.
+///
+/// For bitflag-style enums, you can implement bitwise ops:
+///
+/// ```
+/// impl_as_raw_bit_op!(MyEnum);
+/// ```
+///
+/// # Example
+///
+/// ```
+/// #[repr(u32)]
+/// #[derive(AsRaw)]
+/// pub enum MyEnum {
+///     Read = 0x1,
+///     Write = 0x2,
+///     Execute = 0x4,
+/// }
+///
+/// impl_as_raw_bit_op!(MyEnum);
+///
+/// let execute: u32 = MyEnum::Execute.as_raw();
+/// assert_eq!(execute, 0x4);
+/// assert_eq!(MyEnum::Read | MyEnum::Write, 0x1 | 0x2)
+/// ```
 pub trait AsRaw {
 
     type Repr;
@@ -9,6 +37,17 @@ pub trait AsRaw {
 macro_rules! impl_as_raw_bit_op {
     ($($t:ty),+ $(,)?) => {
         $(
+
+        impl core::ops::BitAnd for $t {
+
+            type Output = <Self as AsRaw>::Repr;
+
+            #[inline(always)]
+            fn bitand(self, rhs: Self) -> Self::Output {
+                self.as_raw() & rhs
+            }
+        }
+
         impl core::ops::BitAnd<<$t as AsRaw>::Repr> for $t
         {
             type Output = <Self as AsRaw>::Repr;
@@ -34,6 +73,16 @@ macro_rules! impl_as_raw_bit_op {
             #[inline(always)]
             fn bitand_assign(&mut self, rhs: $t) {
                 *self &= rhs.as_raw()
+            }
+        }
+
+        impl core::ops::BitOr for $t {
+
+            type Output = <Self as AsRaw>::Repr;
+
+            #[inline(always)]
+            fn bitor(self, rhs: Self) -> Self::Output {
+                self.as_raw() | rhs
             }
         }
 

@@ -1,15 +1,10 @@
 use ash::vk;
 
-use nox_mem::Vector;
-
-
-pub fn allocate_command_buffers<Vec>(
+pub fn allocate_command_buffers(
     device: &ash::Device,
     info: &vk::CommandBufferAllocateInfo,
-    out: &mut Vec,
+    out: &mut [vk::CommandBuffer],
 ) -> Result<(), vk::Result>
-    where
-        Vec: Vector<vk::CommandBuffer>,
 {
     if info.command_buffer_count > out.len() as u32 {
         panic!("out len smaller than command buffer count!");

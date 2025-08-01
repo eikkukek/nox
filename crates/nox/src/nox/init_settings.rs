@@ -4,6 +4,7 @@ use crate::version::Version;
 
 use super::AppName;
 
+#[derive(Clone, Copy)]
 pub struct InitSettings {
     pub app_name: AppName,
     pub app_version: Version,

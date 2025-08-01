@@ -1,6 +1,7 @@
 use core::{
     ops::{Deref, DerefMut},
     ptr::NonNull,
+    hash::{Hash, Hasher},
 };
 
 use crate::capacity_policy::CapacityPolicy;
@@ -79,6 +80,11 @@ pub trait Vector<T>:
         where
             V: Vector<T>;
 
+    #[inline(always)]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     fn contains(&self, value: &T) -> bool
         where
             T: PartialEq;
@@ -101,4 +107,30 @@ pub trait Vector<T>:
     fn iter(&self) -> Self::Iter<'_>;
 
     fn iter_mut(&mut self) -> Self::IterMut<'_>;
+
+    fn map_hash<H, F>(&self, state: &mut H, mut f: F)
+        where 
+            H: Hasher,
+            F: FnMut(&T, &mut H)
+    {
+        self.len().hash(state);
+        for value in self.iter() {
+            f(value, state);
+        }
+    }
+
+    fn map_eq<F>(&self, other: &Self, mut f: F) -> bool
+        where
+            F: FnMut(&T, &T) -> bool
+    {
+        if self.len() != other.len() {
+            return false
+        }
+        for (i, value) in self.iter().enumerate() {
+            if !f(value, &other[i]) {
+                return false
+            }
+        }
+        true
+    }
 }

@@ -2,13 +2,11 @@ use ash::vk;
 
 pub use vk::Format as Format;
 
-use nox_mem::{slice, AsRaw, GlobalVec, Vector};
-
-use crate::byte_hash::ByteHash;
+use nox_mem::{slice, Vector, vec_types::GlobalVec};
 
 pub use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct GraphicsPipelineInfo {
     dynamic_states: GlobalVec<vk::DynamicState>,
     color_output_formats: GlobalVec<vk::Format>,
@@ -120,7 +118,7 @@ impl GraphicsPipelineInfo {
         self
     }
 
-    pub fn as_create_info(&self) -> CreateInfos<'_> {
+    pub(crate) fn as_create_info(&self) -> CreateInfos<'_> {
 
         let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo {
             s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -144,9 +142,10 @@ impl GraphicsPipelineInfo {
             cull_mode: self.cull_mode.into(),
             front_face: self.front_face.into(),
             depth_bias_enable: self.depth_bias_info.is_some().into(),
-            depth_bias_constant_factor: depth_bias_info.constant_factor,
-            depth_bias_clamp: depth_bias_info.clamp,
-            depth_bias_slope_factor: depth_bias_info.constant_factor,
+            depth_bias_constant_factor: depth_bias_info.constant_factor.to_inner(),
+            depth_bias_clamp: depth_bias_info.clamp.to_inner(),
+            depth_bias_slope_factor: depth_bias_info.constant_factor.to_inner(),
+            line_width: 1.0,
             ..Default::default()
         };
 
@@ -156,7 +155,7 @@ impl GraphicsPipelineInfo {
             s_type: vk::StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
             rasterization_samples: sample_shading_info.samples.into(),
             sample_shading_enable: self.sample_shading_info.is_some().into(),
-            min_sample_shading: sample_shading_info.min_shading,
+            min_sample_shading: sample_shading_info.min_shading.to_inner(),
             p_sample_mask: core::ptr::null(),
             alpha_to_coverage_enable: sample_shading_info.alpha_to_coverage.into(),
             alpha_to_one_enable: sample_shading_info.alpha_to_one.into(),
@@ -178,8 +177,8 @@ impl GraphicsPipelineInfo {
             stencil_test_enable: depth_stencil_info.stencil_test_enable.into(),
             front: stencil_test_info.front.into(),
             back: stencil_test_info.back.into(),
-            min_depth_bounds: depth_bounds.min,
-            max_depth_bounds: depth_bounds.max,
+            min_depth_bounds: depth_bounds.min.to_inner(),
+            max_depth_bounds: depth_bounds.max.to_inner(),
             ..Default::default()
         };
 
@@ -222,26 +221,5 @@ impl GraphicsPipelineInfo {
             dynamic_state,
             rendering_info,
         }
-    }
-}
-
-impl ByteHash for GraphicsPipelineInfo {
-
-    fn byte_hash(&self, hasher: &mut blake3::Hasher) {
-        self.dynamic_states.byte_hash(hasher);
-        self.color_output_formats.byte_hash(hasher);
-        self.polygon_mode.as_raw().byte_hash(hasher);
-        self.cull_mode.as_raw().byte_hash(hasher);
-        self.front_face.as_raw().byte_hash(hasher);
-        self.depth_bias_info.byte_hash(hasher);
-        self.primitive_topology.0.as_raw().byte_hash(hasher);
-        self.primitive_topology.1.byte_hash(hasher);
-        self.sample_shading_info.byte_hash(hasher);
-        self.depth_stencil_info.byte_hash(hasher);
-        self.color_blend_info.byte_hash(hasher);
-        self.depth_output_format.byte_hash(hasher);
-        self.stencil_output_format.byte_hash(hasher);
-        self.depth_clamp.byte_hash(hasher);
-        self.rasterizer_discard.byte_hash(hasher);
     }
 }

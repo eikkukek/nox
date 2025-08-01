@@ -8,7 +8,7 @@ use ash_window;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle,};
 use std::ffi::CString;
 
-use nox_mem::{Vector, FixedVec, ArrayVec};
+use nox_mem::{Vector, vec_types::{FixedVec, ArrayVec}};
 
 use super::{
     Allocators,
@@ -39,7 +39,7 @@ pub struct VulkanContext<'mem> {
     physical_device_info: PhysicalDeviceInfo,
     device: ash::Device,
     graphics_queue: vk::Queue,
-    _transfer_queue: vk::Queue,
+    transfer_queue: vk::Queue,
     _compute_queue: vk::Queue,
     swapchain_context: Option<SwapchainContext<'mem>>,
     swapchain_state: SwapchainState,
@@ -157,13 +157,13 @@ impl<'mem> VulkanContext<'mem> {
         let mut unique_device_queues = ArrayVec::<u32, 3>::new();
         let queue_family_indices = physical_device_info.queue_family_indices();
         unique_device_queues
-            .push(queue_family_indices.get_graphics_index())
+            .push(queue_family_indices.graphics_index())
             .map_err(|e| array_format!("failed to push to 'unque device queues' ( {:?} )", e))?;
         unique_device_queues
-            .push_if_unique(queue_family_indices.get_transfer_index())
+            .push_if_unique(queue_family_indices.transfer_index())
             .map_err(|e| array_format!("failed to push to 'unique device queues' ( {:?} )", e))?;
         unique_device_queues
-            .push_if_unique(queue_family_indices.get_compute_index())
+            .push_if_unique(queue_family_indices.compute_index())
             .map_err(|e| array_format!("failed to push to 'unique device queues' ( {:?} )", e))?;
         let mut device_queue_create_infos = ArrayVec::<vk::DeviceQueueCreateInfo, 3>::new();
         let queue_priority = 1.0;
@@ -219,9 +219,9 @@ impl<'mem> VulkanContext<'mem> {
                     array_format!("failed to create vulkan device {:?}", e)
                 })?
         };
-        let graphics_queue = unsafe { device.get_device_queue(queue_family_indices.get_graphics_index(), 0) };
-        let transfer_queue = unsafe { device.get_device_queue(queue_family_indices.get_transfer_index(), 0) };
-        let compute_queue = unsafe { device.get_device_queue(queue_family_indices.get_compute_index(), 0) };
+        let graphics_queue = unsafe { device.get_device_queue(queue_family_indices.graphics_index(), 0) };
+        let transfer_queue = unsafe { device.get_device_queue(queue_family_indices.transfer_index(), 0) };
+        let compute_queue = unsafe { device.get_device_queue(queue_family_indices.compute_index(), 0) };
         let swapchain_loader = ash::khr::swapchain::Device::new(&instance, &device);
         Ok(
             Self {
@@ -234,7 +234,7 @@ impl<'mem> VulkanContext<'mem> {
                 physical_device_info,
                 device,
                 graphics_queue,
-                _transfer_queue: transfer_queue,
+                transfer_queue: transfer_queue,
                 _compute_queue: compute_queue,
                 swapchain_context: None,
                 swapchain_state: SwapchainState::OutOfDate(buffered_frame_count, window.inner_size()),
@@ -250,20 +250,20 @@ impl<'mem> VulkanContext<'mem> {
         &self.swapchain_loader
     }
 
-    pub fn queue_family_indices(&self) -> &physical_device::QueueFamilyIndices {
-        &self.physical_device_info.queue_family_indices()
+    pub fn queue_family_indices(&self) -> physical_device::QueueFamilyIndices {
+        self.physical_device_info.queue_family_indices()
     }
 
     pub fn graphics_queue(&self) -> vk::Queue {
         self.graphics_queue
     }
 
-    pub fn _transfer_queue(&self) -> vk::Queue {
-        self.graphics_queue
+    pub fn transfer_queue(&self) -> vk::Queue {
+        self.transfer_queue
     }
 
     pub fn _compute_queue(&self) -> vk::Queue {
-        self.graphics_queue
+        self._compute_queue
     }
 
     pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
@@ -301,7 +301,7 @@ impl<'mem> VulkanContext<'mem> {
             vk::Extent2D { width: framebuffer_size.width, height: framebuffer_size.height },
             buffered_frame_count,
             graphics_command_pool,
-            self.queue_family_indices().get_graphics_index(),
+            self.queue_family_indices().graphics_index(),
             &allocators.swapchain,
             &allocators.init,
         ) {

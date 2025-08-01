@@ -7,20 +7,17 @@ pub(crate) use layout::{
     PipelineLayoutInfo,
     DescriptorSetLayoutInfo,
     DescriptorBindingInfo,
-    PushConstantRange,
+    //PushConstantRange,
     DescriptorType,
 };
 
-pub use graphics::{
-    GraphicsPipelineInfo,
-    WriteMask
-};
+pub use graphics::*;
 
-pub use pipeline_cache::{PipelineID, PipelineCache};
+pub use pipeline_cache::{PipelineID, PipelineTypeInfo, PipelineCache};
 
 use ash::vk;
 
-use nox_mem::{Vector, GlobalVec};
+use nox_mem::{Vector, vec_types::GlobalVec};
 
 use crate::renderer::Error;
 
@@ -52,6 +49,16 @@ pub(crate) fn create_transient_graphics_pipelines(
         let vertex_input_state = &vertex_input_state_infos[info.1 as usize];
         let stages = &stages[info.2 as usize];
         let layout = layouts[info.3 as usize];
+        const VIEWPORT_STATE: vk::PipelineViewportStateCreateInfo = vk::PipelineViewportStateCreateInfo {
+            s_type: vk::StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            p_next: core::ptr::null(),
+            flags: vk::PipelineViewportStateCreateFlags::empty(),
+            viewport_count: 1,
+            p_viewports: core::ptr::null(),
+            scissor_count: 1,
+            p_scissors: core::ptr::null(),
+            _marker: core::marker::PhantomData,
+        };
         let vk_create_info = vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
             p_next: (&create_info.rendering_info as *const _) as _,
@@ -60,7 +67,7 @@ pub(crate) fn create_transient_graphics_pipelines(
             p_vertex_input_state: vertex_input_state,
             p_input_assembly_state: &create_info.input_assembly_state,
             p_tessellation_state: &create_info.tesellation_state,
-            p_viewport_state: core::ptr::null(),
+            p_viewport_state: &VIEWPORT_STATE,
             p_rasterization_state: &create_info.rasterization_state,
             p_multisample_state: &create_info.multisample_state,
             p_depth_stencil_state: &create_info.depth_stencil_state,
@@ -85,6 +92,7 @@ pub(crate) fn create_transient_graphics_pipelines(
         if result != vk::Result::SUCCESS {
             return Err(result.into())
         }
+        pipelines.set_len(create_infos.len());
     }
     Ok(pipelines)
 }

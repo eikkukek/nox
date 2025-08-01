@@ -1,11 +1,10 @@
-use ash::vk::{self, Handle};
+use core::hash::Hash;
 
-use nox_mem::{GlobalVec, Vector};
+use ash::vk;
 
-use crate::{
-    renderer::Error,
-    byte_hash::ByteHash,
-};
+use nox_mem::{Vector, vec_types::GlobalVec};
+
+use crate::renderer::Error;
 
 use super::*;
 
@@ -13,7 +12,6 @@ use super::*;
 pub struct PipelineLayoutInfo {
     set_layouts: GlobalVec<vk::DescriptorSetLayout>,
     push_constant_ranges: GlobalVec<vk::PushConstantRange>,
-    hasher: blake3::Hasher,
 }
 
 impl PipelineLayoutInfo {
@@ -26,19 +24,16 @@ impl PipelineLayoutInfo {
         Self {
             set_layouts: GlobalVec::with_capacity(set_capacity as usize).unwrap(),
             push_constant_ranges: GlobalVec::with_capacity(push_constant_capacity as usize).unwrap(),
-            hasher: blake3::Hasher::new(),
         }
     }
 
     pub fn with_set_layout(mut self, handle: vk::DescriptorSetLayout) -> Self {
         self.set_layouts.push(handle).unwrap();
-        handle.as_raw().byte_hash(&mut self.hasher);
         self
     }
 
     pub fn _with_push_constant_range(mut self, range: PushConstantRange) -> Self {
         self.push_constant_ranges.push(range.into()).unwrap();
-        range.byte_hash(&mut self.hasher);
         self
     }
 
@@ -57,16 +52,30 @@ impl PipelineLayoutInfo {
     }
 }
 
-impl ByteHash for PipelineLayoutInfo {
+impl PartialEq for PipelineLayoutInfo {
 
-    fn byte_hash(&self, hasher: &mut blake3::Hasher) {
-        let hash1 = hasher.clone().finalize();
-        let hash2 = self.hasher.clone().finalize();
-        *hasher = blake3::Hasher::new();
-        hasher.update(b"combine_v1{");
-        hasher.update(hash1.as_bytes());
-        hasher.update(b"}{");
-        hasher.update(hash2.as_bytes());
-        hasher.update(b"}");
+    fn eq(&self, other: &Self) -> bool {
+        self.set_layouts == other.set_layouts &&
+        self.push_constant_ranges.map_eq(
+            &other.push_constant_ranges,
+            |v1, v2| {
+                Into::<PushConstantRange>::into(*v1) ==
+                Into::<PushConstantRange>::into(*v2)
+        })
+    }
+}
+
+impl Eq for PipelineLayoutInfo {}
+
+impl Hash for PipelineLayoutInfo {
+
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.set_layouts.hash(state);
+        self.push_constant_ranges.map_hash(
+            state,
+            |v, s| {
+                Into::<PushConstantRange>::into(*v).hash(s);
+            }
+        );
     }
 }

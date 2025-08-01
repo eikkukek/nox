@@ -1,11 +1,11 @@
 use ash::vk;
 
-use nox_mem::{AsRaw, impl_as_raw_bit_op, slice};
+use nox_mem::{AsRaw, impl_as_raw_bit_op};
 
 pub use vk::ImageAspectFlags as ImageAspectFlags;
 
 #[repr(u32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum ImageUsage {
     TransferSrc = vk::ImageUsageFlags::TRANSFER_SRC.as_raw(),
     TransferDst = vk::ImageUsageFlags::TRANSFER_DST.as_raw(),
@@ -23,7 +23,7 @@ impl From<ImageUsage> for vk::ImageUsageFlags {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum ImageAspect {
     Color = vk::ImageAspectFlags::COLOR.as_raw(),
     Depth = vk::ImageAspectFlags::DEPTH.as_raw(),
@@ -49,7 +49,7 @@ pub trait Format: Copy + AsRaw<Repr = i32> {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum ColorFormat {
     UnormR8 = vk::Format::R8_UNORM.as_raw(),
     UnormRG8 = vk::Format::R8G8_UNORM.as_raw(),
@@ -64,12 +64,12 @@ pub enum ColorFormat {
 impl Format for ColorFormat {
 
     fn aspects(self) -> &'static [ImageAspect] {
-        slice![ImageAspect::Color]
+        &[ImageAspect::Color]
     }
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum DepthFormat {
     D32 = vk::Format::D32_SFLOAT.as_raw(),
     D16 = vk::Format::D16_UNORM.as_raw(),
@@ -83,13 +83,13 @@ impl Format for DepthFormat {
     fn aspects(self) -> &'static [ImageAspect] {
         match self {
             Self::D32 | Self::D16 => {
-                slice![ImageAspect::Depth]
+                &[ImageAspect::Depth]
             },
             Self::S8 => {
-                slice![ImageAspect::Stencil]
+                &[ImageAspect::Stencil]
             },
             Self::D32S8 | Self::D24S8 => {
-                slice![
+                &[
                     ImageAspect::Depth,
                     ImageAspect::Stencil,
                 ]
@@ -99,7 +99,7 @@ impl Format for DepthFormat {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum IntegerFormat {
     UIntR8 = vk::Format::R8_UINT.as_raw(),
     UIntRG8 = vk::Format::R8G8_UINT.as_raw(),
@@ -114,12 +114,12 @@ pub enum IntegerFormat {
 impl Format for IntegerFormat {
 
     fn aspects(self) -> &'static [ImageAspect] {
-        slice![ImageAspect::Color]
+        &[ImageAspect::Color]
     }
 }
 
 #[repr(i32)]
-#[derive(Default, Clone, Copy, AsRaw)]
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
 pub enum ComponentSwizzle {
     #[default]
     Identity = vk::ComponentSwizzle::IDENTITY.as_raw(),

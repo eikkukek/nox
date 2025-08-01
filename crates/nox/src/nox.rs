@@ -1,4 +1,7 @@
+pub mod image_buffer;
 mod init_settings;
+
+use std::sync::{Arc, RwLock};
 
 use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
@@ -8,40 +11,38 @@ use winit::{
     dpi::LogicalSize,
 };
 
+use crate::renderer;
+
 use super::{
     interface::Interface,
     memory::Memory,
     renderer::Renderer,
-    string_types::{ArrayString, LargeError},
+    string_types::ArrayString,
 };
 
 pub use init_settings::InitSettings;
-
 
 pub type AppName = ArrayString<128>;
 
 pub type ShaderID = u64;
 
-pub struct Nox<'interface, 'mem, I>
+pub struct Nox<'mem, I>
     where
-        'mem: 'interface,
         I: Interface,
 {
-    interface: Option<&'interface mut I>,
+    interface: Arc<RwLock<I>>,
     window: Option<Window>,
     memory: &'mem Memory,
     renderer: Option<Renderer<'mem>>,
 }
 
-impl<'interface, 'mem, I: Interface> Nox<'interface, 'mem, I>
-    where
-        'mem: 'interface
+impl<'mem, I: Interface> Nox<'mem, I>
 {
 
-    pub fn new(interface: &'interface mut I, memory: &'mem mut Memory) -> Option<Self> {
+    pub fn new(interface: I, memory: &'mem mut Memory) -> Option<Self> {
         Some(
             Nox {
-                interface: Some(interface),
+                interface: Arc::new(RwLock::new(interface)),
                 window: None,
                 memory,
                 renderer: None,
@@ -55,16 +56,23 @@ impl<'interface, 'mem, I: Interface> Nox<'interface, 'mem, I>
         event_loop.run_app(&mut self).expect("failed to run event loop");
     }
 
-    pub fn get_renderer(&mut self) -> Option<&mut Renderer<'mem>> {
-        Some(self.renderer.as_mut()?)
+    pub fn gpu_name(&mut self) -> renderer::DeviceName {
+        self.renderer
+            .as_ref()
+            .unwrap()
+            .device_info()
+            .device_name().clone()
     }
 
-    pub fn load_shader(_input_filename: &str) -> Result<ShaderID, LargeError> {
-        Err(LargeError::new())
+    pub fn renderer_resources(&mut self) -> Arc<RwLock<renderer::GlobalResources>> {
+        self.renderer
+            .as_ref()
+            .unwrap()
+            .global_resources()
     }
 }
 
-impl<'interface, 'mem, I: Interface> Drop for Nox<'interface, 'mem, I> {
+impl<'mem, I: Interface> Drop for Nox<'mem, I> {
 
     fn drop(&mut self) {
         if let Some(mut renderer) = self.renderer.take() {
@@ -73,10 +81,7 @@ impl<'interface, 'mem, I: Interface> Drop for Nox<'interface, 'mem, I> {
     }
 }
 
-impl<'interface, 'mem, I: Interface> ApplicationHandler for Nox<'interface, 'mem, I>
-    where
-        'mem: 'interface
-{
+impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
         match event {
@@ -87,26 +92,35 @@ impl<'interface, 'mem, I: Interface> ApplicationHandler for Nox<'interface, 'mem
                 }
             },
             WindowEvent::RedrawRequested => {
-                let Some(interface) = self.interface.take() else { return };
+                let interface = self.interface.clone();
+                let resources = self.renderer_resources();
+                interface.write().unwrap().update(
+                    self,
+                    &mut resources.write().unwrap(),
+                );
                 let renderer_allocators = self.memory.renderer_allocators();
                 if let Some(window) = &self.window {
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
-                        if let Err(e) = renderer.render(&window, interface, renderer_allocators) {
+                        let mut handles = renderer.command_requests(self.interface.clone());
+                        for handle in &mut handles {
+                            if let Err(e) = handle.take().unwrap().join() {
+                                panic!("thread poisoned during command requests: {:?}", e)
+                            }
+                        }
+                        if let Err(e) = renderer.render(&window, self.interface.clone(), renderer_allocators) {
                             eprintln!("Nox renderer error: {}", e);
                             event_loop.exit();
                         }
                     }
                 }
-                self.interface = Some(interface);
             },
             _ => {},
         }
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(interface) = self.interface.take() else { return };
-        let init_settings = interface.init_settings();
+        let init_settings = self.interface.read().unwrap().init_settings();
         if self.window.is_none() {
             let window_attributes = Window::default_attributes()
                 .with_title(init_settings.app_name.as_str())
@@ -142,8 +156,7 @@ impl<'interface, 'mem, I: Interface> ApplicationHandler for Nox<'interface, 'mem
                 }
             };
             self.window = Some(window);
-            interface.init_callback(self);
-            self.interface = Some(interface);
+            self.interface.clone().write().unwrap().init_callback(self);
         }
     }
 }
