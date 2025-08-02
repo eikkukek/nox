@@ -773,3 +773,19 @@ impl<'alloc, T: Sized, Alloc: Allocator, CapacityPol: CapacityPolicy> Default
         Self::with_no_alloc()
     }
 }
+
+unsafe impl<
+    'alloc,
+    T: Sized + Send,
+    Alloc: Allocator + Send,
+    CapacityPol: CapacityPolicy,
+    IsGlobal: Conditional,
+> Send for AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal> {}
+
+unsafe impl<
+    'alloc,
+    T: Sized + Sync,
+    Alloc: Allocator + Sync,
+    CapacityPol: CapacityPolicy,
+    IsGlobal: Conditional,
+> Sync for AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal> {}

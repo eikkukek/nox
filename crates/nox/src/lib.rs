@@ -4,6 +4,7 @@
 pub mod nox;
 pub mod renderer;
 pub mod interface;
+mod error;
 //pub mod asset_importer;
 
 pub mod version;
@@ -16,6 +17,7 @@ pub mod stack_alloc;
 
 pub use nox_mem as mem;
 
+pub use error::Error;
 pub use version::Version;
 pub use nox::*;
 pub use renderer::frame_graph;

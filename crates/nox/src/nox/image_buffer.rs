@@ -1,11 +1,14 @@
-use std::ffi::CString;
+use std::{ffi::CString};
 
 use core::{
     ptr::NonNull,
     slice,
+    ops::Deref,
 };
 
 use stb_image::stb_image;
+
+use crate::renderer::image::Dimensions;
 
 pub struct ImageBuffer {
     pub(crate) buffer: NonNull<u8>,
@@ -30,17 +33,16 @@ impl ImageBuffer {
             stb_image::stbi_load(filename.as_ptr(), &mut x, &mut y, &mut ch, channels as i32)
         };
         if img.is_null() {
-            return Err(unsafe {
-                 std::ffi::CString
-                    ::from_raw(stb_image::stbi_failure_reason() as _)
-                    .to_str()
-                    .unwrap_or("<failed to convert C string>")
-                    .into()
-            })
+            unsafe {
+                let err = std::ffi::CString::from_raw(stb_image::stbi_failure_reason() as *mut i8);
+                return Err(
+                    err
+                        .to_str()
+                        .unwrap_or("<failed to convert C string>")
+                        .into()
+                )
+            }
         }
-        unsafe {
-            stb_image::stbi_image_free(img as _)
-        };
         Ok(Self {
             buffer: NonNull::new(img).unwrap(),
             width: x as u32,
@@ -65,15 +67,21 @@ impl ImageBuffer {
     pub fn height(&self) -> u32 {
         self.height
     }
+
+    pub fn dimensions(&self) -> Dimensions {
+        Dimensions::new(self.width, self.height, 1)
+    }
     
     pub fn channels(&self) -> u32 {
         self.channels
     }
 }
 
-impl AsRef<[u8]> for ImageBuffer {
+impl Deref for ImageBuffer {
 
-    fn as_ref(&self) -> &[u8] {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
         self.as_slice()
     }
 }
@@ -86,3 +94,6 @@ impl Drop for ImageBuffer {
         }
     }
 }
+
+unsafe impl Send for ImageBuffer {}
+unsafe impl Sync for ImageBuffer {}

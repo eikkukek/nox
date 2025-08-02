@@ -63,13 +63,6 @@ impl<'mem, I: Interface> Nox<'mem, I>
             .device_info()
             .device_name().clone()
     }
-
-    pub fn renderer_resources(&mut self) -> Arc<RwLock<renderer::GlobalResources>> {
-        self.renderer
-            .as_ref()
-            .unwrap()
-            .global_resources()
-    }
 }
 
 impl<'mem, I: Interface> Drop for Nox<'mem, I> {
@@ -93,16 +86,16 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
             },
             WindowEvent::RedrawRequested => {
                 let interface = self.interface.clone();
-                let resources = self.renderer_resources();
+                let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
                 interface.write().unwrap().update(
                     self,
-                    &mut resources.write().unwrap(),
+                    &mut renderer_context,
                 );
                 let renderer_allocators = self.memory.renderer_allocators();
                 if let Some(window) = &self.window {
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
-                        let mut handles = renderer.command_requests(self.interface.clone());
+                        let mut handles = renderer.command_requests(self.interface.clone(), renderer_context.command_requests);
                         for handle in &mut handles {
                             if let Err(e) = handle.take().unwrap().join() {
                                 panic!("thread poisoned during command requests: {:?}", e)
@@ -156,7 +149,14 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                 }
             };
             self.window = Some(window);
-            self.interface.clone().write().unwrap().init_callback(self);
+            let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
+            self.interface
+                .clone()
+                .write()
+                .unwrap()
+                .init_callback(self, &mut renderer_context)
+                .unwrap();
+            self.renderer.as_mut().unwrap().command_requests(self.interface.clone(), renderer_context.command_requests);
         }
     }
 }

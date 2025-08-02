@@ -39,10 +39,6 @@ impl CommandRequests {
         self.transfer_requests.len()
     }
 
-    pub(crate) fn reset(&mut self) {
-        self.transfer_requests.clear();
-    }
-
     pub fn reserve_transfer_requests(&mut self, capacity: u32) {
         self.transfer_requests.reserve(capacity as usize).unwrap();
     }

@@ -2,12 +2,14 @@
 
 pub use winit::dpi::LogicalSize;
 
-use crate::renderer::{
-    self,
-    GlobalResources,
-    CommandRequests,
-    CommandRequestID,
-    TransferCommandbuffer,
+use crate::{
+    Error,
+    renderer::{
+        self,
+        RendererContext,
+        CommandRequestID,
+        TransferCommandbuffer,
+    }
 };
 
 use super::{
@@ -22,9 +24,13 @@ pub trait Interface
 {
     fn init_settings(&self) -> InitSettings;
 
-    fn init_callback(&mut self, nox: &mut Nox<Self>) {}
+    fn init_callback(
+        &mut self,
+        nox: &mut Nox<Self>,
+        renderer_context: &mut RendererContext
+    ) -> Result<(), Error>;
 
-    fn update(&mut self, nox: &mut Nox<Self>, renderer_resources: &mut GlobalResources);
+    fn update(&mut self, nox: &mut Nox<Self>, renderer_contexts: &mut RendererContext);
 
     fn surface_update(&mut self, nox: &mut Nox<Self>, surface_size: LogicalSize<f32>, image_count: u32) {}
 
@@ -33,8 +39,6 @@ pub trait Interface
         frame_graph: &'a mut dyn FrameGraphInit,
         pending_transfers: &[CommandRequestID],
     ) -> Result<(), renderer::Error>;
-
-    fn command_requests(&mut self, requests: &mut CommandRequests);
 
     fn transfer_commands(
         &mut self,

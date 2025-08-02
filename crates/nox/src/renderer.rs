@@ -2,7 +2,6 @@ pub mod frame_graph;
 pub mod pipeline;
 pub mod image;
 pub mod memory_binder;
-//pub mod default_binder;
 
 mod errors;
 mod memory_layout;
@@ -111,6 +110,27 @@ impl Allocators {
     }
 }
 
+
+pub struct RendererContext {
+    global_resources: Arc<RwLock<GlobalResources>>,
+    pub(crate) command_requests: CommandRequests,
+}
+
+impl RendererContext {
+
+    pub fn edit_resources<F>(&self, mut f: F) -> Result<(), Error>
+        where
+            F: FnMut(&mut GlobalResources) -> Result<(), Error>
+    {
+        let mut resources = self.global_resources.write().unwrap();
+        f(&mut resources)
+    }
+
+    pub fn command_requests(&mut self) -> &mut CommandRequests {
+        &mut self.command_requests
+    }
+}
+
 pub struct Renderer<'mem> {
     main_thread_context: ThreadContext,
     thread_contexts: Arc<RwLock<FxHashMap<ThreadId, ThreadContext>>>,
@@ -122,7 +142,6 @@ pub struct Renderer<'mem> {
     vulkan_context: VulkanContext<'mem>,
     memory_layout: MemoryLayout,
     buffered_frame_count: u32,
-    command_requests: CommandRequests,
     transfer_commands: Arc<RwLock<GlobalVec<TransferCommandbuffer>>>,
 }
 
@@ -163,7 +182,7 @@ impl<'mem> Renderer<'mem> {
             ::new(vulkan_context.device(), &physical_device_info, buffered_frame_count, allocators)
             .map_err(|e| array_format!("failed to create full screen pass data ( {:?} )", e))?;
         let global_resources = Arc::new(RwLock::new(
-            GlobalResources::new(device.clone())
+            GlobalResources::new(device.clone(), &physical_device_info)
         ));
         let mut s = Self {
             pipeline_cache: PipelineCache::new(),
@@ -176,7 +195,6 @@ impl<'mem> Renderer<'mem> {
             device: device.clone(),
             memory_layout,
             buffered_frame_count,
-            command_requests: CommandRequests::new(),
             transfer_commands: Default::default(),
         };
         let mut frame_states = ArrayVec::new();
@@ -202,14 +220,20 @@ impl<'mem> Renderer<'mem> {
         Ok(s)
     }
 
+    #[inline(always)]
     pub fn device_info(&self) -> &PhysicalDeviceInfo {
         self.vulkan_context.physical_device_info()
     }
 
-    pub (crate) fn global_resources(&self) -> Arc<RwLock<GlobalResources>> {
-        self.global_resources.clone()
+    #[inline(always)]
+    pub (crate) fn renderer_context(&mut self) -> RendererContext {
+        RendererContext {
+            global_resources: self.global_resources.clone(),
+            command_requests: CommandRequests::new(),
+        }
     }
 
+    #[inline(always)]
     pub(crate) fn request_resize(&mut self, size: PhysicalSize<u32>) {
         self.vulkan_context.request_swapchain_update(self.buffered_frame_count, size);
     }
@@ -217,13 +241,12 @@ impl<'mem> Renderer<'mem> {
     pub(crate) fn command_requests<I: Interface>(
         &mut self,
         interface: Arc<RwLock<I>>,
+        command_requests: CommandRequests,
     ) -> GlobalVec<Option<JoinHandle<()>>>
     {
-        self.command_requests.reset();
-        interface.write().unwrap().command_requests(&mut self.command_requests);
 
         let mut handles = GlobalVec
-            ::with_capacity(self.command_requests.task_count())
+            ::with_capacity(command_requests.task_count())
             .unwrap();
 
         let staging_alloc = Arc::new(RwLock::new(LinearDeviceAlloc::new(
@@ -234,7 +257,7 @@ impl<'mem> Renderer<'mem> {
             self.vulkan_context.physical_device_info(),
         ).unwrap()));
 
-        for (id, request) in self.command_requests.transfer_iter() {
+        for (id, request) in command_requests.transfer_iter() {
 
             let device = self.device.clone();
             let capacity = request.staging_buffer_capacity;
@@ -243,6 +266,7 @@ impl<'mem> Renderer<'mem> {
             let interface = interface.clone();
             let thread_contexts = self.thread_contexts.clone();
             let queue_families = self.vulkan_context.queue_family_indices();
+            let global_resources = self.global_resources.clone();
 
             let handle = thread::spawn(move || {
                 let mut thread_contexts = thread_contexts
@@ -270,8 +294,9 @@ impl<'mem> Renderer<'mem> {
                     device,
                     vk_cmd_buffer,
                     command_pool,
-                    capacity,
+                    global_resources,
                     alloc,
+                    capacity,
                     id,
                 ).unwrap();
                 interface
@@ -345,9 +370,6 @@ impl<'mem> Renderer<'mem> {
             for i in ready_transfers.iter().rev() {
                 transfer_commands.remove(*i);
             }
-        }
-        else {
-            self.command_requests.reset();
         }
         let swapchain_loader = self.vulkan_context.swapchain_loader().clone();
         let queue_family_indices = self.vulkan_context.queue_family_indices();

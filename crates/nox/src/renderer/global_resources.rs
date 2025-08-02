@@ -1,4 +1,8 @@
+mod default_binder;
+
 use std::sync::{Arc, RwLock};
+
+use ash::vk;
 
 use nox_mem::{
     slot_map::{GlobalSlotMap, SlotIndex},
@@ -6,6 +10,7 @@ use nox_mem::{
 
 use super::{
     Error,
+    PhysicalDeviceInfo,
     image::{
         ImageBuilder,
         Image,
@@ -16,6 +21,8 @@ use super::{
     },
     memory_binder::MemoryBinder,
 };
+
+pub use default_binder::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ImageID(pub(crate) SlotIndex<ImageResource>);
@@ -51,15 +58,33 @@ pub(crate) struct ImageResource {
 pub struct GlobalResources {
     device: Arc<ash::Device>,
     images: GlobalSlotMap<ImageResource>,
+    default_image_binder: DefaultBinder,
 }
 
 impl GlobalResources {
 
-    pub(crate) fn new(device: Arc<ash::Device>) -> Self {
+    #[inline(always)]
+    pub(crate) fn new(
+        device: Arc<ash::Device>,
+        physical_device_info: &PhysicalDeviceInfo,
+    ) -> Self
+    {
+        let default_image_binder = DefaultBinder::new(
+            device.clone(),
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+            physical_device_info,
+        );
         Self {
             device,
             images: GlobalSlotMap::new(),
+            default_image_binder,
         }
+    }
+
+    #[inline(always)]
+    pub fn default_image_binder(&self) -> DefaultBinder {
+        self.default_image_binder.clone()
     }
 
     #[inline(always)]

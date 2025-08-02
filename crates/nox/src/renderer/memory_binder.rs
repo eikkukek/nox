@@ -2,15 +2,15 @@ use ash::vk;
 
 use super::Error;
 
-pub trait DeviceMemory: 'static {
+pub trait DeviceMemory: 'static + Send + Sync {
 
     fn device_memory(&self) -> vk::DeviceMemory;
 
-    fn size(&self) -> vk::DeviceSize;
-
     fn offset(&self) -> vk::DeviceSize;
 
-    unsafe fn free_memory(&mut self);
+    fn size(&self) -> vk::DeviceSize;
+
+    unsafe fn free_memory(&self);
 }
 
 pub trait MemoryBinder {

@@ -13,10 +13,12 @@ use nox_mem::{Vector, vec_types::GlobalVec};
 use crate::{
     has_not_bits,
     renderer::{
-        image::{Image, ImageError, ImageSubresourceLayers, Offset, Dimensions},
+        image::{Dimensions, ImageError, ImageSubresourceLayers, Offset},
         linear_device_alloc::LinearDeviceAlloc,
-        memory_binder::{MemoryBinder, DeviceMemory},
-        Error
+        memory_binder::{DeviceMemory, MemoryBinder},
+        Error,
+        GlobalResources,
+        ImageID,
     }
 };
 
@@ -24,6 +26,7 @@ pub struct TransferCommandbuffer {
     device: Arc<ash::Device>,
     command_buffer: vk::CommandBuffer,
     command_pool: vk::CommandPool,
+    global_resources: Arc<RwLock<GlobalResources>>,
     staging_buffers: GlobalVec<vk::Buffer>,
     linear_device_alloc: Arc<RwLock<LinearDeviceAlloc>>,
     fence: Option<vk::Fence>,
@@ -36,8 +39,9 @@ impl TransferCommandbuffer {
         device: Arc<ash::Device>,
         command_buffer: vk::CommandBuffer,
         command_pool: vk::CommandPool,
-        staging_buffer_capacity: u32,
+        global_resources: Arc<RwLock<GlobalResources>>,
         linear_device_alloc: Arc<RwLock<LinearDeviceAlloc>>,
+        staging_buffer_capacity: u32,
         id: CommandRequestID,
     ) -> Result<Self, Error>
     {
@@ -45,6 +49,7 @@ impl TransferCommandbuffer {
             device: device.clone(),
             command_buffer,
             command_pool,
+            global_resources,
             staging_buffers: GlobalVec::with_capacity(staging_buffer_capacity as usize)?,
             linear_device_alloc,
             fence: None,
@@ -78,13 +83,15 @@ impl TransferCommandbuffer {
     #[inline(always)]
     pub fn copy_data_to_image(
         &mut self,
-        image: Image,
+        image_id: ImageID,
         data: &[u8],
         layers: Option<ImageSubresourceLayers>,
         offset: Option<Offset>,
         dimensions: Option<Dimensions>,
     ) -> Result<(), Error>
     {
+        let g = self.global_resources.write().unwrap();
+        let image = g.get_image(image_id);
         let properties = image.properties();
         if has_not_bits!(properties.usage, vk::ImageUsageFlags::TRANSFER_SRC) {
             return Err(ImageError::UsageMismatch {

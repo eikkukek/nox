@@ -4,7 +4,7 @@ use ash::vk;
 
 use nox_mem::{Vector, vec_types::GlobalVec};
 
-use crate::{has_bits, renderer::memory_binder::DeviceMemory};
+use crate::{renderer::memory_binder::DeviceMemory, has_bits, has_not_bits};
 
 use super::{
     PhysicalDeviceInfo,
@@ -66,8 +66,8 @@ impl Block {
         }
         unsafe {
             device.bind_image_memory(image, device_memory, offset)?;
-            self.used = end;
         };
+        self.used = end;
         Ok(Memory::new(device_memory, offset, memory_requirements.size))
     }
 
@@ -102,8 +102,8 @@ impl Block {
         }
         unsafe {
             device.bind_buffer_memory(buffer, device_memory, offset)?;
-            self.used = end;
         };
+        self.used = end;
         Ok(Memory::new(device_memory, offset, memory_requirements.size))
     }
 
@@ -144,7 +144,7 @@ impl LinearDeviceAlloc {
         let mut blocks = GlobalVec::with_capacity(4).unwrap();
         for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize].iter().enumerate() {
             let property_flags = memory_type.property_flags;
-            if has_bits!(property_flags, required_properties) && !property_flags.intersects(forbidden_properties) {
+            if has_bits!(property_flags, required_properties) && has_not_bits!(property_flags, forbidden_properties) {
                 blocks.push(Block::new(i as u32)).unwrap();
             }
         }
@@ -193,15 +193,15 @@ impl DeviceMemory for Memory {
         self.memory
     }
 
-    fn size(&self) -> vk::DeviceSize {
-        self.size
-    }
-
     fn offset(&self) -> vk::DeviceSize {
         self.offset
     }
 
-    unsafe fn free_memory(&mut self) {}
+    fn size(&self) -> vk::DeviceSize {
+        self.size
+    }
+
+    unsafe fn free_memory(&self) {}
 }
 
 impl MemoryBinder for LinearDeviceAlloc {

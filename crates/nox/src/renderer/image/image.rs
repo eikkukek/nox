@@ -187,7 +187,7 @@ impl Drop for Image {
                 device.destroy_image_view(vk::Handle::from_raw(view.get()), None);
             }
             device.destroy_image(self.handle(), None);
-            if let Some(mut memory) = self.memory.take() {
+            if let Some(memory) = self.memory.take() {
                 memory.free_memory();
             }
         }
