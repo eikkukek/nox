@@ -117,7 +117,10 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
         if self.window.is_none() {
             let window_attributes = Window::default_attributes()
                 .with_title(init_settings.app_name.as_str())
-                .with_inner_size(init_settings.window_size)
+                .with_inner_size(LogicalSize::new(
+                    init_settings.window_size[0],
+                    init_settings.window_size[1],
+                ))
                 .with_min_inner_size(LogicalSize::new(1.0, 1.0));
             let window = match event_loop.create_window(window_attributes) {
                 Ok(window) => window,
@@ -136,7 +139,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                     &window,
                     &init_settings.app_name,
                     init_settings.app_version,
-                    true,
+                    false,
                     *self.memory.renderer_layout(),
                     3,
                     renderer_allocators,
@@ -145,7 +148,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                 Err(e) => {
                     event_loop.exit();
                     eprintln!("Nox error: failed to create renderer ( {} )", e);
-                    None
+                    return
                 }
             };
             self.window = Some(window);
@@ -154,8 +157,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                 .clone()
                 .write()
                 .unwrap()
-                .init_callback(self, &mut renderer_context)
-                .unwrap();
+                .init_callback(self, &mut renderer_context);
             self.renderer.as_mut().unwrap().command_requests(self.interface.clone(), renderer_context.command_requests);
         }
     }

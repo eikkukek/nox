@@ -1,5 +1,3 @@
-use winit::dpi::LogicalSize;
-
 use crate::version::Version;
 
 use super::AppName;
@@ -8,7 +6,7 @@ use super::AppName;
 pub struct InitSettings {
     pub app_name: AppName,
     pub app_version: Version,
-    pub window_size: LogicalSize<f32>
+    pub window_size: [u32; 2],
 }
 
 impl InitSettings {
@@ -16,7 +14,7 @@ impl InitSettings {
     pub fn new(
         app_name: &str,
         app_version: Version,
-        window_size: LogicalSize<f32>
+        window_size: [u32; 2],
     ) -> Self
     {
         InitSettings {

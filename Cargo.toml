@@ -1,3 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/nox", "crates/nox-mem", "crates/nox-mem-derive", "crates/nox-ser"]
+members = [
+	"crates/nox",
+	"crates/nox-font",
+	"crates/nox-mem",
+	"crates/nox-mem-derive",
+	"crates/nox-ser"
+]

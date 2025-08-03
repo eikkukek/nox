@@ -1,4 +1,4 @@
-use std::{ffi::CString};
+use std::ffi::{CStr, CString};
 
 use core::{
     ptr::NonNull,
@@ -34,13 +34,11 @@ impl ImageBuffer {
         };
         if img.is_null() {
             unsafe {
-                let err = std::ffi::CString::from_raw(stb_image::stbi_failure_reason() as *mut i8);
-                return Err(
-                    err
-                        .to_str()
-                        .unwrap_or("<failed to convert C string>")
-                        .into()
-                )
+                let err = CStr::from_ptr(stb_image::stbi_failure_reason());
+                return Err(err
+                    .to_str()
+                    .unwrap_or("<failed to convert C string>")
+                    .into())
             }
         }
         Ok(Self {

@@ -65,8 +65,8 @@ impl<T: Sized> Pointer<T> {
     #[inline(always)]
     pub unsafe fn insert_element(&self, value: T, index: usize, len: usize) -> Pointer<T> {
         unsafe {
-            self.copy_to(*self.add(1), len - index);
             let res = self.add(index);
+            res.copy_to(*res.add(1), len - index);
             res.write(value);
             res
         }

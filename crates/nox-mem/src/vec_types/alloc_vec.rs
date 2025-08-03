@@ -4,6 +4,7 @@ use core::{
     slice::{self, Iter, IterMut},
     ops::{Deref, DerefMut},
     hash::{Hash, Hasher},
+    fmt::{Debug, Display},
 };
 
 use crate::{
@@ -764,6 +765,28 @@ impl_traits!{
             }
         }
     ,
+    Debug where T: Debug =>
+
+        fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+            self.as_slice().fmt(f)
+        }
+    ,
+    Display where T: Display =>
+
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            <char as Display>::fmt(&'[', f)?;
+            for value in &self[0..self.len() - 1] {
+                value.fmt(f)?;
+                <str as Display>::fmt(&", ", f)?;
+            }
+            self.back().unwrap().fmt(f)?;
+            <char as Display>::fmt(&']', f)
+        }
+    ,
+}
+
+fn lol(f: &mut core::fmt::Formatter) {
+    <char as Display>::fmt(&'[', f);
 }
 
 impl<'alloc, T, Alloc, CapacityPol, IsGlobal> From<&AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal>> for Vec<T>

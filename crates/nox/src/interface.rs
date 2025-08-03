@@ -1,9 +1,6 @@
 #![allow(unused_variables)]
 
-pub use winit::dpi::LogicalSize;
-
 use crate::{
-    Error,
     renderer::{
         self,
         RendererContext,
@@ -28,11 +25,11 @@ pub trait Interface
         &mut self,
         nox: &mut Nox<Self>,
         renderer_context: &mut RendererContext
-    ) -> Result<(), Error>;
+    );
 
     fn update(&mut self, nox: &mut Nox<Self>, renderer_contexts: &mut RendererContext);
 
-    fn surface_update(&mut self, nox: &mut Nox<Self>, surface_size: LogicalSize<f32>, image_count: u32) {}
+    fn surface_update(&mut self, nox: &mut Nox<Self>, surface_size: [u32; 2], image_count: u32) {}
 
     fn render<'a>(
         &mut self,
