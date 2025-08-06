@@ -24,10 +24,10 @@ pub trait Interface
     fn init_callback(
         &mut self,
         nox: &mut Nox<Self>,
-        renderer_context: &mut RendererContext
+        renderer: &mut RendererContext,
     );
 
-    fn update(&mut self, nox: &mut Nox<Self>, renderer_contexts: &mut RendererContext);
+    fn update(&mut self, nox: &mut Nox<Self>, renderer: &mut RendererContext);
 
     fn surface_update(&mut self, nox: &mut Nox<Self>, surface_size: [u32; 2], image_count: u32) {}
 

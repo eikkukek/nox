@@ -22,7 +22,7 @@ pub use global_alloc::{GlobalAlloc, GLOBAL_ALLOC};
 pub use option_alloc::OptionAlloc;
 pub use capacity_policy::CapacityPolicy;
 pub use as_raw::AsRaw;
-pub use nox_mem_derive::AsRaw;
+pub use nox_derive::AsRaw;
 pub use hashable::Hashable;
 pub use mad_cell::MadCell;
 pub use vec_types::Vector;

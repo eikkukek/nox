@@ -5,7 +5,7 @@ use nox_mem::{AsRaw, impl_as_raw_bit_op};
 pub use vk::ImageAspectFlags as ImageAspectFlags;
 
 #[repr(u32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum ImageUsage {
     TransferSrc = vk::ImageUsageFlags::TRANSFER_SRC.as_raw(),
     TransferDst = vk::ImageUsageFlags::TRANSFER_DST.as_raw(),
@@ -23,7 +23,7 @@ impl From<ImageUsage> for vk::ImageUsageFlags {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum ImageAspect {
     Color = vk::ImageAspectFlags::COLOR.as_raw(),
     Depth = vk::ImageAspectFlags::DEPTH.as_raw(),
@@ -49,7 +49,7 @@ pub trait Format: Copy + AsRaw<Repr = i32> {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum ColorFormat {
     UnormR8 = vk::Format::R8_UNORM.as_raw(),
     UnormRG8 = vk::Format::R8G8_UNORM.as_raw(),
@@ -69,7 +69,7 @@ impl Format for ColorFormat {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum DepthFormat {
     D32 = vk::Format::D32_SFLOAT.as_raw(),
     D16 = vk::Format::D16_UNORM.as_raw(),
@@ -99,7 +99,7 @@ impl Format for DepthFormat {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum IntegerFormat {
     UIntR8 = vk::Format::R8_UINT.as_raw(),
     UIntRG8 = vk::Format::R8G8_UINT.as_raw(),
@@ -119,7 +119,7 @@ impl Format for IntegerFormat {
 }
 
 #[repr(i32)]
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum ComponentSwizzle {
     #[default]
     Identity = vk::ComponentSwizzle::IDENTITY.as_raw(),
@@ -134,6 +134,72 @@ pub enum ComponentSwizzle {
 impl From<ComponentSwizzle> for vk::ComponentSwizzle {
 
     fn from(value: ComponentSwizzle) -> Self {
+        Self::from_raw(value.as_raw())
+    }
+}
+
+#[repr(i32)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+pub enum Filter {
+    #[default]
+    Nearest = vk::Filter::NEAREST.as_raw(),
+    Linear = vk::Filter::LINEAR.as_raw(),
+}
+
+impl From<Filter> for vk::Filter {
+
+    fn from(value: Filter) -> Self {
+        Self::from_raw(value.as_raw())
+    }
+}
+
+#[repr(i32)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+pub enum MipMode {
+    #[default]
+    Nearest = vk::SamplerMipmapMode::NEAREST.as_raw(),
+    Linear = vk::SamplerMipmapMode::LINEAR.as_raw(),
+}
+
+impl From<MipMode> for vk::SamplerMipmapMode {
+
+    fn from(value: MipMode) -> Self {
+        Self::from_raw(value.as_raw())
+    }
+}
+
+#[repr(i32)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+pub enum AddressMode {
+    Repeat = vk::SamplerAddressMode::REPEAT.as_raw(),
+    MirroredRepeat = vk::SamplerAddressMode::MIRRORED_REPEAT.as_raw(),
+    #[default]
+    ClampToEdge = vk::SamplerAddressMode::CLAMP_TO_EDGE.as_raw(),
+    ClampToBorder = vk::SamplerAddressMode::CLAMP_TO_BORDER.as_raw(),
+}
+
+impl From<AddressMode> for vk::SamplerAddressMode {
+
+    fn from(value: AddressMode) -> Self {
+        Self::from_raw(value.as_raw())
+    }
+}
+
+#[repr(i32)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+pub enum BorderColor {
+    #[default]
+    FloatTransparentBlack = vk::BorderColor::FLOAT_TRANSPARENT_BLACK.as_raw(),
+    IntTransparentBlack = vk::BorderColor::INT_TRANSPARENT_BLACK.as_raw(),
+    FloatOpaqueBlack = vk::BorderColor::FLOAT_OPAQUE_BLACK.as_raw(),
+    IntOpaqueBlack = vk::BorderColor::INT_OPAQUE_BLACK.as_raw(),
+    FloatOpaqueWhite = vk::BorderColor::FLOAT_OPAQUE_WHITE.as_raw(),
+    IntOpaqueWhite = vk::BorderColor::INT_OPAQUE_WHITE.as_raw(),
+}
+
+impl From<BorderColor> for vk::BorderColor {
+
+    fn from(value: BorderColor) -> Self {
         Self::from_raw(value.as_raw())
     }
 }

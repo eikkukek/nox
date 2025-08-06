@@ -2,20 +2,20 @@ use core::hash::{Hash, Hasher};
 
 use ash::vk;
 
-use nox_mem::{Hashable, AsRaw, Vector, vec_types::GlobalVec};
+use nox_mem::{Hashable, AsRaw, vec_types::{Vector, GlobalVec, FixedVec}, Allocator};
 
 use crate::{renderer::MSAA};
 
 use super::*;
 
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DepthBiasInfo {
     pub constant_factor: Hashable<f32>,
     pub clamp: Hashable<f32>,
     pub slope_factor: Hashable<f32>,
 }
 
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SampleShadingInfo {
     pub samples: MSAA,
     pub min_shading: Hashable<f32>,
@@ -23,13 +23,13 @@ pub struct SampleShadingInfo {
     pub alpha_to_one: bool,
 }
 
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DepthBounds {
     pub min: Hashable<f32>,
     pub max: Hashable<f32>,
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StencilOpState {
     pub fail_op: StencilOp,
     pub pass_op: StencilOp,
@@ -70,13 +70,13 @@ impl From<StencilOpState> for vk::StencilOpState {
     }
 }
 
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StencilTestInfo {
     pub front: StencilOpState,
     pub back: StencilOpState,
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DepthStencilInfo {
     pub compare_op: CompareOp,
     pub depth_bounds: Option<DepthBounds>,
@@ -98,7 +98,7 @@ impl Default for DepthStencilInfo {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteMask {
     mask: u32,
 }
@@ -170,7 +170,7 @@ impl AsRaw for WriteMask {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ColorOutputBlendState {
     pub color_blend_factor: (BlendFactor, BlendFactor),
     pub color_blend_op: BlendOp,
@@ -178,7 +178,7 @@ pub struct ColorOutputBlendState {
     pub alpha_blend_op: BlendOp,
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct ColorOutputState(WriteMask, Option<ColorOutputBlendState>);
 
 impl From<ColorOutputState> for vk::PipelineColorBlendAttachmentState {
@@ -230,7 +230,7 @@ impl From<vk::PipelineColorBlendAttachmentState> for ColorOutputState {
     }
 }
 
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlendConstants([Hashable<f32>; 4]);
 
 impl From<BlendConstants> for [f32; 4] {
@@ -303,7 +303,11 @@ impl PartialEq for ColorBlendInfo {
 
 impl Eq for ColorBlendInfo {}
 
-pub(crate) struct CreateInfos<'a> {
+pub(crate) struct CreateInfos<'a, Alloc: Allocator> {
+    pub shader_stage_infos: FixedVec<'a, vk::PipelineShaderStageCreateInfo<'static>, Alloc>,
+    pub _vertex_input_bindings: FixedVec<'a, vk::VertexInputBindingDescription, Alloc>,
+    pub _vertex_input_attributes: FixedVec<'a, vk::VertexInputAttributeDescription, Alloc>,
+    pub vertex_input_state: vk::PipelineVertexInputStateCreateInfo<'static>,
     pub input_assembly_state: vk::PipelineInputAssemblyStateCreateInfo<'a>,
     pub tesellation_state: vk::PipelineTessellationStateCreateInfo<'a>,
     pub rasterization_state: vk::PipelineRasterizationStateCreateInfo<'a>,
@@ -312,4 +316,5 @@ pub(crate) struct CreateInfos<'a> {
     pub color_blend_state: vk::PipelineColorBlendStateCreateInfo<'a>,
     pub dynamic_state: vk::PipelineDynamicStateCreateInfo<'a>,
     pub rendering_info: vk::PipelineRenderingCreateInfo<'a>,
+    pub layout: vk::PipelineLayout,
 }

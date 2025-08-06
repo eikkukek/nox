@@ -4,7 +4,7 @@ use ash::vk;
 
 use nox_mem::{Vector, vec_types::GlobalVec};
 
-use crate::{renderer::memory_binder::DeviceMemory, has_bits, has_not_bits};
+use crate::{renderer::memory_binder::DeviceMemory, has_bits};
 
 use super::{
     PhysicalDeviceInfo,
@@ -144,7 +144,7 @@ impl LinearDeviceAlloc {
         let mut blocks = GlobalVec::with_capacity(4).unwrap();
         for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize].iter().enumerate() {
             let property_flags = memory_type.property_flags;
-            if has_bits!(property_flags, required_properties) && has_not_bits!(property_flags, forbidden_properties) {
+            if has_bits!(property_flags, required_properties) && !property_flags.intersects(forbidden_properties) {
                 blocks.push(Block::new(i as u32)).unwrap();
             }
         }

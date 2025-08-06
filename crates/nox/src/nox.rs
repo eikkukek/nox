@@ -11,7 +11,7 @@ use winit::{
     dpi::LogicalSize,
 };
 
-use crate::renderer;
+pub use crate::renderer;
 
 use super::{
     interface::Interface,
@@ -139,7 +139,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                     &window,
                     &init_settings.app_name,
                     init_settings.app_version,
-                    false,
+                    init_settings.enable_vulkan_validation,
                     *self.memory.renderer_layout(),
                     3,
                     renderer_allocators,

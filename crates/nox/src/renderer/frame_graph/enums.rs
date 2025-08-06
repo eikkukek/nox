@@ -3,7 +3,7 @@ use nox_mem::AsRaw;
 use ash::vk;
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum AttachmentLoadOp {
     Load = vk::AttachmentLoadOp::LOAD.as_raw(),
     Clear = vk::AttachmentLoadOp::CLEAR.as_raw(),
@@ -18,7 +18,7 @@ impl From<AttachmentLoadOp> for vk::AttachmentLoadOp {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum AttachmentStoreOp {
     Store = vk::AttachmentStoreOp::STORE.as_raw(),
     DontCare = vk::AttachmentStoreOp::DONT_CARE.as_raw(),

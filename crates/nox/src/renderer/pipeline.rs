@@ -1,19 +1,13 @@
 pub mod graphics;
 pub mod layout;
-mod pipeline_cache;
+pub mod vertex_input;
 
 pub(crate) use layout::{
-    ShaderStage,
-    PipelineLayoutInfo,
-    DescriptorSetLayoutInfo,
-    DescriptorBindingInfo,
-    //PushConstantRange,
+    PipelineLayout,
     DescriptorType,
 };
 
 pub use graphics::*;
-
-pub use pipeline_cache::{PipelineID, PipelineTypeInfo, PipelineCache};
 
 use ash::vk;
 
@@ -36,8 +30,7 @@ pub(crate) fn create_shader_module(device: &ash::Device, spirv: &[u32]) -> Resul
 
 pub(crate) fn create_transient_graphics_pipelines(
     device: &ash::Device,
-    pipeline_infos: &[(graphics::CreateInfos, u32, u32, u32)],
-    vertex_input_state_infos: &[vk::PipelineVertexInputStateCreateInfo],
+    pipeline_infos: &[(graphics::CreateInfos, u32, u32)],
     stages: &[GlobalVec<vk::PipelineShaderStageCreateInfo>],
     layouts: &[vk::PipelineLayout],
 ) -> Result<GlobalVec<vk::Pipeline>, Error>
@@ -46,9 +39,8 @@ pub(crate) fn create_transient_graphics_pipelines(
     let mut create_infos = GlobalVec::with_capacity(pipeline_count).unwrap();
     for info in pipeline_infos {
         let create_info = &info.0;
-        let vertex_input_state = &vertex_input_state_infos[info.1 as usize];
-        let stages = &stages[info.2 as usize];
-        let layout = layouts[info.3 as usize];
+        let stages = &stages[info.1 as usize];
+        let layout = layouts[info.2 as usize];
         const VIEWPORT_STATE: vk::PipelineViewportStateCreateInfo = vk::PipelineViewportStateCreateInfo {
             s_type: vk::StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
             p_next: core::ptr::null(),
@@ -61,10 +53,10 @@ pub(crate) fn create_transient_graphics_pipelines(
         };
         let vk_create_info = vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-            p_next: (&create_info.rendering_info as *const _) as _,
+            p_next: &create_info.rendering_info as *const _ as _,
             stage_count: stages.len() as u32,
             p_stages: stages.as_ptr(),
-            p_vertex_input_state: vertex_input_state,
+            p_vertex_input_state: &info.0.vertex_input_state,
             p_input_assembly_state: &create_info.input_assembly_state,
             p_tessellation_state: &create_info.tesellation_state,
             p_viewport_state: &VIEWPORT_STATE,

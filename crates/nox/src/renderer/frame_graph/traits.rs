@@ -1,21 +1,13 @@
 use crate::renderer::{
+    *,
     image::{ImageRangeInfo, ImageBuilder},
     global_resources::{ImageSourceID},
-    pipeline::PipelineID,
     frame_state::ResourceID,
-    Error,
 };
 
-use super::{
-    PassInfo,
-    WriteInfo, ReadInfo,
-    RenderArea,
-};
+use super::*;
 
-pub trait PassPipelineBuilder<'a> {
-
-    fn with_pipeline(&mut self, id: PipelineID) -> &mut dyn PassPipelineBuilder<'a>;
-}
+pub type PassCallback = fn(&RenderCommands);
 
 pub trait PassAttachmentBuilder<'a> {
 
@@ -31,7 +23,7 @@ pub trait PassAttachmentBuilder<'a> {
 
     fn with_dependency(&mut self, pass_index: usize) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    fn as_pipeline_builder(&mut self) -> &mut dyn PassPipelineBuilder<'a>;
+    fn with_callback(&mut self, callback: PassCallback) -> &mut dyn PassAttachmentBuilder<'a>;
 }
 
 pub trait FrameGraph<'a> {

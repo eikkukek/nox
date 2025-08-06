@@ -1,0 +1,124 @@
+use core::slice::SlicePattern;
+use std::sync::Arc;
+
+use ash::vk;
+
+use nox_mem::vec_types::{Vector, GlobalVec, ArrayVec};
+
+use crate::renderer::{
+    *,
+    shader::Shader,
+};
+
+#[derive(Clone)]
+pub(crate) struct PipelineLayout {
+    device: Arc<ash::Device>,
+    handle: vk::PipelineLayout,
+    pipeline_descriptor_sets: GlobalVec<(bool, vk::DescriptorSetLayout)>,
+    push_constant_ranges: GlobalVec<vk::PushConstantRange>,
+    shader_ids: GlobalVec<ShaderID>,
+}
+
+impl PipelineLayout {
+
+    pub fn new<const SHADER_COUNT: usize>(
+        device: Arc<ash::Device>,
+        shader_ids: [ShaderID; SHADER_COUNT],
+        global_resources: &GlobalResources,
+    ) -> Result<Self, Error>
+    {
+        let mut set_infos = GlobalVec::<GlobalVec<vk::DescriptorSetLayoutBinding>>::new();
+        let mut push_constants = GlobalVec::new();
+        let mut shaders = ArrayVec::<&Shader, SHADER_COUNT>::new();
+        for id in shader_ids {
+            shaders.push(global_resources.get_shader(id)).unwrap();
+        }
+        for shader in &shaders {
+            for uniform in shader.uniforms().iter().map(|v| *v) {
+                if uniform.set >= set_infos.len() as u32 {
+                    set_infos.resize(uniform.set as usize + 1, GlobalVec::new()).unwrap();
+                }
+                set_infos[uniform.set as usize].push(uniform.into()).unwrap();
+            }
+            for push_constant in shader.push_constant().iter().map(|v| *v) {
+                push_constants.push(push_constant.into()).unwrap();
+            }
+        }
+        let mut set_layouts = RaiiHandle::new(
+            GlobalVec::with_capacity(set_infos.capacity()).unwrap(),
+            |v| { unsafe {
+                for layout in &v {
+                    device.destroy_descriptor_set_layout(*layout, None);
+                }
+            }}
+        );
+        for info in &set_infos {
+            let create_info = vk::DescriptorSetLayoutCreateInfo {
+                s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                binding_count: info.len() as u32,
+                p_bindings: info.as_ptr(),
+                ..Default::default()
+            };
+            unsafe {
+                set_layouts
+                    .push(device.create_descriptor_set_layout(&create_info, None)?)
+                    .unwrap();
+            }
+        }
+        let info = vk::PipelineLayoutCreateInfo {
+            s_type: vk::StructureType::PIPELINE_LAYOUT_CREATE_INFO,
+            set_layout_count: set_layouts.len() as u32,
+            p_set_layouts: set_layouts.as_ptr(),
+            push_constant_range_count: push_constants.len() as u32,
+            p_push_constant_ranges: push_constants.as_ptr(),
+            ..Default::default()
+        };
+        let handle = unsafe {
+            device.create_pipeline_layout(&info, None)?
+        };
+        let set_layouts = set_layouts.into_inner();
+        let mut pipeline_descriptor_sets = GlobalVec::with_capacity(set_layouts.len()).unwrap();
+        for (i, layout) in set_layouts.iter().enumerate() {
+            pipeline_descriptor_sets.push((
+                set_infos[i].len() != 0,
+                *layout,
+            )).unwrap();
+        }
+        Ok(Self {
+            pipeline_descriptor_sets,
+            device,
+            handle,
+            push_constant_ranges: push_constants,
+            shader_ids: GlobalVec::from(shader_ids.as_slice()),
+        })
+    }
+
+    pub fn handle(&self) -> vk::PipelineLayout {
+        self.handle
+    }
+
+    pub fn pipeline_descriptor_sets(&self) -> &[(bool, vk::DescriptorSetLayout)] {
+        &self.pipeline_descriptor_sets
+    }
+
+    pub fn push_constant_ranges(&self) -> &[vk::PushConstantRange] {
+        &self.push_constant_ranges
+    }
+
+    pub fn shader_ids(&self) -> &[ShaderID] {
+        &self.shader_ids
+    }
+}
+
+impl Drop for PipelineLayout {
+
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_pipeline_layout(self.handle(), None);
+            for (_, set) in &self.pipeline_descriptor_sets {
+                self.device.destroy_descriptor_set_layout(*set, None);
+            }
+            self.pipeline_descriptor_sets.clear();
+        }
+    }
+}

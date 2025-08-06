@@ -2,14 +2,17 @@ use ash::vk;
 
 pub use vk::Format as Format;
 
-use nox_mem::{slice, Vector, vec_types::GlobalVec};
+use nox_mem::{slice, vec_types::{Vector, GlobalVec, FixedVec}, Allocator};
 
-pub use super::*;
+use super::*;
+
+use crate::renderer::*;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct GraphicsPipelineInfo {
-    dynamic_states: GlobalVec<vk::DynamicState>,
-    color_output_formats: GlobalVec<vk::Format>,
+    pub(crate) dynamic_states: GlobalVec<vk::DynamicState>,
+    pub(crate) color_output_formats: GlobalVec<vk::Format>,
+    vertex_input_bindings: GlobalVec<VertexInputBinding>,
     polygon_mode: PolygonMode,
     cull_mode: CullMode,
     front_face: FrontFace,
@@ -18,21 +21,24 @@ pub struct GraphicsPipelineInfo {
     sample_shading_info: Option<SampleShadingInfo>,
     depth_stencil_info: Option<DepthStencilInfo>,
     color_blend_info: ColorBlendInfo,
-    depth_output_format: Format,
-    stencil_output_format: Format,
+    pub(crate) depth_output_format: Format,
+    pub(crate) stencil_output_format: Format,
+    vertex_input_attribute_count: u32,
+    pub(crate) layout_id: PipelineLayoutID,
     depth_clamp: bool,
     rasterizer_discard: bool,
 }
 
 impl GraphicsPipelineInfo {
 
-    pub fn new() -> Self {
+    pub fn new(layout_id: PipelineLayoutID) -> Self {
         Self {
             dynamic_states: GlobalVec::from(slice![
                 vk::DynamicState::VIEWPORT,
                 vk::DynamicState::SCISSOR,
             ]),
             color_output_formats: Default::default(),
+            vertex_input_bindings: Default::default(),
             polygon_mode: Default::default(),
             cull_mode: Default::default(),
             front_face: Default::default(),
@@ -43,82 +49,129 @@ impl GraphicsPipelineInfo {
             color_blend_info: Default::default(),
             depth_output_format: Default::default(),
             stencil_output_format: Default::default(),
+            vertex_input_attribute_count: 0,
+            layout_id,
             depth_clamp: false,
             rasterizer_discard: false,
         }
     }
 
-    pub fn with_depth_clamp(mut self, enabled: bool) -> Self {
+    /// Adds vertex input binding to the pipeline (see [`VertexInputBinding`])
+    /// The binding must be unique and its attribute locations must not intersect
+    /// with other bindings.
+    pub fn with_vertex_input_binding(&mut self, binding: VertexInputBinding) -> &mut Self {
+        let first_location = binding.first_location();
+        let last_location = binding.last_location();
+        for b in &self.vertex_input_bindings {
+            if b.binding == binding.binding {
+                panic!("vertex binding {} already exists", binding.binding)
+            }
+            if first_location < b.last_location()  &&
+                b.first_location() < last_location
+            {
+                panic!("vertex input binding {} intersects with binding {}", binding.binding, b.binding)
+            }
+        }
+        self.vertex_input_attribute_count += binding.attributes.len() as u32;
+        self.vertex_input_bindings.push(binding).unwrap();
+        self
+    }
+
+    pub fn with_depth_clamp(&mut self, enabled: bool) -> &mut Self {
         self.depth_clamp = enabled;
         self
     }
 
-    pub fn with_rasterizer_discard(mut self, enabled: bool) -> Self {
+    pub fn with_rasterizer_discard(&mut self, enabled: bool) -> &mut Self {
         self.rasterizer_discard = enabled;
         self
     }
 
-    pub fn with_polygon_mode(mut self, polygon_mode: PolygonMode) -> Self {
+    pub fn with_polygon_mode(&mut self, polygon_mode: PolygonMode) -> &mut Self {
         self.polygon_mode = polygon_mode;
         self
     }
 
-    pub fn with_cull_mode(mut self, cull_mode: CullMode) -> Self {
+    pub fn with_cull_mode(&mut self, cull_mode: CullMode) -> &mut Self {
         self.cull_mode = cull_mode;
         self
     }
 
-    pub fn with_front_face(mut self, front_face: FrontFace) -> Self {
+    pub fn with_front_face(&mut self, front_face: FrontFace) -> &mut Self {
         self.front_face = front_face;
         self
     }
 
-    pub fn with_depth_bias(mut self, depth_bias_info: Option<DepthBiasInfo>) -> Self {
+    pub fn with_depth_bias(&mut self, depth_bias_info: Option<DepthBiasInfo>) -> &mut Self {
         self.depth_bias_info = depth_bias_info;
         self
     }
 
-    pub fn with_primitive_topology(mut self, topology: PrimitiveTopology, restart_enable: bool) -> Self {
+    pub fn with_primitive_topology(&mut self, topology: PrimitiveTopology, restart_enable: bool) -> &mut Self {
         self.primitive_topology = (topology, restart_enable);
         self
     }
 
-    pub fn with_sample_shading(mut self, sample_shading_info: Option<SampleShadingInfo>) -> Self {
+    pub fn with_sample_shading(&mut self, sample_shading_info: Option<SampleShadingInfo>) -> &mut Self {
         self.sample_shading_info = sample_shading_info;
         self
     }
 
     /// Blend constants are used with color attachments that use 'ConstColor' or 'ConstAlpha' BlendFactors.
     /// The default constants are [0.0, 0.0, 0.0, 0.0]
-    pub fn with_blend_constants(mut self, blend_constants: BlendConstants) -> Self {
+    pub fn with_blend_constants(&mut self, blend_constants: BlendConstants) -> &mut Self {
         self.color_blend_info.blend_constants = blend_constants;
         self
     }
 
     /// Appends a color output to the pipeline.
     /// The number of color outputs of a pipeline must match exactly with the number of outputs in the fragment shader.
-    pub fn with_color_output(mut self, format: Format, write_mask: WriteMask, blend_state: Option<ColorOutputBlendState>) -> Self {
+    pub fn with_color_output(&mut self, format: Format, write_mask: WriteMask, blend_state: Option<ColorOutputBlendState>) -> &mut Self {
         self.color_output_formats.push(format).unwrap();
         self.color_blend_info.add_attachment(write_mask, blend_state);
         self
     }
 
-    pub fn with_depth_output(mut self, format: Format) -> Self {
+    pub fn with_depth_output(&mut self, format: Format) -> &mut Self {
         self.depth_output_format = format;
         self
     }
 
-    pub fn with_stencil_output(mut self, format: Format) -> Self {
+    pub fn with_stencil_output(&mut self, format: Format) -> &mut Self {
         self.stencil_output_format = format;
         self
     }
 
-    pub fn with_dynamic_states(mut self, dynamic_state: &[DynamicState]) -> Self {
+    pub fn with_dynamic_states(&mut self, dynamic_state: &[DynamicState]) -> &mut Self {
         self.dynamic_states.append_map(dynamic_state, |v| (*v).into()).unwrap();
         self
     }
 
-    pub(crate) fn as_create_info(&self) -> CreateInfos<'_> {
+    pub(crate) fn as_create_info<'a, Alloc: Allocator>(
+        &self,
+        global_resources: &GlobalResources,
+        alloc: &'a Alloc,
+    ) -> Result<CreateInfos<'a, Alloc>, Error>
+    {
+
+        let layout = global_resources.get_pipeline_layout(self.layout_id);
+        let shader_ids = layout.shader_ids();
+
+        let mut shader_stage_infos = FixedVec::with_capacity(shader_ids.len(), alloc)?;
+
+        for id in shader_ids {
+            let shader = global_resources.get_shader(*id);
+            const NAME: &core::ffi::CStr = unsafe {
+                core::ffi::CStr::from_bytes_with_nul_unchecked(b"main\0")
+            };
+            shader_stage_infos.push(vk::PipelineShaderStageCreateInfo {
+                s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+                stage: shader.stage().into(),
+                module: *shader.shader_module(),
+                p_name: NAME.as_ptr(),
+                ..Default::default()
+            });
+        }
 
         let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo {
             s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -211,7 +264,34 @@ impl GraphicsPipelineInfo {
             ..Default::default()
         };
 
-        CreateInfos {
+        let mut vertex_input_bindings = FixedVec 
+            ::with_capacity(self.vertex_input_bindings.len(), alloc)?;
+
+        let mut vertex_input_attributes = FixedVec
+            ::with_capacity(self.vertex_input_attribute_count as usize, alloc)?;
+
+        for binding in self.vertex_input_bindings.iter().map(|v| *v) {
+            vertex_input_bindings.push(binding.into()).unwrap();
+            let b = binding.binding;
+            for attr in binding.attributes {
+                vertex_input_attributes.push(attr.into_vk(b)).unwrap();
+            }
+        }
+
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo {
+            s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            vertex_binding_description_count: vertex_input_bindings.len() as u32,
+            p_vertex_binding_descriptions: vertex_input_bindings.as_ptr(),
+            vertex_attribute_description_count: vertex_input_attributes.len() as u32,
+            p_vertex_attribute_descriptions: vertex_input_attributes.as_ptr(),
+            ..Default::default()
+        };
+
+        Ok(CreateInfos {
+            _vertex_input_bindings: vertex_input_bindings,
+            _vertex_input_attributes: vertex_input_attributes,
+            shader_stage_infos,
+            vertex_input_state,
             input_assembly_state,
             tesellation_state,
             rasterization_state,
@@ -220,6 +300,7 @@ impl GraphicsPipelineInfo {
             color_blend_state,
             dynamic_state,
             rendering_info,
-        }
+            layout: layout.handle(),
+        })
     }
 }

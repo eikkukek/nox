@@ -1,4 +1,4 @@
-use nox_mem::{GlobalVec, Vector};
+use nox_mem::{Vector, vec_types::GlobalVec};
 
 use super::{Reader, Primitive};
 

@@ -32,6 +32,23 @@ impl<T, const N: usize> ArrayVec<T, N>
             len: 0,
         }
     }
+
+    pub fn with_len(value: T, len: usize) -> Result<Self, CapacityError>
+        where
+            T: Clone,
+    {
+        if len > N {
+            return Err(CapacityError::FixedCapacity { capacity: N })
+        }
+        let mut data: [MaybeUninit<T>; N] = unsafe { MaybeUninit::uninit().assume_init() };
+        for i in 0..len {
+            data[i].write(value.clone());
+        }
+        Ok(Self {
+            data,
+            len,
+        })
+    }
 }
 
 impl<T, const N: usize> Vector<T> for ArrayVec<T, N>

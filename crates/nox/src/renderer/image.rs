@@ -5,6 +5,7 @@ mod properties;
 mod image;
 mod subresource_range;
 mod image_source;
+mod sampler;
 mod error;
 
 use std::sync::Arc;
@@ -24,7 +25,16 @@ pub use enums::*;
 pub use structs::*;
 pub use error::*;
 pub use builder::*;
+pub use sampler::*;
 pub use properties::ImageProperties;
 pub(crate) use image_source::*;
 pub use image::*;
 pub(crate) use subresource_range::ImageSubresourceRange;
+
+pub(crate) fn make_aspect_mask(aspects: &[ImageAspect]) -> u32 {
+    let mut mask = 0;
+    for aspect in aspects {
+        mask |= *aspect;
+    }
+    mask
+}

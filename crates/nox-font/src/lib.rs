@@ -1,5 +1,5 @@
 mod face;
-mod vertisize;
+mod triangulate;
 
 pub use face::Face;
-pub use vertisize::vertisize;
+pub use triangulate::triangulate;

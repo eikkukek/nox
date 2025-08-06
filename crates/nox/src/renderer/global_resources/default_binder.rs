@@ -8,7 +8,7 @@ use crate::{
         PhysicalDeviceInfo,
         memory_binder::{MemoryBinder, DeviceMemory},
     },
-    has_bits, has_not_bits
+    has_bits,
 };
 
 #[derive(Clone)]
@@ -30,7 +30,7 @@ impl DefaultBinder {
         let mut memory_type_bits = 0;
         for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize].iter().enumerate() {
             let property_flags = memory_type.property_flags;
-            if has_bits!(property_flags, required_properties) && has_not_bits!(property_flags, forbidden_properties) {
+            if has_bits!(property_flags, required_properties) && !property_flags.intersects(forbidden_properties) {
                 memory_type_bits |= 1 << i;
             }
         }
@@ -79,7 +79,7 @@ impl MemoryBinder for DefaultBinder {
         if memory_type_bits == 0 {
             return Err(Error::IncompatibleMemoryRequirements)
         }
-        let memory_type_index = memory_type_bits.trailing_zeros() + 1;
+        let memory_type_index = memory_type_bits.trailing_zeros();
         let allocate_info = vk::MemoryAllocateInfo {
             s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
             allocation_size: memory_requirements.size,

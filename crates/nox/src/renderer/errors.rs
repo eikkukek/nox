@@ -3,15 +3,19 @@ use ash::vk;
 use nox_mem::{const_assert, size_of, CapacityError};
 
 use super::image::ImageError;
+use super::buffer::BufferError;
 
 #[derive(Clone, Debug)]
 pub enum Error {
     CapacityError(CapacityError),
     VulkanError(vk::Result),
-    ShadercError(String),
-    OutOfDeviceMemory { size: vk::DeviceSize, align: vk::DeviceSize, avail: vk::DeviceSize },
+    ShaderError(String),
+    OutOfDeviceMemory { size: u64, align: u64, avail: u64, },
+    DescriptorPoolFull { max_sets: u32, allocated_sets: u32 },
+    InvalidHostCopy { copy_size: u64, host_buffer_size: usize, },
     IncompatibleMemoryRequirements,
     ImageError(ImageError),
+    BufferError(BufferError),
 }
 
 const_assert!(size_of!(shaderc::Error) == 32);
@@ -33,7 +37,14 @@ impl From<vk::Result> for Error {
 impl From<shaderc::Error> for Error {
 
     fn from(value: shaderc::Error) -> Self {
-        Self::ShadercError(value.to_string())
+        Self::ShaderError("shaderc error: ".to_string() + &value.to_string())
+    }
+}
+
+impl From<rspirv_reflect::ReflectError> for Error {
+
+    fn from(value: rspirv_reflect::ReflectError) -> Self {
+        Self::ShaderError("spirv cross error: ".to_string() + &value.to_string())
     }
 }
 
@@ -41,5 +52,12 @@ impl From<ImageError> for Error {
 
     fn from(value: ImageError) -> Self {
         Self::ImageError(value)
+    }
+}
+
+impl From<BufferError> for Error {
+
+    fn from(value: BufferError) -> Self {
+        Self::BufferError(value)
     }
 }

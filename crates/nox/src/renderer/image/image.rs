@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::renderer::memory_binder::DeviceMemory;
+use crate::renderer::{memory_binder::DeviceMemory};
 
 use super::*;
 
@@ -34,6 +34,11 @@ impl Image {
     #[inline(always)]
     pub(crate) fn properties(&self) -> ImageProperties {
         self.properties
+    }
+
+    #[inline(always)]
+    pub(crate) fn state(&self) -> ImageState {
+        self.state
     }
 
     #[inline(always)]
@@ -146,7 +151,7 @@ impl Image {
     pub(crate) fn cmd_memory_barrier(
         &mut self,
         state: ImageState,
-        command_buffer: vk::CommandBuffer
+        command_buffer: vk::CommandBuffer,
     )
     {
         if self.state == state {

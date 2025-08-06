@@ -785,10 +785,6 @@ impl_traits!{
     ,
 }
 
-fn lol(f: &mut core::fmt::Formatter) {
-    <char as Display>::fmt(&'[', f);
-}
-
 impl<'alloc, T, Alloc, CapacityPol, IsGlobal> From<&AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal>> for Vec<T>
     where
         T: Clone,

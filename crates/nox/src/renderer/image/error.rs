@@ -20,11 +20,3 @@ pub enum ImageError {
         copy_dimensions: Dimensions,
     },
 }
-
-pub(crate) fn make_aspect_mask(aspects: &[ImageAspect]) -> u32 {
-    let mut mask = 0;
-    for aspect in aspects {
-        mask |= *aspect;
-    }
-    mask
-}

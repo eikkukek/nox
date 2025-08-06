@@ -23,14 +23,12 @@ impl ImageBuffer {
         if channels > 4 {
             return Err(format!("channels must be less or equal to 4 ( requested channels: {} )", channels))
         }
+        let c_path = CString::new(filename).unwrap();
         let mut x = 0;
         let mut y = 0;
         let mut ch = 0;
-        let filename = CString
-            ::new(filename)
-            .unwrap();
         let img = unsafe {
-            stb_image::stbi_load(filename.as_ptr(), &mut x, &mut y, &mut ch, channels as i32)
+            stb_image::stbi_load(c_path.as_ptr(), &mut x, &mut y, &mut ch, channels as i32)
         };
         if img.is_null() {
             unsafe {
@@ -53,7 +51,7 @@ impl ImageBuffer {
         unsafe {
             slice::from_raw_parts(
                 self.buffer.as_ptr(),
-                self.width as usize * self.height as usize,
+                self.width as usize * self.height as usize * self.channels as usize,
             )
         }
     }

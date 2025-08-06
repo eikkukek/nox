@@ -16,6 +16,8 @@ mod memory;
 pub mod stack_alloc;
 
 pub use nox_mem as mem;
+pub use nox_font as font;
+pub use nox_math as math;
 
 pub use error::Error;
 pub use version::Version;
@@ -23,6 +25,7 @@ pub use nox::*;
 pub use renderer::frame_graph;
 pub use memory::Memory;
 //pub use asset_importer::AssetType;
+
 
 impl byte_hash::ByteHasher for blake3::Hasher {
 

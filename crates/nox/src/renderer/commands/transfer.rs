@@ -13,12 +13,13 @@ use nox_mem::{Vector, vec_types::GlobalVec};
 use crate::{
     has_not_bits,
     renderer::{
-        image::{Dimensions, ImageError, ImageSubresourceLayers, Offset},
+        global_resources::*,
+        image::*,
+        buffer::*,
         linear_device_alloc::LinearDeviceAlloc,
         memory_binder::{DeviceMemory, MemoryBinder},
-        Error,
-        GlobalResources,
-        ImageID,
+        BufferError,
+        Error
     }
 };
 
@@ -30,6 +31,7 @@ pub struct TransferCommandbuffer {
     staging_buffers: GlobalVec<vk::Buffer>,
     linear_device_alloc: Arc<RwLock<LinearDeviceAlloc>>,
     fence: Option<vk::Fence>,
+    transfer_queue_index: u32,
     id: CommandRequestID,
 }
 
@@ -42,6 +44,7 @@ impl TransferCommandbuffer {
         global_resources: Arc<RwLock<GlobalResources>>,
         linear_device_alloc: Arc<RwLock<LinearDeviceAlloc>>,
         staging_buffer_capacity: u32,
+        transfer_queue_index: u32,
         id: CommandRequestID,
     ) -> Result<Self, Error>
     {
@@ -53,6 +56,7 @@ impl TransferCommandbuffer {
             staging_buffers: GlobalVec::with_capacity(staging_buffer_capacity as usize)?,
             linear_device_alloc,
             fence: None,
+            transfer_queue_index,
             id,
         })
     }
@@ -81,6 +85,95 @@ impl TransferCommandbuffer {
     }
 
     #[inline(always)]
+    pub fn copy_data_to_buffer(
+        &mut self,
+        buffer_id: BufferID, 
+        data: &[u8],
+        offset: u64,
+        size: u64,
+    ) -> Result<(), Error>
+    {
+        let mut g = self.global_resources.write().unwrap();
+        let buffer = g.get_mut_buffer(buffer_id);
+        let properties = buffer.properties();
+        if has_not_bits!(properties.usage, vk::BufferUsageFlags::TRANSFER_DST) {
+            return Err(BufferError::UsageMismatch {
+                missing_usage: vk::BufferUsageFlags::TRANSFER_DST
+            }.into())
+        }
+        if properties.size < offset + size {
+            return Err(BufferError::InvalidCopy {
+                buffer_size: properties.size, copy_offset: offset, copy_size: size,
+            }.into())
+        }
+        if (data.len() as u64) < size {
+            return Err(Error::InvalidHostCopy {
+                copy_size: size, host_buffer_size: data.len()
+            })
+        }
+        let mut buf_state = BufferState::new(
+            vk::AccessFlags::TRANSFER_WRITE,
+            self.transfer_queue_index,
+            vk::PipelineStageFlags::TRANSFER,
+        );
+        let buf_queue = buffer.state().queue_family_index;
+        buffer.cmd_memory_barrier(
+            buf_state,
+            self.command_buffer,
+        );
+        let device = &self.device;
+        let buffer_info = vk::BufferCreateInfo {
+            s_type: vk::StructureType::BUFFER_CREATE_INFO,
+            size: data.len() as vk::DeviceSize,
+            usage: vk::BufferUsageFlags::TRANSFER_SRC,
+            sharing_mode: vk::SharingMode::EXCLUSIVE,
+            ..Default::default()
+        };
+        let staging_buffer = unsafe {
+            device.create_buffer(&buffer_info, None)?
+        };
+        let memory = self.linear_device_alloc
+            .write()
+            .expect("LinearDeviceAlloc lock poisoned")
+            .bind_buffer_memory(staging_buffer)?;
+        let ptr = unsafe {
+            self.device.map_memory(
+                memory.device_memory(),
+                memory.offset(),
+                memory.size(),
+                Default::default(),
+            )?
+        } as *mut u8;
+
+        let region = vk::BufferCopy {
+            src_offset: 0,
+            dst_offset: offset,
+            size,
+        };
+
+        unsafe {
+            ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+            self.device.cmd_copy_buffer(
+                self.command_buffer,
+                staging_buffer,
+                buffer.handle(),
+                &[region],
+            );
+        };
+
+        self.staging_buffers
+            .push(staging_buffer)
+            .unwrap();
+
+        if buf_state.queue_family_index != buf_queue {
+            buf_state.queue_family_index = buf_queue;
+            buffer.cmd_memory_barrier(buf_state, self.command_buffer);
+        }
+
+        Ok(())
+    }
+
+    #[inline(always)]
     pub fn copy_data_to_image(
         &mut self,
         image_id: ImageID,
@@ -90,14 +183,25 @@ impl TransferCommandbuffer {
         dimensions: Option<Dimensions>,
     ) -> Result<(), Error>
     {
-        let g = self.global_resources.write().unwrap();
-        let image = g.get_image(image_id);
+        let mut g = self.global_resources.write().unwrap();
+        let image = g.get_mut_image(image_id);
         let properties = image.properties();
-        if has_not_bits!(properties.usage, vk::ImageUsageFlags::TRANSFER_SRC) {
+        if has_not_bits!(properties.usage, vk::ImageUsageFlags::TRANSFER_DST) {
             return Err(ImageError::UsageMismatch {
-                missing_usage: vk::ImageUsageFlags::TRANSFER_SRC
+                missing_usage: vk::ImageUsageFlags::TRANSFER_DST
             }.into())
         }
+        let mut img_state = ImageState::new(
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            self.transfer_queue_index,
+            vk::PipelineStageFlags::TRANSFER
+        );
+        let img_queue = image.state().queue_family_index;
+        image.cmd_memory_barrier(
+            img_state,
+            self.command_buffer,
+        );
         let mut subresource_layers = properties.all_layers(0);
         if let Some(layers) = layers {
             if let Some(err) = image.validate_layers(layers) {
@@ -134,7 +238,7 @@ impl TransferCommandbuffer {
         let buffer_info = vk::BufferCreateInfo {
             s_type: vk::StructureType::BUFFER_CREATE_INFO,
             size: data.len() as vk::DeviceSize,
-            usage: vk::BufferUsageFlags::TRANSFER_DST,
+            usage: vk::BufferUsageFlags::TRANSFER_SRC,
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             ..Default::default()
         };
@@ -177,7 +281,12 @@ impl TransferCommandbuffer {
         self.staging_buffers
             .push(staging_buffer)
             .unwrap();
-        
+
+        if img_state.queue_family_index != img_queue {
+            img_state.queue_family_index = img_queue;
+            image.cmd_memory_barrier(img_state, self.command_buffer);
+        }
+
         Ok(())
     }
 }

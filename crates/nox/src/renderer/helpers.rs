@@ -7,7 +7,7 @@ pub fn allocate_command_buffers(
 ) -> Result<(), vk::Result>
 {
     if info.command_buffer_count > out.len() as u32 {
-        panic!("out len smaller than command buffer count!");
+        panic!("out length smaller than command buffer count!");
     }
     let allocate_command_buffers = device.fp_v1_0().allocate_command_buffers;
     let result = unsafe {

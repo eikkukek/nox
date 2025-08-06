@@ -8,15 +8,13 @@ use nox_mem::{Allocator, CapacityError, Vector, vec_types::FixedVec};
 
 use crate::{
     renderer::{
+        *,
         global_resources::*,
         frame_state::SubresourceResetGuard,
-        QueueFamilyIndices,
-        Error,
         image::{
             ImageState,
             ImageBuilder,
         },
-        pipeline::PipelineCache,
         frame_state::{FrameState, ResourceID},
     },
     has_bits,
@@ -27,7 +25,6 @@ use super::*;
 pub(crate) struct FrameGraphImpl<'a, Alloc: Allocator> {
     frame_state: Rc<RefCell<FrameState>>,
     command_buffer: vk::CommandBuffer,
-    pipeline_cache: &'a PipelineCache,
     passes: FixedVec<'a, Pass<'a, Alloc>, Alloc>,
     queue_family_indices: QueueFamilyIndices,
     alloc: &'a Alloc,
@@ -39,7 +36,6 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
     pub fn new(
         frame_state: Rc<RefCell<FrameState>>,
         command_buffer: vk::CommandBuffer,
-        pipeline_cache: &'a PipelineCache,
         alloc: &'a Alloc,
         frame_index: u32,
         queue_family_indices: QueueFamilyIndices,
@@ -48,7 +44,6 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
         FrameGraphImpl {
             frame_state,
             command_buffer,
-            pipeline_cache,
             passes: FixedVec::with_no_alloc(),
             queue_family_indices,
             alloc,
@@ -113,7 +108,6 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         let alloc = self.alloc;
         let pass = self.passes.push(Pass::new(
             info,
-            self.pipeline_cache,
             alloc
         )?).expect("pass capacity exceeded");
         f(pass);
@@ -124,7 +118,7 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
 
 impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
 
-    pub fn render(&mut self) -> Result<(), Error> {
+    pub fn render(&mut self, render_commands: &RenderCommands) -> Result<(), Error> {
         let alloc = self.alloc;
         let frame_state = self.frame_state.borrow_mut();
         let device = frame_state.device();
@@ -238,7 +232,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                 device.cmd_begin_rendering(command_buffer, &rendering_info);
             }
             if let Some(callback) = pass.callback {
-                callback(index)
+                callback(render_commands)
             }
             unsafe { device.cmd_end_rendering(command_buffer); }
         }
@@ -259,16 +253,15 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
         let mut dependents = FixedVec::<FixedVec<usize, Alloc>, Alloc>
             ::with_len_with(pass_count, FixedVec::with_no_alloc, alloc)?;
         for (i, pass) in passes.iter().enumerate() {
-            if let Some(deps) = &pass.dependencies {
-                in_degree[i] = deps.len();
-                for index in deps {
-                    let list = &mut dependents[*index];
-                    if list.capacity() == 0 {
-                        *list =
-                            FixedVec::with_capacity(pass_count, alloc)?;
-                    }
-                    list.push(i)?;
+            let deps = &pass.dependencies;
+            in_degree[i] = deps.len();
+            for index in deps {
+                let list = &mut dependents[*index];
+                if list.capacity() == 0 {
+                    *list =
+                        FixedVec::with_capacity(pass_count, alloc)?;
                 }
+                list.push(i)?;
             }
             
         }

@@ -3,7 +3,8 @@ resolver = "3"
 members = [
 	"crates/nox",
 	"crates/nox-font",
+	"crates/nox-math",
 	"crates/nox-mem",
-	"crates/nox-mem-derive",
+	"crates/nox-derive",
 	"crates/nox-ser"
 ]

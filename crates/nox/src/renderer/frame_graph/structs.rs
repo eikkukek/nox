@@ -57,7 +57,7 @@ impl From<RenderArea> for vk::Rect2D {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClearColorValue {
     Float([Hashable<f32>; 4]),
     Int([i32; 4]),
@@ -112,7 +112,14 @@ impl From<ClearColorValue> for vk::ClearColorValue {
     }
 }
 
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
+impl From<ClearColorValue> for vk::ClearValue {
+
+    fn from(value: ClearColorValue) -> Self {
+        Self { color: value.into() }
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClearDepthStencilValue {
     pub depth: Hashable<f32>,
     pub stencil: u32,
@@ -128,7 +135,7 @@ impl From<ClearDepthStencilValue> for vk::ClearDepthStencilValue {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClearValue {
     Color(ClearColorValue),
     DepthStencil(ClearDepthStencilValue),
@@ -215,7 +222,7 @@ impl WriteInfo {
     }
 
     #[inline(always)]
-    pub(crate) fn vk_format(&self) -> vk::Format {
+    pub(crate) fn _vk_format(&self) -> vk::Format {
         self.range_info
             .map(|v| v.component_info
                 .map(|v| v.format)

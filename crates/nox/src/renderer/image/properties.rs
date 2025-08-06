@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageProperties {
     pub(crate) dimensions: Dimensions,
     pub(crate) aspect_mask: u32,

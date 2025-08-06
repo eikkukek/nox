@@ -7,7 +7,7 @@ use ash::vk;
 
 use super::{ComponentSwizzle, Format};
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Dimensions {
     pub width: u32,
     pub height: u32,
@@ -48,7 +48,7 @@ impl From<Dimensions> for vk::Extent3D {
     }
 }
 
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Offset {
     pub x: i32,
     pub y: i32,
@@ -74,7 +74,7 @@ impl From<Offset> for vk::Offset3D {
     }
 }
 
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentMapping {
     r: ComponentSwizzle,
     g: ComponentSwizzle,
@@ -94,7 +94,7 @@ impl From<ComponentMapping> for vk::ComponentMapping {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageSubresourceRangeInfo {
     pub aspect_mask: u32,
     pub base_mip_level: u32,
@@ -147,7 +147,7 @@ impl From<ImageSubresourceRangeInfo> for vk::ImageSubresourceRange {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageSubresourceLayers {
     pub aspect_mask: u32,
     pub mip_level: u32,
@@ -184,7 +184,7 @@ impl From<ImageSubresourceLayers> for vk::ImageSubresourceLayers {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentInfo {
     pub component_mapping: ComponentMapping,
     pub(crate) format: vk::Format,
@@ -224,7 +224,7 @@ impl ImageRangeInfo {
     }
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ImageState {
     pub access_flags: vk::AccessFlags,
     pub layout: vk::ImageLayout,

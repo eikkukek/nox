@@ -8,6 +8,7 @@ mod memory_layout;
 mod handle;
 mod helpers;
 mod shader_fn;
+mod shader;
 mod enums;
 mod physical_device;
 mod vulkan_context;
@@ -16,6 +17,7 @@ mod swapchain_context;
 mod thread_context;
 mod frame_state;
 mod linear_device_alloc;
+mod buffer;
 mod global_resources;
 mod commands;
 
@@ -45,23 +47,26 @@ use super::{
     AppName
 };
 
+pub use vk::Format as VkFormat;
+
 pub use enums::*;
 pub use errors::Error;
 pub use memory_layout::MemoryLayout;
 pub use handle::{Handle, RaiiHandle};
 pub use image::{ImageBuilder};
+pub use buffer::BufferError;
 pub use physical_device::QueueFamilyIndices;
 pub use global_resources::*;
 pub use commands::*;
+pub use nox_derive::VertexInput;
+pub use shader::*;
+pub use pipeline::vertex_input::*;
 
 //use device_allocators::DeviceAllocators;
 use linear_device_alloc::LinearDeviceAlloc;
 use vulkan_context::VulkanContext;
 use swapchain_context::SwapchainContext;
 use physical_device::PhysicalDeviceInfo;
-use pipeline::{
-    PipelineCache,
-};
 use frame_state::FrameState;
 use frame_graph::FrameGraphImpl;
 use swapchain_context::PresentResult;
@@ -136,13 +141,13 @@ pub struct Renderer<'mem> {
     thread_contexts: Arc<RwLock<FxHashMap<ThreadId, ThreadContext>>>,
     frame_states: ArrayVec<Rc<RefCell<FrameState>>, {MAX_BUFFERED_FRAMES as usize}>,
     swapchain_pass_pipeline_data: SwapchainPassPipelineData,
-    pipeline_cache: PipelineCache,
     global_resources: Arc<RwLock<GlobalResources>>,
     device: Arc<ash::Device>,
     vulkan_context: VulkanContext<'mem>,
     memory_layout: MemoryLayout,
     buffered_frame_count: u32,
     transfer_commands: Arc<RwLock<GlobalVec<TransferCommandbuffer>>>,
+    tmp_alloc: Rc<StackAlloc>,
 }
 
 impl<'mem> Renderer<'mem> {
@@ -179,13 +184,14 @@ impl<'mem> Renderer<'mem> {
             )?;
         let physical_device_info = vulkan_context.physical_device_info().clone();
         let swapchain_pass_pipeline_data = SwapchainPassPipelineData
-            ::new(vulkan_context.device(), &physical_device_info, buffered_frame_count, allocators)
+            ::new(device.clone(), &physical_device_info, buffered_frame_count, allocators)
             .map_err(|e| array_format!("failed to create full screen pass data ( {:?} )", e))?;
         let global_resources = Arc::new(RwLock::new(
-            GlobalResources::new(device.clone(), &physical_device_info)
+            GlobalResources
+                ::new(device.clone(), &physical_device_info)
+                .map_err(|e| array_format!("failed to create global resources ( {:?} ) ", e))?
         ));
         let mut s = Self {
-            pipeline_cache: PipelineCache::new(),
             main_thread_context,
             thread_contexts: Default::default(),
             vulkan_context,
@@ -196,6 +202,7 @@ impl<'mem> Renderer<'mem> {
             memory_layout,
             buffered_frame_count,
             transfer_commands: Default::default(),
+            tmp_alloc: Rc::new(StackAlloc::new(memory_layout.tmp_size()).ok_or(array_format!("failed to create tmp alloc"))?),
         };
         let mut frame_states = ArrayVec::new();
         let mut i = 0;
@@ -278,7 +285,7 @@ impl<'mem> Renderer<'mem> {
                         ::new(device.clone(), queue_families)
                         .unwrap()
                     );
-                let vk_cmd_buffer = vk::CommandBuffer::null();
+                let mut vk_cmd_buffer = vk::CommandBuffer::null();
                 let command_pool = thread_context.transfer_pool();
                 let info = vk::CommandBufferAllocateInfo {
                     s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
@@ -288,7 +295,10 @@ impl<'mem> Renderer<'mem> {
                     ..Default::default()
                 };
                 helpers
-                    ::allocate_command_buffers(&device, &info, &mut [vk_cmd_buffer])
+                    ::allocate_command_buffers(&device, &info, slice::from_mut(&mut vk_cmd_buffer))
+                    .unwrap();
+                helpers
+                    ::begin_command_buffer(&device, vk_cmd_buffer)
                     .unwrap();
                 let mut command_buffer = TransferCommandbuffer::new(
                     device,
@@ -297,6 +307,7 @@ impl<'mem> Renderer<'mem> {
                     global_resources,
                     alloc,
                     capacity,
+                    queue_families.transfer_index(),
                     id,
                 ).unwrap();
                 interface
@@ -339,6 +350,11 @@ impl<'mem> Renderer<'mem> {
                     .map_err(|e| array_format!("failed to create fence: {:?}", e))?;
                 if new {
                     let command_buffer = command.vk_command_buffer();
+                    unsafe {
+                        device
+                            .end_command_buffer(command_buffer)
+                            .map_err(|e| array_format!("failed to end command buffer: {:?}", e))?;
+                    }
                     let submit_info = vk::SubmitInfo {
                         s_type: vk::StructureType::SUBMIT_INFO,
                         command_buffer_count: 1,
@@ -402,7 +418,6 @@ impl<'mem> Renderer<'mem> {
         let mut frame_graph = FrameGraphImpl::new(
             self.frame_states[frame_data.frame_index as usize].clone(),
             frame_data.command_buffer, 
-            &self.pipeline_cache,
             alloc,
             frame_data.frame_index,
             queue_family_indices,
@@ -412,8 +427,14 @@ impl<'mem> Renderer<'mem> {
             .unwrap()
             .render(&mut frame_graph, &pending_transfers)
             .map_err(|e| array_format!("interface failed to render ( {:?} )", e))?;
+        let render_commands = RenderCommands::new(
+            device.clone(),
+            frame_data.command_buffer,
+            self.global_resources.clone(),
+            self.tmp_alloc.clone(),
+        );
         frame_graph
-            .render()
+            .render(&render_commands)
             .map_err(|e| array_format!("frame graph failed to render ( {:?} )", e))?;
         let frame_state = &self.frame_states[frame_data.frame_index as usize].borrow_mut();
         let mut image_state = frame_data.image_state;
@@ -501,7 +522,7 @@ impl<'mem> Renderer<'mem> {
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
-                    self.swapchain_pass_pipeline_data.layout,
+                    self.swapchain_pass_pipeline_data.layout.handle(),
                     0,
                     &[self.swapchain_pass_pipeline_data.get_descriptor_set(
                         image_view,

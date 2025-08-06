@@ -136,6 +136,14 @@ impl<T> PartialEq for SlotIndex<T> {
 
 impl<T> Eq for SlotIndex<T> {}
 
+impl<T> core::hash::Hash for SlotIndex<T> {
+
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.version.hash(state);
+        self.index.hash(state);
+    }
+}
+
 pub struct AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal>
     where
         T: Sized,

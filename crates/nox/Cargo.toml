@@ -5,13 +5,15 @@ edition = "2024"
 
 [dependencies]
 nox-mem = { path = "../nox-mem" }
-nox-mem-derive = { path = "../nox-mem-derive" }
+nox-derive = { path = "../nox-derive" }
+nox-math = { path = "../nox-math" }
+nox-font = { path = "../nox-font" }
 
 ash = "0.38.0"
 ash-window = "0.13.0"
 raw-window-handle = "0.6.0"
 winit = "0.30"
-spirv-cross2 = "0.4.3"
+rspirv-reflect = "0.9.0"
 shaderc = "0.9.1"
 memmap2 = "0.9.5"
 fxhash = "0.2.1"

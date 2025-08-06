@@ -2,7 +2,7 @@ use ash::vk;
 use nox_mem::AsRaw;
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum DynamicState {
     CullMode = vk::DynamicState::CULL_MODE.as_raw(),
     FrontFace = vk::DynamicState::FRONT_FACE.as_raw(),
@@ -25,7 +25,7 @@ impl From<DynamicState> for vk::DynamicState {
 }
 
 #[repr(i32)]
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum PolygonMode {
     #[default]
     Fill = vk::PolygonMode::FILL.as_raw(),
@@ -40,7 +40,7 @@ impl From<PolygonMode> for vk::PolygonMode {
 }
 
 #[repr(u32)]
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum CullMode {
     None = vk::CullModeFlags::NONE.as_raw(),
     #[default]
@@ -57,7 +57,7 @@ impl From<CullMode> for vk::CullModeFlags {
 }
 
 #[repr(i32)]
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum FrontFace {
     #[default]
     CounterClockwise = vk::FrontFace::COUNTER_CLOCKWISE.as_raw(),
@@ -72,7 +72,7 @@ impl From<FrontFace> for vk::FrontFace {
 }
 
 #[repr(i32)]
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum PrimitiveTopology {
     PointList = vk::PrimitiveTopology::POINT_LIST.as_raw(),
     LineList = vk::PrimitiveTopology::LINE_LIST.as_raw(),
@@ -100,27 +100,7 @@ impl From<PrimitiveTopology> for vk::PrimitiveTopology {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
-pub enum CompareOp {
-    Never = vk::CompareOp::NEVER.as_raw(),
-    Less = vk::CompareOp::LESS.as_raw(),
-    Equal = vk::CompareOp::EQUAL.as_raw(),
-    LessOrEqual = vk::CompareOp::LESS_OR_EQUAL.as_raw(),
-    Greater = vk::CompareOp::GREATER.as_raw(),
-    NotEqual = vk::CompareOp::NOT_EQUAL.as_raw(),
-    GreaterOrEqual = vk::CompareOp::GREATER_OR_EQUAL.as_raw(),
-    Always = vk::CompareOp::ALWAYS.as_raw(),
-}
-
-impl From<CompareOp> for vk::CompareOp {
-
-    fn from(value: CompareOp) -> Self {
-        Self::from_raw(value.as_raw())
-    }
-}
-
-#[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum StencilOp {
     Keep = vk::StencilOp::KEEP.as_raw(),
     Zero = vk::StencilOp::ZERO.as_raw(),
@@ -140,7 +120,7 @@ impl From<StencilOp> for vk::StencilOp {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum BlendFactor {
     Zero = vk::BlendFactor::ZERO.as_raw(),
     One = vk::BlendFactor::ONE.as_raw(),
@@ -189,7 +169,7 @@ impl From<BlendFactor> for vk::BlendFactor {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, Hash, PartialEq, Eq, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum BlendOp {
     Add = vk::BlendOp::ADD.as_raw(),
     Sub = vk::BlendOp::SUBTRACT.as_raw(),

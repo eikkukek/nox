@@ -1,18 +1,18 @@
-use super::PhysicalDeviceInfo;
+use crate::Version;
 
 #[inline(always)]
 pub fn glsl_to_spirv(
     src: &str,
     input_name: &str,
     shader_kind: shaderc::ShaderKind,
-    physical_device_info: &PhysicalDeviceInfo,
+    vulkan_version: Version,
 ) -> Result<shaderc::CompilationArtifact, shaderc::Error>
 {
     let compiler = shaderc::Compiler::new()?;
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_target_env(
         shaderc::TargetEnv::Vulkan,
-        physical_device_info.api_version().as_u32()
+        vulkan_version.as_u32(),
     );
     options.set_source_language(shaderc::SourceLanguage::GLSL);
     options.set_optimization_level(shaderc::OptimizationLevel::Performance);

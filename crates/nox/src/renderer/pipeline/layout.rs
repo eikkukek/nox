@@ -1,7 +1,5 @@
 mod enums;
-mod structs;
-mod info;
+mod layout;
 
 pub use enums::*;
-pub use structs::*;
-pub use info::PipelineLayoutInfo;
+pub(crate) use layout::PipelineLayout;

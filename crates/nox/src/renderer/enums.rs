@@ -2,7 +2,7 @@ use ash::vk;
 use nox_mem::AsRaw;
 
 #[repr(u32)]
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, AsRaw, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
 pub enum MSAA {
     #[default]
     X1 = vk::SampleCountFlags::TYPE_1.as_raw(),
@@ -17,6 +17,26 @@ pub enum MSAA {
 impl From<MSAA> for vk::SampleCountFlags {
     
     fn from(value: MSAA) -> Self {
+        Self::from_raw(value.as_raw())
+    }
+}
+
+#[repr(i32)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+pub enum CompareOp {
+    Never = vk::CompareOp::NEVER.as_raw(),
+    Less = vk::CompareOp::LESS.as_raw(),
+    Equal = vk::CompareOp::EQUAL.as_raw(),
+    LessOrEqual = vk::CompareOp::LESS_OR_EQUAL.as_raw(),
+    Greater = vk::CompareOp::GREATER.as_raw(),
+    NotEqual = vk::CompareOp::NOT_EQUAL.as_raw(),
+    GreaterOrEqual = vk::CompareOp::GREATER_OR_EQUAL.as_raw(),
+    Always = vk::CompareOp::ALWAYS.as_raw(),
+}
+
+impl From<CompareOp> for vk::CompareOp {
+
+    fn from(value: CompareOp) -> Self {
         Self::from_raw(value.as_raw())
     }
 }

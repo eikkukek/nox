@@ -2,12 +2,11 @@ use super::*;
 
 use ash::vk;
 
-use nox_mem::{Allocator, CapacityError, slot_map::SlotIndex, vec_types::{FixedVec, Vector}};
+use nox_mem::{Allocator, CapacityError, vec_types::{FixedVec, Vector}};
 
 use crate::renderer::{
+    *,
     frame_state::ResourceID,
-    MSAA,
-    pipeline::{PipelineID, PipelineCache, PipelineTypeInfo},
     image::ImageSubresourceRangeInfo,
 };
 
@@ -16,12 +15,9 @@ pub(crate) struct Pass<'alloc, Alloc: Allocator> {
     pub writes: FixedVec<'alloc, WriteInfo, Alloc>,
     pub depth_write: Option<WriteInfo>,
     pub stencil_write: Option<WriteInfo>,
-    pub dependencies: Option<FixedVec<'alloc, usize, Alloc>>,
+    pub dependencies: FixedVec<'alloc, usize, Alloc>,
     pub render_area: Option<vk::Rect2D>,
-    pub pipeline_cache: &'alloc PipelineCache,
-    pub pipelines: Option<FixedVec<'alloc, PipelineID, Alloc>>,
-    pub callback: Option<fn(usize)>,
-    pub last_pipeline_type_index: Option<SlotIndex<PipelineTypeInfo>>,
+    pub callback: Option<PassCallback>,
     pub msaa_samples: MSAA,
 }
 
@@ -29,7 +25,6 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
     
     pub fn new(
         info: PassInfo,
-        pipeline_cache: &'alloc PipelineCache,
         alloc: &'alloc Alloc
     ) -> Result<Self, CapacityError> {
         let reads =
@@ -48,17 +43,10 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
             };
         let dependencies =
             if info.max_dependencies != 0 {
-                Some(FixedVec::with_capacity(info.max_dependencies as usize, alloc)?)
+                FixedVec::with_capacity(info.max_dependencies as usize, alloc)?
             }
             else {
-                None
-            };
-        let pipelines =
-            if info.max_pipelines != 0 {
-                Some(FixedVec::with_capacity(info.max_pipelines as usize, alloc)?)
-            }
-            else {
-                None
+                FixedVec::with_no_alloc()
             };
         Ok(Self {
             reads,
@@ -67,10 +55,7 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
             stencil_write: None.into(),
             dependencies,
             render_area: None,
-            pipeline_cache,
-            pipelines,
             callback: None,
-            last_pipeline_type_index: None,
             msaa_samples: info.msaa_samples,
         })
     }
@@ -137,7 +122,8 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
 
 impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
 
-    fn as_pipeline_builder(&mut self) -> &mut dyn PassPipelineBuilder<'a> {
+    fn with_callback(&mut self, callback: PassCallback) -> &mut dyn PassAttachmentBuilder<'a> {
+        self.callback = Some(callback);
         self
     }
 
@@ -184,42 +170,8 @@ impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
 
     fn with_dependency(&mut self, pass_index: usize) -> &mut dyn PassAttachmentBuilder<'a> {
         self.dependencies
-            .as_mut()
-            .expect("dependency capacity exceeded")
             .push(pass_index)
             .expect("dependency capacity exceeded");
-        self
-    }
-}
-
-impl<'pass, Alloc: Allocator> PassPipelineBuilder<'pass> for Pass<'pass, Alloc> {
-
-    fn with_pipeline(&mut self, id: PipelineID) -> &mut dyn PassPipelineBuilder<'pass> {
-        if self.last_pipeline_type_index.is_none_or(|v| v != id.type_index())
-        {
-            let type_info = self.pipeline_cache.get_type_info(id);
-
-            assert!(type_info.msaa_samples() == self.msaa_samples.into(), "pipeline MSAA sample count must match pass sample count");
-
-            assert!(type_info.depth_format() == self.depth_write.as_ref().map_or(vk::Format::UNDEFINED, |r| r.vk_format()),
-                "pipeline depth format must match pass depth format");
-
-            assert!(type_info.stencil_format() == self.stencil_write.as_ref().map_or(vk::Format::UNDEFINED, |r| r.vk_format()),
-                "pipeline stencil format must match pass stencil format");
-
-            let format_count = type_info.color_formats().len();
-            assert!(format_count <= self.writes.len());
-            for (i, format) in type_info.color_formats()[0..format_count].iter().enumerate() {
-                assert!(self.writes[i].vk_format() == *format, "pipeline color formats must match pass color write formats")
-            }
-
-            self.last_pipeline_type_index = Some(id.type_index());
-        } 
-        self.pipelines
-            .as_mut()
-            .expect("pipeline capacity exceeded")
-            .push(id)
-            .expect("pipeline capacity exceeded");
         self
     }
 }
