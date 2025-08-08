@@ -35,14 +35,18 @@ use ash::vk;
 
 use fxhash::FxHashMap;
 
-use nox_mem::vec_types::{ArrayVec, GlobalVec, Vector};
+use nox_mem::{
+    string_types::*,
+    vec_types::{ArrayVec, GlobalVec, Vector},
+};
 
-use crate::{stack_alloc::StackAlloc, utility::clamp};
+use nox_alloc::arena_alloc::*;
+
+use nox_math::clamp;
 
 use super::{
     interface::Interface,
     Version,
-    string_types::{ArrayString, array_format, LargeError},
     AppName
 };
 
@@ -84,9 +88,8 @@ pub const MIN_BUFFERED_FRAMES: u32 = 2;
 pub const MAX_BUFFERED_FRAMES: u32 = 8;
 
 pub struct Allocators {
-    init: StackAlloc,
-    swapchain: StackAlloc,
-    frame_graphs: UnsafeCell<ArrayVec<StackAlloc, {MAX_BUFFERED_FRAMES as usize}>>,
+    swapchain: ArenaAlloc,
+    frame_graphs: UnsafeCell<ArrayVec<ArenaAlloc, {MAX_BUFFERED_FRAMES as usize}>>,
     _memory_layout: MemoryLayout,
 }
 
@@ -94,8 +97,7 @@ impl Allocators {
 
     pub fn new(memory_layout: MemoryLayout) -> Option<Self> {
         Some(Self {
-            init: StackAlloc::new(memory_layout.init_size())?,
-            swapchain: StackAlloc::new(memory_layout.swapchain_size())?,
+            swapchain: ArenaAlloc::new(memory_layout.swapchain_size())?,
             frame_graphs: UnsafeCell::new(Default::default()),
             _memory_layout: memory_layout,
         })
@@ -105,11 +107,11 @@ impl Allocators {
         assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
         unsafe { &mut *self.frame_graphs.get() }.resize_with(
             buffered_frame_count as usize,
-            || StackAlloc::new(self._memory_layout.frame_graphs_size()).unwrap()
+            || ArenaAlloc::new(self._memory_layout.frame_graphs_size()).unwrap()
         ).unwrap();
     }
 
-    fn frame_graphs(&self) -> &ArrayVec<StackAlloc, {MAX_BUFFERED_FRAMES as usize}> {
+    fn frame_graphs(&self) -> &ArrayVec<ArenaAlloc, {MAX_BUFFERED_FRAMES as usize}> {
         unsafe { &*self.frame_graphs.get() }
     }
 }
@@ -146,7 +148,7 @@ pub struct Renderer<'mem> {
     vulkan_context: VulkanContext<'mem>,
     memory_layout: MemoryLayout,
     buffered_frame_count: u32,
-    tmp_alloc: StackAlloc,
+    tmp_alloc: ArenaAlloc,
 }
 
 impl<'mem> Renderer<'mem> {
@@ -159,11 +161,12 @@ impl<'mem> Renderer<'mem> {
         memory_layout: MemoryLayout,
         mut buffered_frame_count: u32,
         allocators: &'mem Allocators,
-    ) -> Result<Self, LargeError>
+    ) -> Result<Self, String>
     {
         buffered_frame_count = clamp(buffered_frame_count, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
         assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
         allocators.realloc_frame_graphs(buffered_frame_count);
+        let tmp_alloc = ArenaAlloc::new(memory_layout.tmp_size()).ok_or(format!("failed to create tmp alloc"))?;
         let vulkan_context = VulkanContext
             ::new(
                 window,
@@ -171,7 +174,8 @@ impl<'mem> Renderer<'mem> {
                 app_version,
                 buffered_frame_count,
                 enable_validation,
-                allocators)
+                &tmp_alloc
+            )
             .map_err(|e| e)?;
         let device = Arc::new(vulkan_context.device().clone());
         let main_thread_context = ThreadContext
@@ -179,7 +183,7 @@ impl<'mem> Renderer<'mem> {
                 device.clone(),
                 vulkan_context.queue_family_indices())
             .map_err(|e|
-                array_format!("failed to create main thread context ( {:?} )", e)
+                format!("failed to create main thread context ( {:?} )", e)
             )?;
         let physical_device_info = vulkan_context.physical_device_info().clone();
         let global_resources = Arc::new(RwLock::new(
@@ -191,12 +195,11 @@ impl<'mem> Renderer<'mem> {
                     &physical_device_info,
                     memory_layout
                 )
-                .map_err(|e| array_format!("failed to create global resources ( {:?} ) ", e))?
+                .map_err(|e| format!("failed to create global resources ( {:?} ) ", e))?
         ));
-        let tmp_alloc = StackAlloc::new(memory_layout.tmp_size()).ok_or(array_format!("failed to create tmp alloc"))?;
         let swapchain_pass_pipeline_data = SwapchainPassPipelineData
             ::new(global_resources.clone(), buffered_frame_count, &tmp_alloc)
-            .map_err(|e| array_format!("failed to create full screen pass data ( {:?} )", e))?;
+            .map_err(|e| format!("failed to create full screen pass data ( {:?} )", e))?;
         let mut s = Self {
             main_thread_context,
             thread_contexts: Default::default(),
@@ -340,7 +343,7 @@ impl<'mem> Renderer<'mem> {
         window: &Window,
         interface: Arc<RwLock<I>>,
         allocators: &'mem Allocators,
-    ) -> Result<(), LargeError>
+    ) -> Result<(), String>
     {
         let device = self.device.clone();
         let mut pending_transfers = Default::default();
@@ -355,13 +358,13 @@ impl<'mem> Renderer<'mem> {
             for (i, command) in transfer_commands.iter_mut().enumerate() {
                 let (new, fence) = command
                     .get_fence()
-                    .map_err(|e| array_format!("failed to create fence: {:?}", e))?;
+                    .map_err(|e| format!("failed to create fence: {:?}", e))?;
                 if new {
                     let command_buffer = command.vk_command_buffer();
                     unsafe {
                         device
                             .end_command_buffer(command_buffer)
-                            .map_err(|e| array_format!("failed to end command buffer: {:?}", e))?;
+                            .map_err(|e| format!("failed to end command buffer: {:?}", e))?;
                     }
                     let submit_info = vk::SubmitInfo {
                         s_type: vk::StructureType::SUBMIT_INFO,
@@ -374,7 +377,7 @@ impl<'mem> Renderer<'mem> {
                             self.vulkan_context.transfer_queue(),
                             &[submit_info],
                             fence,
-                        ).map_err(|e| array_format!("failed to submit transfer commands: {:?}", e))?;
+                        ).map_err(|e| format!("failed to submit transfer commands: {:?}", e))?;
                     };
                 }
                 unsafe {
@@ -386,7 +389,7 @@ impl<'mem> Renderer<'mem> {
                             pending_transfers.push(command.id()).unwrap();
                         }
                         Err(e) => {
-                            return Err(array_format!("unexpected fence wait error: {:?}", e))
+                            return Err(format!("unexpected fence wait error: {:?}", e))
                         }
                     }
                 }
@@ -401,24 +404,26 @@ impl<'mem> Renderer<'mem> {
         let swapchain_context = self.vulkan_context
             .get_swapchain_context(
                 self.main_thread_context.graphics_pool(),
-                allocators)
+                &self.tmp_alloc,
+                allocators
+            )
             .map_err(|e| {
-                array_format!("failed to get swapchain context ( {} )", e)
+                format!("failed to get swapchain context ( {} )", e)
             })?;
         let frame_data = match swapchain_context
             .setup_image(&device, &swapchain_loader)
             .map_err(|e| {
-                array_format!("failed to setup render image ( {} )", e)
+                format!("failed to setup render image ( {} )", e)
             })? {
                 Some(r) => r,
                 None => return Ok(())
             };
         if let Err(e) = helpers::begin_command_buffer(&device, frame_data.command_buffer) {
-            return Err(array_format!("failed to begin command buffer {:?}", e))
+            return Err(format!("failed to begin command buffer {:?}", e))
         }
         let pipeline = self.swapchain_pass_pipeline_data
             .get_pipeline(frame_data.format, &self.tmp_alloc)
-            .map_err(|e| array_format!("failed to get full screen pass pipeline {:?}", e))?;
+            .map_err(|e| format!("failed to get full screen pass pipeline {:?}", e))?;
         let alloc = &allocators.frame_graphs()[frame_data.frame_index as usize];
         unsafe {
             alloc.force_clear();
@@ -435,7 +440,7 @@ impl<'mem> Renderer<'mem> {
             .write()
             .unwrap()
             .render(&mut frame_graph, &pending_transfers)
-            .map_err(|e| array_format!("interface failed to render ( {:?} )", e))?;
+            .map_err(|e| format!("interface failed to render ( {:?} )", e))?;
         let mut render_commands = RenderCommands::new(
             device.clone(),
             frame_data.command_buffer,
@@ -444,7 +449,7 @@ impl<'mem> Renderer<'mem> {
         );
         frame_graph
             .render(&mut *interface.write().unwrap(), &mut render_commands)
-            .map_err(|e| array_format!("frame graph failed to render ( {:?} )", e))?;
+            .map_err(|e| format!("frame graph failed to render ( {:?} )", e))?;
         let frame_state = &self.frame_states[frame_data.frame_index as usize].borrow_mut();
         let mut image_state = frame_data.image_state;
         if let Some(render_image_id) = frame_state.render_image() {
@@ -549,14 +554,14 @@ impl<'mem> Renderer<'mem> {
                 queue_family_indices.graphics_index()
             );
         if let Err(e) = unsafe { device.end_command_buffer(frame_data.command_buffer) } {
-            return Err(array_format!("failed to end command buffer {:?}", e))
+            return Err(format!("failed to end command buffer {:?}", e))
         }
         if let Err(e) = unsafe { device.queue_submit(graphics_queue, slice::from_ref(&submit_info), fence) } {
-            return Err(array_format!("graphics queue submit failed {:?}", e))
+            return Err(format!("graphics queue submit failed {:?}", e))
         }
         let present_result = swapchain_context
             .present_submit(&swapchain_loader, graphics_queue)
-            .map_err(|e| array_format!("queue present failed {}", e))?;
+            .map_err(|e| format!("queue present failed {}", e))?;
         if present_result != PresentResult::Success || frame_data.suboptimal {
             self.vulkan_context.request_swapchain_update(self.buffered_frame_count, window.inner_size());
         }

@@ -1,6 +1,6 @@
 use core::slice;
 
-use nox_mem::{Vector, vec_types::GlobalVec};
+use nox_mem::{vec_types::{Vector, GlobalVec}};
 
 use nox_math::Vec2;
 

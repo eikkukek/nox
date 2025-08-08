@@ -1,8 +1,7 @@
 use nox_mem::{
     GlobalAlloc,
     GLOBAL_ALLOC,
-    Vector,
-    vec_types::AllocVec,
+    vec_types::{Vector, AllocVec},
     slot_map,
 };
 

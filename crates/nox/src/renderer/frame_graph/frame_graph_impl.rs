@@ -4,7 +4,7 @@ use core::cell::RefCell;
 
 use ash::vk;
 
-use nox_mem::{Allocator, CapacityError, Vector, vec_types::FixedVec};
+use nox_mem::{Allocator, CapacityError, vec_types::{FixedVec, Vector}};
 
 use crate::{
     renderer::{

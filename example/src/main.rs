@@ -1,7 +1,6 @@
 use std::{path::PathBuf, ptr::NonNull};
 
 use nox::{
-    image_buffer::ImageBuffer,
     interface::Interface,
     mem::{GLOBAL_ALLOC, size_of, slice_as_bytes},
     renderer::{
@@ -10,7 +9,10 @@ use nox::{
         frame_graph::*,
         *
     },
-    InitSettings, Memory, Nox, Version
+    InitSettings,
+    Memory,
+    Nox,
+    Version,
 };
 
 #[repr(C)]
@@ -130,7 +132,7 @@ fn mat4_project(fov: f32, aspect_ratio: f32, z_near: f32, z_far: f32) -> [f32; 1
 }
 
 struct App {
-    image: Option<ImageBuffer>,
+    image: Option<NonNull<u8>>,
     color_format: ColorFormat,
     depth_format: DepthFormat,
     image_id: ImageID,

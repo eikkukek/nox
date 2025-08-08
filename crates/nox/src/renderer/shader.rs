@@ -4,7 +4,7 @@ use ash::vk;
 
 use rspirv_reflect::Reflection;
 
-use nox_mem::{vec_types::GlobalVec, AsRaw, Vector};
+use nox_mem::{vec_types::{Vector, GlobalVec}, AsRaw};
 
 use crate::Version;
 

@@ -4,7 +4,7 @@ use core::ptr::NonNull;
 
 use ash::vk;
 
-use nox_mem::{Vector, vec_types::GlobalVec};
+use nox_mem::{vec_types::{GlobalVec, Vector}};
 
 use crate::{renderer::memory_binder::DeviceMemory, has_bits};
 

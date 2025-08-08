@@ -1,6 +1,3 @@
-pub mod image_buffer;
-mod init_settings;
-
 use std::sync::{Arc, RwLock};
 
 use winit::{
@@ -11,16 +8,15 @@ use winit::{
     dpi::LogicalSize,
 };
 
+use nox_mem::string_types::ArrayString;
+
 pub use crate::renderer;
 
 use super::{
     interface::Interface,
     memory::Memory,
     renderer::Renderer,
-    string_types::ArrayString,
 };
-
-pub use init_settings::InitSettings;
 
 pub type AppName = ArrayString<128>;
 

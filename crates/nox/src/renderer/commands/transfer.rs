@@ -8,7 +8,7 @@ use ash::vk;
 
 use super::*;
 
-use nox_mem::{Vector, vec_types::GlobalVec};
+use nox_mem::{vec_types::{Vector, GlobalVec}};
 
 use crate::{
     has_not_bits,

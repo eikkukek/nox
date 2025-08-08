@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 nox-mem = { path = "../nox-mem" }
+nox-alloc = { path = "../nox-alloc" }
 nox-derive = { path = "../nox-derive" }
 nox-math = { path = "../nox-math" }
 nox-font = { path = "../nox-font" }
@@ -18,4 +19,3 @@ shaderc = "0.9.1"
 memmap2 = "0.9.5"
 fxhash = "0.2.1"
 blake3 = "1.8.2"
-stb_image = "0.3.0"

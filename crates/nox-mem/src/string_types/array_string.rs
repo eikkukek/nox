@@ -1,8 +1,6 @@
 use core::fmt::Write;
 use core::cmp::PartialEq;
 
-use super::SmallError;
-
 #[derive(Copy, Clone)]
 pub struct ArrayString<const N: usize> {
     string: [u8; N],
@@ -29,7 +27,7 @@ impl<const N: usize> ArrayString<N> {
         }
     }
 
-    pub fn from_ascii<const N_BUF: usize>(s: &[i8; N_BUF]) -> Result<Self, SmallError> {
+    pub fn from_ascii<const N_BUF: usize>(s: &[i8; N_BUF]) -> Result<Self, Self> {
         let mut string = [0u8; N];
         let mut len = 0usize;
         for c in *s {
@@ -52,7 +50,7 @@ impl<const N: usize> ArrayString<N> {
         )
     }
 
-    pub unsafe fn from_ascii_ptr(s: *const i8) -> Result<Self, SmallError> {
+    pub unsafe fn from_ascii_ptr(s: *const i8) -> Result<Self, Self> {
         let mut string = [0u8; N];
         let mut len = 0usize;
         let mut c = unsafe { *s };
@@ -93,6 +91,13 @@ impl<const N: usize> ArrayString<N> {
     }
 }
 
+impl<const N: usize> From<ArrayString<N>> for String {
+
+    fn from(value: ArrayString<N>) -> Self {
+        Self::from(value.as_str())
+    }
+}
+
 impl<const N: usize, const M: usize> PartialEq<ArrayString::<M>> for ArrayString::<N> {
 
     fn eq(&self, other: &ArrayString<M>) -> bool {
@@ -100,21 +105,21 @@ impl<const N: usize, const M: usize> PartialEq<ArrayString::<M>> for ArrayString
     }
 }
 
-impl<const N: usize> std::fmt::Debug for ArrayString<N> {
+impl<const N: usize> core::fmt::Debug for ArrayString<N> {
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ArrayString<{}>({:?})", N, self.as_str())
     }
 }
 
-impl<const N: usize> std::fmt::Display for ArrayString<N> {
+impl<const N: usize> core::fmt::Display for ArrayString<N> {
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl<const N: usize> std::fmt::Write for ArrayString<N> {
+impl<const N: usize> core::fmt::Write for ArrayString<N> {
 
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
         let available = N - self.len;

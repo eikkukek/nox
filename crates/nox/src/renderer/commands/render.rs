@@ -4,7 +4,9 @@ use ash::vk;
 
 use nox_mem::vec_types::{Vector, ArrayVec};
 
-use crate::{renderer::*, stack_alloc::StackGuard, has_not_bits};
+use nox_alloc::arena_alloc::*;
+
+use crate::{renderer::*, has_not_bits};
 
 #[derive(Clone, Copy)]
 pub struct DrawInfo {
@@ -53,7 +55,7 @@ pub struct RenderCommands<'a>{
     command_buffer: vk::CommandBuffer,
     global_resources: Arc<RwLock<GlobalResources>>,
     current_pipeline: Option<GraphicsPipelineID>,
-    tmp_alloc: &'a StackAlloc,
+    tmp_alloc: &'a ArenaAlloc,
 }
 
 impl<'a> RenderCommands<'a> {
@@ -63,7 +65,7 @@ impl<'a> RenderCommands<'a> {
         device: Arc<ash::Device>,
         command_buffer: vk::CommandBuffer,
         global_resources: Arc<RwLock<GlobalResources>>,
-        tmp_alloc: &'a StackAlloc,
+        tmp_alloc: &'a ArenaAlloc,
     ) -> Self
     {
         Self {
@@ -96,7 +98,7 @@ impl<'a> RenderCommands<'a> {
         where
             F: FnMut(u32) -> ShaderResourceID,
     {
-        let guard = StackGuard::new(&*self.tmp_alloc);
+        let guard = ArenaGuard::new(&*self.tmp_alloc);
         let g = self.global_resources.read().unwrap();
         let (layout, sets) = g.pipeline_get_shader_resource(
             self.current_pipeline.expect("attempting to bind shader resources with no pipeline attached"),
@@ -122,7 +124,7 @@ impl<'a> RenderCommands<'a> {
         where
             F: FnMut(PushConstant) -> &'b [u8]
     {
-        let guard = StackGuard::new(&*self.tmp_alloc);
+        let guard = ArenaGuard::new(&*self.tmp_alloc);
         let g = self.global_resources.read().unwrap();
         let (layout, pcs) = g.pipeline_get_push_constants(
             self.current_pipeline.expect("attempting to push constants with not pipeline attached"),

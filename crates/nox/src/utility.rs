@@ -1,17 +1,3 @@
-#[inline(always)]
-pub fn clamp<T>(x: T, min: T, max: T) -> T
-    where
-        T: PartialOrd
-{
-	let clamped = if x > min { x } else { min };
-	return if clamped < max { clamped } else { max };
-}
-
-#[inline(always)]
-pub const fn next_align(offset: usize, align: usize) -> usize {
-    (offset + align - 1) & !(align - 1)
-}
-
 #[macro_export]
 macro_rules! count_idents {
     ($($idents:ident),+) => {

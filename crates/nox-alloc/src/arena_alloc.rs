@@ -6,24 +6,20 @@ use core::{
     ptr::NonNull,
 };
 
-use nox_mem::Allocator;
-
-use super::{
-    utility::next_align,
-};
+use nox_mem::{Allocator, align_up};
 
 struct Cell {
     pos: usize,
     guard_active: bool,
 }
 
-pub struct StackAlloc {
+pub struct ArenaAlloc {
     data: NonNull<u8>,
     size: usize,
     cell: UnsafeCell<Cell>,
 }
 
-impl StackAlloc {
+impl ArenaAlloc {
 
     pub fn new(size: usize) -> Option<Self> {
         let layout = Layout::from_size_align(size, mem::align_of::<usize>()).ok()?;
@@ -84,7 +80,7 @@ impl StackAlloc {
     #[inline(always)]
     unsafe fn allocate_raw_internal(&self, size: usize, align: usize) -> Option<NonNull<u8>> {
         let start = self.data.as_ptr() as usize + self.used();
-        let aligned_start = next_align(start, align);
+        let aligned_start = align_up(start, align);
         let end = aligned_start + size;
         if end > self.data.as_ptr() as usize + self.size {
             return None
@@ -98,7 +94,7 @@ impl StackAlloc {
     }
 }
 
-impl Allocator for StackAlloc {
+impl Allocator for ArenaAlloc {
 
     #[inline(always)]
     unsafe fn allocate_raw(&self, size: usize, align: usize) -> Option<NonNull<u8>> {
@@ -112,7 +108,7 @@ impl Allocator for StackAlloc {
     unsafe fn free_raw(&self, _ptr: NonNull<u8>, _size: usize, _align: usize) {}
 }
 
-impl Drop for StackAlloc {
+impl Drop for ArenaAlloc {
 
     fn drop(&mut self) {
         if self.size == 0 { panic!("attempting to drop twice") }
@@ -124,15 +120,15 @@ impl Drop for StackAlloc {
     }
 }
 
-pub struct StackGuard<'alloc> {
+pub struct ArenaGuard<'a> {
     pos_rollback: usize,
-    stack: &'alloc StackAlloc,
+    stack: &'a ArenaAlloc,
 }
 
-impl<'alloc> StackGuard<'alloc> {
+impl<'a> ArenaGuard<'a> {
 
     #[inline(always)]
-    pub fn new(stack: &'alloc StackAlloc) -> Self {
+    pub fn new(stack: &'a ArenaAlloc) -> Self {
         unsafe {
             let cell = stack.cell();
             assert!(cell.guard_active == false, "attempting to create concurrent guards");
@@ -163,7 +159,7 @@ impl<'alloc> StackGuard<'alloc> {
     }
 }
 
-impl<'alloc> Allocator for StackGuard<'alloc> {
+impl<'a> Allocator for ArenaGuard<'a> {
 
     #[inline(always)]
     unsafe fn allocate_raw(&self, size: usize, align: usize) -> Option<NonNull<u8>> {
@@ -174,7 +170,7 @@ impl<'alloc> Allocator for StackGuard<'alloc> {
     unsafe fn free_raw(&self, _ptr: NonNull<u8>, _size: usize, _align: usize) {}
 }
 
-impl<'alloc> Drop for StackGuard<'alloc> {
+impl<'a> Drop for ArenaGuard<'a> {
 
     fn drop(&mut self) {
         unsafe {

@@ -2,9 +2,9 @@ use std::sync::{Arc, RwLock};
 
 use ash::vk;
 
-use nox_mem::{Vector, vec_types::{ArrayVec, GlobalVec}};
+use nox_mem::{vec_types::{Vector, ArrayVec, GlobalVec}};
 
-use crate::stack_alloc::StackGuard;
+use nox_alloc::arena_alloc::*;
 
 use super::{
     *,
@@ -27,7 +27,7 @@ impl SwapchainPassPipelineData {
     pub fn new(
         global_resources: Arc<RwLock<GlobalResources>>,
         buffered_frame_count: u32,
-        tmp_alloc: &StackAlloc,
+        tmp_alloc: &ArenaAlloc,
     ) -> Result<Self, Error>
     {
         assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
@@ -43,7 +43,7 @@ impl SwapchainPassPipelineData {
 
         let sampler = g.create_sampler(|_| {})?;
 
-        let stack_guard = StackGuard::new(&tmp_alloc);
+        let stack_guard = ArenaGuard::new(&tmp_alloc);
 
         let resource_infos = ArrayVec::<ShaderResourceInfo, {MAX_BUFFERED_FRAMES as usize}>
             ::with_len(ShaderResourceInfo { layout_id, set: 0 }, buffered_frame_count as usize)
@@ -71,11 +71,11 @@ impl SwapchainPassPipelineData {
     pub fn _update_buffered_frame_count(
         &mut self,
         buffered_frame_count: u32,
-        tmp_alloc: &StackAlloc,
+        tmp_alloc: &ArenaAlloc,
     ) -> Result<(), Error>
     {
         let mut g = self.global_resources.write().unwrap();
-        let stack_guard = StackGuard::new(&tmp_alloc);
+        let stack_guard = ArenaGuard::new(&tmp_alloc);
         g.free_shader_resources(&self.shader_resources, &stack_guard)?;
 
         self.shader_resources.clear();
@@ -96,7 +96,7 @@ impl SwapchainPassPipelineData {
     pub fn get_pipeline(
         &mut self,
         format: vk::Format,
-        tmp_alloc: &StackAlloc,
+        tmp_alloc: &ArenaAlloc,
     ) -> Result<vk::Pipeline, Error>
     {
         if let Some(pipeline) = self.last_pipeline {
@@ -111,7 +111,7 @@ impl SwapchainPassPipelineData {
         let mut info = GraphicsPipelineInfo::new(self.layout_id);
         info.with_color_output_vk(format, WriteMask::all(), None);
         let mut pipeline = None;
-        let stack_guard = StackGuard::new(&tmp_alloc);
+        let stack_guard = ArenaGuard::new(&tmp_alloc);
         self.global_resources
             .write()
             .unwrap()
@@ -134,10 +134,10 @@ impl SwapchainPassPipelineData {
         &mut self,
         image: ImageSourceID,
         frame_index: u32,
-        tmp_alloc: &StackAlloc,
+        tmp_alloc: &ArenaAlloc,
     ) -> Result<vk::DescriptorSet, Error>
     {
-        let stack_guard = StackGuard::new(&tmp_alloc);
+        let stack_guard = ArenaGuard::new(&tmp_alloc);
         let mut g = self.global_resources.write().unwrap();
         let resource_id = self.shader_resources[frame_index as usize];
         let update = ShaderResourceImageUpdate {
