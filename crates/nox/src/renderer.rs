@@ -56,7 +56,7 @@ pub use enums::*;
 pub use errors::Error;
 pub use memory_layout::MemoryLayout;
 pub use handle::{Handle, RaiiHandle};
-pub use image::{ImageBuilder};
+pub use image::{ImageBuilder, ImageError};
 pub use buffer::*;
 pub use physical_device::QueueFamilyIndices;
 pub use global_resources::*;

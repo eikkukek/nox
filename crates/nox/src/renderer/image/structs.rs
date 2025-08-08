@@ -7,7 +7,7 @@ use ash::vk;
 
 use super::{ComponentSwizzle, Format};
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Dimensions {
     pub width: u32,
     pub height: u32,

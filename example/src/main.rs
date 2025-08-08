@@ -1,13 +1,10 @@
-use std::{path::PathBuf, ptr::NonNull};
+use std::{os::unix::ffi::OsStrExt, path::PathBuf, ptr::NonNull};
 
 use nox::{
     interface::Interface,
-    mem::{GLOBAL_ALLOC, size_of, slice_as_bytes},
+    mem::{size_of, slice_as_bytes, GLOBAL_ALLOC},
     renderer::{
-        image::*,
-        pipeline::*,
-        frame_graph::*,
-        *
+        *, frame_graph::*, image::*, pipeline::*,
     },
     InitSettings,
     Memory,
@@ -133,6 +130,7 @@ fn mat4_project(fov: f32, aspect_ratio: f32, z_near: f32, z_far: f32) -> [f32; 1
 
 struct App {
     image: Option<NonNull<u8>>,
+    image_size: Dimensions,
     color_format: ColorFormat,
     depth_format: DepthFormat,
     image_id: ImageID,
@@ -157,6 +155,7 @@ impl App {
     fn new() -> Self {
         Self {
             image: None,
+            image_size: Default::default(),
             color_format: ColorFormat::SrgbRGBA8,
             depth_format: DepthFormat::D32,
             image_id: Default::default(),
@@ -194,7 +193,22 @@ impl Interface for App {
         };
         path.pop();
         path.push("../../nightreign.jpg");
-        self.image = Some(ImageBuffer::new(path.to_str().unwrap(), 4).unwrap());
+        let mut x = 0;
+        let mut y = 0;
+        let mut ch = 0;
+        unsafe {
+            self.image = NonNull::new(stb_image::stb_image::stbi_load(
+                path.as_os_str().as_bytes().as_ptr() as _,
+                &mut x,
+                &mut y,
+                &mut ch,
+                4,
+            ));
+        }
+        self.image_size = Dimensions::new(x as u32, y as u32, 1);
+        if self.image.is_none() {
+            return Err(nox::Error::UserError("failed to load image".into()))
+        }
         renderer_context.edit_resources(|r| {
             self.vertex_shader_id = r.create_shader(
                 "#version 450
@@ -262,7 +276,7 @@ impl Interface for App {
                     builder
                         .with_usage(ImageUsage::TransferDst)
                         .with_usage(ImageUsage::Sampled)
-                        .with_dimensions(self.image.as_ref().unwrap().dimensions())
+                        .with_dimensions(self.image_size)
                         .with_format(self.color_format, false);
                 },
                 &mut r.default_binder())?;
@@ -451,7 +465,12 @@ impl Interface for App {
     {
         command_buffer.copy_data_to_image(
             self.image_id,
-            self.image.as_ref().unwrap(),
+            unsafe {
+                core::slice::from_raw_parts(
+                    self.image.unwrap().as_ptr(),
+                    (self.image_size.width * self.image_size.height) as usize * 4
+                )
+            },
             None,
             None,
             None,
@@ -470,6 +489,17 @@ impl Interface for App {
             0,
             indices.len() as u64,
         ).unwrap();
+    }
+}
+
+impl Drop for App {
+
+    fn drop(&mut self) {
+        if let Some(image) = self.image {
+            unsafe {
+                stb_image::stb_image::stbi_image_free(image.as_ptr() as _);
+            }
+        } 
     }
 }
 
