@@ -1,4 +1,4 @@
-use std::ptr::NonNull;
+use std::{path::PathBuf, ptr::NonNull};
 
 use nox::{
     image_buffer::ImageBuffer,
@@ -176,7 +176,7 @@ impl App {
 impl Interface for App {
 
     fn init_settings(&self) -> InitSettings {
-        InitSettings::new("Test", Version::default(), [540, 540], true)
+        InitSettings::new("Test", Version::default(), [540, 540], false)
     }
 
     fn init_callback(
@@ -186,7 +186,13 @@ impl Interface for App {
     ) -> Result<(), nox::Error>
     {
         println!("GPU: {}", nox.gpu_name());
-        self.image = Some(ImageBuffer::new("/home/eikku/.dotfiles/nightreign.jpg", 4).unwrap());
+        let mut path = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(_) => PathBuf::new(),
+        };
+        path.pop();
+        path.push("../../nightreign.jpg");
+        self.image = Some(ImageBuffer::new(path.to_str().unwrap(), 4).unwrap());
         renderer_context.edit_resources(|r| {
             self.vertex_shader_id = r.create_shader(
                 "#version 450
