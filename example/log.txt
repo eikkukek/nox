@@ -1,7 +1,0 @@
-["jpg", "png"]
-["gltf", "glb"]
-["vert", "frag", "comp"]
-Nox message: created window Test
-Vulkan loader version: 1.4.321
-GPU: AMD Radeon RX 7800 XT (RADV NAVI32)
-ImageMemoryBarrier { s_type: IMAGE_MEMORY_BARRIER, p_next: 0x0, src_access_mask: , dst_access_mask: COLOR_ATTACHMENT_WRITE, old_layout: UNDEFINED, new_layout: COLOR_ATTACHMENT_OPTIMAL, src_queue_family_index: 4294967295, dst_queue_family_index: 0, image: 0x250000000025, subresource_range: ImageSubresourceRange { aspect_mask: COLOR, base_mip_level: 0, level_count: 1, base_array_layer: 0, layer_count: 1 }, _marker: PhantomData<&()> }
