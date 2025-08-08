@@ -50,7 +50,7 @@ impl ResourcePool
     pub fn reset(&mut self) {
         let mut g = self.global_resources.write().unwrap();
         for id in self.transient_image_sources.iter() {
-            g.destroy_image_source(*id);
+            g.destroy_image_source(*id).unwrap();
         }
         self.transient_image_sources.clear();
         unsafe {
@@ -69,15 +69,15 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, id: ImageSourceID) -> ResourceID {
+    pub fn add_image(&mut self, id: ImageSourceID) -> Result<ResourceID, Error> {
         let g = self.global_resources.read().unwrap();
-        let image = g.get_image_source(id);
-        ResourceID {
+        let image = g.get_image_source(id)?;
+        Ok(ResourceID {
             id,
             format: image.vk_format(),
             samples: image.samples(),
             is_transient: false,
-        }
+        })
     }
 
     #[inline(always)]
@@ -112,8 +112,8 @@ impl ResourcePool
             },
             _ => panic!("resource ID must contain an ImageID when creating subresource")
         };
-        let sub_id = GlobalResources::create_image_subresource(
-            self.global_resources.clone(),
+        let mut g = self.global_resources.write().unwrap();
+        let sub_id = g.create_image_subresource(
             img_id,
             range_info
         )?.into();
@@ -129,12 +129,13 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn get_image_properties(&self, resource_id: ResourceID) -> ImageProperties {
-        self.global_resources
+    pub fn get_image_properties(&self, resource_id: ResourceID) -> Result<ImageProperties, Error> {
+        Ok(self.global_resources
             .read()
             .unwrap()
-            .get_image_source(resource_id.id)
+            .get_image_source(resource_id.id)?
             .properties()
+        )
     }
 
     #[inline(always)]
@@ -143,12 +144,12 @@ impl ResourcePool
         id: ResourceID,
         state: ImageState,
         command_buffer: vk::CommandBuffer,
-    ) -> Option<SubresourceResetGuard>
+    ) -> Result<Option<SubresourceResetGuard>, Error>
     {
         let mut g = self.global_resources.write().unwrap();
-        let mut source = g.get_mut_image_source(id.id);
+        let mut source = g.get_mut_image_source(id.id)?;
         source.cmd_memory_barrier(state, command_buffer);
-        if let ImageSourceID::SubresourceID(id) = id.id {
+        Ok(if let ImageSourceID::SubresourceID(id) = id.id {
             Some(SubresourceResetGuard {
                 resources: self.global_resources.clone(),
                 command_buffer,
@@ -158,13 +159,20 @@ impl ResourcePool
         }
         else {
             None
-        }
+        })
     }
 
     #[inline(always)]
     pub fn get_image_view(&self, id: ResourceID) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
         let mut g = self.global_resources.write().unwrap();
-        let mut src = g.get_mut_image_source(id.id);
+        let mut src = g.get_mut_image_source(id.id)?;
         Ok((src.get_view()?, src.layout()))
+    }
+
+    #[inline(always)]
+    pub(super) unsafe fn force_clean_up(&mut self) {
+        unsafe {
+            self.device_alloc.clean_up();
+        }
     }
 }

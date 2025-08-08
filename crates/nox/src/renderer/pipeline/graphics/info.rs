@@ -1,12 +1,10 @@
 use ash::vk;
 
-pub use vk::Format as Format;
-
 use nox_mem::{slice, vec_types::{Vector, GlobalVec, FixedVec}, Allocator};
 
 use super::*;
 
-use crate::renderer::*;
+use crate::renderer::{image::Format, *};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct GraphicsPipelineInfo {
@@ -21,8 +19,8 @@ pub struct GraphicsPipelineInfo {
     sample_shading_info: Option<SampleShadingInfo>,
     depth_stencil_info: Option<DepthStencilInfo>,
     color_blend_info: ColorBlendInfo,
-    pub(crate) depth_output_format: Format,
-    pub(crate) stencil_output_format: Format,
+    pub(crate) depth_output_format: vk::Format,
+    pub(crate) stencil_output_format: vk::Format,
     vertex_input_attribute_count: u32,
     pub(crate) layout_id: PipelineLayoutID,
     depth_clamp: bool,
@@ -82,6 +80,11 @@ impl GraphicsPipelineInfo {
         self
     }
 
+    pub fn with_depth_stencil(&mut self, info: DepthStencilInfo) -> &mut Self {
+        self.depth_stencil_info = Some(info);
+        self
+    }
+
     pub fn with_rasterizer_discard(&mut self, enabled: bool) -> &mut Self {
         self.rasterizer_discard = enabled;
         self
@@ -126,19 +129,37 @@ impl GraphicsPipelineInfo {
 
     /// Appends a color output to the pipeline.
     /// The number of color outputs of a pipeline must match exactly with the number of outputs in the fragment shader.
-    pub fn with_color_output(&mut self, format: Format, write_mask: WriteMask, blend_state: Option<ColorOutputBlendState>) -> &mut Self {
+    pub fn with_color_output(
+        &mut self,
+        format: impl Format,
+        write_mask: WriteMask,
+        blend_state: Option<ColorOutputBlendState>
+    ) -> &mut Self
+    {
+        self.color_output_formats.push(format.as_vk_format()).unwrap();
+        self.color_blend_info.add_attachment(write_mask, blend_state);
+        self
+    }
+
+    pub(crate) fn with_color_output_vk(
+        &mut self,
+        format: vk::Format,
+        write_mask: WriteMask,
+        blend_state: Option<ColorOutputBlendState>
+    ) -> &mut Self
+    {
         self.color_output_formats.push(format).unwrap();
         self.color_blend_info.add_attachment(write_mask, blend_state);
         self
     }
 
-    pub fn with_depth_output(&mut self, format: Format) -> &mut Self {
-        self.depth_output_format = format;
+    pub fn with_depth_output(&mut self, format: impl Format) -> &mut Self {
+        self.depth_output_format = format.as_vk_format();
         self
     }
 
-    pub fn with_stencil_output(&mut self, format: Format) -> &mut Self {
-        self.stencil_output_format = format;
+    pub fn with_stencil_output(&mut self, format: impl Format) -> &mut Self {
+        self.stencil_output_format = format.as_vk_format();
         self
     }
 
@@ -154,23 +175,38 @@ impl GraphicsPipelineInfo {
     ) -> Result<CreateInfos<'a, Alloc>, Error>
     {
 
-        let layout = global_resources.get_pipeline_layout(self.layout_id);
+        let layout = global_resources.get_pipeline_layout(self.layout_id)?;
         let shader_ids = layout.shader_ids();
 
         let mut shader_stage_infos = FixedVec::with_capacity(shader_ids.len(), alloc)?;
 
+        let mut vertex_shader_included = false;
+        let mut fragment_shader_included = false;
+
         for id in shader_ids {
-            let shader = global_resources.get_shader(*id);
+            let shader = global_resources.get_shader(*id)?;
             const NAME: &core::ffi::CStr = unsafe {
                 core::ffi::CStr::from_bytes_with_nul_unchecked(b"main\0")
             };
+            if shader.stage() == ShaderStage::Vertex {
+                if vertex_shader_included {
+                    return Err(Error::ShaderError(String::from("Vertex shader included twice in pipeline")))
+                }
+                vertex_shader_included = true;
+            }
+            if shader.stage() == ShaderStage::Fragment {
+                if fragment_shader_included {
+                    return Err(Error::ShaderError(String::from("Fragment shader included twice in pipeline")))
+                }
+                fragment_shader_included = true;
+            }
             shader_stage_infos.push(vk::PipelineShaderStageCreateInfo {
                 s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 stage: shader.stage().into(),
                 module: *shader.shader_module(),
                 p_name: NAME.as_ptr(),
                 ..Default::default()
-            });
+            }).unwrap();
         }
 
         let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo {

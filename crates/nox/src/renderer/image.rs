@@ -28,7 +28,7 @@ pub use builder::*;
 pub use sampler::*;
 pub use properties::ImageProperties;
 pub(crate) use image_source::*;
-pub use image::*;
+pub(crate) use image::*;
 pub(crate) use subresource_range::ImageSubresourceRange;
 
 pub(crate) fn make_aspect_mask(aspects: &[ImageAspect]) -> u32 {

@@ -2,17 +2,32 @@ mod properties;
 mod state;
 mod error;
 
-use std::sync::Arc;
+use std::{ptr::NonNull, sync::Arc};
 
 use core::num::NonZeroU64;
 
 use ash::vk::{self, Handle};
+
+use nox_mem::{AsRaw, impl_as_raw_bit_op};
 
 use crate::renderer::memory_binder::DeviceMemory;
 
 pub use error::BufferError;
 pub(crate) use properties::BufferProperties;
 pub(crate) use state::BufferState;
+
+#[repr(u32)]
+#[derive(Clone, Copy, AsRaw)]
+pub enum BufferUsage {
+    TransferSrc = vk::BufferUsageFlags::TRANSFER_SRC.as_raw(),
+    TransferDst = vk::BufferUsageFlags::TRANSFER_DST.as_raw(),
+    IndexBuffer = vk::BufferUsageFlags::INDEX_BUFFER.as_raw(),
+    VertexBuffer = vk::BufferUsageFlags::VERTEX_BUFFER.as_raw(),
+    UniformBuffer = vk::BufferUsageFlags::UNIFORM_BUFFER.as_raw(),
+    StorageBuffer = vk::BufferUsageFlags::STORAGE_BUFFER.as_raw(),
+}
+
+impl_as_raw_bit_op!(BufferUsage);
 
 pub(crate) struct Buffer {
     handle: NonZeroU64,
@@ -102,6 +117,14 @@ impl Buffer {
             );
         }
         self.state = state;
+    }
+
+    #[inline(always)]
+    pub unsafe fn map_memory(&mut self) -> Option<NonNull<u8>>
+    {
+        unsafe {
+            self.memory.as_mut()?.map_memory()
+        }
     }
 }
 

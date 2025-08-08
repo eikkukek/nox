@@ -11,51 +11,34 @@ use crate::renderer::{
 };
 
 pub(crate) struct Pass<'alloc, Alloc: Allocator> {
+    pub id: PassID,
     pub reads: FixedVec<'alloc, ReadInfo, Alloc>,
     pub writes: FixedVec<'alloc, WriteInfo, Alloc>,
     pub depth_write: Option<WriteInfo>,
     pub stencil_write: Option<WriteInfo>,
-    pub dependencies: FixedVec<'alloc, usize, Alloc>,
+    pub dependencies: FixedVec<'alloc, PassID, Alloc>,
     pub render_area: Option<vk::Rect2D>,
-    pub callback: Option<PassCallback>,
     pub msaa_samples: MSAA,
 }
 
 impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
     
     pub fn new(
+        id: PassID,
         info: PassInfo,
         alloc: &'alloc Alloc
     ) -> Result<Self, CapacityError> {
-        let reads =
-            if info.max_reads != 0 {
-                FixedVec::with_capacity(info.max_reads as usize, alloc)?
-            }
-            else {
-                FixedVec::with_no_alloc()
-            };
-        let writes =
-            if info.max_writes != 0 {
-                FixedVec::with_capacity(info.max_writes as usize, alloc)?
-            }
-            else {
-                FixedVec::with_no_alloc()
-            };
-        let dependencies =
-            if info.max_dependencies != 0 {
-                FixedVec::with_capacity(info.max_dependencies as usize, alloc)?
-            }
-            else {
-                FixedVec::with_no_alloc()
-            };
+        let reads = FixedVec::with_capacity(info.max_reads as usize, alloc)?;
+        let writes = FixedVec::with_capacity(info.max_color_writes as usize, alloc)?;
+        let dependencies = FixedVec::with_capacity(info.max_dependencies as usize, alloc)?;
         Ok(Self {
+            id,
             reads,
             writes,
             depth_write: None.into(),
             stencil_write: None.into(),
             dependencies,
             render_area: None,
-            callback: None,
             msaa_samples: info.msaa_samples,
         })
     }
@@ -122,11 +105,6 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
 
 impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
 
-    fn with_callback(&mut self, callback: PassCallback) -> &mut dyn PassAttachmentBuilder<'a> {
-        self.callback = Some(callback);
-        self
-    }
-
     fn with_read(&mut self, read_info: ReadInfo) -> &mut dyn PassAttachmentBuilder<'a> {
         self.reads
             .push(read_info)
@@ -168,9 +146,9 @@ impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
         self
     }
 
-    fn with_dependency(&mut self, pass_index: usize) -> &mut dyn PassAttachmentBuilder<'a> {
+    fn with_dependency(&mut self, pass_id: PassID) -> &mut dyn PassAttachmentBuilder<'a> {
         self.dependencies
-            .push(pass_index)
+            .push(pass_id)
             .expect("dependency capacity exceeded");
         self
     }

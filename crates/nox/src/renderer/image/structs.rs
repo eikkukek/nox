@@ -48,6 +48,17 @@ impl From<Dimensions> for vk::Extent3D {
     }
 }
 
+impl From<vk::Extent2D> for Dimensions {
+
+    fn from(value: vk::Extent2D) -> Self {
+        Dimensions::new(
+            value.width,
+            value.height,
+            1
+        )
+    }
+}
+
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Offset {
     pub x: i32,

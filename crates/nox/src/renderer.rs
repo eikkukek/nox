@@ -12,7 +12,6 @@ mod shader;
 mod enums;
 mod physical_device;
 mod vulkan_context;
-mod descriptor_pool;
 mod swapchain_context;
 mod thread_context;
 mod frame_state;
@@ -54,7 +53,7 @@ pub use errors::Error;
 pub use memory_layout::MemoryLayout;
 pub use handle::{Handle, RaiiHandle};
 pub use image::{ImageBuilder};
-pub use buffer::BufferError;
+pub use buffer::*;
 pub use physical_device::QueueFamilyIndices;
 pub use global_resources::*;
 pub use commands::*;
@@ -137,6 +136,7 @@ impl RendererContext {
 }
 
 pub struct Renderer<'mem> {
+    transfer_commands: Arc<RwLock<GlobalVec<TransferCommandbuffer>>>,
     main_thread_context: ThreadContext,
     thread_contexts: Arc<RwLock<FxHashMap<ThreadId, ThreadContext>>>,
     frame_states: ArrayVec<Rc<RefCell<FrameState>>, {MAX_BUFFERED_FRAMES as usize}>,
@@ -146,8 +146,7 @@ pub struct Renderer<'mem> {
     vulkan_context: VulkanContext<'mem>,
     memory_layout: MemoryLayout,
     buffered_frame_count: u32,
-    transfer_commands: Arc<RwLock<GlobalVec<TransferCommandbuffer>>>,
-    tmp_alloc: Rc<StackAlloc>,
+    tmp_alloc: StackAlloc,
 }
 
 impl<'mem> Renderer<'mem> {
@@ -183,14 +182,21 @@ impl<'mem> Renderer<'mem> {
                 array_format!("failed to create main thread context ( {:?} )", e)
             )?;
         let physical_device_info = vulkan_context.physical_device_info().clone();
-        let swapchain_pass_pipeline_data = SwapchainPassPipelineData
-            ::new(device.clone(), &physical_device_info, buffered_frame_count, allocators)
-            .map_err(|e| array_format!("failed to create full screen pass data ( {:?} )", e))?;
         let global_resources = Arc::new(RwLock::new(
             GlobalResources
-                ::new(device.clone(), &physical_device_info)
+                ::new(
+                    device.clone(),
+                    Arc::new(vulkan_context.instance().clone()),
+                    vulkan_context.physical_device(),
+                    &physical_device_info,
+                    memory_layout
+                )
                 .map_err(|e| array_format!("failed to create global resources ( {:?} ) ", e))?
         ));
+        let tmp_alloc = StackAlloc::new(memory_layout.tmp_size()).ok_or(array_format!("failed to create tmp alloc"))?;
+        let swapchain_pass_pipeline_data = SwapchainPassPipelineData
+            ::new(global_resources.clone(), buffered_frame_count, &tmp_alloc)
+            .map_err(|e| array_format!("failed to create full screen pass data ( {:?} )", e))?;
         let mut s = Self {
             main_thread_context,
             thread_contexts: Default::default(),
@@ -202,7 +208,7 @@ impl<'mem> Renderer<'mem> {
             memory_layout,
             buffered_frame_count,
             transfer_commands: Default::default(),
-            tmp_alloc: Rc::new(StackAlloc::new(memory_layout.tmp_size()).ok_or(array_format!("failed to create tmp alloc"))?),
+            tmp_alloc,
         };
         let mut frame_states = ArrayVec::new();
         let mut i = 0;
@@ -215,6 +221,7 @@ impl<'mem> Renderer<'mem> {
                     vk::MemoryPropertyFlags::DEVICE_LOCAL,
                     vk::MemoryPropertyFlags::LAZILY_ALLOCATED | vk::MemoryPropertyFlags::PROTECTED,
                     &physical_device_info,
+                    false,
                 ).unwrap();
                 let s = Rc::new(RefCell::new(
                     FrameState::new(device.clone(), global_resources.clone(), device_alloc)
@@ -262,6 +269,7 @@ impl<'mem> Renderer<'mem> {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             vk::MemoryPropertyFlags::from_raw(0),
             self.vulkan_context.physical_device_info(),
+            true,
         ).unwrap()));
 
         for (id, request) in command_requests.transfer_iter() {
@@ -409,7 +417,7 @@ impl<'mem> Renderer<'mem> {
             return Err(array_format!("failed to begin command buffer {:?}", e))
         }
         let pipeline = self.swapchain_pass_pipeline_data
-            .get_pipeline(frame_data.format)
+            .get_pipeline(frame_data.format, &self.tmp_alloc)
             .map_err(|e| array_format!("failed to get full screen pass pipeline {:?}", e))?;
         let alloc = &allocators.frame_graphs()[frame_data.frame_index as usize];
         unsafe {
@@ -417,6 +425,7 @@ impl<'mem> Renderer<'mem> {
         }
         let mut frame_graph = FrameGraphImpl::new(
             self.frame_states[frame_data.frame_index as usize].clone(),
+            frame_data.extent.into(),
             frame_data.command_buffer, 
             alloc,
             frame_data.frame_index,
@@ -427,14 +436,14 @@ impl<'mem> Renderer<'mem> {
             .unwrap()
             .render(&mut frame_graph, &pending_transfers)
             .map_err(|e| array_format!("interface failed to render ( {:?} )", e))?;
-        let render_commands = RenderCommands::new(
+        let mut render_commands = RenderCommands::new(
             device.clone(),
             frame_data.command_buffer,
             self.global_resources.clone(),
-            self.tmp_alloc.clone(),
+            &self.tmp_alloc,
         );
         frame_graph
-            .render(&render_commands)
+            .render(&mut *interface.write().unwrap(), &mut render_commands)
             .map_err(|e| array_format!("frame graph failed to render ( {:?} )", e))?;
         let frame_state = &self.frame_states[frame_data.frame_index as usize].borrow_mut();
         let mut image_state = frame_data.image_state;
@@ -516,19 +525,16 @@ impl<'mem> Renderer<'mem> {
                 device.cmd_begin_rendering(command_buffer, &rendering_info);
 
                 device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
-                let (image_view, layout) = frame_state
-                    .get_image_view(render_image_id)
-                    .unwrap();
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
-                    self.swapchain_pass_pipeline_data.layout.handle(),
+                    self.swapchain_pass_pipeline_data.get_pipeline_layout().unwrap(),
                     0,
                     &[self.swapchain_pass_pipeline_data.get_descriptor_set(
-                        image_view,
-                        layout,
+                        render_image_id.id,
                         frame_data.frame_index,
-                    )],
+                        &self.tmp_alloc
+                    ).unwrap()],
                     Default::default(),
                 );
                 device.cmd_draw(command_buffer, 6, 1, 0, 0);
@@ -559,6 +565,15 @@ impl<'mem> Renderer<'mem> {
 
     pub(crate) fn clean_up(&mut self, allocators: &'mem Allocators) {
         println!("Nox renderer message: terminating renderer");
+        unsafe {
+            self.device.device_wait_idle().unwrap();
+        }
+        for state in &self.frame_states {
+            unsafe {
+                state.borrow_mut().force_clean_up();
+            }
+        }
+        self.global_resources.write().unwrap().clean_up();
         self.vulkan_context.destroy_swapchain(self.main_thread_context.graphics_pool(), &allocators);
     }
 }

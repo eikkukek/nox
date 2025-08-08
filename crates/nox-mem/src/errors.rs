@@ -10,5 +10,9 @@ pub enum CapacityError {
     AllocFailed {
         new_capacity: usize,
     },
+    IndexOutOfBounds {
+        index: usize,
+        len: usize,
+    },
     ZeroSizedElement,
 }

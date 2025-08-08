@@ -1,6 +1,6 @@
 use ash::vk;
 
-use nox_mem::{const_assert, size_of, CapacityError};
+use nox_mem::{const_assert, size_of, CapacityError, slot_map::SlotMapError};
 
 use super::image::ImageError;
 use super::buffer::BufferError;
@@ -8,6 +8,7 @@ use super::buffer::BufferError;
 #[derive(Clone, Debug)]
 pub enum Error {
     CapacityError(CapacityError),
+    SlotMapError(SlotMapError),
     VulkanError(vk::Result),
     ShaderError(String),
     OutOfDeviceMemory { size: u64, align: u64, avail: u64, },
@@ -24,6 +25,13 @@ impl From<CapacityError> for Error {
 
     fn from(value: CapacityError) -> Self {
         Self::CapacityError(value)
+    }
+}
+
+impl From<SlotMapError> for Error {
+
+    fn from(value: SlotMapError) -> Self {
+        Self::SlotMapError(value)
     }
 }
 

@@ -8,3 +8,6 @@ members = [
 	"crates/nox-derive",
 	"crates/nox-ser"
 ]
+exclude = [
+	"example"
+]

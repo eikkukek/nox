@@ -1,4 +1,3 @@
-use core::slice::SlicePattern;
 use std::sync::Arc;
 
 use ash::vk;
@@ -14,7 +13,7 @@ use crate::renderer::{
 pub(crate) struct PipelineLayout {
     device: Arc<ash::Device>,
     handle: vk::PipelineLayout,
-    pipeline_descriptor_sets: GlobalVec<(bool, vk::DescriptorSetLayout)>,
+    pipeline_descriptor_sets: GlobalVec<(GlobalVec<vk::DescriptorType>, vk::DescriptorSetLayout)>,
     push_constant_ranges: GlobalVec<vk::PushConstantRange>,
     shader_ids: GlobalVec<ShaderID>,
 }
@@ -31,7 +30,7 @@ impl PipelineLayout {
         let mut push_constants = GlobalVec::new();
         let mut shaders = ArrayVec::<&Shader, SHADER_COUNT>::new();
         for id in shader_ids {
-            shaders.push(global_resources.get_shader(id)).unwrap();
+            shaders.push(global_resources.get_shader(id)?).unwrap();
         }
         for shader in &shaders {
             for uniform in shader.uniforms().iter().map(|v| *v) {
@@ -79,8 +78,15 @@ impl PipelineLayout {
         let set_layouts = set_layouts.into_inner();
         let mut pipeline_descriptor_sets = GlobalVec::with_capacity(set_layouts.len()).unwrap();
         for (i, layout) in set_layouts.iter().enumerate() {
+            let set_info = &set_infos[i];
+            let mut types = GlobalVec
+                ::with_capacity(set_info.len())
+                .unwrap();
+            for binding in set_info {
+                types.push(binding.descriptor_type).unwrap();
+            }
             pipeline_descriptor_sets.push((
-                set_infos[i].len() != 0,
+                types,
                 *layout,
             )).unwrap();
         }
@@ -97,7 +103,7 @@ impl PipelineLayout {
         self.handle
     }
 
-    pub fn pipeline_descriptor_sets(&self) -> &[(bool, vk::DescriptorSetLayout)] {
+    pub fn pipeline_descriptor_sets(&self) -> &[(GlobalVec<vk::DescriptorType>, vk::DescriptorSetLayout)] {
         &self.pipeline_descriptor_sets
     }
 

@@ -24,9 +24,11 @@ use super::*;
 
 pub(crate) struct FrameGraphImpl<'a, Alloc: Allocator> {
     frame_state: Rc<RefCell<FrameState>>,
+    frame_buffer_size: image::Dimensions,
     command_buffer: vk::CommandBuffer,
     passes: FixedVec<'a, Pass<'a, Alloc>, Alloc>,
     queue_family_indices: QueueFamilyIndices,
+    next_pass_id: u32,
     alloc: &'a Alloc,
     frame_index: u32,
 }
@@ -35,6 +37,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
 
     pub fn new(
         frame_state: Rc<RefCell<FrameState>>,
+        frame_buffer_size: image::Dimensions,
         command_buffer: vk::CommandBuffer,
         alloc: &'a Alloc,
         frame_index: u32,
@@ -43,9 +46,11 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
     {
         FrameGraphImpl {
             frame_state,
+            frame_buffer_size,
             command_buffer,
             passes: FixedVec::with_no_alloc(),
             queue_family_indices,
+            next_pass_id: 0,
             alloc,
             frame_index,
         }
@@ -74,13 +79,17 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         self.frame_index
     }
 
+    fn frame_buffer_size(&self) -> image::Dimensions {
+        self.frame_buffer_size
+    }
+
     fn set_render_image(&mut self, id: ResourceID)
     {
         assert!(self.frame_state.borrow().is_valid_resource_id(id), "invalid id");
         self.frame_state.borrow_mut().set_render_image(id);
     }
 
-    fn add_image(&mut self, id: ImageSourceID) -> ResourceID {
+    fn add_image(&mut self, id: ImageSourceID) -> Result<ResourceID, Error> {
         self.frame_state.borrow_mut().add_image(id)
     }
 
@@ -100,39 +109,41 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         self.frame_state.borrow_mut().add_transient_image_subresource(resource_id, range_info)
     }
 
-    fn with_pass(
+    fn add_pass(
         &mut self,
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder),
-    ) -> Result<&mut dyn FrameGraph<'a>, Error> {
+    ) -> Result<PassID, Error> {
         let alloc = self.alloc;
         let pass = self.passes.push(Pass::new(
+            PassID(self.next_pass_id),
             info,
             alloc
         )?).expect("pass capacity exceeded");
+        self.next_pass_id += 1;
         f(pass);
         assert!(pass.validate(alloc)?, "pass valiation error (Image subresource write overlaps)");
-        Ok(self)
+        Ok(pass.id)
     }
 }
 
 impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
 
-    pub fn render(&mut self, render_commands: &RenderCommands) -> Result<(), Error> {
+    pub fn render(&mut self, interface: &mut impl Interface, render_commands: &mut RenderCommands) -> Result<(), Error> {
         let alloc = self.alloc;
         let frame_state = self.frame_state.borrow_mut();
         let device = frame_state.device();
-        let passes = &self.passes;
+        let passes = &mut self.passes;
         let sorted = Self::sort(passes, alloc)?;
         let command_buffer = self.command_buffer;
         let graphics_queue_index = self.queue_family_indices.graphics_index();
         for index in sorted.iter().map(|i| *i) {
-            let pass = &passes[index];
+            let pass = &mut passes[index];
             let color_output_count = pass.writes.len();
             let mut reset_guards = FixedVec::<SubresourceResetGuard, Alloc>::with_capacity(pass.reads.len() + color_output_count + 2, alloc)?;
             for read in pass.reads.iter() {
                 let resource_id = read.resource_id;
-                let image_properties = frame_state.get_image_properties(resource_id);
+                let image_properties = frame_state.get_image_properties(resource_id)?;
                 assert!(has_bits!(image_properties.usage, vk::ImageUsageFlags::SAMPLED),
                     "read image usage must contain ImageUsage::Sampled bit");
                 let reset_guard = frame_state.cmd_memory_barrier(
@@ -143,36 +154,52 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                         graphics_queue_index,
                         vk::PipelineStageFlags::FRAGMENT_SHADER,
                     ),
-                );
+                )?;
                 if let Some(guard) = reset_guard {
                     reset_guards.push(guard).unwrap();
                 }
             }
             let mut render_extent = vk::Extent2D { width: u32::MAX, height: u32::MAX };
-            let mut process_write = |write: &WriteInfo, is_color: bool| -> Result<vk::RenderingAttachmentInfo<'static>, Error> {
+            enum AttachmentType {
+                Color,
+                Depth,
+                Stencil,
+            }
+            let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>, Error> {
                 let resource_id = write.resource_id;
-                let image_properties = frame_state.get_image_properties(resource_id);
-                if is_color {
-                    assert!(
-                        has_bits!(image_properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT),
-                        "color write image usage must contain ImageUsage::ColorAttachment bit"
-                    );
-                }
-                else {
-                    assert!(
-                        has_bits!(image_properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
-                        "depth/stencil write image usage must contain ImageUsage::DepthStencilAttachment bit"
-                    );
-                }
+                let image_properties = frame_state.get_image_properties(resource_id)?;
+                let layout = match ty {
+                        AttachmentType::Color => {
+                            assert!(
+                                has_bits!(image_properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT),
+                                "color write image usage must contain ImageUsage::ColorAttachment bit"
+                            );
+                            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        },
+                        AttachmentType::Depth => {
+                            assert!(
+                                has_bits!(image_properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
+                                "depth/stencil write image usage must contain ImageUsage::DepthStencilAttachment bit"
+                            );
+                            vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL
+                        },
+                        AttachmentType::Stencil => {
+                            assert!(
+                                has_bits!(image_properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
+                                "depth/stencil write image usage must contain ImageUsage::DepthStencilAttachment bit"
+                            );
+                            vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL
+                        }
+                };
                 let reset_guard = frame_state.cmd_memory_barrier(
                     resource_id,
                     ImageState::new(
                         vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        layout,
                         graphics_queue_index,
                         vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                     ),
-                );
+                )?;
                 render_extent.width = render_extent.width.min(image_properties.dimensions.width);
                 render_extent.height = render_extent.height.min(image_properties.dimensions.height);
                 let (image_view, image_layout) = frame_state.get_image_view(resource_id)?;
@@ -195,18 +222,18 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                 color_outputs = FixedVec::<vk::RenderingAttachmentInfo, Alloc>::with_capacity(color_output_count, alloc)?;
                 for write in writes {
                     color_outputs
-                        .push(process_write(write, true)?).unwrap();
+                        .push(process_write(write, AttachmentType::Color)?).unwrap();
                 }
             }
             let depth_output =
                 if let Some(write) = &pass.depth_write {
-                    Some(process_write(&write, false)?)
+                    Some(process_write(&write, AttachmentType::Depth)?)
                 } else {
                     None
                 };
             let stencil_output =
                 if let Some(write) = &pass.stencil_write {
-                    Some(process_write(write, false)?)
+                    Some(process_write(write, AttachmentType::Stencil)?)
                 } else {
                     None
                 };
@@ -231,9 +258,20 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             unsafe {
                 device.cmd_begin_rendering(command_buffer, &rendering_info);
             }
-            if let Some(callback) = pass.callback {
-                callback(render_commands)
+            let view_port = vk::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: rendering_info.render_area.extent.width as f32,
+                height: rendering_info.render_area.extent.height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            };
+            let scissor = rendering_info.render_area;
+            unsafe {
+                device.cmd_set_viewport(command_buffer, 0, &[view_port]);
+                device.cmd_set_scissor(command_buffer, 0, &[scissor]);
             }
+            interface.render_commands(pass.id, render_commands)?;
             unsafe { device.cmd_end_rendering(command_buffer); }
         }
         Ok(())
@@ -256,7 +294,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             let deps = &pass.dependencies;
             in_degree[i] = deps.len();
             for index in deps {
-                let list = &mut dependents[*index];
+                let list = &mut dependents[index.0 as usize];
                 if list.capacity() == 0 {
                     *list =
                         FixedVec::with_capacity(pass_count, alloc)?;

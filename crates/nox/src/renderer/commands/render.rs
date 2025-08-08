@@ -4,7 +4,7 @@ use ash::vk;
 
 use nox_mem::vec_types::{Vector, ArrayVec};
 
-use crate::{renderer::*, stack_alloc::StackGuard};
+use crate::{renderer::*, stack_alloc::StackGuard, has_not_bits};
 
 #[derive(Clone, Copy)]
 pub struct DrawInfo {
@@ -15,6 +15,22 @@ pub struct DrawInfo {
     pub first_instance: u32,
     pub instance_count: u32,
     pub first_binding: u32,
+}
+
+#[derive(Clone, Copy)]
+pub struct DrawBufferInfo {
+    pub id: BufferID,
+    pub offset: u64,
+}
+
+impl DrawBufferInfo {
+
+    pub fn new(id: BufferID, offset: u64) -> Self {
+        Self {
+            id,
+            offset,
+        }
+    }
 }
 
 impl Default for DrawInfo {
@@ -32,22 +48,22 @@ impl Default for DrawInfo {
     }
 }
 
-pub struct RenderCommands{
+pub struct RenderCommands<'a>{
     device: Arc<ash::Device>,
     command_buffer: vk::CommandBuffer,
     global_resources: Arc<RwLock<GlobalResources>>,
     current_pipeline: Option<GraphicsPipelineID>,
-    tmp_alloc: Rc<StackAlloc>,
+    tmp_alloc: &'a StackAlloc,
 }
 
-impl RenderCommands {
+impl<'a> RenderCommands<'a> {
 
     #[inline(always)]
     pub(crate) fn new(
         device: Arc<ash::Device>,
         command_buffer: vk::CommandBuffer,
         global_resources: Arc<RwLock<GlobalResources>>,
-        tmp_alloc: Rc<StackAlloc>,
+        tmp_alloc: &'a StackAlloc,
     ) -> Self
     {
         Self {
@@ -60,15 +76,16 @@ impl RenderCommands {
     }
 
     #[inline(always)]
-    pub fn bind_pipeline(&mut self, id: GraphicsPipelineID) {
+    pub fn bind_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
         let handle = self.global_resources
             .read()
             .unwrap()
-            .get_pipeline_handle(id);
+            .get_pipeline_handle(id)?;
         unsafe {
             self.device.cmd_bind_pipeline(self.command_buffer, vk::PipelineBindPoint::GRAPHICS, handle);
         }
         self.current_pipeline = Some(id);
+        Ok(())
     }
 
     #[inline(always)]
@@ -98,12 +115,12 @@ impl RenderCommands {
     }
 
     #[inline(always)]
-    pub fn push_constants<'a, F>(
-        &'a self,
+    pub fn push_constants<'b, F>(
+        &'b self,
         f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(PushConstant) -> &'a [u8]
+            F: FnMut(PushConstant) -> &'b [u8]
     {
         let guard = StackGuard::new(&*self.tmp_alloc);
         let g = self.global_resources.read().unwrap();
@@ -130,28 +147,57 @@ impl RenderCommands {
     pub fn draw_indexed<const VERTEX_BUFFER_COUNT: usize>(
         &self,
         info: DrawInfo,
-        vertex_buffers: ArrayVec<(BufferID, u64), VERTEX_BUFFER_COUNT>,
-        index_buffer: (BufferID, u64),
-    )
+        vertex_buffers: ArrayVec<DrawBufferInfo, VERTEX_BUFFER_COUNT>,
+        index_buffer: DrawBufferInfo,
+    ) -> Result<(), Error>
     {
         assert!(self.current_pipeline.is_some(), "attempting to draw with no pipeline attached");
         unsafe {
             let command_buffer = self.command_buffer;
             let resources = self.global_resources.read().unwrap();
-            let index_buf = resources.get_buffer(index_buffer.0);
-            assert!(index_buf.properties().size >= index_buffer.1 + info.index_count as u64 * info.index_type.index_size(),
-                "index buffer offset + index count goes out of index buffer range");
+            let index_buf = resources.get_buffer(index_buffer.id)?;
+            let index_buf_properties = index_buf.properties();
+            if index_buf_properties.size < index_buffer.offset + info.index_count as u64 * info.index_type.index_size() {
+                return Err(BufferError::OutOfRange {
+                    buffer_size: index_buf.properties().size,
+                    requested_offset: index_buffer.offset,
+                    requested_size: info.index_count as u64 * info.index_type.index_size(),
+                }.into())
+            }
+            if has_not_bits!(index_buf_properties.usage, vk::BufferUsageFlags::INDEX_BUFFER) {
+                return Err(BufferError::UsageMismatch {
+                    missing_usage: vk::BufferUsageFlags::INDEX_BUFFER
+                }.into())
+            }
             let mut vert = ArrayVec::<vk::Buffer, VERTEX_BUFFER_COUNT>::new();
             let mut vert_off = ArrayVec::<vk::DeviceSize, VERTEX_BUFFER_COUNT>::new();
-            for (id, offset) in &vertex_buffers {
-                let buf = resources.get_buffer(*id);
-                assert!(buf.properties().size >= *offset, "vertex buffer offset goes out of vertex buffer range");
+            for (id, offset) in vertex_buffers.iter().map(|v| (v.id, v.offset)) {
+                let buf = resources.get_buffer(id)?;
+                let properties = buf.properties();
+                let size = properties.size;
+                if size <= offset {
+                    return Err(BufferError::OutOfRange {
+                        buffer_size: size,
+                        requested_offset: offset, requested_size: 1,
+                    }.into())
+                }
+                if has_not_bits!(properties.usage, vk::BufferUsageFlags::VERTEX_BUFFER) {
+                    return Err(BufferError::UsageMismatch {
+                        missing_usage: vk::BufferUsageFlags::VERTEX_BUFFER
+                    }.into())
+                }
                 vert.push(buf.handle()).unwrap();
-                vert_off.push(*offset).unwrap();
+                vert_off.push(offset).unwrap();
             }
             self.device.cmd_bind_vertex_buffers(command_buffer, info.first_binding, &vert, &vert_off);
-            self.device.cmd_bind_index_buffer(command_buffer, index_buf.handle(), index_buffer.1, info.index_type.into());
-            self.device.cmd_draw_indexed(command_buffer, info.index_count, info.instance_count, info.first_index, info.vertex_offset, info.first_instance);
+            self.device.cmd_bind_index_buffer(command_buffer, index_buf.handle(), index_buffer.offset, info.index_type.into());
+            self.device.cmd_draw_indexed(
+                command_buffer,
+                info.index_count, info.instance_count,
+                info.first_index, info.vertex_offset,
+                info.first_instance
+            );
         }
+        Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ptr::NonNull, sync::Arc};
 
 use ash::vk;
 
@@ -15,6 +15,7 @@ use crate::{
 pub struct DefaultBinder {
     device: Arc<ash::Device>,
     memory_type_bits: u32,
+    mappable: bool,
 }
 
 impl DefaultBinder {
@@ -37,6 +38,7 @@ impl DefaultBinder {
         Self {
             device,
             memory_type_bits,
+            mappable: has_bits!(required_properties, vk::MemoryPropertyFlags::HOST_VISIBLE),
         }
     }
 }
@@ -45,7 +47,12 @@ pub struct Memory {
     device: Arc<ash::Device>,
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
+    mappable: bool,
+    map: Option<NonNull<u8>>,
 }
+
+unsafe impl Send for Memory {}
+unsafe impl Sync for Memory {}
 
 impl DeviceMemory for Memory {
 
@@ -65,6 +72,20 @@ impl DeviceMemory for Memory {
         unsafe {
             self.device.free_memory(self.memory, None);
         }
+    }
+
+    unsafe fn map_memory(&mut self) -> Option<core::ptr::NonNull<u8>> {
+        if !self.mappable {
+            return None
+        }
+        if let Some(map) = self.map {
+            return Some(map)
+        }
+        let ptr = unsafe {
+            self.device.map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::from_raw(0)).ok()?
+        };
+        self.map = Some(NonNull::new(ptr as *mut u8).unwrap());
+        self.map
     }
 }
 
@@ -96,6 +117,8 @@ impl MemoryBinder for DefaultBinder {
             device: self.device.clone(),
             memory,
             size: memory_requirements.size,
+            map: None,
+            mappable: self.mappable,
         })
     }
 
@@ -106,7 +129,7 @@ impl MemoryBinder for DefaultBinder {
         if memory_type_bits == 0 {
             return Err(Error::IncompatibleMemoryRequirements)
         }
-        let memory_type_index = memory_type_bits.trailing_zeros() + 1;
+        let memory_type_index = memory_type_bits.trailing_zeros();
         let allocate_info = vk::MemoryAllocateInfo {
             s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
             allocation_size: memory_requirements.size,
@@ -123,6 +146,8 @@ impl MemoryBinder for DefaultBinder {
             device: self.device.clone(),
             memory,
             size: memory_requirements.size,
+            map: None,
+            mappable: self.mappable,
         })
     }
 }

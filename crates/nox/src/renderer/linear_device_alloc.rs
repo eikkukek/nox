@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use core::ptr::NonNull;
+
 use ash::vk;
 
 use nox_mem::{Vector, vec_types::GlobalVec};
@@ -17,6 +19,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(Clone, Copy)]
 struct Block {
     device_memory: Option<vk::DeviceMemory>,
+    mapped_pointer: Option<NonNull<u8>>,
     used: vk::DeviceSize,
     memory_type_index: u32,
 }
@@ -30,6 +33,7 @@ impl Block {
     fn new(memory_type_index: u32) -> Self {
         Self {
             device_memory: None,
+            mapped_pointer: None,
             used: 0,
             memory_type_index,
         }
@@ -68,7 +72,7 @@ impl Block {
             device.bind_image_memory(image, device_memory, offset)?;
         };
         self.used = end;
-        Ok(Memory::new(device_memory, offset, memory_requirements.size))
+        Ok(Memory::new(device_memory, None, offset, memory_requirements.size))
     }
 
     #[inline(always)]
@@ -79,6 +83,7 @@ impl Block {
         memory_requirements: vk::MemoryRequirements,
         block_size: vk::DeviceSize,
         granularity: vk::DeviceSize,
+        map: bool,
     ) -> Result<Memory>
     {
         if self.device_memory.is_none() {
@@ -93,6 +98,12 @@ impl Block {
             });
         }
         let device_memory = self.device_memory.unwrap();
+        if map && self.mapped_pointer.is_none() {
+            let ptr = unsafe {
+                device.map_memory(device_memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::from_raw(0))?
+            };
+            self.mapped_pointer = NonNull::new(ptr as *mut u8);
+        }
         let used = self.used;
         let align = memory_requirements.alignment.max(granularity);
         let offset = (used + align - 1) & !(align - 1);
@@ -104,7 +115,7 @@ impl Block {
             device.bind_buffer_memory(buffer, device_memory, offset)?;
         };
         self.used = end;
-        Ok(Memory::new(device_memory, offset, memory_requirements.size))
+        Ok(Memory::new(device_memory, self.mapped_pointer, offset, memory_requirements.size))
     }
 
     #[inline(always)]
@@ -128,6 +139,7 @@ pub(crate) struct LinearDeviceAlloc {
     blocks: GlobalVec<Block>,
     block_size: vk::DeviceSize,
     granularity: vk::DeviceSize,
+    map_memory: bool,
 }
 
 impl LinearDeviceAlloc {
@@ -138,6 +150,7 @@ impl LinearDeviceAlloc {
         required_properties: vk::MemoryPropertyFlags,
         forbidden_properties: vk::MemoryPropertyFlags,
         physical_device_info: &PhysicalDeviceInfo,
+        map_memory: bool,
     ) -> Result<Self>
     {
         let memory_properties = physical_device_info.memory_properties();
@@ -153,6 +166,7 @@ impl LinearDeviceAlloc {
             blocks,
             block_size,
             granularity: physical_device_info.properties().limits.buffer_image_granularity,
+            map_memory,
         })
     }
 
@@ -163,26 +177,46 @@ impl LinearDeviceAlloc {
             }
         }
     }
+
+    pub unsafe fn clean_up(&mut self) {
+        unsafe {
+            for block in self.blocks.iter_mut() {
+                block.free_memory(&self.device);
+            }
+        }
+    }
 }
 
 pub(crate) struct Memory {
     memory: vk::DeviceMemory,
+    map: Option<NonNull<u8>>,
     offset: vk::DeviceSize,
     size: vk::DeviceSize,
 }
+
+unsafe impl Send for Memory {}
+unsafe impl Sync for Memory {}
 
 impl Memory {
 
     pub fn new(
         memory: vk::DeviceMemory,
+        map: Option<NonNull<u8>>,
         offset: vk::DeviceSize,
         size: vk::DeviceSize,
     ) -> Self
     {
         Self {
             memory,
+            map,
             offset,
             size,
+        }
+    }
+
+    pub unsafe fn get_mapped_memory(&self) -> Option<NonNull<u8>> {
+        unsafe {
+            Some(self.map?.add(self.offset as usize))
         }
     }
 }
@@ -202,6 +236,12 @@ impl DeviceMemory for Memory {
     }
 
     unsafe fn free_memory(&self) {}
+
+    unsafe fn map_memory(&mut self) -> Option<NonNull<u8>> {
+        unsafe {
+            self.get_mapped_memory()
+        }
+    }
 }
 
 impl MemoryBinder for LinearDeviceAlloc {
@@ -224,7 +264,14 @@ impl MemoryBinder for LinearDeviceAlloc {
         let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
         for block in self.blocks.iter_mut() {
             if memory_requirements.memory_type_bits & (1 << block.memory_type_index) != 0 {
-                return block.bind_buffer_memory(device, buffer, memory_requirements, self.block_size, self.granularity);
+                return block.bind_buffer_memory(
+                    device,
+                    buffer,
+                    memory_requirements,
+                    self.block_size,
+                    self.granularity,
+                    self.map_memory,
+                );
             }
         }
         return Err(IncompatibleMemoryRequirements)

@@ -7,6 +7,7 @@ pub mod vec_types;
 pub mod slot_map;
 pub mod const_fn;
 
+mod slice_cast;
 mod macros;
 mod as_raw;
 mod errors;
@@ -26,3 +27,4 @@ pub use nox_derive::AsRaw;
 pub use hashable::Hashable;
 pub use mad_cell::MadCell;
 pub use vec_types::Vector;
+pub use slice_cast::*;

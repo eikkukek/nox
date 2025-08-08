@@ -36,6 +36,7 @@ use core::{
     num::NonZeroU32,
     ops::{Index, IndexMut},
 };
+use std::u32;
 
 use crate::{
     capacity_policy::CapacityPolicy,
@@ -49,8 +50,22 @@ use crate::{
     impl_traits,
 };
 
-type Result<T> = core::result::Result<T, CapacityError>;
+#[derive(Clone, Copy, Debug)]
+pub enum SlotMapError {
+    StaleIndex { slot_version: u32, index_version: u32 },
+    CapacityError(CapacityError),
+}
 
+impl From<CapacityError> for SlotMapError {
+
+    fn from(value: CapacityError) -> Self {
+        Self::CapacityError(value)
+    }
+}
+
+type Result<T> = core::result::Result<T, SlotMapError>;
+
+use SlotMapError::StaleIndex;
 use CapacityError::{ FixedCapacity, InvalidReservation, AllocFailed, ZeroSizedElement };
 
 pub struct Dyn {}
@@ -106,11 +121,32 @@ impl<T> Slot<T> {
     }
 }
 
-#[derive(Debug)]
 pub struct SlotIndex<T> {
     version: NonZeroU32,
     index: u32,
     _marker: PhantomData<T>,
+}
+
+impl<T> core::fmt::Debug for SlotIndex<T> {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        "SlotIndex { version: ".fmt(f)?;
+        self.version.fmt(f)?;
+        ", index: ".fmt(f)?;
+        self.index.fmt(f)?;
+        "}".fmt(f)
+    }
+}
+
+impl<T> Default for SlotIndex<T> {
+
+    fn default() -> Self {
+        Self {
+            version: NonZeroU32::new(1).unwrap(),
+            index: u32::MAX,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<T> Clone for SlotIndex<T> {
@@ -308,7 +344,7 @@ impl<'alloc, T, Alloc> AllocSlotMap<'alloc, T, Alloc, Fixed, False>
     #[inline(always)]
     pub fn new(capacity: u32, alloc: &'alloc Alloc) -> Result<Self> {
         if capacity == 0 {
-            return Err(FixedCapacity { capacity: capacity as usize })
+            return Err(FixedCapacity { capacity: capacity as usize }.into())
         }
         let data: Pointer<Slot<T>> = unsafe { alloc
             .allocate_uninit(capacity as usize)
@@ -439,14 +475,14 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<'alloc, T, Alloc, Cap
 
     pub fn reserve(&mut self, capacity: u32) -> Result<()> {
         if !CapacityPol::can_grow() {
-            return Err(FixedCapacity { capacity: self.capacity as usize })
+            return Err(FixedCapacity { capacity: self.capacity as usize }.into())
         }
         let new_capacity = match CapacityPol::grow(self.capacity as usize, capacity as usize) {
             Some(c) => c as u32,
             None => return Err(InvalidReservation {
                 current: self.capacity as usize,
                 requested: capacity as usize,
-            })
+            }.into())
         };
         let tmp: Pointer<Slot<T>> = unsafe { self.alloc 
             .allocate_uninit(new_capacity as usize)
@@ -504,16 +540,19 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<'alloc, T, Alloc, Cap
     }
 
     #[inline(always)]
-    pub fn remove(&mut self, index: SlotIndex<T>) -> T
+    pub fn remove(&mut self, index: SlotIndex<T>) -> Result<T>
     {
-        if index.index > self.capacity {
-            panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
+        if index.index >= self.capacity {
+            return Err(
+                CapacityError::IndexOutOfBounds {
+                    index: index.index as usize, len: self.capacity as usize }.into()
+            )
         }
         let ptr = unsafe { self.data.add(index.index as usize) };
         let mut slot = unsafe { ptr.read() };
         let index_version = index.version.get();
         if slot.version != index_version {
-            panic!("stale index: slot version {}, index version {}", slot.version, index_version)
+            return Err(StaleIndex { slot_version: slot.version, index_version: index_version })
         }
         let value = unsafe { slot.value.assume_init() };
         slot.version += 1;
@@ -524,13 +563,13 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<'alloc, T, Alloc, Cap
         }
         self.free_head = Some(index.index);
         self.len -= 1;
-        value
+        Ok(value)
     }
 
     #[inline(always)]
     pub fn contains(&self, index: SlotIndex<T>) -> bool {
-        if index.index > self.capacity {
-            panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
+        if index.index >= self.capacity {
+            return false
         }
         let index_version = index.version.get();
         let slot = unsafe { self.data.add(index.index as usize).as_ref() };
@@ -538,65 +577,38 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<'alloc, T, Alloc, Cap
     }
 
     #[inline(always)]
-    pub fn get(&self, index: SlotIndex<T>) -> &T {
-        if index.index > self.capacity {
-            panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
+    pub fn get(&self, index: SlotIndex<T>) -> Result<&T> {
+        if index.index >= self.capacity {
+            return Err(
+                CapacityError::IndexOutOfBounds {
+                    index: index.index as usize, len: self.capacity as usize }.into()
+            )
         }
         let index_version = index.version.get();
         let slot = unsafe { self.data.add(index.index as usize).as_ref() };
         if slot.version != index_version {
-            panic!("stale index: slot version {}, index version {}", slot.version, index_version)
+            return Err(StaleIndex { slot_version: slot.version, index_version: index_version })
         }
         assert!(slot.next_free_index.is_none(), "invalid index");
         unsafe {
-            slot.value.assume_init_ref()
+            Ok(slot.value.assume_init_ref())
         }
-    }
-
-    pub fn try_get(&self, index: SlotIndex<T>) -> Option<&T> {
-        if index.index > self.capacity {
-            panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
-        }
-        let index_version = index.version.get();
-        let slot = unsafe { self.data.add(index.index as usize).as_ref() };
-        if slot.version != index_version {
-            return None
-        }
-        assert!(slot.next_free_index.is_none(), "invalid index");
-        Some(unsafe {
-            slot.value.assume_init_ref()
-        })
     }
 
     #[inline(always)]
-    pub fn get_mut(&mut self, index: SlotIndex<T>) -> &mut T {
-        if index.index > self.capacity {
+    pub fn get_mut(&mut self, index: SlotIndex<T>) -> Result<&mut T> {
+        if index.index >= self.capacity {
             panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
         }
         let index_version = index.version.get();
         let slot = unsafe { self.data.add(index.index as usize).as_mut() };
         if slot.version != index_version {
-            panic!("stale index: slot version {}, index version {}", slot.version, index_version)
+            return Err(StaleIndex { slot_version: slot.version, index_version: index_version })
         }
         assert!(slot.next_free_index.is_none(), "invalid index");
         unsafe {
-            slot.value.assume_init_mut()
+            Ok(slot.value.assume_init_mut())
         }
-    }
-
-    pub fn try_get_mut(&mut self, index: SlotIndex<T>) -> Option<&mut T> {
-        if index.index > self.capacity {
-            panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
-        }
-        let index_version = index.version.get();
-        let slot = unsafe { self.data.add(index.index as usize).as_mut() };
-        if slot.version != index_version {
-            return None
-        }
-        assert!(slot.next_free_index.is_none(), "invalid index");
-        Some(unsafe {
-            slot.value.assume_init_mut()
-        })
     }
 
     #[inline(always)]
@@ -724,14 +736,36 @@ impl_traits!(
 
         #[inline(always)]
         fn index(&self, index: SlotIndex<T>) -> &Self::Output {
-            self.get(index)
+            if index.index >= self.capacity {
+                panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
+            }
+            let index_version = index.version.get();
+            let slot = unsafe { self.data.add(index.index as usize).as_ref() };
+            if slot.version != index_version {
+                panic!("stale index: slot version {}, index version {}", slot.version, index_version);
+            }
+            assert!(slot.next_free_index.is_none(), "invalid index");
+            unsafe {
+                slot.value.assume_init_ref()
+            }
         }
     ,
     IndexMut<SlotIndex<T>> =>
 
         #[inline(always)]
         fn index_mut(&mut self, index: SlotIndex<T>) -> &mut Self::Output {
-            self.get_mut(index)
+            if index.index >= self.capacity {
+                panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
+            }
+            let index_version = index.version.get();
+            let slot = unsafe { self.data.add(index.index as usize).as_mut() };
+            if slot.version != index_version {
+                panic!("stale index: slot version {}, index version {}", slot.version, index_version);
+            }
+            assert!(slot.next_free_index.is_none(), "invalid index");
+            unsafe {
+                slot.value.assume_init_mut()
+            }
         }
     ,
     IntoIterator for &'map =>

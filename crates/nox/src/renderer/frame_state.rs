@@ -23,6 +23,7 @@ pub(crate) struct FrameState {
 
 impl FrameState {
 
+    #[inline(always)]
     pub fn new(
         device: Arc<ash::Device>,
         global_resources: Arc<RwLock<GlobalResources>>,
@@ -36,6 +37,7 @@ impl FrameState {
         }
     }
 
+    #[inline(always)]
     pub fn init(&mut self, command_buffer: vk::CommandBuffer)
     {
         self.resource_pool.reset();
@@ -43,14 +45,17 @@ impl FrameState {
         self.render_image = None;
     }
 
+    #[inline(always)]
     pub fn device(&self) -> Arc<ash::Device> {
         self.resource_pool.device()
     }
 
-    pub fn add_image(&mut self, id: ImageSourceID) -> ResourceID {
+    #[inline(always)]
+    pub fn add_image(&mut self, id: ImageSourceID) -> Result<ResourceID, Error> {
         self.resource_pool.add_image(id)
     }
 
+    #[inline(always)]
     pub fn add_transient_image<F: FnMut(&mut ImageBuilder)>(
         &mut self,
         f: F,
@@ -59,6 +64,7 @@ impl FrameState {
         self.resource_pool.add_transient_image(f)
     }
 
+    #[inline(always)]
     pub fn add_transient_image_subresource(
         &mut self,
         resource_id: ResourceID,
@@ -68,32 +74,45 @@ impl FrameState {
         self.resource_pool.add_transient_image_subresource(resource_id, range_info)
     }
 
-    pub fn get_image_properties(&self, resource_id: ResourceID) -> ImageProperties {
+    #[inline(always)]
+    pub fn get_image_properties(&self, resource_id: ResourceID) -> Result<ImageProperties, Error> {
         self.resource_pool.get_image_properties(resource_id)
     }
 
+    #[inline(always)]
     pub fn set_render_image(&mut self, id: ResourceID) {
         self.render_image = Some(id);
     }
 
+    #[inline(always)]
     pub fn render_image(&self) -> Option<ResourceID> {
         self.render_image
     }
 
+    #[inline(always)]
     pub fn is_valid_resource_id(&self, id: ResourceID) -> bool {
         self.resource_pool.is_valid_id(id)
     }
 
+    #[inline(always)]
     pub fn cmd_memory_barrier(
         &self,
         id: ResourceID,
         state: ImageState
-    ) -> Option<SubresourceResetGuard>
+    ) -> Result<Option<SubresourceResetGuard>, Error>
     {
         self.resource_pool.cmd_memory_barrier(id, state, self.command_buffer)
     }
 
+    #[inline(always)]
     pub fn get_image_view(&self, id: ResourceID) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
         self.resource_pool.get_image_view(id)
+    }
+
+    #[inline(always)]
+    pub unsafe fn force_clean_up(&mut self) {
+        unsafe {
+            self.resource_pool.force_clean_up();
+        }
     }
 }

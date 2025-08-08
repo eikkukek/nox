@@ -78,6 +78,26 @@ pub enum DepthFormat {
     D24S8 = vk::Format::D24_UNORM_S8_UINT.as_raw(),
 }
 
+impl DepthFormat {
+
+    pub fn all_depth() -> &'static [DepthFormat] {
+        &[
+            DepthFormat::D32,
+            DepthFormat::D16,
+            DepthFormat::D32S8,
+            DepthFormat::D24S8,
+        ]
+    }
+
+    pub fn all_stencil() -> &'static [DepthFormat] {
+        &[
+            DepthFormat::S8,
+            DepthFormat::D32S8,
+            DepthFormat::D24S8,
+        ]
+    }
+}
+
 impl Format for DepthFormat {
 
     fn aspects(self) -> &'static [ImageAspect] {
@@ -115,6 +135,26 @@ impl Format for IntegerFormat {
 
     fn aspects(self) -> &'static [ImageAspect] {
         &[ImageAspect::Color]
+    }
+}
+
+#[repr(u32)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+pub enum FormatFeature {
+    SampledImage = vk::FormatFeatureFlags::SAMPLED_IMAGE.as_raw(),
+    StorageImage = vk::FormatFeatureFlags::STORAGE_IMAGE.as_raw(),
+    ColorAttachment = vk::FormatFeatureFlags::COLOR_ATTACHMENT.as_raw(),
+    DepthStencilAttachment = vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT.as_raw(),
+    TransferSrc = vk::FormatFeatureFlags::TRANSFER_SRC.as_raw(),
+    TransferDst = vk::FormatFeatureFlags::TRANSFER_DST.as_raw(),
+}
+
+impl_as_raw_bit_op!(FormatFeature);
+
+impl From<FormatFeature> for u32 {
+
+    fn from(value: FormatFeature) -> Self {
+        value as Self
     }
 }
 
@@ -173,8 +213,8 @@ impl From<MipMode> for vk::SamplerMipmapMode {
 pub enum AddressMode {
     Repeat = vk::SamplerAddressMode::REPEAT.as_raw(),
     MirroredRepeat = vk::SamplerAddressMode::MIRRORED_REPEAT.as_raw(),
-    #[default]
     ClampToEdge = vk::SamplerAddressMode::CLAMP_TO_EDGE.as_raw(),
+    #[default]
     ClampToBorder = vk::SamplerAddressMode::CLAMP_TO_BORDER.as_raw(),
 }
 

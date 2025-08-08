@@ -3,17 +3,21 @@ mod enums;
 mod structs;
 mod descriptor_pool;
 
-use std::sync::{Arc, RwLock};
+use std::{ptr::NonNull, sync::Arc};
 
 use ash::vk;
 
 use nox_mem::{
-    slot_map::{GlobalSlotMap, SlotIndex},
-    vec_types::{Vector, FixedVec},
-    Allocator,
+    slot_map::{GlobalSlotMap, SlotIndex, SlotMapError},
+    vec_types::{FixedVec, Vector},
+    Allocator, AsRaw,
 };
 
-use crate::renderer::{image::SamplerBuilder, pipeline::PipelineLayout, *};
+use crate::{
+    has_bits, renderer::{
+        buffer::BufferUsage, image::{Format, SamplerBuilder}, pipeline::PipelineLayout, *
+    }
+};
 
 use super::{
     Error,
@@ -37,6 +41,8 @@ use descriptor_pool::*;
 
 pub struct GlobalResources {
     device: Arc<ash::Device>,
+    instance: Arc<ash::Instance>,
+    physical_device: vk::PhysicalDevice,
     graphics_pipelines: GlobalSlotMap<GraphicsPipeline>,
     shaders: GlobalSlotMap<Shader>,
     pipeline_layouts: GlobalSlotMap<pipeline::PipelineLayout>,
@@ -58,6 +64,8 @@ impl GlobalResources {
     #[inline(always)]
     pub(crate) fn new(
         device: Arc<ash::Device>,
+        instance: Arc<ash::Instance>,
+        physical_device: vk::PhysicalDevice,
         physical_device_info: &PhysicalDeviceInfo,
         memory_layout: MemoryLayout,
     ) -> Result<Self, Error>
@@ -110,6 +118,8 @@ impl GlobalResources {
             dummy_descriptor_pool: dummy_descriptor_pool.into_inner(),
             descriptor_pool: DescriptorPool::new(device.clone(), memory_layout)?,
             device,
+            physical_device,
+            instance,
             graphics_pipelines: GlobalSlotMap::with_capacity(16).unwrap(),
             shaders: GlobalSlotMap::with_capacity(16).unwrap(),
             pipeline_layouts: GlobalSlotMap::with_capacity(16).unwrap(),
@@ -135,6 +145,29 @@ impl GlobalResources {
     }
 
     #[inline(always)]
+    pub fn supported_image_format<F: Format, U: Into<u32> + Copy>(
+        &self,
+        formats: &[F],
+        required_features: U,
+    ) -> Option<F>
+    {
+        for format in formats {
+            let properties = unsafe {
+                self.instance
+                    .get_physical_device_format_properties(
+                        self.physical_device, format.as_vk_format())
+            };
+            if has_bits!(
+                    properties.optimal_tiling_features,
+                    vk::FormatFeatureFlags::from_raw(<U as Into<u32>>::into(required_features))
+            ) {
+                return Some(*format)
+            }
+        } 
+        None
+    }
+
+    #[inline(always)]
     pub fn create_shader(
         &mut self,
         input: &str,
@@ -153,7 +186,16 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_shader(&self, id: ShaderID) -> &Shader {
+    pub fn destroy_shader(
+        &mut self,
+        shader: ShaderID,
+    ) -> Result<(), Error>
+    {
+        self.shaders.remove(shader.0).map_err(Into::into).map(|_| {})
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_shader(&self, id: ShaderID) -> Result<&Shader, SlotMapError> {
         self.shaders.get(id.0)
     }
 
@@ -165,7 +207,7 @@ impl GlobalResources {
     {
         let mut s = ArrayVec::<&Shader, SHADER_COUNT>::new();
         for id in shaders {
-            s.push(self.shaders.get(id.0)).unwrap();
+            s.push(self.shaders.get(id.0)?).unwrap();
         }
         let pipeline_layout = PipelineLayout::new(
             self.device.clone(),
@@ -177,7 +219,7 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_pipeline_layout(&self, id: PipelineLayoutID) -> &PipelineLayout {
+    pub(crate) fn get_pipeline_layout(&self, id: PipelineLayoutID) -> Result<&PipelineLayout, SlotMapError> {
         self.pipeline_layouts.get(id.0)
     }
 
@@ -193,7 +235,7 @@ impl GlobalResources {
     {
         let mut set_layouts = FixedVec::with_capacity(resources.len(), alloc)?;
         for resource in resources {
-            let layout = self.pipeline_layouts.get(resource.layout_id.0);
+            let layout = self.pipeline_layouts.get(resource.layout_id.0)?;
             let set = layout.pipeline_descriptor_sets()[resource.set as usize].1;
             set_layouts.push(set).unwrap();
         }
@@ -204,6 +246,11 @@ impl GlobalResources {
                 descriptor_set: *set,
                 layout_id: info.layout_id,
                 set: info.set,
+                binding_count: self.pipeline_layouts
+                    .get(info.layout_id.0)
+                    .unwrap()
+                    .pipeline_descriptor_sets()[info.set as usize]
+                    .0.len() as u32
             });
             collect(i, ShaderResourceID(index))
         }
@@ -219,7 +266,7 @@ impl GlobalResources {
     {
         let mut sets = FixedVec::with_capacity(resources.len(), alloc)?;
         for id in resources {
-            let resource = self.shader_resources.get(id.0);
+            let resource = self.shader_resources.get(id.0)?;
             sets.push(resource.descriptor_set).unwrap();
         }
         self.descriptor_pool.free(&sets)?;
@@ -227,12 +274,122 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn update_shader_resource(
+    pub fn get_descriptor_set(
         &mut self,
-        writes: &[ShaderResourceUpdate],
-        alloc: &impl Allocator,
-    )
+        resource_id: ShaderResourceID,
+    ) -> Result<vk::DescriptorSet, SlotMapError>
     {
+        self.shader_resources.get(resource_id.0).map(|v| v.descriptor_set)
+    }
+
+    #[inline(always)]
+    pub fn update_shader_resources(
+        &mut self,
+        image_updates: &[ShaderResourceImageUpdate],
+        buffer_updates: &[ShaderResourceBufferUpdate],
+        copies: &[ShaderResourceCopy],
+        alloc: &impl Allocator,
+    ) -> Result<(), Error>
+    {
+        let mut writes = FixedVec::with_capacity(image_updates.len() + buffer_updates.len(), alloc)?;
+        let mut image_infos = FixedVec::with_capacity(image_updates.len(), alloc)?;
+        for update in image_updates {
+            let set = self.shader_resources.get(update.resource.0)?;
+            let vk_set = set.descriptor_set;
+            let ty = self.pipeline_layouts
+                .get(set.layout_id.0)?
+                .pipeline_descriptor_sets()
+                [set.set as usize].0
+                [update.binding as usize];
+            let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
+            for info in update.infos {
+                let sampler = self.samplers.get(info.sampler.0)?.handle;
+                let mut image_source = self.get_mut_image_source(info.image_source)?;
+                let vk_info = vk::DescriptorImageInfo {
+                    sampler,
+                    image_view: image_source.get_view()?,
+                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                };
+                vk_infos.push(vk_info).unwrap();
+            }
+            let vk_infos = image_infos.push(vk_infos).unwrap();
+            let write = vk::WriteDescriptorSet {
+                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                dst_set: vk_set,
+                dst_binding: update.binding,
+                dst_array_element: update.starting_index,
+                descriptor_count: vk_infos.len() as u32,
+                descriptor_type: ty,
+                p_image_info: vk_infos.as_ptr(),
+                ..Default::default()
+            };
+            writes.push(write).unwrap();
+        }
+        let mut buffer_infos = FixedVec::with_capacity(buffer_updates.len(), alloc)?;
+        for update in buffer_updates {
+            let set = self.shader_resources.get(update.resource.0)?;
+            let vk_set = set.descriptor_set;
+            let ty = self.pipeline_layouts
+                .get(set.layout_id.0)?
+                .pipeline_descriptor_sets()
+                [set.set as usize].0
+                [update.binding as usize];
+            let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
+            for info in update.infos {
+                let buffer = self.buffers.get(info.buffer.0)?;
+                let properties = buffer.properties();
+                if info.offset + info.size > properties.size {
+                    return Err(Error::BufferError(BufferError::OutOfRange {
+                        buffer_size: properties.size,
+                        requested_offset: info.offset,
+                        requested_size: info.size,
+                    }))
+                }
+                let vk_info = vk::DescriptorBufferInfo {
+                    buffer: buffer.handle(),
+                    offset: info.offset,
+                    range: info.size,
+                };
+                vk_infos.push(vk_info).unwrap();
+            }
+            let vk_infos = buffer_infos.push(vk_infos).unwrap();
+            let write = vk::WriteDescriptorSet {
+                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                dst_set: vk_set,
+                dst_binding: update.binding,
+                dst_array_element: update.starting_index,
+                descriptor_count: vk_infos.len() as u32,
+                descriptor_type: ty,
+                p_buffer_info: vk_infos.as_ptr(),
+                ..Default::default()
+            };
+            writes.push(write).unwrap();
+        }
+        let mut vk_copies = FixedVec::with_capacity(copies.len(), alloc)?;
+        for copy in copies {
+            let src = self.shader_resources.get(copy.src_resource.0)?;
+            let dst = self.shader_resources.get(copy.dst_resource.0)?;
+            assert!(src.binding_count > copy.src_binding,
+                "copy src binding {} out of range with count {}", src.binding_count, copy.src_binding);
+            assert!(dst.binding_count > copy.dst_binding,
+                "copy src binding {} out of range with count {}", dst.binding_count, copy.dst_binding);
+            let vk_copy = vk::CopyDescriptorSet {
+                s_type: vk::StructureType::COPY_DESCRIPTOR_SET,
+                src_set: src.descriptor_set,
+                src_binding: copy.src_binding,
+                src_array_element: copy.src_starting_index,
+                dst_set: dst.descriptor_set,
+                dst_binding: copy.dst_binding,
+                dst_array_element: copy.dst_starting_index,
+                descriptor_count: copy.array_count,
+                ..Default::default()
+            };
+            vk_copies.push(vk_copy).unwrap();
+        }
+        unsafe {
+            self.device.update_descriptor_sets(&writes, &vk_copies);
+        }
+        Ok(())
     }
 
     #[inline(always)]
@@ -315,6 +472,10 @@ impl GlobalResources {
         Ok(())
     }
 
+    pub fn destroy_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
+        self.graphics_pipelines.remove(id.0).map_err(Into::into).map(|_| {})
+    }
+
     pub(crate) fn pipeline_get_shader_resource<'a, F, Alloc>(
         &self,
         id: GraphicsPipelineID,
@@ -325,13 +486,13 @@ impl GlobalResources {
             F: FnMut(u32) -> ShaderResourceID,
             Alloc: Allocator,
     {
-        let pipeline = self.graphics_pipelines.get(id.0);
-        let layout = self.pipeline_layouts.get(pipeline.layout_id.0);
+        let pipeline = self.graphics_pipelines.get(id.0)?;
+        let layout = self.pipeline_layouts.get(pipeline.layout_id.0)?;
         let sets = layout.pipeline_descriptor_sets();
         let mut res = FixedVec::with_capacity(sets.len(), alloc)?;
         for (i, set) in sets.iter().enumerate() {
-            if set.0 {
-                let resource = self.shader_resources.get(f(i as u32).0);
+            if set.0.len() != 0 {
+                let resource = self.shader_resources.get(f(i as u32).0)?;
                 res.push(resource.descriptor_set).unwrap();
             }
             else {
@@ -351,8 +512,8 @@ impl GlobalResources {
             F: FnMut(PushConstant) -> &'b [u8],
             Alloc: Allocator,
     {
-        let pipeline = self.graphics_pipelines.get(id.0);
-        let layout = self.pipeline_layouts.get(pipeline.layout_id.0);
+        let pipeline = self.graphics_pipelines.get(id.0)?;
+        let layout = self.pipeline_layouts.get(pipeline.layout_id.0)?;
         let push_constants = layout.push_constant_ranges();
         let mut res = FixedVec::with_capacity(push_constants.len(), alloc)?;
         for pc in push_constants.iter().map(|v| *v) {
@@ -363,20 +524,25 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_pipeline_handle(&self, id: GraphicsPipelineID) -> vk::Pipeline {
-        self.graphics_pipelines.get(id.0).handle
+    pub(crate) fn get_pipeline_handle(&self, id: GraphicsPipelineID) -> Result<vk::Pipeline, SlotMapError> {
+        self.graphics_pipelines.get(id.0).map(|v| v.handle)
     }
 
     #[inline(always)]
-    pub fn create_vertex_buffer<Binder: MemoryBinder>(
+    pub fn create_buffer<Binder: MemoryBinder>(
         &mut self,
         size: u64,
+        usage: &[BufferUsage],
         binder: &mut Binder,
     ) -> Result<BufferID, Error>
     {
+        let mut vk_usage = vk::BufferUsageFlags::from_raw(0);
+        for usage in usage {
+            vk_usage |= vk::BufferUsageFlags::from_raw(usage.as_raw());
+        }
         let properties = BufferProperties {
             size,
-            usage: vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+            usage: vk_usage,
             create_flags: Default::default(),
         };
         let mut buffer = Buffer::new(self.device.clone(), properties)?;
@@ -388,13 +554,23 @@ impl GlobalResources {
         ))
     }
 
+    pub unsafe fn map_buffer(
+        &mut self,
+        buffer: BufferID,
+    ) -> Option<NonNull<u8>>
+    {
+        unsafe {
+            self.buffers.get_mut(buffer.0).ok()?.map_memory()
+        }
+    }
+
     #[inline(always)]
-    pub(crate) fn get_buffer(&self, id: BufferID) -> &Buffer {
+    pub(crate) fn get_buffer(&self, id: BufferID) -> Result<&Buffer, SlotMapError> {
         self.buffers.get(id.0)
     }
 
     #[inline(always)]
-    pub(crate) fn get_mut_buffer(&mut self, id: BufferID) -> &mut Buffer {
+    pub(crate) fn get_mut_buffer(&mut self, id: BufferID) -> Result<&mut Buffer, SlotMapError> {
         self.buffers.get_mut(id.0)
     }
 
@@ -407,8 +583,17 @@ impl GlobalResources {
         let mut builder = SamplerBuilder::new();
         f(&mut builder);
         let handle = builder.build(&self.device)?;
-        let index = self.samplers.insert(Sampler { handle, builder, });
+        let index = self.samplers.insert(Sampler { handle, _builder: builder, });
         Ok(SamplerID(index))
+    }
+
+    #[inline(always)]
+    pub fn destroy_sampler(&mut self, sampler: SamplerID) -> Result<(), SlotMapError> {
+        let sampler = self.samplers.remove(sampler.0)?.handle;
+        unsafe {
+            self.device.destroy_sampler(sampler, None);
+        }
+        Ok(())
     }
 
     #[inline(always)]
@@ -428,7 +613,7 @@ impl GlobalResources {
         }
         Ok(ImageID(
             self.images.insert(ImageResource {
-                image,
+                image: Arc::new(image),
                 subresources: Default::default(),
             })
         ))
@@ -436,37 +621,37 @@ impl GlobalResources {
 
     #[inline(always)]
     pub fn create_image_subresource(
-        s: Arc<RwLock<Self>>,
+        &mut self,
         id: ImageID,
         range_info: ImageRangeInfo
     ) -> Result<ImageSubresourceID, Error>
     {
-        let subresource = ImageSubresourceRange::new(range_info, id, s.clone())?;
-        let mut s = s.write().unwrap();
-        Ok(ImageSubresourceID(id.0, s.images
-            .get_mut(id.0)
-            .subresources.insert(subresource)
-        ))
+        let image = self.images.get_mut(id.0)?;
+        let subresource = ImageSubresourceRange::new(image.image.clone(), range_info)?;
+        Ok(ImageSubresourceID(id.0, image.subresources.insert(subresource)))
     }
 
     #[inline(always)]
-    pub fn destroy_image(&mut self, id: ImageID) {
-        self.images.remove(id.0);
+    pub fn destroy_image(&mut self, id: ImageID) -> Result<(), SlotMapError> {
+        self.images.remove(id.0).map(|_| {})
     }
 
     #[inline(always)]
-    pub fn destroy_image_subresource(&mut self, id: ImageSubresourceID) {
-        self.images.get_mut(id.0).subresources.remove(id.1);
+    pub fn destroy_image_subresource(&mut self, id: ImageSubresourceID) -> Result<(), Error> {
+        self.images
+            .get_mut(id.0)?.subresources
+            .remove(id.1).map(|_| {})
+            .map_err(Into::into)
     }
 
     #[inline(always)]
-    pub fn destroy_image_source(&mut self, id: ImageSourceID) {
+    pub fn destroy_image_source(&mut self, id: ImageSourceID) -> Result<(), Error> {
         match id {
             ImageSourceID::ImageID(id) => {
-                self.destroy_image(id);
+                self.destroy_image(id).map_err(Into::into)
             },
             ImageSourceID::SubresourceID(id) => {
-                self.destroy_image_subresource(id);
+                self.destroy_image_subresource(id).map_err(Into::into)
             },
         }
     }
@@ -479,7 +664,7 @@ impl GlobalResources {
             },
             ImageSourceID::SubresourceID(id) => {
                 self.images
-                    .try_get(id.0)
+                    .get(id.0)
                     .map(|v| v.subresources.contains(id.1))
                     .unwrap_or(false)
             },
@@ -490,40 +675,19 @@ impl GlobalResources {
     pub(crate) fn get_image(
         &self,
         id: ImageID,
-    ) -> &Image
+    ) -> Result<Arc<Image>, SlotMapError>
     {
-        &self.images.get(id.0).image
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_mut_image(
-        &mut self,
-        id: ImageID,
-    ) -> &mut Image
-    {
-        &mut self.images.get_mut(id.0).image
-    }
-
-    #[inline(always)]
-    pub(crate) fn _get_image_subresource(
-        &self,
-        id: ImageSubresourceID,
-    ) -> &ImageSubresourceRange
-    {
-        self.images
-            .get(id.0)
-            .subresources
-            .get(id.1)
+        self.images.get(id.0).map(|v| v.image.clone())
     }
 
     #[inline(always)]
     pub(crate) fn get_mut_image_subresource(
         &mut self,
         id: ImageSubresourceID,
-    ) -> &mut ImageSubresourceRange
+    ) -> Result<&mut ImageSubresourceRange, SlotMapError>
     {
         self.images
-            .get_mut(id.0)
+            .get_mut(id.0)?
             .subresources
             .get_mut(id.1)
     }
@@ -532,21 +696,21 @@ impl GlobalResources {
     pub(crate) fn get_image_source(
         &self,
         id: ImageSourceID,
-    ) -> ImageSource<'_>
+    ) -> Result<ImageSource<'_>, SlotMapError>
     {
         match id {
             ImageSourceID::ImageID(id) => {
-                ImageSource::Image(
-                    &self.images.get(id.0).image
-                )
+                Ok(ImageSource::Image(
+                    self.images.get(id.0)?.image.clone()
+                ))
             },
             ImageSourceID::SubresourceID(id) => {
-                ImageSource::Subresource(
+                Ok(ImageSource::Subresource(
                     self.images
-                        .get(id.0)
+                        .get(id.0)?
                         .subresources
-                        .get(id.1)
-                )
+                        .get(id.1)?
+                ))
             }
         }
     }
@@ -555,20 +719,20 @@ impl GlobalResources {
     pub(crate) fn get_mut_image_source(
         &mut self,
         id: ImageSourceID,
-    ) -> ImageSourceMut<'_>
+    ) -> Result<ImageSourceMut<'_>, SlotMapError>
     {
         match id {
             ImageSourceID::ImageID(id) => {
-                ImageSourceMut::Image(
-                    &mut self.images.get_mut(id.0).image
-                )
+                Ok(ImageSourceMut::Image(
+                    self.images.get_mut(id.0)?.image.clone()
+                ))
             },
             ImageSourceID::SubresourceID(id) => {
-                ImageSourceMut::Subresource(self.images
-                    .get_mut(id.0)
+                Ok(ImageSourceMut::Subresource(self.images
+                    .get_mut(id.0)?
                     .subresources
-                    .get_mut(id.1)
-                )
+                    .get_mut(id.1)?
+                ))
             }
         }
     }
@@ -589,14 +753,21 @@ impl GlobalResources {
         todo!()
     }
     */
-}
 
-impl Drop for GlobalResources {
-
-    fn drop(&mut self) {
+    pub(crate) fn clean_up(&mut self) {
         unsafe {
             self.device.destroy_descriptor_set_layout(self.dummy_descriptor_set_layout, None);
             self.device.destroy_descriptor_pool(self.dummy_descriptor_pool, None);
+            for sampler in &self.samplers {
+                self.device.destroy_sampler(sampler.handle, None);
+            }
+            self.samplers.clear();
+            self.buffers.clear();
+            self.images.clear();
+            self.graphics_pipelines.clear();
+            self.pipeline_layouts.clear();
+            self.shaders.clear();
+            self.descriptor_pool.clean_up();
         }
     }
 }

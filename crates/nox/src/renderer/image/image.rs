@@ -1,15 +1,15 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::renderer::{memory_binder::DeviceMemory};
 
 use super::*;
 
-pub struct Image {
+pub(crate) struct Image {
     pub(super) handle: NonZeroU64,
     pub(super) memory: Option<Box<dyn DeviceMemory>>,
-    pub(super) view: Option<NonZeroU64>,
+    pub(super) view: RwLock<Option<NonZeroU64>>,
     pub(super) device: Arc<ash::Device>,
-    pub(super) state: ImageState,
+    pub(super) state: RwLock<ImageState>,
     pub(super) properties: ImageProperties,
     pub(super) component_mapping: ComponentMapping,
 }
@@ -38,7 +38,7 @@ impl Image {
 
     #[inline(always)]
     pub(crate) fn state(&self) -> ImageState {
-        self.state
+        *self.state.read().unwrap()
     }
 
     #[inline(always)]
@@ -58,7 +58,7 @@ impl Image {
 
     #[inline(always)]
     pub(crate) fn layout(&self) -> vk::ImageLayout {
-        self.state.layout
+        self.state.read().unwrap().layout
     }
 
     #[inline(always)]
@@ -127,8 +127,9 @@ impl Image {
     }
 
     #[inline(always)]
-    pub(crate) fn get_view(&mut self) -> Result<vk::ImageView, Error> {
-        if self.view.is_none() {
+    pub(crate) fn get_view(&self) -> Result<vk::ImageView, Error> {
+        let mut write = self.view.write().unwrap();
+        if write.is_none() {
             let device = &self.device;
             let create_info = vk::ImageViewCreateInfo {
                 s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
@@ -139,26 +140,27 @@ impl Image {
                 subresource_range: self.properties.whole_subresource().into(),
                 ..Default::default()
             };
-            self.view = NonZeroU64::new(unsafe {
+            *write = NonZeroU64::new(unsafe {
                 vk::Handle::as_raw(device.create_image_view(&create_info, None)?)
             });
         }
 
-        Ok(vk::Handle::from_raw(self.view.unwrap().get()))
+        Ok(vk::Handle::from_raw(write.unwrap().get()))
     }
 
     #[inline(always)]
     pub(crate) fn cmd_memory_barrier(
-        &mut self,
+        &self,
         state: ImageState,
         command_buffer: vk::CommandBuffer,
     )
     {
-        if self.state == state {
+        let mut write = self.state.write().unwrap();
+        if *write == state {
             return
         }
         let device = &self.device;
-        let memory_barrier = self.state.to_memory_barrier(
+        let memory_barrier = write.to_memory_barrier(
             self.handle(),
             state,
             self.properties.whole_subresource(),
@@ -166,14 +168,14 @@ impl Image {
         unsafe {
             device.cmd_pipeline_barrier(
                 command_buffer,
-                self.state.pipeline_stage,
+                write.pipeline_stage,
                 state.pipeline_stage,
                 Default::default(),
                 Default::default(),
                 Default::default(),
                 &[memory_barrier]);
         }
-        self.state = state;
+        *write = state;
     }
 
     #[inline(always)]
@@ -188,7 +190,7 @@ impl Drop for Image {
     fn drop(&mut self) {
         let device = &self.device;
         unsafe {
-            if let Some(view) = self.view {
+            if let Some(view) = *self.view.read().unwrap() {
                 device.destroy_image_view(vk::Handle::from_raw(view.get()), None);
             }
             device.destroy_image(self.handle(), None);

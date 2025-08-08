@@ -7,8 +7,6 @@ use crate::renderer::{
 
 use super::*;
 
-pub type PassCallback = fn(&RenderCommands);
-
 pub trait PassAttachmentBuilder<'a> {
 
     fn with_read(&mut self, read_info: ReadInfo) -> &mut dyn PassAttachmentBuilder<'a>;
@@ -21,18 +19,18 @@ pub trait PassAttachmentBuilder<'a> {
 
     fn with_render_area(&mut self, render_area: RenderArea) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    fn with_dependency(&mut self, pass_index: usize) -> &mut dyn PassAttachmentBuilder<'a>;
-
-    fn with_callback(&mut self, callback: PassCallback) -> &mut dyn PassAttachmentBuilder<'a>;
+    fn with_dependency(&mut self, pass_id: PassID) -> &mut dyn PassAttachmentBuilder<'a>;
 }
 
 pub trait FrameGraph<'a> {
 
     fn frame_index(&self) -> u32;
 
+    fn frame_buffer_size(&self) -> image::Dimensions;
+
     fn set_render_image(&mut self, id: ResourceID);
 
-    fn add_image(&mut self, id: ImageSourceID) -> ResourceID;
+    fn add_image(&mut self, id: ImageSourceID) -> Result<ResourceID, Error>;
 
     fn add_transient_image(
         &mut self, 
@@ -45,11 +43,11 @@ pub trait FrameGraph<'a> {
         range_info: ImageRangeInfo,
     ) -> Result<ResourceID, Error>;
 
-    fn with_pass(
+    fn add_pass(
         &mut self,
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder),
-    ) -> Result<&mut dyn FrameGraph<'a>, Error>;
+    ) -> Result<PassID, Error>;
 }
 
 pub trait FrameGraphInit<'a> {

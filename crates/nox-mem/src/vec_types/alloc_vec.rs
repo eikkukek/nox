@@ -85,9 +85,7 @@ impl<'alloc, T, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPol, Fals
             if CapacityPol::can_grow() {
                 return Ok(Self::new(alloc).unwrap())
             }
-            return Err(InvalidReservation {
-                current: 0, requested: 0
-            })
+            return Ok(Self::with_no_alloc())
         }
         let true_capacity =
             if CapacityPol::power_of_two() {

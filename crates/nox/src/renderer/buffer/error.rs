@@ -2,9 +2,9 @@ use ash::vk;
 
 #[derive(Clone, Debug)]
 pub enum BufferError {
-    InvalidCopy {
+    OutOfRange {
         buffer_size: u64, 
-        copy_offset: u64, copy_size: u64,
+        requested_offset: u64, requested_size: u64,
     },
     UsageMismatch {
         missing_usage: vk::BufferUsageFlags,

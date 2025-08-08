@@ -39,10 +39,12 @@ pub(crate) struct SubresourceResetGuard {
 impl Drop for SubresourceResetGuard {
 
     fn drop(&mut self) {
-        self.resources
+        if let Ok(v) = self.resources
             .write()
             .unwrap()
             .get_mut_image_subresource(self.id)
-            .cmd_memory_barrier(self.dst_state, self.command_buffer);
+        {
+            v.cmd_memory_barrier(self.dst_state, self.command_buffer);
+        }
     }
 }

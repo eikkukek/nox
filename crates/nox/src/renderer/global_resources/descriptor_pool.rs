@@ -5,7 +5,7 @@ pub struct DescriptorPool {
     handle: vk::DescriptorPool,
     allocated_sets: u32,
     max_sets: u32,
-    pool_sizes: [vk::DescriptorPoolSize; 3],
+    _pool_sizes: [vk::DescriptorPoolSize; 3],
 }
 
 impl DescriptorPool {
@@ -17,7 +17,7 @@ impl DescriptorPool {
     {
         let pool_sizes = [
             vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::SAMPLED_IMAGE,
+                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                 descriptor_count: memory_layout.uniform_sampled_images(),
             },
             vk::DescriptorPoolSize {
@@ -45,7 +45,7 @@ impl DescriptorPool {
             handle,
             allocated_sets: 0,
             max_sets: info.max_sets,
-            pool_sizes,
+            _pool_sizes: pool_sizes,
         })
     }
 
@@ -91,5 +91,13 @@ impl DescriptorPool {
         }
         self.allocated_sets -= descriptor_sets.len() as u32;
         Ok(())
+    }
+
+    pub(super) fn clean_up(&mut self) {
+        unsafe {
+            self.device.destroy_descriptor_pool(
+                self.handle, None,
+            );
+        }
     }
 }

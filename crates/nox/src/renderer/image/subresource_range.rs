@@ -1,12 +1,9 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use super::*;
 
-use crate::renderer::global_resources::{GlobalResources, ImageID};
-
 pub(crate) struct ImageSubresourceRange {
-    pub global_resources: Arc<RwLock<GlobalResources>>,
-    pub image_id: ImageID,
+    pub image: Arc<Image>,
     pub view: Option<NonZeroU64>,
     pub state: ImageState,
     pub subresource_info: ImageSubresourceRangeInfo,
@@ -17,21 +14,17 @@ impl ImageSubresourceRange {
 
     #[inline(always)]
     pub fn new(
+        image: Arc<Image>,
         range_info: ImageRangeInfo,
-        image_id: ImageID,
-        global_resources: Arc<RwLock<GlobalResources>>,
-    ) -> Result<Self, ImageError>
+    ) -> Result<Self, Error>
     {
-        let g = global_resources.read().unwrap();
-        let image = g.get_image(image_id);
         if let Some(err) = image.validate_range(range_info) {
-            return Err(err)
+            return Err(err.into())
         }
         Ok(Self {
-            global_resources: global_resources.clone(),
-            image_id,
+            image: image.clone(),
             view: None,
-            state: image.state,
+            state: *image.state.read().unwrap(),
             subresource_info: range_info.subresource_info,
             component_info: range_info.component_info.unwrap_or(image.component_info()),
         })
@@ -39,11 +32,7 @@ impl ImageSubresourceRange {
     
     #[inline(always)]
     pub fn properties(&self) -> ImageProperties {
-        let mut properties = self.global_resources
-            .read()
-            .unwrap()
-            .get_image(self.image_id)
-            .properties;
+        let mut properties = self.image.properties();
         let subresource_info = self.subresource_info;
         properties.mip_levels = subresource_info.level_count.get();
         properties.array_layers = subresource_info.layer_count.get();
@@ -63,25 +52,19 @@ impl ImageSubresourceRange {
 
     #[inline(always)]
     pub fn samples(&self) -> MSAA {
-        self.global_resources
-            .read()
-            .unwrap()
-            .get_image(self.image_id)
-            .samples()
+        self.image.samples()
     }
 
     #[inline(always)]
     pub fn get_view(&mut self) -> Result<vk::ImageView, Error> {
-        let g = self.global_resources.read().unwrap();
-        let image = g.get_image(self.image_id);
         if self.view.is_none() {
-            let device = image.device();
+            let device = self.image.device();
             let subresource_info = self.subresource_info;
             let component_info = self.component_info;
             let create_info = vk::ImageViewCreateInfo {
                 s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
-                image: image.handle(),
-                view_type: image.view_type(),
+                image: self.image.handle(),
+                view_type: self.image.view_type(),
                 format: component_info.format,
                 components: self.component_info.component_mapping.into(),
                 subresource_range: subresource_info.into(),
@@ -104,14 +87,12 @@ impl ImageSubresourceRange {
         command_buffer: vk::CommandBuffer
     )
     {
-        let g = self.global_resources.read().unwrap();
-        let image = g.get_image(self.image_id);
         if self.state == state {
             return
         }
-        let device = image.device();
+        let device = self.image.device();
         let memory_barrier = self.state.to_memory_barrier(
-            image.handle(),
+            self.image.handle(),
             state,
             self.subresource_info.into(),
         );
@@ -133,10 +114,8 @@ impl Drop for ImageSubresourceRange {
 
     fn drop(&mut self) {
         if let Some(view) = self.view {
-            let g = self.global_resources.read().unwrap();
-            let image = g.get_image(self.image_id);
             unsafe {
-                image.device().destroy_image_view(vk::Handle::from_raw(view.get()), None);
+                self.image.device().destroy_image_view(vk::Handle::from_raw(view.get()), None);
             }
         }
     }

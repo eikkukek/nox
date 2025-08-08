@@ -1,8 +1,4 @@
-use std::hash::Hash;
-
 use ash::vk;
-
-use nox_mem::Hashable;
 
 use crate::renderer::{
     image::ImageRangeInfo,
@@ -12,12 +8,14 @@ use crate::renderer::{
 
 use super::{AttachmentLoadOp, AttachmentStoreOp};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct PassID(pub(crate) u32);
+
 #[derive(Default, Clone, Copy)]
 pub struct PassInfo {
     pub max_reads: u32,
-    pub max_writes: u32,
+    pub max_color_writes: u32,
     pub max_dependencies: u32,
-    pub max_pipelines: u32,
     pub msaa_samples: MSAA,
 }
 
@@ -57,9 +55,9 @@ impl From<RenderArea> for vk::Rect2D {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum ClearColorValue {
-    Float([Hashable<f32>; 4]),
+    Float([f32; 4]),
     Int([i32; 4]),
     UInt([u32; 4]),
 }
@@ -76,10 +74,10 @@ impl From<[f32; 4]> for ClearColorValue {
 
     fn from(value: [f32; 4]) -> Self {
         Self::Float([
-            Hashable::from(value[0]),
-            Hashable::from(value[1]),
-            Hashable::from(value[2]),
-            Hashable::from(value[3]),
+            value[0],
+            value[1],
+            value[2],
+            value[3],
         ])
     }
 }
@@ -90,12 +88,7 @@ impl From<ClearColorValue> for vk::ClearColorValue {
         match value {
             ClearColorValue::Float(v) => {
                 Self {
-                    float32: [
-                        v[0].to_inner(),
-                        v[1].to_inner(),
-                        v[2].to_inner(),
-                        v[3].to_inner(),
-                    ]
+                    float32: v,
                 }
             },
             ClearColorValue::Int(v) => {
@@ -119,9 +112,9 @@ impl From<ClearColorValue> for vk::ClearValue {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub struct ClearDepthStencilValue {
-    pub depth: Hashable<f32>,
+    pub depth: f32,
     pub stencil: u32,
 }
 
@@ -129,13 +122,13 @@ impl From<ClearDepthStencilValue> for vk::ClearDepthStencilValue {
 
     fn from(value: ClearDepthStencilValue) -> Self {
         Self {
-            depth: value.depth.to_inner(),
+            depth: value.depth,
             stencil: value.stencil,
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum ClearValue {
     Color(ClearColorValue),
     DepthStencil(ClearDepthStencilValue),

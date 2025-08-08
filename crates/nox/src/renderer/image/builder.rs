@@ -1,3 +1,5 @@
+use std::sync::RwLock;
+
 use super::*;
 
 #[derive(Clone)]
@@ -112,14 +114,14 @@ impl ImageBuilder {
         Ok(Image {
             handle: NonZeroU64::new(vk::Handle::as_raw(handle)).unwrap(),
             memory: None,
-            view: None,
+            view: RwLock::new(None),
             device: self.device.clone(),
-            state: ImageState::new(
+            state: RwLock::new(ImageState::new(
                 vk::AccessFlags::NONE,
                 vk::ImageLayout::UNDEFINED,
                 vk::QUEUE_FAMILY_IGNORED,
                 vk::PipelineStageFlags::TOP_OF_PIPE,
-            ),
+            )),
             component_mapping: self.component_mapping,
             properties: ImageProperties {
                 dimensions: self.dimensions,

@@ -403,3 +403,14 @@ impl_traits! {
         }
     ,
 }
+
+impl<const N: usize, T: Clone> From<[T; N]> for ArrayVec<T, N> {
+    
+    fn from(value: [T; N]) -> Self {
+        let mut vec = ArrayVec::new();
+        for v in value {
+            vec.push(v.clone()).unwrap();
+        }
+        vec
+    }
+}

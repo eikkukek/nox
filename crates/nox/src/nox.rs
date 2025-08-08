@@ -153,11 +153,14 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
             };
             self.window = Some(window);
             let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
-            self.interface
+            if let Err(e) = self.interface
                 .clone()
                 .write()
                 .unwrap()
-                .init_callback(self, &mut renderer_context);
+                .init_callback(self, &mut renderer_context) {
+                event_loop.exit();
+                eprintln!("Nox error: init callback error ( {:?} )", e);
+            }
             self.renderer.as_mut().unwrap().command_requests(self.interface.clone(), renderer_context.command_requests);
         }
     }

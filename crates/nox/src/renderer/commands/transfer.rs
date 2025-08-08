@@ -17,7 +17,7 @@ use crate::{
         image::*,
         buffer::*,
         linear_device_alloc::LinearDeviceAlloc,
-        memory_binder::{DeviceMemory, MemoryBinder},
+        memory_binder::MemoryBinder,
         BufferError,
         Error
     }
@@ -94,7 +94,7 @@ impl TransferCommandbuffer {
     ) -> Result<(), Error>
     {
         let mut g = self.global_resources.write().unwrap();
-        let buffer = g.get_mut_buffer(buffer_id);
+        let buffer = g.get_mut_buffer(buffer_id)?;
         let properties = buffer.properties();
         if has_not_bits!(properties.usage, vk::BufferUsageFlags::TRANSFER_DST) {
             return Err(BufferError::UsageMismatch {
@@ -102,8 +102,8 @@ impl TransferCommandbuffer {
             }.into())
         }
         if properties.size < offset + size {
-            return Err(BufferError::InvalidCopy {
-                buffer_size: properties.size, copy_offset: offset, copy_size: size,
+            return Err(BufferError::OutOfRange {
+                buffer_size: properties.size, requested_offset: offset, requested_size: size,
             }.into())
         }
         if (data.len() as u64) < size {
@@ -136,14 +136,7 @@ impl TransferCommandbuffer {
             .write()
             .expect("LinearDeviceAlloc lock poisoned")
             .bind_buffer_memory(staging_buffer)?;
-        let ptr = unsafe {
-            self.device.map_memory(
-                memory.device_memory(),
-                memory.offset(),
-                memory.size(),
-                Default::default(),
-            )?
-        } as *mut u8;
+        let ptr = unsafe { memory.get_mapped_memory() }.unwrap();
 
         let region = vk::BufferCopy {
             src_offset: 0,
@@ -152,7 +145,7 @@ impl TransferCommandbuffer {
         };
 
         unsafe {
-            ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+            ptr::copy_nonoverlapping(data.as_ptr(), ptr.as_ptr(), data.len());
             self.device.cmd_copy_buffer(
                 self.command_buffer,
                 staging_buffer,
@@ -183,8 +176,8 @@ impl TransferCommandbuffer {
         dimensions: Option<Dimensions>,
     ) -> Result<(), Error>
     {
-        let mut g = self.global_resources.write().unwrap();
-        let image = g.get_mut_image(image_id);
+        let g = self.global_resources.read().unwrap();
+        let image = g.get_image(image_id)?;
         let properties = image.properties();
         if has_not_bits!(properties.usage, vk::ImageUsageFlags::TRANSFER_DST) {
             return Err(ImageError::UsageMismatch {
@@ -249,14 +242,7 @@ impl TransferCommandbuffer {
             .write()
             .expect("LinearDeviceAlloc lock poisoned")
             .bind_buffer_memory(staging_buffer)?;
-        let ptr = unsafe {
-            self.device.map_memory(
-                memory.device_memory(),
-                memory.offset(),
-                memory.size(),
-                Default::default(),
-            )?
-        } as *mut u8;
+        let ptr = unsafe { memory.get_mapped_memory() }.unwrap();
 
         let region = vk::BufferImageCopy {
             buffer_offset: 0,
@@ -268,7 +254,7 @@ impl TransferCommandbuffer {
         };
 
         unsafe {
-            ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+            ptr::copy_nonoverlapping(data.as_ptr(), ptr.as_ptr(), data.len());
             self.device.cmd_copy_buffer_to_image(
                 self.command_buffer,
                 staging_buffer,
@@ -299,7 +285,7 @@ impl Drop for TransferCommandbuffer {
                 self.device.destroy_buffer(*buffer, None);
             }
             self.staging_buffers.clear();
-            if let Some(fence) = self.fence {
+            if let Some(fence) = self.fence.take() {
                 self.device.destroy_fence(fence, None);
             }
             self.device.free_command_buffers(self.command_pool, &[self.command_buffer]);

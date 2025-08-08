@@ -28,7 +28,7 @@ enum SwapchainState {
     OutOfDate(u32, PhysicalSize<u32>),
 }
 
-pub struct VulkanContext<'mem> {
+pub(crate) struct VulkanContext<'mem> {
     #[allow(unused)]
     entry: ash::Entry,
     instance: ash::Instance,
@@ -244,6 +244,14 @@ impl<'mem> VulkanContext<'mem> {
 
     pub fn device(&self) -> &ash::Device {
         &self.device
+    }
+
+    pub fn physical_device(&self) -> vk::PhysicalDevice {
+        self.physical_device
+    }
+
+    pub fn instance(&self) -> &ash::Instance {
+        &self.instance
     }
 
     pub fn swapchain_loader(&self) -> &swapchain::Device {

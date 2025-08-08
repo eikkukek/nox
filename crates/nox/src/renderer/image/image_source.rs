@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) enum ImageSource<'a> {
-    Image(&'a Image),
+    Image(Arc<Image>),
     Subresource(&'a ImageSubresourceRange),
 }
 
@@ -11,7 +11,7 @@ impl<'a> ImageSource<'a> {
     pub fn _state(&self) -> ImageState {
         match self {
             Self::Image(s) => {
-                s.state
+                s.state()
             },
             Self::Subresource(s) => {
                 s.state
@@ -69,7 +69,7 @@ impl<'a> ImageSource<'a> {
 }
 
 pub(crate) enum ImageSourceMut<'a> {
-    Image(&'a mut Image),
+    Image(Arc<Image>),
     Subresource(&'a mut ImageSubresourceRange),
 }
 
@@ -79,7 +79,7 @@ impl<'a> ImageSourceMut<'a> {
     pub fn state(&self) -> ImageState {
         match self {
             Self::Image(s) => {
-                s.state
+                s.state()
             },
             Self::Subresource(s) => {
                 s.state

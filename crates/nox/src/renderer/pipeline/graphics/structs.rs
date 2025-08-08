@@ -4,7 +4,7 @@ use ash::vk;
 
 use nox_mem::{Hashable, AsRaw, vec_types::{Vector, GlobalVec, FixedVec}, Allocator};
 
-use crate::{renderer::MSAA};
+use crate::renderer::*;
 
 use super::*;
 
@@ -27,6 +27,16 @@ pub struct SampleShadingInfo {
 pub struct DepthBounds {
     pub min: Hashable<f32>,
     pub max: Hashable<f32>,
+}
+
+impl DepthBounds {
+
+    pub fn new(min: f32, max: f32) -> Self {
+        Self {
+            min: min.into(),
+            max: max.into(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
