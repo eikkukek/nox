@@ -20,6 +20,21 @@ struct Vertex {
     uv: [f32; 2],
 }
 
+#[repr(C)]
+#[derive(VertexInput)]
+struct VertexOff {
+    off: f32,
+}
+
+impl VertexOff {
+
+    const fn new(off: f32) -> Self {
+        Self {
+            off,
+        }
+    }
+}
+
 impl Vertex {
 
     const fn new(
@@ -67,6 +82,10 @@ const CUBE_VERTICES: &[Vertex] = &[
     Vertex::new([0.5, -0.5, -0.5], [0.0, 0.0, -1.0], [1.0, 0.0]),
     Vertex::new([0.5, 0.5, -0.5], [0.0, 0.0, -1.0], [1.0, 1.0]),
     Vertex::new([-0.5, 0.5, -0.5], [0.0, 0.0, -1.0], [0.0, 1.0]),
+];
+
+const CUBE_OFF: &[VertexOff] = &[
+    VertexOff::new(-0.8), VertexOff::new(0.0), VertexOff::new(0.8),
 ];
 
 const CUBE_INDICES: &[u32] = &[
@@ -143,6 +162,7 @@ struct App {
     pipelines: [GraphicsPipelineID; 2],
     outline_layout: PipelineLayoutID,
     vertex_buffer_id: BufferID,
+    vertex_instance_buffer: BufferID,
     index_buffer_id: BufferID,
     uniform_buffer_id: BufferID,
     shader_resources: [ShaderResourceID; 2],
@@ -173,6 +193,7 @@ impl App {
             pipeline_layouts: Default::default(),
             pipelines: Default::default(),
             vertex_buffer_id: Default::default(),
+            vertex_instance_buffer: Default::default(),
             index_buffer_id: Default::default(),
             uniform_buffer_id: Default::default(),
             shader_resources: Default::default(),
@@ -227,6 +248,8 @@ impl Interface for App {
                 layout(location = 1) in vec3 in_normal;
                 layout(location = 2) in vec2 in_uv;
 
+                layout(location = 3) in float in_off;
+
                 layout(location = 0) out vec3 out_normal;
                 layout(location = 1) out vec2 out_uv;
 
@@ -238,7 +261,9 @@ impl Interface for App {
                 void main() {
                     mat3 normal_matrix = transpose(inverse(mat3(matrices.model)));
                     out_normal = normal_matrix * in_normal;
-                    gl_Position = matrices.projection * matrices.model * vec4(in_pos, 1.0);
+                    mat4 model = matrices.model;
+                    model[3].x += in_off;
+                    gl_Position = matrices.projection * model * vec4(in_pos, 1.0);
                     out_uv = in_uv;
                 }
                 ",
@@ -277,6 +302,8 @@ impl Interface for App {
                 layout(location = 1) in vec3 in_normal;
                 layout(location = 2) in vec2 in_uv;
 
+                layout(location = 3) in float in_off;
+
                 layout(set = 0, binding = 0) uniform Matrices {
                     mat4 model;
                     mat4 projection;
@@ -284,6 +311,7 @@ impl Interface for App {
 
                 void main() {
                     mat4 model = matrices.model;
+                    model[3].x += in_off;
                     model[0] *= 1.08;
                     model[1] *= 1.08;
                     model[2] *= 1.08;
@@ -346,6 +374,7 @@ impl Interface for App {
                 .with_depth_output(self.depth_stencil_format)
                 .with_stencil_output(self.depth_stencil_format)
                 .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
+                .with_vertex_input_binding(VertexInputBinding::new::<3, VertexOff>(1, VertexInputRate::Instance))
                 .with_depth_stencil(DepthStencilInfo {
                     compare_op: CompareOp::Less,
                     depth_bounds: Some(DepthBounds::new(0.0, 1.0)),
@@ -373,6 +402,7 @@ impl Interface for App {
                 .with_depth_output(self.depth_stencil_format)
                 .with_stencil_output(self.depth_stencil_format)
                 .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
+                .with_vertex_input_binding(VertexInputBinding::new::<3, VertexOff>(1, VertexInputRate::Instance))
                 .with_depth_stencil(DepthStencilInfo {
                     compare_op: CompareOp::Less,
                     depth_bounds: Some(DepthBounds::new(0.0, 1.0)),
@@ -397,6 +427,11 @@ impl Interface for App {
             )?;
             self.vertex_buffer_id = r.create_buffer(
                 (CUBE_VERTICES.len() * size_of!(Vertex)) as u64,
+                &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
+                &mut r.default_binder(),
+            )?;
+            self.vertex_instance_buffer = r.create_buffer(
+                (CUBE_OFF.len() * size_of!(VertexOff)) as u64,
                 &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
                 &mut r.default_binder(),
             )?;
@@ -566,11 +601,16 @@ impl Interface for App {
                 commands.bind_shader_resources(|i| {
                     self.shader_resources[i as usize]
                 })?;
-                commands.draw_indexed(DrawInfo {
+                commands.draw_indexed(
+                    DrawInfo {
                         index_count: CUBE_INDICES.len() as u32,
+                        instance_count: 3,
                         ..Default::default()
                     },
-                    [DrawBufferInfo::new(self.vertex_buffer_id, 0)].into(),
+                    [
+                        DrawBufferInfo::new(self.vertex_buffer_id, 0),
+                        DrawBufferInfo::new(self.vertex_instance_buffer, 0),
+                    ].into(),
                     DrawBufferInfo::new(self.index_buffer_id, 0),
                 )?;
             },
@@ -579,11 +619,16 @@ impl Interface for App {
                 commands.bind_shader_resources(|_| {
                     self.shader_resources[0]
                 })?;
-                commands.draw_indexed(DrawInfo {
+                commands.draw_indexed(
+                    DrawInfo {
                         index_count: CUBE_INDICES.len() as u32,
+                        instance_count: 3,
                         ..Default::default()
                     },
-                    [DrawBufferInfo::new(self.vertex_buffer_id, 0)].into(),
+                    [
+                        DrawBufferInfo::new(self.vertex_buffer_id, 0),
+                        DrawBufferInfo::new(self.vertex_instance_buffer, 0),
+                    ].into(),
                     DrawBufferInfo::new(self.index_buffer_id, 0),
                 )?
             }
@@ -606,16 +651,17 @@ impl Interface for App {
                     (self.image_size.width * self.image_size.height) as usize * 4
                 )
             },
-            None,
-            None,
-            None,
+            None, None, None,
         ).unwrap();
         let vertices = unsafe { slice_as_bytes(CUBE_VERTICES) }.unwrap();
         command_buffer.copy_data_to_buffer(
             self.vertex_buffer_id,
-            vertices,
-            0,
-            vertices.len() as u64,
+            vertices, 0, vertices.len() as u64,
+        ).unwrap();
+        let vertices_instance = unsafe { slice_as_bytes(CUBE_OFF) }.unwrap();
+        command_buffer.copy_data_to_buffer(
+            self.vertex_instance_buffer,
+            vertices_instance, 0, vertices_instance.len() as u64
         ).unwrap();
         let indices = unsafe { slice_as_bytes(CUBE_INDICES) }.unwrap();
         command_buffer.copy_data_to_buffer(

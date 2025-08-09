@@ -149,7 +149,7 @@ impl<'a> RenderCommands<'a> {
     pub fn draw_indexed<const VERTEX_BUFFER_COUNT: usize>(
         &self,
         info: DrawInfo,
-        vertex_buffers: ArrayVec<DrawBufferInfo, VERTEX_BUFFER_COUNT>,
+        bindings: ArrayVec<DrawBufferInfo, VERTEX_BUFFER_COUNT>,
         index_buffer: DrawBufferInfo,
     ) -> Result<(), Error>
     {
@@ -173,7 +173,7 @@ impl<'a> RenderCommands<'a> {
             }
             let mut vert = ArrayVec::<vk::Buffer, VERTEX_BUFFER_COUNT>::new();
             let mut vert_off = ArrayVec::<vk::DeviceSize, VERTEX_BUFFER_COUNT>::new();
-            for (id, offset) in vertex_buffers.iter().map(|v| (v.id, v.offset)) {
+            for (id, offset) in bindings.iter().map(|v| (v.id, v.offset)) {
                 let buf = resources.get_buffer(id)?;
                 let properties = buf.properties();
                 let size = properties.size;
