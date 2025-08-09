@@ -4,7 +4,7 @@ use core::cell::RefCell;
 
 use ash::vk;
 
-use nox_mem::{Allocator, CapacityError, vec_types::{FixedVec, Vector}};
+use nox_mem::{Allocator, vec_types::{FixedVec, Vector}};
 
 use crate::{
     renderer::{
@@ -134,11 +134,9 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
         let frame_state = self.frame_state.borrow_mut();
         let device = frame_state.device();
         let passes = &mut self.passes;
-        let sorted = Self::sort(passes, alloc)?;
         let command_buffer = self.command_buffer;
         let graphics_queue_index = self.queue_family_indices.graphics_index();
-        for index in sorted.iter().map(|i| *i) {
-            let pass = &mut passes[index];
+        for pass in passes.iter() {
             let color_output_count = pass.writes.len();
             let mut reset_guards = FixedVec::<SubresourceResetGuard, Alloc>::with_capacity(pass.reads.len() + color_output_count + 2, alloc)?;
             for read in pass.reads.iter() {
@@ -163,41 +161,53 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             enum AttachmentType {
                 Color,
                 Depth,
-                Stencil,
+                DepthStencil,
             }
             let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>, Error> {
                 let resource_id = write.resource_id;
                 let image_properties = frame_state.get_image_properties(resource_id)?;
-                let layout = match ty {
+                let (access, layout, stage) = match ty {
                         AttachmentType::Color => {
                             assert!(
                                 has_bits!(image_properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT),
                                 "color write image usage must contain ImageUsage::ColorAttachment bit"
                             );
-                            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                            (
+                                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            )
                         },
                         AttachmentType::Depth => {
                             assert!(
                                 has_bits!(image_properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
                                 "depth/stencil write image usage must contain ImageUsage::DepthStencilAttachment bit"
                             );
-                            vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL
+                            (
+                                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                                vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                            )
                         },
-                        AttachmentType::Stencil => {
+                        AttachmentType::DepthStencil => {
                             assert!(
                                 has_bits!(image_properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
                                 "depth/stencil write image usage must contain ImageUsage::DepthStencilAttachment bit"
                             );
-                            vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL
+                            (
+                                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                                vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                            )
                         }
                 };
                 let reset_guard = frame_state.cmd_memory_barrier(
                     resource_id,
                     ImageState::new(
-                        vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                        access,
                         layout,
                         graphics_queue_index,
-                        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                        stage,
                     ),
                 )?;
                 render_extent.width = render_extent.width.min(image_properties.dimensions.width);
@@ -225,15 +235,21 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                         .push(process_write(write, AttachmentType::Color)?).unwrap();
                 }
             }
+            let mut stencil_output = None;
             let depth_output =
-                if let Some(write) = &pass.depth_write {
-                    Some(process_write(&write, AttachmentType::Depth)?)
-                } else {
-                    None
-                };
-            let stencil_output =
-                if let Some(write) = &pass.stencil_write {
-                    Some(process_write(write, AttachmentType::Stencil)?)
+                if let Some((stencil, write)) = &pass.depth_write {
+                    let v = process_write(
+                        &write,
+                        if *stencil {
+                            AttachmentType::DepthStencil
+                        } else {
+                            AttachmentType::Depth
+                        }
+                    )?;
+                    if *stencil {
+                        stencil_output = Some(v);
+                    }
+                    Some(v)
                 } else {
                     None
                 };
@@ -275,75 +291,5 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             unsafe { device.cmd_end_rendering(command_buffer); }
         }
         Ok(())
-    }
-
-    #[inline(always)]
-    fn sort(passes: &FixedVec<Pass<Alloc>, Alloc>, alloc: &'a Alloc) -> Result<FixedVec<'a, usize, Alloc>, CapacityError> {
-        if passes.len() == 0 {
-            return Ok(FixedVec::with_no_alloc())
-        }
-        let pass_count = passes.len();
-        if pass_count == 0 {
-            return Ok(FixedVec::with_no_alloc())
-        }
-        let mut in_degree = FixedVec::<usize, Alloc>
-            ::with_len(pass_count, 0, alloc)?;
-        let mut dependents = FixedVec::<FixedVec<usize, Alloc>, Alloc>
-            ::with_len_with(pass_count, FixedVec::with_no_alloc, alloc)?;
-        for (i, pass) in passes.iter().enumerate() {
-            let deps = &pass.dependencies;
-            in_degree[i] = deps.len();
-            for index in deps {
-                let list = &mut dependents[index.0 as usize];
-                if list.capacity() == 0 {
-                    *list =
-                        FixedVec::with_capacity(pass_count, alloc)?;
-                }
-                list.push(i)?;
-            }
-            
-        }
-        if in_degree.len() == 0 {
-            let mut i = 0;
-            return
-                FixedVec
-                ::with_len_with(pass_count,
-                    || {
-                        let index = i;
-                        i += 1;
-                        index
-                    },
-                    alloc
-                )
-        }
-        let mut pending = FixedVec::<usize, Alloc>
-            ::with_capacity(pass_count, alloc)?;
-        for (i, deg) in in_degree.iter().enumerate() {
-            if *deg == 0 {
-                pending
-                    .push(i)?;
-            }
-        }
-        let mut sorted = FixedVec
-            ::with_capacity(pass_count, alloc)?;
-        while let Some(index) = pending.pop() {
-            sorted.push(index)?;
-            let list = &dependents[index];
-            if list.capacity() != 0 {
-                for index in list.iter().map(|i| *i) {
-                    let count = &mut in_degree[index];
-                    *count -= 1;
-                    if *count == 0 {
-                        pending.push(index)?;
-                    }
-                }
-            }
-        }
-        if sorted.len() != pass_count {
-            panic!("cycle detected")
-        }
-        else {
-            Ok(sorted)
-        }
     }
 }

@@ -14,9 +14,7 @@ pub(crate) struct Pass<'alloc, Alloc: Allocator> {
     pub id: PassID,
     pub reads: FixedVec<'alloc, ReadInfo, Alloc>,
     pub writes: FixedVec<'alloc, WriteInfo, Alloc>,
-    pub depth_write: Option<WriteInfo>,
-    pub stencil_write: Option<WriteInfo>,
-    pub dependencies: FixedVec<'alloc, PassID, Alloc>,
+    pub depth_write: Option<(bool, WriteInfo)>,
     pub render_area: Option<vk::Rect2D>,
     pub msaa_samples: MSAA,
 }
@@ -30,14 +28,11 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
     ) -> Result<Self, CapacityError> {
         let reads = FixedVec::with_capacity(info.max_reads as usize, alloc)?;
         let writes = FixedVec::with_capacity(info.max_color_writes as usize, alloc)?;
-        let dependencies = FixedVec::with_capacity(info.max_dependencies as usize, alloc)?;
         Ok(Self {
             id,
             reads,
             writes,
-            depth_write: None.into(),
-            stencil_write: None.into(),
-            dependencies,
+            depth_write: None,
             render_area: None,
             msaa_samples: info.msaa_samples,
         })
@@ -128,28 +123,21 @@ impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
             "write MSAA sample count must match pass sample count ( write: {:?}, pass: {:?} )",
             write.samples(), self.msaa_samples,
         );
-        self.depth_write = Some(write);
+        self.depth_write = Some((false, write));
         self
     }
 
-    fn with_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a> {
+    fn with_depth_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a> {
         assert!(write.resource_id.samples == self.msaa_samples,
             "write MSAA sample count must match pass sample count ( write: {:?}, pass: {:?} )",
             write.resource_id.samples, self.msaa_samples,
         );
-        self.stencil_write = Some(write);
+        self.depth_write = Some((true, write));
         self
     }
 
     fn with_render_area(&mut self, render_area: RenderArea) -> &mut dyn PassAttachmentBuilder<'a> {
         self.render_area = Some(render_area.into());
-        self
-    }
-
-    fn with_dependency(&mut self, pass_id: PassID) -> &mut dyn PassAttachmentBuilder<'a> {
-        self.dependencies
-            .push(pass_id)
-            .expect("dependency capacity exceeded");
         self
     }
 }

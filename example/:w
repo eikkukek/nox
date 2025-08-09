@@ -113,7 +113,7 @@ impl Quat {
             1.0 - 2.0 * (num2 + num3), 2.0 * (self.x * self.y + self.z * self.w), 2.0 * (self.x * self.z - self.y * self.w), 0.0,
             2.0 * (self.x * self.y - self.z * self.w), 1.0 - 2.0 * (num1 + num3), 2.0 * (self.y * self.z + self.x * self.w), 0.0,
             2.0 * (self.x * self.z + self.y * self.w), 2.0 * (self.y * self.z - self.x * self.w), 1.0 - 2.0 * (num1 + num2), 0.0,
-            0.0, 0.0, 2.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
         ];
     }
 }
@@ -139,8 +139,8 @@ struct App {
     fragment_shader_id: ShaderID,
     outline_vertex: ShaderID,
     outline_fragment: ShaderID,
-    pipeline_layouts: [PipelineLayoutID; 2],
-    pipelines: [GraphicsPipelineID; 2],
+    pipeline_layout_id: PipelineLayoutID,
+    pipeline_ids: [GraphicsPipelineID; 2],
     outline_layout: PipelineLayoutID,
     vertex_buffer_id: BufferID,
     index_buffer_id: BufferID,
@@ -170,8 +170,8 @@ impl App {
             outline_vertex: Default::default(),
             outline_fragment: Default::default(),
             outline_layout: Default::default(),
-            pipeline_layouts: Default::default(),
-            pipelines: Default::default(),
+            pipeline_layout_id: Default::default(),
+            pipeline_ids: Default::default(),
             vertex_buffer_id: Default::default(),
             index_buffer_id: Default::default(),
             uniform_buffer_id: Default::default(),
@@ -187,7 +187,7 @@ impl App {
 impl Interface for App {
 
     fn init_settings(&self) -> InitSettings {
-        InitSettings::new("Test", Version::default(), [540, 540], true)
+        InitSettings::new("Test", Version::default(), [540, 540], false)
     }
 
     fn init_callback(
@@ -284,9 +284,9 @@ impl Interface for App {
 
                 void main() {
                     mat4 model = matrices.model;
-                    model[0] *= 1.08;
-                    model[1] *= 1.08;
-                    model[2] *= 1.08;
+                    model[0] *= 1.1;
+                    model[1] *= 1.1;
+                    model[2] *= 1.1;
 
                     gl_Position = matrices.projection * model * vec4(in_pos, 1.0);
                 }
@@ -305,14 +305,9 @@ impl Interface for App {
                 "outline fragment",
                 ShaderStage::Fragment,
             )?;
-            self.pipeline_layouts = [
-                    r.create_pipeline_layout(
-                        [self.vertex_shader_id, self.fragment_shader_id],
-                    )?,
-                    r.create_pipeline_layout(
-                        [self.outline_vertex, self.outline_fragment],
-                    )?,
-            ];
+            self.pipeline_layout_id = r.create_pipeline_layout(
+                [self.vertex_shader_id, self.fragment_shader_id],
+            )?;
             self.outline_layout = r.create_pipeline_layout(
                 [self.outline_vertex, self.outline_fragment],
             )?;
@@ -336,7 +331,8 @@ impl Interface for App {
             self.sampler_id = r.create_sampler(
                 |_| {},
             )?;
-            let mut graphics_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[0]);
+            let mut outline_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layout_id);
+            let mut graphics_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layout_id);
             graphics_pipeline_info
                 .with_color_output(
                     self.color_format,
@@ -344,14 +340,12 @@ impl Interface for App {
                     None,
                 )
                 .with_depth_output(self.depth_stencil_format)
-                .with_stencil_output(self.depth_stencil_format)
                 .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
                 .with_depth_stencil(DepthStencilInfo {
                     compare_op: CompareOp::Less,
                     depth_bounds: Some(DepthBounds::new(0.0, 1.0)),
                     stencil_test_info: Some(StencilTestInfo {
-                        front: Default::default(),
-                        back: StencilOpState {
+                        front: StencilOpState {
                             fail_op: StencilOp::Keep,
                             pass_op: StencilOp::Replace,
                             depth_fail_op: StencilOp::Keep,
@@ -360,10 +354,10 @@ impl Interface for App {
                             write_mask: 0x1,
                             reference: 0x1,
                         },
+                        back: Default::default(),
                     }),
                     write_enable: true,
                 });
-            let mut outline_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[1]);
             outline_pipeline_info
                 .with_color_output(
                     self.color_format,
@@ -371,14 +365,11 @@ impl Interface for App {
                     None,
                 )
                 .with_depth_output(self.depth_stencil_format)
-                .with_stencil_output(self.depth_stencil_format)
-                .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
                 .with_depth_stencil(DepthStencilInfo {
                     compare_op: CompareOp::Less,
                     depth_bounds: Some(DepthBounds::new(0.0, 1.0)),
                     stencil_test_info: Some(StencilTestInfo {
-                        front: Default::default(),
-                        back: StencilOpState {
+                        front: StencilOpState {
                             fail_op: StencilOp::Keep,
                             pass_op: StencilOp::Keep,
                             depth_fail_op: StencilOp::Keep,
@@ -387,12 +378,13 @@ impl Interface for App {
                             write_mask: 0x0,
                             reference: 0x1,
                         },
+                        back: Default::default(),
                     }),
                     write_enable: true,
                 });
             r.create_graphics_pipelines(
                 &[graphics_pipeline_info, outline_pipeline_info],
-                |i, id| { self.pipelines[i] = id; },
+                |i, id| { self.pipeline_ids[i] = id; },
                 &GLOBAL_ALLOC
             )?;
             self.vertex_buffer_id = r.create_buffer(
@@ -416,22 +408,23 @@ impl Interface for App {
             r.allocate_shader_resources(
                 &[
                     ShaderResourceInfo {
-                        layout_id: self.pipeline_layouts[0],
+                        layout_id: self.pipeline_layout_id,
                         set: 0,
                     },
                     ShaderResourceInfo {
-                        layout_id: self.pipeline_layouts[0],
+                        layout_id: self.pipeline_layout_id,
                         set: 1,
                     }
                 ],
                 |i, v| self.shader_resources[i] = v,
                 &GLOBAL_ALLOC,
             )?;
+            println!("here?");
             r.update_shader_resources(
                 &[
                     ShaderResourceImageUpdate {
                         resource: self.shader_resources[1],
-                        binding: 1,
+                        binding: 0,
                         starting_index: 0,
                         infos: &[ShaderResourceImageInfo {
                             sampler: self.sampler_id,
@@ -489,7 +482,7 @@ impl Interface for App {
             );
         }
         self.rot += 0.001;
-        let depth_stencil_output = frame_graph.add_transient_image(
+        let depth_output = frame_graph.add_transient_image(
             &mut |builder| {
                 builder
                     .with_usage(ImageUsage::DepthStencilAttachment)
@@ -520,8 +513,8 @@ impl Interface for App {
                         AttachmentStoreOp::Store,
                         Default::default())
                     )
-                    .with_depth_stencil_write(WriteInfo::new(
-                        depth_stencil_output,
+                    .with_depth_write(WriteInfo::new(
+                        depth_output,
                         None,
                         AttachmentLoadOp::Clear,
                         AttachmentStoreOp::Store,
@@ -540,8 +533,8 @@ impl Interface for App {
                         AttachmentStoreOp::Store,
                         Default::default()
                     ))
-                    .with_depth_stencil_write(WriteInfo::new(
-                        depth_stencil_output,
+                    .with_depth_write(WriteInfo::new(
+                        depth_output,
                         None,
                         AttachmentLoadOp::Load,
                         AttachmentStoreOp::Store,
@@ -562,7 +555,7 @@ impl Interface for App {
     {
         match pass {
             x if x == self.first_pass_id => {
-                commands.bind_pipeline(self.pipelines[0])?;
+                commands.bind_pipeline(self.pipeline_ids[0])?;
                 commands.bind_shader_resources(|i| {
                     self.shader_resources[i as usize]
                 })?;
@@ -575,7 +568,7 @@ impl Interface for App {
                 )?;
             },
             x if x == self.second_pass_id => {
-                commands.bind_pipeline(self.pipelines[1])?;
+                commands.bind_pipeline(self.pipeline_ids[1])?;
                 commands.bind_shader_resources(|_| {
                     self.shader_resources[0]
                 })?;

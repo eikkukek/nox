@@ -11,11 +11,17 @@ use super::{AttachmentLoadOp, AttachmentStoreOp};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PassID(pub(crate) u32);
 
+impl Default for PassID {
+
+    fn default() -> Self {
+        Self(u32::MAX)
+    }
+}
+
 #[derive(Default, Clone, Copy)]
 pub struct PassInfo {
     pub max_reads: u32,
     pub max_color_writes: u32,
-    pub max_dependencies: u32,
     pub msaa_samples: MSAA,
 }
 

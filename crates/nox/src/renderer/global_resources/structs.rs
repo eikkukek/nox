@@ -23,7 +23,7 @@ pub(super) struct ShaderResource {
     pub binding_count: u32,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct ShaderResourceID(pub(super) SlotIndex<ShaderResource>);
 
 #[derive(Default, Clone, Copy)]

@@ -41,12 +41,19 @@ impl DepthBounds {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StencilOpState {
+    /// Operation performed when stencil test fails
     pub fail_op: StencilOp,
+    /// Operation performed when both stencil and depth test pass
     pub pass_op: StencilOp,
+    /// Operation performed when stencil test passes but depth test fails
     pub depth_fail_op: StencilOp,
+    /// Compare operation for the stencil test
     pub compare_op: CompareOp,
+    /// Bitmask applied to stencil and reference before comparison
     pub compare_mask: u32,
+    /// Bitmask controlling which bits can be written to stencil buffer
     pub write_mask: u32,
+    /// The bits which are compared against the stencil buffer
     pub reference: u32,
 }
 
@@ -54,10 +61,10 @@ impl Default for StencilOpState {
 
     fn default() -> Self {
         Self {
-            fail_op: StencilOp::Zero,
-            pass_op: StencilOp::Zero,
-            depth_fail_op: StencilOp::Zero,
-            compare_op: CompareOp::Never,
+            fail_op: StencilOp::Keep,
+            pass_op: StencilOp::Keep,
+            depth_fail_op: StencilOp::Keep,
+            compare_op: CompareOp::Always,
             compare_mask: 0,
             write_mask: 0,
             reference: 0,
@@ -92,7 +99,6 @@ pub struct DepthStencilInfo {
     pub depth_bounds: Option<DepthBounds>,
     pub stencil_test_info: Option<StencilTestInfo>,
     pub write_enable: bool,
-    pub stencil_test_enable: bool,
 }
 
 impl Default for DepthStencilInfo {
@@ -103,7 +109,6 @@ impl Default for DepthStencilInfo {
             depth_bounds: None,
             stencil_test_info: None,
             write_enable: false,
-            stencil_test_enable: false,
         }
     }
 }

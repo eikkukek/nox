@@ -296,11 +296,16 @@ impl GlobalResources {
         for update in image_updates {
             let set = self.shader_resources.get(update.resource.0)?;
             let vk_set = set.descriptor_set;
-            let ty = self.pipeline_layouts
+            let Some(ty) = self.pipeline_layouts
                 .get(set.layout_id.0)?
                 .pipeline_descriptor_sets()
                 [set.set as usize].0
-                [update.binding as usize];
+                [update.binding as usize]
+            else {
+                return Err(Error::ShaderError(
+                    format!("invalid shader resource image binding {} for set {}", update.binding, set.set)
+                ));
+            };
             let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
             for info in update.infos {
                 let sampler = self.samplers.get(info.sampler.0)?.handle;
@@ -329,11 +334,16 @@ impl GlobalResources {
         for update in buffer_updates {
             let set = self.shader_resources.get(update.resource.0)?;
             let vk_set = set.descriptor_set;
-            let ty = self.pipeline_layouts
+            let Some(ty) = self.pipeline_layouts
                 .get(set.layout_id.0)?
                 .pipeline_descriptor_sets()
                 [set.set as usize].0
-                [update.binding as usize];
+                [update.binding as usize]
+            else {
+                return Err(Error::ShaderError(
+                    format!("invalid shader resource image binding {} for set {}", update.binding, set.set)
+                ));
+            };
             let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
             for info in update.infos {
                 let buffer = self.buffers.get(info.buffer.0)?;

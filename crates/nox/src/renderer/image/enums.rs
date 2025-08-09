@@ -69,8 +69,8 @@ impl Format for ColorFormat {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
-pub enum DepthFormat {
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
+pub enum DepthStencilFormat {
     D32 = vk::Format::D32_SFLOAT.as_raw(),
     D16 = vk::Format::D16_UNORM.as_raw(),
     S8 = vk::Format::S8_UINT.as_raw(),
@@ -78,27 +78,34 @@ pub enum DepthFormat {
     D24S8 = vk::Format::D24_UNORM_S8_UINT.as_raw(),
 }
 
-impl DepthFormat {
+impl DepthStencilFormat {
 
-    pub fn all_depth() -> &'static [DepthFormat] {
+    pub fn all_depth() -> &'static [DepthStencilFormat] {
         &[
-            DepthFormat::D32,
-            DepthFormat::D16,
-            DepthFormat::D32S8,
-            DepthFormat::D24S8,
+            DepthStencilFormat::D32,
+            DepthStencilFormat::D16,
+            DepthStencilFormat::D32S8,
+            DepthStencilFormat::D24S8,
         ]
     }
 
-    pub fn all_stencil() -> &'static [DepthFormat] {
+    pub fn all_stencil() -> &'static [DepthStencilFormat] {
         &[
-            DepthFormat::S8,
-            DepthFormat::D32S8,
-            DepthFormat::D24S8,
+            DepthStencilFormat::S8,
+            DepthStencilFormat::D32S8,
+            DepthStencilFormat::D24S8,
+        ]
+    }
+
+    pub fn all_depth_stencil() -> &'static [DepthStencilFormat] {
+        &[
+            DepthStencilFormat::D32S8,
+            DepthStencilFormat::D24S8,
         ]
     }
 }
 
-impl Format for DepthFormat {
+impl Format for DepthStencilFormat {
 
     fn aspects(self) -> &'static [ImageAspect] {
         match self {
@@ -150,13 +157,6 @@ pub enum FormatFeature {
 }
 
 impl_as_raw_bit_op!(FormatFeature);
-
-impl From<FormatFeature> for u32 {
-
-    fn from(value: FormatFeature) -> Self {
-        value as Self
-    }
-}
 
 #[repr(i32)]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]

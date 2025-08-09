@@ -145,6 +145,19 @@ impl ImageSubresourceRangeInfo {
     }
 }
 
+impl Default for ImageSubresourceRangeInfo {
+
+    fn default() -> Self {
+        Self {
+            aspect_mask: 0,
+            base_mip_level: 0,
+            level_count: NonZeroU32::new(1).unwrap(),
+            base_array_layer: 0,
+            layer_count: NonZeroU32::new(1).unwrap(),
+        }
+    }
+}
+
 impl From<ImageSubresourceRangeInfo> for vk::ImageSubresourceRange {
 
     fn from(value: ImageSubresourceRangeInfo) -> Self {

@@ -33,6 +33,13 @@ pub fn nox_as_raw(item: TokenStream) -> TokenStream {
                     self as Self::Repr
                 }
             }
+
+            impl From<#name> for #meta {
+
+                fn from(value: #name) -> Self {
+                    value as Self
+                }
+            }
         };
         TokenStream::from(expanded)
     }

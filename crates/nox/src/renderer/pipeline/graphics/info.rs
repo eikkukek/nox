@@ -263,7 +263,7 @@ impl GraphicsPipelineInfo {
             depth_write_enable: depth_stencil_info.write_enable.into(),
             depth_compare_op: depth_stencil_info.compare_op.into(),
             depth_bounds_test_enable: depth_stencil_info.depth_bounds.is_some().into(),
-            stencil_test_enable: depth_stencil_info.stencil_test_enable.into(),
+            stencil_test_enable: depth_stencil_info.stencil_test_info.is_some().into(),
             front: stencil_test_info.front.into(),
             back: stencil_test_info.back.into(),
             min_depth_bounds: depth_bounds.min.to_inner(),

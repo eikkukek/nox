@@ -30,6 +30,7 @@ pub struct Nox<'mem, I>
     window: Option<Window>,
     memory: &'mem Memory,
     renderer: Option<Renderer<'mem>>,
+    error_flag: bool,
 }
 
 impl<'mem, I: Interface> Nox<'mem, I>
@@ -42,6 +43,7 @@ impl<'mem, I: Interface> Nox<'mem, I>
                 window: None,
                 memory,
                 renderer: None,
+                error_flag: false,
             }
         )
     }
@@ -73,6 +75,9 @@ impl<'mem, I: Interface> Drop for Nox<'mem, I> {
 impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
+        if self.error_flag {
+            return
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(), // terminate app,
             WindowEvent::Resized(size) => {
@@ -98,8 +103,9 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                             }
                         }
                         if let Err(e) = renderer.render(&window, self.interface.clone(), renderer_allocators) {
-                            eprintln!("Nox renderer error: {}", e);
                             event_loop.exit();
+                            self.error_flag = true;
+                            eprintln!("Nox renderer error: {}", e);
                         }
                     }
                 }
@@ -121,8 +127,9 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
             let window = match event_loop.create_window(window_attributes) {
                 Ok(window) => window,
                 Err(e) => {
-                    eprintln!("Nox error: failed to create window ( {} )", e);
                     event_loop.exit();
+                    self.error_flag = true;
+                    eprintln!("Nox error: failed to create window ( {} )", e);
                     return
                 },
             };
@@ -143,6 +150,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                 Ok(r) => Some(r),
                 Err(e) => {
                     event_loop.exit();
+                    self.error_flag = true;
                     eprintln!("Nox error: failed to create renderer ( {} )", e);
                     return
                 }
@@ -155,6 +163,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                 .unwrap()
                 .init_callback(self, &mut renderer_context) {
                 event_loop.exit();
+                self.error_flag = true;
                 eprintln!("Nox error: init callback error ( {:?} )", e);
             }
             self.renderer.as_mut().unwrap().command_requests(self.interface.clone(), renderer_context.command_requests);

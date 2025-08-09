@@ -15,11 +15,9 @@ pub trait PassAttachmentBuilder<'a> {
 
     fn with_depth_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    fn with_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
+    fn with_depth_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
 
     fn with_render_area(&mut self, render_area: RenderArea) -> &mut dyn PassAttachmentBuilder<'a>;
-
-    fn with_dependency(&mut self, pass_id: PassID) -> &mut dyn PassAttachmentBuilder<'a>;
 }
 
 pub trait FrameGraph<'a> {

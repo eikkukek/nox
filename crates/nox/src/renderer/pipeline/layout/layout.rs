@@ -13,7 +13,7 @@ use crate::renderer::{
 pub(crate) struct PipelineLayout {
     device: Arc<ash::Device>,
     handle: vk::PipelineLayout,
-    pipeline_descriptor_sets: GlobalVec<(GlobalVec<vk::DescriptorType>, vk::DescriptorSetLayout)>,
+    pipeline_descriptor_sets: GlobalVec<(GlobalVec<Option<vk::DescriptorType>>, vk::DescriptorSetLayout)>,
     push_constant_ranges: GlobalVec<vk::PushConstantRange>,
     shader_ids: GlobalVec<ShaderID>,
 }
@@ -37,7 +37,22 @@ impl PipelineLayout {
                 if uniform.set >= set_infos.len() as u32 {
                     set_infos.resize(uniform.set as usize + 1, GlobalVec::new()).unwrap();
                 }
-                set_infos[uniform.set as usize].push(uniform.into()).unwrap();
+                let bindings = &mut set_infos[uniform.set as usize];
+                if uniform.binding >= bindings.len() as u32 {
+                    let mut binding = bindings.len() as u32;
+                    bindings.resize_with(
+                        uniform.binding as usize + 1,
+                        || {
+                            let s = vk::DescriptorSetLayoutBinding {
+                                binding,
+                                ..Default::default()
+                            };
+                            binding += 1;
+                            s
+                        }
+                    ).unwrap();
+                }
+                bindings[uniform.binding as usize] = uniform.into();
             }
             for push_constant in shader.push_constant().iter().map(|v| *v) {
                 push_constants.push(push_constant.into()).unwrap();
@@ -83,7 +98,10 @@ impl PipelineLayout {
                 ::with_capacity(set_info.len())
                 .unwrap();
             for binding in set_info {
-                types.push(binding.descriptor_type).unwrap();
+                types.push(
+                    if binding.stage_flags.is_empty() { None }
+                    else { Some(binding.descriptor_type) }
+                ).unwrap();
             }
             pipeline_descriptor_sets.push((
                 types,
@@ -103,7 +121,7 @@ impl PipelineLayout {
         self.handle
     }
 
-    pub fn pipeline_descriptor_sets(&self) -> &[(GlobalVec<vk::DescriptorType>, vk::DescriptorSetLayout)] {
+    pub fn pipeline_descriptor_sets(&self) -> &[(GlobalVec<Option<vk::DescriptorType>>, vk::DescriptorSetLayout)] {
         &self.pipeline_descriptor_sets
     }
 
