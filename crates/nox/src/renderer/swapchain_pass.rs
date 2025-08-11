@@ -103,12 +103,12 @@ impl SwapchainPassPipelineData {
     {
         if let Some(pipeline) = self.last_pipeline {
             if format == pipeline.1 {
-                return Ok(self.global_resources.read().unwrap().get_pipeline_handle(pipeline.0)?)
+                return Ok(self.global_resources.read().unwrap().get_pipeline(pipeline.0)?.handle)
             }
         }
         if let Some(pipeline) = self.pipelines.iter().find(|p| p.1 == format) {
             self.last_pipeline = Some(*pipeline);
-            return Ok(self.global_resources.read().unwrap().get_pipeline_handle(pipeline.0)?)
+            return Ok(self.global_resources.read().unwrap().get_pipeline(pipeline.0)?.handle)
         }
         let mut info = GraphicsPipelineInfo::new(self.layout_id);
         info.with_color_output_vk(format, WriteMask::all(), None);
@@ -119,7 +119,7 @@ impl SwapchainPassPipelineData {
             .unwrap()
             .create_graphics_pipelines(&[info], |_, v| { pipeline = Some(v) }, &stack_guard)?;
         let pipeline = self.pipelines.push((pipeline.unwrap(), format)).unwrap();
-        Ok(self.global_resources.read().unwrap().get_pipeline_handle(pipeline.0)?)
+        Ok(self.global_resources.read().unwrap().get_pipeline(pipeline.0)?.handle)
     }
 
     pub fn get_pipeline_layout(&mut self) -> Result<vk::PipelineLayout, Error>

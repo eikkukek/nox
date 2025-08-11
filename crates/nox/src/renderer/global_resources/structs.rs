@@ -70,7 +70,7 @@ pub struct ShaderResourceCopy {
 }
 
 #[derive(Clone)]
-pub(super) struct GraphicsPipeline {
+pub(crate) struct GraphicsPipeline {
     pub device: Arc<ash::Device>,
     pub _color_formats: GlobalVec<vk::Format>,
     pub _dynamic_states: GlobalVec<vk::DynamicState>,
@@ -78,6 +78,7 @@ pub(super) struct GraphicsPipeline {
     pub layout_id: PipelineLayoutID,
     pub _depth_format: vk::Format,
     pub _stencil_format: vk::Format,
+    pub samples: MSAA,
 }
 
 impl Drop for GraphicsPipeline {

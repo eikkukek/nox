@@ -55,7 +55,7 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
                 ::with_capacity(writes.len(), alloc)?;
             for write in writes {
 
-                let id = write.resource_id;
+                let id = write.main_id;
 
                 if write.range_info.is_none() {
                     if reads.iter().any(|r| r.resource_id == id) ||
@@ -118,6 +118,20 @@ impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
             "write MSAA sample count must match pass sample count ( write: {:?}, pass: {:?} )",
             write.samples(), self.msaa_samples,
         );
+        if write.samples() != MSAA::X1 {
+            if let Some(resolve) = write.resolve.map(|v| v.0) {
+                assert!(
+                    resolve.samples() == MSAA::X1,
+                    "write resolve image sample count must be 1, resolve samples: {:?}",
+                    resolve.samples(),
+                );
+                assert!(
+                    write.main_id.format == resolve.format,
+                    "write resolve image format must be the same as main image format, main format {:?}, resolve format {:?}",
+                    write.main_id.format, resolve.format,
+                );
+            }
+        }
         self.writes
             .push(write)
             .expect("write capacity exceeded");
@@ -129,15 +143,43 @@ impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
             "write MSAA sample count must match pass sample count ( write: {:?}, pass: {:?} )",
             write.samples(), self.msaa_samples,
         );
+        if write.samples() != MSAA::X1 {
+            if let Some(resolve) = write.resolve.map(|v| v.0) {
+                assert!(
+                    resolve.samples() == MSAA::X1,
+                    "write resolve image sample count must be 1, resolve samples: {:?}",
+                    resolve.samples(),
+                );
+                assert!(
+                    write.main_id.format == resolve.format,
+                    "write resolve image format must be the same as main image format, main format {:?}, resolve format {:?}",
+                    write.main_id.format, resolve.format,
+                );
+            }
+        }
         self.depth_write = Some((false, write));
         self
     }
 
     fn with_depth_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a> {
-        assert!(write.resource_id.samples == self.msaa_samples,
+        assert!(write.samples() == self.msaa_samples,
             "write MSAA sample count must match pass sample count ( write: {:?}, pass: {:?} )",
-            write.resource_id.samples, self.msaa_samples,
+            write.samples(), self.msaa_samples,
         );
+        if write.samples() != MSAA::X1 {
+            if let Some(resolve) = write.resolve.map(|v| v.0) {
+                assert!(
+                    resolve.samples() == MSAA::X1,
+                    "write resolve image sample count must be 1, resolve samples: {:?}",
+                    resolve.samples(),
+                );
+                assert!(
+                    write.main_id.format == resolve.format,
+                    "write resolve image format must be the same as main image format, main format {:?}, resolve format {:?}",
+                    write.main_id.format, resolve.format,
+                );
+            }
+        }
         self.depth_write = Some((true, write));
         self
     }

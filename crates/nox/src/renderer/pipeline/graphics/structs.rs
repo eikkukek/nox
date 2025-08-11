@@ -23,6 +23,24 @@ pub struct SampleShadingInfo {
     pub alpha_to_one: bool,
 }
 
+impl SampleShadingInfo {
+
+    pub fn new(
+        samples: MSAA,
+        min_shading: f32,
+        alpha_to_coverage: bool,
+        alpha_to_one: bool,
+    ) -> Self
+    {
+        Self {
+            samples,
+            min_shading: min_shading.into(),
+            alpha_to_coverage,
+            alpha_to_one,
+        }
+    }
+}
+
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DepthBounds {
     pub min: Hashable<f32>,

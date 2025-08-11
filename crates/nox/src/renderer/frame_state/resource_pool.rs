@@ -46,8 +46,8 @@ impl ResourcePool
         Self {
             device,
             global_resources,
-            transient_images: GlobalSlotMap::with_capacity(4).unwrap(),
-            subviews: GlobalVec::with_capacity(4).unwrap(),
+            transient_images: GlobalSlotMap::new(),
+            subviews: GlobalVec::new(),
             render_image: None,
             render_image_reset: None,
             device_alloc,

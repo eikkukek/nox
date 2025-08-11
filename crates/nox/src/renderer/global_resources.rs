@@ -493,6 +493,7 @@ impl GlobalResources {
                 _dynamic_states: info.dynamic_states.clone(),
                 handle: *handle,
                 layout_id: info.layout_id,
+                samples: info.sample_shading_info.map(|v| v.samples).unwrap_or(MSAA::X1),
                 _depth_format: info.depth_output_format,
                 _stencil_format: info.stencil_output_format,
             });
@@ -553,8 +554,8 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_pipeline_handle(&self, id: GraphicsPipelineID) -> Result<vk::Pipeline, SlotMapError> {
-        self.graphics_pipelines.get(id.0).map(|v| v.handle)
+    pub(crate) fn get_pipeline(&self, id: GraphicsPipelineID) -> Result<&GraphicsPipeline, SlotMapError> {
+        self.graphics_pipelines.get(id.0)
     }
 
     #[inline(always)]

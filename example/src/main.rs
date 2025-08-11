@@ -428,6 +428,7 @@ impl Interface for App {
             )?;
             let mut graphics_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[0]);
             graphics_pipeline_info
+                .with_sample_shading(SampleShadingInfo::new(MSAA::X4, 0.2, false, false))
                 .with_color_output(
                     self.color_format,
                     WriteMask::all(),
@@ -456,6 +457,7 @@ impl Interface for App {
                 });
             let mut outline_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[1]);
             outline_pipeline_info
+                .with_sample_shading(SampleShadingInfo::new(MSAA::X4, 0.2, false, false))
                 .with_color_output(
                     self.color_format,
                     WriteMask::all(),
@@ -639,12 +641,22 @@ impl Interface for App {
         let depth_stencil_output = frame_graph.add_transient_image(
             &mut |builder| {
                 builder
+                    .with_samples(MSAA::X4)
                     .with_usage(ImageUsage::DepthStencilAttachment)
                     .with_format(self.depth_stencil_format, false)
                     .with_dimensions(frame_buffer_size);
             }
         )?;
         let color_output = frame_graph.add_transient_image(
+            &mut |builder| {
+                builder
+                    .with_samples(MSAA::X4)
+                    .with_usage(ImageUsage::ColorAttachment)
+                    .with_format(self.color_format, false)
+                    .with_dimensions(frame_buffer_size);
+            }
+        )?;
+        let color_output_resolve = frame_graph.add_transient_image(
             &mut |builder| {
                 builder
                     .with_usage(ImageUsage::ColorAttachment)
@@ -654,14 +666,16 @@ impl Interface for App {
             }
         )?;
         let texture = frame_graph.add_image(self.image.into())?;
-        frame_graph.set_render_image(color_output, None)?;
+        frame_graph.set_render_image(color_output_resolve, None)?;
         self.first_pass = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, max_reads: 2, ..Default::default() },
+            PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4 },
             &mut |builder| {
                 builder
                     .with_read(ReadInfo { resource_id: texture, range_info: None })
                     .with_write(WriteInfo::new(
                         color_output,
+                        None,
+                        None,
                         None,
                         AttachmentLoadOp::Clear,
                         AttachmentStoreOp::Store,
@@ -670,6 +684,8 @@ impl Interface for App {
                     .with_depth_stencil_write(WriteInfo::new(
                         depth_stencil_output,
                         None,
+                        None,
+                        None,
                         AttachmentLoadOp::Clear,
                         AttachmentStoreOp::Store,
                         ClearValue::DepthStencil{ depth: 1.0, stencil: 0 },
@@ -677,11 +693,13 @@ impl Interface for App {
             }
         )?;
         self.second_pass = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, ..Default::default() },
+            PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4 },
             &mut |builder| {
                 builder
                     .with_write(WriteInfo::new(
                         color_output,
+                        None,
+                        Some((color_output_resolve, ResolveMode::Average)),
                         None,
                         AttachmentLoadOp::Load,
                         AttachmentStoreOp::Store,
@@ -689,6 +707,8 @@ impl Interface for App {
                     ))
                     .with_depth_stencil_write(WriteInfo::new(
                         depth_stencil_output,
+                        None,
+                        None,
                         None,
                         AttachmentLoadOp::Load,
                         AttachmentStoreOp::Store,

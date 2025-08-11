@@ -55,6 +55,7 @@ pub struct RenderCommands<'a>{
     command_buffer: vk::CommandBuffer,
     global_resources: Arc<RwLock<GlobalResources>>,
     current_pipeline: Option<GraphicsPipelineID>,
+    current_sample_count: MSAA,
     tmp_alloc: &'a ArenaAlloc,
 }
 
@@ -73,8 +74,15 @@ impl<'a> RenderCommands<'a> {
             command_buffer,
             global_resources,
             current_pipeline: None,
+            current_sample_count: MSAA::X1,
             tmp_alloc,
         }
+    }
+
+    #[inline(always)]
+    pub fn set_current_sample_count(&mut self, samples: MSAA) {
+        self.current_sample_count = samples;
+        self.current_pipeline = None;
     }
 
     #[inline(always)]
@@ -87,12 +95,14 @@ impl<'a> RenderCommands<'a> {
 
     #[inline(always)]
     pub fn bind_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
-        let handle = self.global_resources
-            .read()
-            .unwrap()
-            .get_pipeline_handle(id)?;
+        let g = self.global_resources.read().unwrap();
+        let pipeline = g.get_pipeline(id)?;
+        assert!(pipeline.samples == self.current_sample_count,
+            "pipeline sample count must match pass sample count, pass sample count {:?}, pipeline sample count {:?}",
+            self.current_sample_count, pipeline.samples,
+        );
         unsafe {
-            self.device.cmd_bind_pipeline(self.command_buffer, vk::PipelineBindPoint::GRAPHICS, handle);
+            self.device.cmd_bind_pipeline(self.command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline.handle);
         }
         self.current_pipeline = Some(id);
         Ok(())

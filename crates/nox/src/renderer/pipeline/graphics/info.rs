@@ -16,7 +16,7 @@ pub struct GraphicsPipelineInfo {
     front_face: FrontFace,
     depth_bias_info: Option<DepthBiasInfo>,
     primitive_topology: (PrimitiveTopology, bool),
-    sample_shading_info: Option<SampleShadingInfo>,
+    pub(crate) sample_shading_info: Option<SampleShadingInfo>,
     depth_stencil_info: Option<DepthStencilInfo>,
     color_blend_info: ColorBlendInfo,
     pub(crate) depth_output_format: vk::Format,
@@ -115,8 +115,8 @@ impl GraphicsPipelineInfo {
         self
     }
 
-    pub fn with_sample_shading(&mut self, sample_shading_info: Option<SampleShadingInfo>) -> &mut Self {
-        self.sample_shading_info = sample_shading_info;
+    pub fn with_sample_shading(&mut self, sample_shading_info: SampleShadingInfo) -> &mut Self {
+        self.sample_shading_info = Some(sample_shading_info);
         self
     }
 

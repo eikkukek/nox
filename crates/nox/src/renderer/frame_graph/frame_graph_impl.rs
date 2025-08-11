@@ -190,7 +190,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                 DepthStencil,
             }
             let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>, Error> {
-                let resource_id = write.resource_id;
+                let resource_id = write.main_id;
                 let image = frame_state.get_image(resource_id)?;
                 let properties = image.properties;
                 let (access, layout, stage) = match ty {
@@ -260,6 +260,53 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                         }
                     }
                 }
+                let mut resolve_image_view = Default::default();
+                let mut resolve_image_layout = Default::default();
+                let mut resolve_mode = Default::default();
+                if let Some((resolve_id, mode)) = write.resolve {
+                    resolve_mode = mode.into();
+                    let resolve_image = frame_state.get_image(resolve_id)?;
+                    let resolve_properties = resolve_image.properties;
+                    assert!(properties.dimensions == resolve_properties.dimensions,
+                        "resolve image dimensions must match main image dimensions, main dimensions {:?}, resolve dimensions {:?}",
+                        properties.dimensions, resolve_properties.dimensions,
+                    );
+                    let state = resolve_image.state();
+                    let range_info = write.resolve_range_info;
+                    if state != dst_state {
+                        if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
+                            frame_state.cmd_memory_barrier(
+                                resolve_id,
+                                dst_state,
+                                None,
+                            )?;
+                        }
+                        else {
+                            frame_state.cmd_memory_barrier(
+                                resolve_id,
+                                dst_state,
+                                range_info.map(|v| v.subresource_info)
+                            )?;
+                            if let Some(info) = range_info {
+                                subresource_reset.push(SubresourceReset {
+                                    image: resolve_image,
+                                    command_buffer,
+                                    old_state: state,
+                                    subresource: info.subresource_info,
+                                }
+                                ).unwrap();
+                            }
+                        }
+                    }
+                    let (image_view, image_layout) =
+                        if let Some(info) = range_info {
+                            frame_state.create_image_view(resolve_id, info)?
+                        } else {
+                            frame_state.get_image_view(resolve_id)?
+                        };
+                    resolve_image_view = image_view;
+                    resolve_image_layout = image_layout;
+                }
                 render_extent.width = render_extent.width.min(properties.dimensions.width);
                 render_extent.height = render_extent.height.min(properties.dimensions.height);
                 let (image_view, image_layout) =
@@ -275,6 +322,9 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                     load_op: write.load_op.into(),
                     store_op: write.store_op.into(),
                     clear_value: write.clear_value.into(),
+                    resolve_image_view,
+                    resolve_image_layout,
+                    resolve_mode,
                     ..Default::default()
                 })
             };
@@ -339,6 +389,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                 device.cmd_set_viewport(command_buffer, 0, &[view_port]);
                 device.cmd_set_scissor(command_buffer, 0, &[scissor]);
             }
+            render_commands.set_current_sample_count(pass.msaa_samples);
             interface.render_commands(pass.id, render_commands)?;
             unsafe { device.cmd_end_rendering(command_buffer); }
         }

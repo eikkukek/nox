@@ -6,7 +6,7 @@ use crate::renderer::{
     frame_state::ResourceID,
 };
 
-use super::{AttachmentLoadOp, AttachmentStoreOp};
+use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PassID(pub(crate) u32);
@@ -171,8 +171,10 @@ impl ReadInfo {
 
 #[derive(Clone, Copy)]
 pub struct WriteInfo {
-    pub resource_id: ResourceID,
+    pub main_id: ResourceID,
     pub range_info: Option<ImageRangeInfo>,
+    pub resolve: Option<(ResourceID, ResolveMode)>,
+    pub resolve_range_info: Option<ImageRangeInfo>,
     pub load_op: AttachmentLoadOp,
     pub store_op: AttachmentStoreOp,
     pub clear_value: ClearValue,
@@ -182,16 +184,20 @@ impl WriteInfo {
 
     #[inline(always)]
     pub fn new(
-        resource_id: ResourceID,
+        main_id: ResourceID,
         range_info: Option<ImageRangeInfo>,
+        resolve: Option<(ResourceID, ResolveMode)>,
+        resolve_range_info: Option<ImageRangeInfo>,
         load_op: AttachmentLoadOp,
         store_op: AttachmentStoreOp,
         clear_value: ClearValue,
     ) -> Self
     {
         Self {
-            resource_id,
+            main_id,
             range_info,
+            resolve,
+            resolve_range_info,
             load_op,
             store_op,
             clear_value,
@@ -200,6 +206,6 @@ impl WriteInfo {
 
     #[inline(always)]
     pub(crate) fn samples(&self) -> MSAA {
-        self.resource_id.samples()
+        self.main_id.samples()
     }
 }
