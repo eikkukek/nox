@@ -6,6 +6,8 @@ use nox_mem::{vec_types::{Vector, ArrayVec, GlobalVec}};
 
 use nox_alloc::arena_alloc::*;
 
+use crate::renderer::image::ImageRangeInfo;
+
 use super::{
     *,
     pipeline::*,
@@ -132,7 +134,8 @@ impl SwapchainPassPipelineData {
 
     pub fn get_descriptor_set(
         &mut self,
-        image: ImageSourceID,
+        image: ImageID,
+        range_info: Option<ImageRangeInfo>,
         frame_index: u32,
         tmp_alloc: &ArenaAlloc,
     ) -> Result<vk::DescriptorSet, Error>
@@ -147,7 +150,7 @@ impl SwapchainPassPipelineData {
             infos: &[
                 ShaderResourceImageInfo {
                     sampler: self.sampler,
-                    image_source: image,
+                    image_source: (image, range_info),
             }],
         };
         g.update_shader_resources(&[update], &[], &[], &stack_guard)?;

@@ -3,21 +3,18 @@ use std::sync::{Arc, RwLock};
 use ash::vk;
 
 use nox_mem::{
-    vec_types::{GlobalVec, Vector},
+    slot_map::{GlobalSlotMap, SlotIndex},
+    vec_types::{GlobalVec, Vector}
 };
 
 use crate::{
-    renderer::{
-        global_resources::{
-            GlobalResources, 
-            ImageSourceID,
-        },
-        image::{ImageBuilder, ImageProperties, ImageRangeInfo},
+    has_bits, renderer::{
+        global_resources::*,
+        image::{Image, ImageBuilder, ImageRangeInfo, ImageSubresourceRangeInfo},
         linear_device_alloc::LinearDeviceAlloc,
         Error, 
         ImageState,
-    },
-    has_bits, has_not_bits, 
+    }
 };
 
 use super::{
@@ -29,7 +26,10 @@ pub(crate) struct ResourcePool
 {
     device: Arc<ash::Device>,
     pub global_resources: Arc<RwLock<GlobalResources>>,
-    transient_image_sources: GlobalVec<ImageSourceID>,
+    transient_images: GlobalSlotMap<ImageID>,
+    subviews: GlobalVec<(ImageID, SlotIndex<vk::ImageView>)>,
+    render_image: Option<(ImageID, Option<ImageRangeInfo>)>,
+    render_image_reset: Option<(ImageState, ImageSubresourceRangeInfo)>,
     device_alloc: LinearDeviceAlloc,
 }
 
@@ -46,7 +46,10 @@ impl ResourcePool
         Self {
             device,
             global_resources,
-            transient_image_sources: GlobalVec::with_capacity(4).unwrap(),
+            transient_images: GlobalSlotMap::with_capacity(4).unwrap(),
+            subviews: GlobalVec::with_capacity(4).unwrap(),
+            render_image: None,
+            render_image_reset: None,
             device_alloc,
         }
     }
@@ -54,13 +57,41 @@ impl ResourcePool
     #[inline(always)]
     pub fn reset(&mut self) {
         let mut g = self.global_resources.write().unwrap();
-        for id in self.transient_image_sources.iter() {
-            g.destroy_image_source(*id).unwrap();
+        assert!(self.render_image == None);
+        for resource in &self.transient_images {
+            g.destroy_image(*resource).unwrap();
         }
-        self.transient_image_sources.clear();
+        self.transient_images.clear_elements();
+        for (image, index) in &self.subviews {
+            if let Ok(image) = g.get_image(*image) {
+                image.destroy_subview(*index).unwrap();
+            }
+        }
+        self.subviews.resize(0, Default::default()).unwrap();
         unsafe {
             self.device_alloc.reset();
         }
+    }
+
+    #[inline(always)]
+    pub fn render_done(
+        &mut self,
+        command_buffer: vk::CommandBuffer,
+    )
+    {
+        if let Some((state, subresource)) = self.render_image_reset {
+            self.global_resources
+                .write().unwrap()
+                .get_image(self.render_image.unwrap().0).unwrap()
+                .cmd_memory_barrier(
+                    state,
+                    command_buffer,
+                    Some(subresource),
+                )
+                .unwrap();
+            self.render_image_reset = None;
+        }
+        self.render_image = None;
     }
 
     #[inline(always)]
@@ -70,21 +101,28 @@ impl ResourcePool
 
     #[inline(always)]
     pub fn is_valid_id(&self, id: ResourceID) -> bool {
-        self.global_resources.read().unwrap().is_valid_image_id(id.id)
+        if has_bits!(id.flags, ResourceFlags::Transient) {
+            self.transient_images.contains(id.index)
+        }
+        else {
+            self.global_resources.read().unwrap().is_valid_image(id.image_id)
+        }
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, id: ImageSourceID) -> Result<ResourceID, Error> {
+    pub fn add_image(&mut self, id: ImageID) -> Result<ResourceID, Error> {
         let g = self.global_resources.read().unwrap();
-        let image = g.get_image_source(id)?;
+        let image = g.get_image(id)?;
         let mut flags = 0;
-        if has_bits!(image.properties().usage, vk::ImageUsageFlags::SAMPLED) {
+        let properties = image.properties;
+        if has_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
             flags |= ResourceFlags::Sampleable;
         }
         Ok(ResourceID {
-            id,
-            format: image.vk_format(),
-            samples: image.samples(),
+            index: Default::default(),
+            image_id: id,
+            format: properties.format,
+            samples: properties.samples,
             flags,
         })
     }
@@ -96,17 +134,18 @@ impl ResourcePool
     ) -> Result<ResourceID, Error>
     {
         let mut g = self.global_resources.write().unwrap();
-        let id = *self.transient_image_sources
-            .push(g.create_image(&mut self.device_alloc, f)?.into())
-            .unwrap();
-        let image = g.get_image_source(id).unwrap();
+        let index = self.transient_images
+            .insert(g.create_image(&mut self.device_alloc, f)?);
+        let image_id = self.transient_images[index];
+        let image = g.get_image(image_id).unwrap();
         let mut flags = ResourceFlags::Transient.into();
-        let properties = image.properties();
+        let properties = image.properties;
         if has_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
             flags |= ResourceFlags::Sampleable;
         }
         Ok(ResourceID {
-            id,
+            index,
+            image_id,
             format: properties.format,
             samples: properties.samples,
             flags,
@@ -114,49 +153,82 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn add_transient_image_subresource(
+    pub fn set_render_image(
         &mut self,
         resource_id: ResourceID,
-        range_info: ImageRangeInfo,
-        cube_map: bool,
-    ) -> Result<ResourceID, Error>
+        range_info: Option<ImageRangeInfo>,
+    ) -> Result<(), Error>
     {
-        let img_id = match resource_id.id {
-            ImageSourceID::ImageID(id) => {
-                id
-            },
-            _ => panic!("resource ID must contain an ImageID when creating subresource")
-        };
-        let mut g = self.global_resources.write().unwrap();
-        let sub_id = g.create_image_subresource(
-            img_id,
-            range_info,
-            cube_map,
-        )?.into();
-        if has_not_bits!(resource_id.flags, ResourceFlags::Transient) {
-            self.transient_image_sources.push(sub_id).unwrap();
+        let image = self.get_image(resource_id)?;
+        if let Some(info) = range_info {
+            if let Some(err) = image.validate_range(info) {
+                return Err(err.into())
+            }
         }
-        let image = g.get_image(img_id).unwrap();
-        let usage = image.properties().usage;
-        let mut flags = ResourceFlags::Transient.into();
-        if has_bits!(usage, vk::ImageUsageFlags::SAMPLED) {
-            flags |= ResourceFlags::Sampleable;
-        }
-        Ok(ResourceID {
-            id: sub_id,
-            format: resource_id.vk_format(),
-            samples: resource_id.samples(),
-            flags,
-        })
+        self.render_image = Some((resource_id.image_id, range_info));
+        Ok(())
     }
 
     #[inline(always)]
-    pub fn get_image_properties(&self, resource_id: ResourceID) -> Result<ImageProperties, Error> {
-        Ok(self.global_resources
-            .read()
-            .unwrap()
-            .get_image_source(resource_id.id)?
-            .properties()
+    pub fn get_render_image(
+        &mut self,
+        graphics_queue: u32,
+        command_buffer: vk::CommandBuffer,
+    ) -> Result<Option<(ImageID, Option<ImageRangeInfo>)>, Error>
+    {
+        if self.render_image.is_none() {
+            return Ok(None)
+        }
+        let (id, range_info) = unsafe { self.render_image.unwrap_unchecked() };
+        let dst_state = ImageState::new(
+            vk::AccessFlags::SHADER_READ,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            graphics_queue,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        );
+        let image = self.global_resources
+            .write().unwrap()
+            .get_image(id)?;
+        let state = image.state();
+        if dst_state != state {
+            if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
+                image.cmd_memory_barrier(
+                    dst_state,
+                    command_buffer,
+                    None,
+                ).unwrap();
+            }
+            else {
+                image.cmd_memory_barrier(
+                    dst_state,
+                    command_buffer,
+                    range_info.map(|v| v.subresource_info)
+                ).unwrap();
+                if let Some(info) = range_info {
+                    self.render_image_reset = Some((state, info.subresource_info));
+                }
+            }
+        }
+        Ok(Some(
+            (id, range_info)
+        ))
+    }
+
+    #[inline(always)]
+    pub fn get_image(&self, resource_id: ResourceID) -> Result<Arc<Image>, Error> {
+        Ok(
+            if has_bits!(resource_id.flags, ResourceFlags::Transient) {
+                self.global_resources
+                    .read()
+                    .unwrap()
+                    .get_image(resource_id.image_id)?
+            }
+            else {
+                self.global_resources
+                    .read()
+                    .unwrap()
+                    .get_image(resource_id.image_id)?
+            }
         )
     }
 
@@ -166,19 +238,34 @@ impl ResourcePool
         id: ResourceID,
         state: ImageState,
         command_buffer: vk::CommandBuffer,
+        subresource_info: Option<ImageSubresourceRangeInfo>
     ) -> Result<(), Error>
     {
-        let mut g = self.global_resources.write().unwrap();
-        let mut source = g.get_mut_image_source(id.id)?;
-        source.cmd_memory_barrier(state, command_buffer);
+        let g = self.global_resources.write().unwrap();
+        let image = g.get_image(id.image_id)?;
+        image.cmd_memory_barrier(state, command_buffer, subresource_info)?;
         Ok(())
     }
 
     #[inline(always)]
     pub fn get_image_view(&self, id: ResourceID) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
-        let mut g = self.global_resources.write().unwrap();
-        let mut src = g.get_mut_image_source(id.id)?;
+        let g = self.global_resources.write().unwrap();
+        let src = g.get_image(id.image_id)?;
         Ok((src.get_view()?, src.layout()))
+    }
+
+    #[inline(always)]
+    pub fn create_image_view(
+        &mut self,
+        id: ResourceID,
+        range_info: ImageRangeInfo,
+    ) -> Result<(vk::ImageView, vk::ImageLayout), Error>
+    {
+        let g = self.global_resources.write().unwrap();
+        let image = g.get_image(id.image_id)?;
+        let (index, view) = image.create_subview(range_info)?;
+        self.subviews.push((id.image_id, index)).unwrap();
+        Ok((view, image.layout()))
     }
 
     #[inline(always)]

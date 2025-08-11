@@ -167,15 +167,6 @@ impl ReadInfo {
             range_info,
         }
     }
-
-    #[inline(always)]
-    pub(crate) fn _vk_format(&self) -> vk::Format {
-        self.range_info
-            .map(|v| v.component_info
-                .map(|v| v.format)
-                .unwrap_or(self.resource_id.vk_format()))
-            .unwrap_or(self.resource_id.vk_format())
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -205,15 +196,6 @@ impl WriteInfo {
             store_op,
             clear_value,
         }
-    }
-
-    #[inline(always)]
-    pub(crate) fn _vk_format(&self) -> vk::Format {
-        self.range_info
-            .map(|v| v.component_info
-                .map(|v| v.format)
-                .unwrap_or(self.resource_id.vk_format()))
-            .unwrap_or(self.resource_id.vk_format())
     }
 
     #[inline(always)]

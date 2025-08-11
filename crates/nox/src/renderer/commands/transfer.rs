@@ -178,7 +178,7 @@ impl TransferCommandbuffer {
     {
         let g = self.global_resources.read().unwrap();
         let image = g.get_image(image_id)?;
-        let properties = image.properties();
+        let properties = image.properties;
         if has_not_bits!(properties.usage, vk::ImageUsageFlags::TRANSFER_DST) {
             return Err(ImageError::UsageMismatch {
                 missing_usage: vk::ImageUsageFlags::TRANSFER_DST
@@ -194,7 +194,8 @@ impl TransferCommandbuffer {
         image.cmd_memory_barrier(
             img_state,
             self.command_buffer,
-        );
+            None,
+        ).unwrap();
         let mut subresource_layers = properties.all_layers(0);
         if let Some(layers) = layers {
             if let Some(err) = image.validate_layers(layers) {
@@ -270,7 +271,7 @@ impl TransferCommandbuffer {
 
         if img_state.queue_family_index != img_queue {
             img_state.queue_family_index = img_queue;
-            image.cmd_memory_barrier(img_state, self.command_buffer);
+            image.cmd_memory_barrier(img_state, self.command_buffer, None).unwrap();
         }
 
         Ok(())

@@ -7,16 +7,11 @@ use ash::vk;
 use nox_mem::{Allocator, vec_types::{FixedVec, Vector}};
 
 use crate::{
-    renderer::{
-        *,
-        global_resources::*,
-        image::{
-            ImageState,
-            ImageBuilder,
-        },
-        frame_state::{FrameState, ResourceID},
-    },
-    has_bits,
+    has_bits, renderer::{
+        frame_state::{FrameState, ResourceID}, image::{
+            Image, ImageBuilder, ImageRangeInfo, ImageState, ImageSubresourceRangeInfo
+        }, *
+    }
 };
 
 use super::*;
@@ -82,13 +77,13 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         self.frame_buffer_size
     }
 
-    fn set_render_image(&mut self, id: ResourceID)
+    fn set_render_image(&mut self, id: ResourceID, range_info: Option<ImageRangeInfo>) -> Result<(), Error>
     {
         assert!(self.frame_state.borrow().is_valid_resource_id(id), "invalid id");
-        self.frame_state.borrow_mut().set_render_image(id);
+        self.frame_state.borrow_mut().set_render_image(id, range_info)
     }
 
-    fn add_image(&mut self, id: ImageSourceID) -> Result<ResourceID, Error> {
+    fn add_image(&mut self, id: ImageID) -> Result<ResourceID, Error> {
         self.frame_state.borrow_mut().add_image(id)
     }
 
@@ -97,16 +92,6 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         f: &mut dyn FnMut(&mut ImageBuilder),
     ) -> Result<ResourceID, Error> {
         self.frame_state.borrow_mut().add_transient_image(f)
-    }
-
-    fn add_transient_image_subresource(
-        &mut self,
-        resource_id: ResourceID,
-        range_info: crate::renderer::image::ImageRangeInfo,
-        cube_map: bool,
-    ) -> Result<ResourceID, Error>
-    {
-        self.frame_state.borrow_mut().add_transient_image_subresource(resource_id, range_info, cube_map)
     }
 
     fn add_pass(
@@ -131,27 +116,72 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
 
     pub fn render(&mut self, interface: &mut impl Interface, render_commands: &mut RenderCommands) -> Result<(), Error> {
         let alloc = self.alloc;
-        let frame_state = self.frame_state.borrow_mut();
+        let mut frame_state = self.frame_state.borrow_mut();
         let device = frame_state.device();
         let passes = &mut self.passes;
         let command_buffer = self.command_buffer;
         let graphics_queue_index = self.queue_family_indices.graphics_index();
+
+        struct SubresourceReset {
+            image: Arc<Image>,
+            command_buffer: vk::CommandBuffer,
+            old_state: ImageState,
+            subresource: ImageSubresourceRangeInfo,
+        }
+
+        impl Drop for SubresourceReset {
+
+            fn drop(&mut self) {
+                self.image.cmd_memory_barrier(
+                    self.old_state,
+                    self.command_buffer,
+                    Some(self.subresource),
+                ).unwrap();
+            }
+        }
+
         for pass in passes.iter() {
+            let mut subresource_reset = FixedVec::with_capacity(pass.reads.len() + pass.writes.len(), alloc)?;
             let color_output_count = pass.writes.len();
             for read in pass.reads.iter() {
                 let resource_id = read.resource_id;
-                let image_properties = frame_state.get_image_properties(resource_id)?;
-                assert!(has_bits!(image_properties.usage, vk::ImageUsageFlags::SAMPLED),
+                let image = frame_state.get_image(resource_id)?;
+                let properties = image.properties;
+                assert!(has_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED),
                     "read image usage must contain ImageUsage::Sampled bit");
-                frame_state.cmd_memory_barrier(
-                    resource_id,
-                    ImageState::new(
-                        vk::AccessFlags::SHADER_READ,
-                        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                        graphics_queue_index,
-                        vk::PipelineStageFlags::FRAGMENT_SHADER,
-                    ),
-                )?;
+                let state = image.state();
+                let dst_state = ImageState::new(
+                    vk::AccessFlags::SHADER_READ,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    graphics_queue_index,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                );
+                if state == dst_state {
+                    continue
+                }
+                let range_info = read.range_info;
+                if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
+                    frame_state.cmd_memory_barrier(
+                        resource_id,
+                        dst_state,
+                        None,
+                    )?;
+                }
+                else {
+                    frame_state.cmd_memory_barrier(
+                        resource_id,
+                        dst_state,
+                        range_info.map(|v| v.subresource_info)
+                    )?;
+                    if let Some(info) = range_info {
+                        subresource_reset.push(SubresourceReset {
+                            image,
+                            command_buffer,
+                            old_state: state,
+                            subresource: info.subresource_info,
+                        }).unwrap();
+                    }
+                }
             }
             let mut render_extent = vk::Extent2D { width: u32::MAX, height: u32::MAX };
             enum AttachmentType {
@@ -161,11 +191,12 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             }
             let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>, Error> {
                 let resource_id = write.resource_id;
-                let image_properties = frame_state.get_image_properties(resource_id)?;
+                let image = frame_state.get_image(resource_id)?;
+                let properties = image.properties;
                 let (access, layout, stage) = match ty {
                         AttachmentType::Color => {
                             assert!(
-                                has_bits!(image_properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT),
+                                has_bits!(properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT),
                                 "color write image usage must contain ImageUsage::ColorAttachment bit"
                             );
                             (
@@ -176,7 +207,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                         },
                         AttachmentType::Depth => {
                             assert!(
-                                has_bits!(image_properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
+                                has_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
                                 "depth/stencil write image usage must contain ImageUsage::DepthStencilAttachment bit"
                             );
                             (
@@ -187,7 +218,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                         },
                         AttachmentType::DepthStencil => {
                             assert!(
-                                has_bits!(image_properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
+                                has_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
                                 "depth/stencil write image usage must contain ImageUsage::DepthStencilAttachment bit"
                             );
                             (
@@ -197,18 +228,46 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                             )
                         }
                 };
-                frame_state.cmd_memory_barrier(
-                    resource_id,
-                    ImageState::new(
-                        access,
-                        layout,
-                        graphics_queue_index,
-                        stage,
-                    ),
-                )?;
-                render_extent.width = render_extent.width.min(image_properties.dimensions.width);
-                render_extent.height = render_extent.height.min(image_properties.dimensions.height);
-                let (image_view, image_layout) = frame_state.get_image_view(resource_id)?;
+                let dst_state = ImageState::new(
+                    access,
+                    layout,
+                    graphics_queue_index,
+                    stage,
+                );
+                let state = image.state();
+                let range_info = write.range_info;
+                if state != dst_state {
+                    if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
+                        frame_state.cmd_memory_barrier(
+                            resource_id,
+                            dst_state,
+                            None,
+                        )?;
+                    }
+                    else {
+                        frame_state.cmd_memory_barrier(
+                            resource_id,
+                            dst_state,
+                            range_info.map(|v| v.subresource_info)
+                        )?;
+                        if let Some(info) = range_info {
+                            subresource_reset.push(SubresourceReset {
+                                image,
+                                command_buffer,
+                                old_state: state,
+                                subresource: info.subresource_info,
+                            }).unwrap();
+                        }
+                    }
+                }
+                render_extent.width = render_extent.width.min(properties.dimensions.width);
+                render_extent.height = render_extent.height.min(properties.dimensions.height);
+                let (image_view, image_layout) =
+                    if let Some(info) = range_info {
+                        frame_state.create_image_view(resource_id, info)?
+                    } else {
+                        frame_state.get_image_view(resource_id)?
+                    };
                 Ok(vk::RenderingAttachmentInfo {
                     s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
                     image_view,

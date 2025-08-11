@@ -139,10 +139,11 @@ impl ImageBuilder {
             (*self.device).create_image(&create_info, None)?
         };
         Ok(Image {
-            handle: NonZeroU64::new(vk::Handle::as_raw(handle)).unwrap(),
+            handle: handle,
             memory: None,
             view: RwLock::new(None),
             device: self.device.clone(),
+            subviews: Default::default(),
             state: RwLock::new(ImageState::new(
                 vk::AccessFlags::NONE,
                 vk::ImageLayout::UNDEFINED,

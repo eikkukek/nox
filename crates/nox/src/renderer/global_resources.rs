@@ -25,10 +25,6 @@ use super::{
     image::{
         ImageBuilder,
         Image,
-        ImageRangeInfo,
-        ImageSubresourceRange,
-        ImageSource,
-        ImageSourceMut,
     },
     buffer::{Buffer, BufferProperties},
     memory_binder::MemoryBinder,
@@ -47,7 +43,7 @@ pub struct GlobalResources {
     shaders: GlobalSlotMap<Shader>,
     pipeline_layouts: GlobalSlotMap<pipeline::PipelineLayout>,
     shader_resources: GlobalSlotMap<ShaderResource>,
-    images: GlobalSlotMap<ImageResource>,
+    images: GlobalSlotMap<Arc<Image>>,
     buffers: GlobalSlotMap<Buffer>,
     samplers: GlobalSlotMap<Sampler>,
     default_binder: DefaultBinder,
@@ -250,7 +246,8 @@ impl GlobalResources {
                     .get(info.layout_id.0)
                     .unwrap()
                     .pipeline_descriptor_sets()[info.set as usize]
-                    .0.len() as u32
+                    .0.len() as u32,
+                image_views: Default::default(),
             });
             collect(i, ShaderResourceID(index))
         }
@@ -267,7 +264,13 @@ impl GlobalResources {
         let mut sets = FixedVec::with_capacity(resources.len(), alloc)?;
         for id in resources {
             let resource = self.shader_resources.get(id.0)?;
+            for (image, index) in &resource.image_views {
+                if let Ok(image) = self.get_image(*image) {
+                    image.destroy_subview(*index).unwrap();
+                }
+            }
             sets.push(resource.descriptor_set).unwrap();
+            self.shader_resources.remove(id.0).unwrap();
         }
         self.descriptor_pool.free(&sets)?;
         Ok(())
@@ -294,7 +297,13 @@ impl GlobalResources {
         let mut writes = FixedVec::with_capacity(image_updates.len() + buffer_updates.len(), alloc)?;
         let mut image_infos = FixedVec::with_capacity(image_updates.len(), alloc)?;
         for update in image_updates {
-            let set = self.shader_resources.get(update.resource.0)?;
+            let set = self.shader_resources.get_mut(update.resource.0)?;
+            for (image, index) in &set.image_views {
+                if let Ok(image) = self.images.get(image.0) {
+                    image.destroy_subview(*index).unwrap();
+                }
+            }
+            set.image_views.resize(0, Default::default()).unwrap();
             let vk_set = set.descriptor_set;
             let Some(ty) = self.pipeline_layouts
                 .get(set.layout_id.0)?
@@ -308,11 +317,21 @@ impl GlobalResources {
             };
             let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
             for info in update.infos {
+                let (id, range_info) = info.image_source;
                 let sampler = self.samplers.get(info.sampler.0)?.handle;
-                let mut image_source = self.get_mut_image_source(info.image_source)?;
+                let image_view =
+                    if let Some(range_info) = range_info {
+                        let (index, view) = self.get_image(id)?.create_subview(range_info)?;
+                        let set = self.shader_resources.get_mut(update.resource.0)?;
+                        set.image_views.push((id, index)).unwrap();
+                        view
+                    }
+                    else {
+                        self.get_image(id)?.get_view()?
+                    };
                 let vk_info = vk::DescriptorImageInfo {
                     sampler,
-                    image_view: image_source.get_view()?,
+                    image_view,
                     image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 };
                 vk_infos.push(vk_info).unwrap();
@@ -622,34 +641,8 @@ impl GlobalResources {
             image.set_memory(Box::new(binder.bind_image_memory(image.handle())?));
         }
         Ok(ImageID(
-            self.images.insert(ImageResource {
-                image: Arc::new(image),
-                subresources: Default::default(),
-            })
+            self.images.insert(Arc::new(image))
         ))
-    }
-
-    #[inline(always)]
-    pub fn create_image_subresource(
-        &mut self,
-        id: ImageID,
-        range_info: ImageRangeInfo,
-        cube_map: bool,
-    ) -> Result<ImageSubresourceID, Error>
-    {
-        let image = self.images.get_mut(id.0)?;
-        if cube_map {
-            if !range_info.subresource_info.layer_count.get().is_multiple_of(6) {
-                return Err(Error::ImageError(
-                    ImageError::InvalidCubeMap {
-                        layer_count: range_info.subresource_info.layer_count.get(),
-                    }
-                ))
-            }
-        }
-        let subresource = ImageSubresourceRange::new(image.image.clone(), range_info, cube_map)?;
-        image.image.state.write().unwrap().layout = vk::ImageLayout::UNDEFINED;
-        Ok(ImageSubresourceID(id.0, image.subresources.insert(subresource)))
     }
 
     #[inline(always)]
@@ -658,38 +651,8 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn destroy_image_subresource(&mut self, id: ImageSubresourceID) -> Result<(), Error> {
-        self.images
-            .get_mut(id.0)?.subresources
-            .remove(id.1).map(|_| {})
-            .map_err(Into::into)
-    }
-
-    #[inline(always)]
-    pub fn destroy_image_source(&mut self, id: ImageSourceID) -> Result<(), Error> {
-        match id {
-            ImageSourceID::ImageID(id) => {
-                self.destroy_image(id).map_err(Into::into)
-            },
-            ImageSourceID::SubresourceID(id) => {
-                self.destroy_image_subresource(id).map_err(Into::into)
-            },
-        }
-    }
-
-    #[inline(always)]
-    pub fn is_valid_image_id(&self, id: ImageSourceID) -> bool {
-        match id {
-            ImageSourceID::ImageID(id) => {
-                self.images.contains(id.0)
-            },
-            ImageSourceID::SubresourceID(id) => {
-                self.images
-                    .get(id.0)
-                    .map(|v| v.subresources.contains(id.1))
-                    .unwrap_or(false)
-            },
-        }
+    pub fn is_valid_image(&self, id: ImageID) -> bool {
+        self.images.contains(id.0)
     }
 
     #[inline(always)]
@@ -698,70 +661,8 @@ impl GlobalResources {
         id: ImageID,
     ) -> Result<Arc<Image>, SlotMapError>
     {
-        self.images.get(id.0).map(|v| v.image.clone())
+        self.images.get(id.0).map(|v| v.clone())
     }
-
-    #[inline(always)]
-    pub(crate) fn get_image_source(
-        &self,
-        id: ImageSourceID,
-    ) -> Result<ImageSource<'_>, SlotMapError>
-    {
-        match id {
-            ImageSourceID::ImageID(id) => {
-                Ok(ImageSource::Image(
-                    self.images.get(id.0)?.image.clone()
-                ))
-            },
-            ImageSourceID::SubresourceID(id) => {
-                Ok(ImageSource::Subresource(
-                    self.images
-                        .get(id.0)?
-                        .subresources
-                        .get(id.1)?
-                ))
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_mut_image_source(
-        &mut self,
-        id: ImageSourceID,
-    ) -> Result<ImageSourceMut<'_>, SlotMapError>
-    {
-        match id {
-            ImageSourceID::ImageID(id) => {
-                Ok(ImageSourceMut::Image(
-                    self.images.get_mut(id.0)?.image.clone()
-                ))
-            },
-            ImageSourceID::SubresourceID(id) => {
-                Ok(ImageSourceMut::Subresource(self.images
-                    .get_mut(id.0)?
-                    .subresources
-                    .get_mut(id.1)?
-                ))
-            }
-        }
-    }
-
-/*
-    #[inline(always)]
-    pub(crate) fn create_graphics_pipelines(
-        infos: &[GraphicsPipelineInfo],
-    ) -> Result<GlobalVec<PipelineID>, Error>
-    {
-        let mut create_infos = GlobalVec::with_capacity(infos.len())?;
-        for info in infos {
-            create_infos.push(info.as_create_info()).unwrap();
-        }
-        let mut vk_infos = GlobalVec::with_capacity(infos.len())?;
-        for info in &create_infos {
-        }
-        todo!()
-    }
-    */
 
     pub(crate) fn clean_up(&mut self) {
         unsafe {

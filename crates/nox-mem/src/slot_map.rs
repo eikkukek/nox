@@ -24,10 +24,10 @@
 //! let mut map = GlobalSlotMap::new();
 //! let key1 = map.insert("hello");
 //! let key2 = map.insert("world");
-//! assert_eq!(map.try_get(key1), Some(&"hello"));
-//! map.remove(key1);
-//! assert_eq!(map.try_get(key1), None);
-//! assert_eq!(map.try_get(key2), Some(&"world"));
+//! assert_eq!(map.get(key1).ok(), Some(&"hello"));
+//! assert_eq!(map.remove(key1).ok(), Some("hello"));
+//! assert_eq!(map.get(key1).ok(), None);
+//! assert_eq!(map.get(key2).ok(), Some(&"world"));
 //! ```
 
 use core::{
@@ -277,10 +277,10 @@ pub type FixedSlotMap<'alloc, T, Alloc> = AllocSlotMap<'alloc, T, Alloc, Fixed, 
 /// let mut map = GlobalSlotMap::new();
 /// let key1 = map.insert("hello");
 /// let key2 = map.insert("world");
-/// assert_eq!(map.try_get(key1), Some(&"hello"));
-/// map.remove(key1);
-/// assert_eq!(map.try_get(key1), None);
-/// assert_eq!(map.try_get(key2), Some(&"world"));
+/// assert_eq!(map.get(key1).ok(), Some(&"hello"));
+/// assert_eq!(map.remove(key1).ok(), Some("hello"));
+/// assert_eq!(map.get(key1).ok(), None);
+/// assert_eq!(map.get(key2).ok(), Some(&"world"));
 /// ```
 pub type GlobalSlotMap<T> = AllocSlotMap<'static, T, GlobalAlloc, Dyn, True>;
 
@@ -608,6 +608,20 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<'alloc, T, Alloc, Cap
         assert!(slot.next_free_index.is_none(), "invalid index");
         unsafe {
             Ok(slot.value.assume_init_mut())
+        }
+    }
+
+    #[inline(always)]
+    pub fn clear_elements(&mut self) {
+        for i in 0..self.capacity() {
+            unsafe {
+                let slot = self.data.add(i as usize).read();
+                if slot.next_free_index.is_none() {
+                    self.remove(SlotIndex {
+                        version: NonZeroU32::new(slot.version).unwrap(), index: i as u32, _marker: PhantomData,
+                    }).unwrap();
+                }
+            }
         }
     }
 

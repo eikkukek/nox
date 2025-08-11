@@ -87,10 +87,10 @@ impl From<Offset> for vk::Offset3D {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentMapping {
-    r: ComponentSwizzle,
-    g: ComponentSwizzle,
-    b: ComponentSwizzle,
-    a: ComponentSwizzle,
+    pub r: ComponentSwizzle,
+    pub g: ComponentSwizzle,
+    pub b: ComponentSwizzle,
+    pub a: ComponentSwizzle,
 }
 
 impl From<ComponentMapping> for vk::ComponentMapping {

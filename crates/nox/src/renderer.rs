@@ -450,24 +450,20 @@ impl<'mem> Renderer<'mem> {
         frame_graph
             .render(&mut *interface.write().unwrap(), &mut render_commands)
             .map_err(|e| format!("frame graph failed to render ( {:?} )", e))?;
-        let frame_state = &self.frame_states[frame_data.frame_index as usize].borrow_mut();
+        let frame_state = &mut self.frame_states[frame_data.frame_index as usize].borrow_mut();
         let mut image_state = frame_data.image_state;
-        if let Some(render_image_id) = frame_state.render_image() {
-            let graphics_queue_index = queue_family_indices.graphics_index();
+        let graphics_queue_index = queue_family_indices.graphics_index();
+        if let Some((render_image, range_info)) = frame_state
+                .get_render_image(queue_family_indices.graphics_index())
+                .map_err(|e| format!("failed to get render image ( {:?} )", e))?
+        {
             let command_buffer = frame_data.command_buffer;
-            let read_image_state = ImageState::new(
-                vk::AccessFlags::COLOR_ATTACHMENT_READ,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                graphics_queue_index,
-                vk::PipelineStageFlags::FRAGMENT_SHADER
-            );
             let write_image_state = ImageState::new(
                 vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 graphics_queue_index,
                 vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             );
-            let _guard = frame_state.cmd_memory_barrier(render_image_id, read_image_state);
             let memory_barrier = image_state.to_memory_barrier(
                 frame_data.image,
                 write_image_state,
@@ -536,15 +532,16 @@ impl<'mem> Renderer<'mem> {
                     self.swapchain_pass_pipeline_data.get_pipeline_layout().unwrap(),
                     0,
                     &[self.swapchain_pass_pipeline_data.get_descriptor_set(
-                        render_image_id.id,
+                        render_image,
+                        range_info,
                         frame_data.frame_index,
                         &self.tmp_alloc
                     ).unwrap()],
                     Default::default(),
                 );
                 device.cmd_draw(command_buffer, 6, 1, 0, 0);
-
                 device.cmd_end_rendering(command_buffer);
+                frame_state.render_done();
             }
         }
         let (submit_info, fence) = swapchain_context

@@ -1,3 +1,5 @@
+use crate::renderer::image::ImageRangeInfo;
+
 use super::*;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -15,12 +17,13 @@ pub struct ShaderResourceInfo {
     pub set: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct ShaderResource {
     pub descriptor_set: vk::DescriptorSet,
     pub layout_id: PipelineLayoutID,
     pub set: u32,
     pub binding_count: u32,
+    pub image_views: GlobalVec<(ImageID, SlotIndex<vk::ImageView>)>,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -36,7 +39,7 @@ pub struct ShaderResourceBufferInfo {
 #[derive(Clone, Copy)]
 pub struct ShaderResourceImageInfo {
     pub sampler: SamplerID,
-    pub image_source: ImageSourceID,
+    pub image_source: (ImageID, Option<ImageRangeInfo>),
 }
 
 #[derive(Clone, Copy)]
@@ -89,43 +92,8 @@ impl Drop for GraphicsPipeline {
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct GraphicsPipelineID(pub(super) SlotIndex<GraphicsPipeline>);
 
-pub(crate) struct ImageResource {
-    pub subresources: GlobalSlotMap<ImageSubresourceRange>,
-    pub image: Arc<Image>,
-}
-
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct ImageID(pub(super) SlotIndex<ImageResource>);
-
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct ImageSubresourceID(pub(super) SlotIndex<ImageResource>, pub(super) SlotIndex<ImageSubresourceRange>);
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ImageSourceID {
-    ImageID(ImageID),
-    SubresourceID(ImageSubresourceID),
-}
-
-impl Default for ImageSourceID {
-
-    fn default() -> Self {
-        Self::ImageID(Default::default())
-    }
-}
-
-impl From<ImageID> for ImageSourceID {
-
-    fn from(value: ImageID) -> Self {
-        Self::ImageID(value)
-    }
-}
-
-impl From<ImageSubresourceID> for ImageSourceID {
-
-    fn from(value: ImageSubresourceID) -> Self {
-        Self::SubresourceID(value)
-    }
-}
+pub struct ImageID(pub(super) SlotIndex<Arc<Image>>);
 
 #[derive(Clone, Copy)]
 pub(super) struct Sampler {

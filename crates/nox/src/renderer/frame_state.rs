@@ -9,14 +9,14 @@ use std::sync::{Arc, RwLock};
 use ash::vk;
 
 use crate::renderer::{
-    global_resources::{GlobalResources, ImageSourceID},
-    image::{ImageBuilder, ImageProperties, ImageRangeInfo, ImageState},
+    global_resources::{GlobalResources, ImageID},
+    image::*,
     linear_device_alloc::LinearDeviceAlloc,
     Error,
 };
 
 pub(crate) struct FrameState {
-    render_image: Option<ResourceID>,
+    render_image: Option<(ResourceID, Option<ImageRangeInfo>)>,
     pub resource_pool: ResourcePool,
     command_buffer: vk::CommandBuffer,
 }
@@ -51,7 +51,7 @@ impl FrameState {
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, id: ImageSourceID) -> Result<ResourceID, Error> {
+    pub fn add_image(&mut self, id: ImageID) -> Result<ResourceID, Error> {
         self.resource_pool.add_image(id)
     }
 
@@ -65,29 +65,28 @@ impl FrameState {
     }
 
     #[inline(always)]
-    pub fn add_transient_image_subresource(
+    pub fn set_render_image(
         &mut self,
-        resource_id: ResourceID,
-        range_info: ImageRangeInfo,
-        cube_map: bool,
-    ) -> Result<ResourceID, Error>
+        id: ResourceID,
+        range_info: Option<ImageRangeInfo>,
+    ) -> Result<(), Error>
     {
-        self.resource_pool.add_transient_image_subresource(resource_id, range_info, cube_map)
+        self.resource_pool.set_render_image(id, range_info)?;
+        Ok(())
     }
 
     #[inline(always)]
-    pub fn get_image_properties(&self, resource_id: ResourceID) -> Result<ImageProperties, Error> {
-        self.resource_pool.get_image_properties(resource_id)
+    pub fn get_render_image(
+        &mut self,
+        graphics_queue: u32,
+    ) -> Result<Option<(ImageID, Option<ImageRangeInfo>)>, Error>
+    {
+        self.resource_pool.get_render_image(graphics_queue, self.command_buffer)
     }
 
     #[inline(always)]
-    pub fn set_render_image(&mut self, id: ResourceID) {
-        self.render_image = Some(id);
-    }
-
-    #[inline(always)]
-    pub fn render_image(&self) -> Option<ResourceID> {
-        self.render_image
+    pub fn render_done(&mut self) {
+        self.resource_pool.render_done(self.command_buffer);
     }
 
     #[inline(always)]
@@ -96,18 +95,34 @@ impl FrameState {
     }
 
     #[inline(always)]
+    pub fn get_image(&self, resource_id: ResourceID) -> Result<Arc<Image>, Error> {
+        self.resource_pool.get_image(resource_id)
+    }
+
+    #[inline(always)]
     pub fn cmd_memory_barrier(
         &self,
         id: ResourceID,
-        state: ImageState
+        state: ImageState,
+        subresource_info: Option<ImageSubresourceRangeInfo>
     ) -> Result<(), Error>
     {
-        self.resource_pool.cmd_memory_barrier(id, state, self.command_buffer)
+        self.resource_pool.cmd_memory_barrier(id, state, self.command_buffer, subresource_info)
     }
 
     #[inline(always)]
     pub fn get_image_view(&self, id: ResourceID) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
         self.resource_pool.get_image_view(id)
+    }
+
+    #[inline(always)]
+    pub fn create_image_view(
+        &mut self,
+        id: ResourceID,
+        range_info: ImageRangeInfo,
+    ) -> Result<(vk::ImageView, vk::ImageLayout), Error>
+    {
+        self.resource_pool.create_image_view(id, range_info)
     }
 
     #[inline(always)]

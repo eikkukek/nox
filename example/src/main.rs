@@ -522,7 +522,7 @@ impl Interface for App {
                         starting_index: 0,
                         infos: &[ShaderResourceImageInfo {
                             sampler: self.sampler,
-                            image_source: self.image.into(),
+                            image_source: (self.image, None),
                         }]
                     },
                 ],
@@ -636,7 +636,24 @@ impl Interface for App {
             }
         )?;
         let texture = frame_graph.add_image(self.image.into())?;
-        frame_graph.set_render_image(color_output);
+        frame_graph.set_render_image(color_output,
+            Some(
+                ImageRangeInfo::new(
+                    ImageSubresourceRangeInfo::new(
+                        ImageAspect::Color.into(), 0, 1, 0, 1
+                    ).unwrap(),
+                    Some(ComponentInfo::new(
+                        ComponentMapping {
+                            r: ComponentSwizzle::B,
+                            g: ComponentSwizzle::R,
+                            b: ComponentSwizzle::G,
+                            a: ComponentSwizzle::Identity,
+                        },
+                        self.color_format)
+                    )
+                )
+            )
+        )?;
         self.first_pass = frame_graph.add_pass(
             PassInfo { max_color_writes: 1, max_reads: 2, ..Default::default() },
             &mut |builder| {

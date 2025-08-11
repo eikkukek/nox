@@ -1,14 +1,17 @@
 use std::sync::{Arc, RwLock};
 
+use nox_mem::slot_map::{GlobalSlotMap, SlotIndex};
+
 use crate::renderer::{memory_binder::DeviceMemory};
 
 use super::*;
 
 pub(crate) struct Image {
-    pub handle: NonZeroU64,
+    pub handle: vk::Image,
     pub memory: Option<Box<dyn DeviceMemory>>,
     pub view: RwLock<Option<NonZeroU64>>,
     pub device: Arc<ash::Device>,
+    pub subviews: RwLock<GlobalSlotMap<vk::ImageView>>,
     pub state: RwLock<ImageState>,
     pub properties: ImageProperties,
     pub component_mapping: ComponentMapping,
@@ -18,22 +21,12 @@ impl Image {
 
     #[inline(always)]
     pub(crate) fn handle(&self) -> vk::Image {
-        vk::Handle::from_raw(self.handle.get())
+        self.handle
     }
 
     #[inline(always)]
     pub(crate) fn view_type(&self) -> vk::ImageViewType {
         self.properties.view_type()
-    }
-
-    #[inline(always)]
-    pub(crate) fn device(&self) -> &ash::Device {
-        &self.device
-    }
-
-    #[inline(always)]
-    pub(crate) fn properties(&self) -> ImageProperties {
-        self.properties
     }
 
     #[inline(always)]
@@ -44,16 +37,6 @@ impl Image {
     #[inline(always)]
     pub fn has_mutable_format(&self) -> bool {
         self.properties.has_mutable_format()
-    }
-
-    #[inline(always)]
-    pub fn samples(&self) -> MSAA {
-        self.properties.samples
-    }
-
-    #[inline(always)]
-    pub(crate) fn vk_format(&self) -> vk::Format {
-        self.properties.format
     }
 
     #[inline(always)]
@@ -149,21 +132,74 @@ impl Image {
     }
 
     #[inline(always)]
+    pub(crate) fn create_subview(
+        &self,
+        range_info: ImageRangeInfo,
+    ) -> Result<(SlotIndex<vk::ImageView>, vk::ImageView), Error>
+    {
+        if let Some(err) = self.validate_range(range_info) {
+            return Err(err.into())
+        }
+        let component_info = 
+            if let Some(info) = range_info.component_info {
+                info
+            } else {
+                self.component_info()
+            };
+        let device = &self.device;
+        let create_info = vk::ImageViewCreateInfo {
+            s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
+            image: self.handle(),
+            view_type: self.view_type(),
+            format: component_info.format,
+            components: component_info.component_mapping.into(),
+            subresource_range: range_info.subresource_info.into(),
+            ..Default::default()
+        };
+        let view = unsafe {
+            device.create_image_view(&create_info, None)?
+        };
+        let mut write = self.subviews.write().unwrap();
+        let index = write.insert(view);
+        Ok((index, view))
+    }
+
+    #[inline(always)]
+    pub(crate) fn destroy_subview(
+        &self,
+        index: SlotIndex<vk::ImageView>
+    ) -> Result<(), Error> {
+        let mut write = self.subviews.write().unwrap();
+        let view = write.remove(index)?;
+        unsafe {
+            self.device.destroy_image_view(view, None);
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
     pub(crate) fn cmd_memory_barrier(
         &self,
         state: ImageState,
         command_buffer: vk::CommandBuffer,
-    )
+        subresource_info: Option<ImageSubresourceRangeInfo>,
+    ) -> Result<(), ImageError>
     {
         let mut write = self.state.write().unwrap();
-        if *write == state {
-            return
-        }
         let device = &self.device;
+        let subresource =
+            if let Some(info) = subresource_info {
+                if let Some(err) = self.validate_range(ImageRangeInfo::new(info, None)) {
+                    return Err(err.into())
+                }
+                info.into()
+            } else {
+                self.properties.whole_subresource().into()
+            };
         let memory_barrier = write.to_memory_barrier(
             self.handle(),
             state,
-            self.properties.whole_subresource(),
+            subresource,
         );
         unsafe {
             device.cmd_pipeline_barrier(
@@ -175,7 +211,10 @@ impl Image {
                 Default::default(),
                 &[memory_barrier]);
         }
-        *write = state;
+        if subresource_info.is_none() {
+            *write = state;
+        }
+        Ok(())
     }
 
     #[inline(always)]
@@ -190,6 +229,9 @@ impl Drop for Image {
     fn drop(&mut self) {
         let device = &self.device;
         unsafe {
+            for subview in self.subviews.read().unwrap().iter() {
+                device.destroy_image_view(*subview, None);
+            }
             if let Some(view) = *self.view.read().unwrap() {
                 device.destroy_image_view(vk::Handle::from_raw(view.get()), None);
             }
