@@ -9,10 +9,12 @@ pub struct ImageBuilder {
     dimensions: Dimensions,
     component_mapping: ComponentMapping,
     pub(crate) format: vk::Format,
-    usage: vk::ImageUsageFlags,
+    pub(crate) usage: vk::ImageUsageFlags,
     pub(crate) samples: MSAA,
     array_layers: u32,
     mip_levels: u32,
+    cube_map: bool,
+    always_cube: bool,
     mutable_format: bool,
 }
 
@@ -30,6 +32,8 @@ impl ImageBuilder {
             samples: MSAA::X1,
             array_layers: 1,
             mip_levels: 1,
+            cube_map: false,
+            always_cube: false,
             mutable_format: false,
         }
     }
@@ -64,7 +68,22 @@ impl ImageBuilder {
     #[inline(always)]
     pub fn with_array_layers(&mut self, layers: u32) -> &mut Self {
         assert!(layers > 0, "image layers must be greater than 0");
+        if self.cube_map {
+            if self.always_cube {
+                assert!(layers.is_multiple_of(6), "layer count of a cube map/array image must be a multiple of 6");
+            }
+            assert!(layers > 6, "layer count of a cube map/array image must be at least 6");
+        }
         self.array_layers = layers;
+        self
+    }
+
+    #[inline(always)]
+    pub fn as_cube_map(&mut self, dimensions: u32, always: bool) -> &mut Self {
+        self.cube_map = true;
+        self.always_cube = always;
+        self.array_layers = self.array_layers.next_multiple_of(6);
+        self.dimensions = Dimensions::new(dimensions, dimensions, 1);
         self
     }
 
@@ -91,6 +110,14 @@ impl ImageBuilder {
         let mut flags = Default::default();
         if self.mutable_format {
             flags |= vk::ImageCreateFlags::MUTABLE_FORMAT;
+        }
+        if self.cube_map {
+            flags |= vk::ImageCreateFlags::CUBE_COMPATIBLE;
+            assert!(
+                self.dimensions.width == self.dimensions.height &&
+                self.dimensions.depth == 1,
+                "width and height of a cube map compatible image must be equal and depth must be 1",
+            );
         }
         assert!(!self.dimensions.zero(), "image dimensions must not be zero");
         let create_info = vk::ImageCreateInfo {
@@ -132,6 +159,7 @@ impl ImageBuilder {
                 array_layers: self.array_layers,
                 mip_levels: self.mip_levels,
                 create_flags: flags,
+                always_cube_map: self.always_cube,
             }
         })
     }

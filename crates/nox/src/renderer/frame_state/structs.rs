@@ -1,19 +1,27 @@
-use std::sync::{Arc, RwLock};
-
 use ash::vk;
 
+use nox_mem::{AsRaw, impl_as_raw_bit_op};
+
 use crate::renderer::{
-    global_resources::{GlobalResources, ImageSourceID, ImageSubresourceID},
-    ImageState,
+    global_resources::ImageSourceID,
     MSAA,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+#[derive(Clone, Copy, PartialEq, Eq, AsRaw)]
+pub enum ResourceFlags {
+    Transient = 0x1,
+    Sampleable = 0x2,
+}
+
+impl_as_raw_bit_op!(ResourceFlags);
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct ResourceID {
     pub(crate) id: ImageSourceID,
     pub(crate) format: vk::Format,
     pub(crate) samples: MSAA,
-    pub(crate) is_transient: bool,
+    pub(crate) flags: u32,
 }
 
 impl ResourceID {
@@ -29,22 +37,9 @@ impl ResourceID {
     }
 }
 
-pub(crate) struct SubresourceResetGuard {
-    pub(crate) resources: Arc<RwLock<GlobalResources>>,
-    pub(crate) command_buffer: vk::CommandBuffer,
-    pub(crate) id: ImageSubresourceID,
-    pub(crate) dst_state: ImageState,
-}
+impl From<ResourceID> for ImageSourceID {
 
-impl Drop for SubresourceResetGuard {
-
-    fn drop(&mut self) {
-        if let Ok(v) = self.resources
-            .write()
-            .unwrap()
-            .get_mut_image_subresource(self.id)
-        {
-            v.cmd_memory_barrier(self.dst_state, self.command_buffer);
-        }
+    fn from(value: ResourceID) -> Self {
+        value.id
     }
 }

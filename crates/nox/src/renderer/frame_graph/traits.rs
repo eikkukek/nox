@@ -39,6 +39,7 @@ pub trait FrameGraph<'a> {
         &mut self,
         resource_id: ResourceID,
         range_info: ImageRangeInfo,
+        cube_map: bool,
     ) -> Result<ResourceID, Error>;
 
     fn add_pass(

@@ -2,28 +2,33 @@ use std::sync::{Arc, RwLock};
 
 use ash::vk;
 
-use nox_mem::{vec_types::{GlobalVec, Vector}};
+use nox_mem::{
+    vec_types::{GlobalVec, Vector},
+};
 
-use crate::renderer::{
-    global_resources::{
-        GlobalResources, 
-        ImageSourceID,
+use crate::{
+    renderer::{
+        global_resources::{
+            GlobalResources, 
+            ImageSourceID,
+        },
+        image::{ImageBuilder, ImageProperties, ImageRangeInfo},
+        linear_device_alloc::LinearDeviceAlloc,
+        Error, 
+        ImageState,
     },
-    image::{ImageBuilder, ImageProperties, ImageRangeInfo},
-    linear_device_alloc::LinearDeviceAlloc,
-    Error, 
-    ImageState,
+    has_bits, has_not_bits, 
 };
 
 use super::{
     ResourceID,
-    SubresourceResetGuard,
+    ResourceFlags,
 };
 
 pub(crate) struct ResourcePool
 {
     device: Arc<ash::Device>,
-    global_resources: Arc<RwLock<GlobalResources>>,
+    pub global_resources: Arc<RwLock<GlobalResources>>,
     transient_image_sources: GlobalVec<ImageSourceID>,
     device_alloc: LinearDeviceAlloc,
 }
@@ -72,11 +77,15 @@ impl ResourcePool
     pub fn add_image(&mut self, id: ImageSourceID) -> Result<ResourceID, Error> {
         let g = self.global_resources.read().unwrap();
         let image = g.get_image_source(id)?;
+        let mut flags = 0;
+        if has_bits!(image.properties().usage, vk::ImageUsageFlags::SAMPLED) {
+            flags |= ResourceFlags::Sampleable;
+        }
         Ok(ResourceID {
             id,
             format: image.vk_format(),
             samples: image.samples(),
-            is_transient: false,
+            flags,
         })
     }
 
@@ -87,15 +96,20 @@ impl ResourcePool
     ) -> Result<ResourceID, Error>
     {
         let mut g = self.global_resources.write().unwrap();
-        let builder = ImageBuilder::new(self.device.clone());
         let id = *self.transient_image_sources
-            .push(g.create_image(f, &mut self.device_alloc)?.into())
+            .push(g.create_image(&mut self.device_alloc, f)?.into())
             .unwrap();
+        let image = g.get_image_source(id).unwrap();
+        let mut flags = ResourceFlags::Transient.into();
+        let properties = image.properties();
+        if has_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
+            flags |= ResourceFlags::Sampleable;
+        }
         Ok(ResourceID {
             id,
-            format: builder.format,
-            samples: builder.samples,
-            is_transient: true,
+            format: properties.format,
+            samples: properties.samples,
+            flags,
         })
     }
 
@@ -104,6 +118,7 @@ impl ResourcePool
         &mut self,
         resource_id: ResourceID,
         range_info: ImageRangeInfo,
+        cube_map: bool,
     ) -> Result<ResourceID, Error>
     {
         let img_id = match resource_id.id {
@@ -115,16 +130,23 @@ impl ResourcePool
         let mut g = self.global_resources.write().unwrap();
         let sub_id = g.create_image_subresource(
             img_id,
-            range_info
+            range_info,
+            cube_map,
         )?.into();
-        if !resource_id.is_transient {
+        if has_not_bits!(resource_id.flags, ResourceFlags::Transient) {
             self.transient_image_sources.push(sub_id).unwrap();
+        }
+        let image = g.get_image(img_id).unwrap();
+        let usage = image.properties().usage;
+        let mut flags = ResourceFlags::Transient.into();
+        if has_bits!(usage, vk::ImageUsageFlags::SAMPLED) {
+            flags |= ResourceFlags::Sampleable;
         }
         Ok(ResourceID {
             id: sub_id,
             format: resource_id.vk_format(),
             samples: resource_id.samples(),
-            is_transient: true,
+            flags,
         })
     }
 
@@ -144,22 +166,12 @@ impl ResourcePool
         id: ResourceID,
         state: ImageState,
         command_buffer: vk::CommandBuffer,
-    ) -> Result<Option<SubresourceResetGuard>, Error>
+    ) -> Result<(), Error>
     {
         let mut g = self.global_resources.write().unwrap();
         let mut source = g.get_mut_image_source(id.id)?;
         source.cmd_memory_barrier(state, command_buffer);
-        Ok(if let ImageSourceID::SubresourceID(id) = id.id {
-            Some(SubresourceResetGuard {
-                resources: self.global_resources.clone(),
-                command_buffer,
-                dst_state: source.state(),
-                id,
-            })
-        }
-        else {
-            None
-        })
+        Ok(())
     }
 
     #[inline(always)]

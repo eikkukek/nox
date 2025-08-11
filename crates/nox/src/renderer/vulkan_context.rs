@@ -203,6 +203,10 @@ impl<'mem> VulkanContext<'mem> {
         let features_12 = vk::PhysicalDeviceVulkan12Features {
             p_next: (&features_13 as *const _) as _,
             timeline_semaphore: vk::TRUE,
+            descriptor_binding_update_unused_while_pending: vk::TRUE,
+            descriptor_binding_uniform_buffer_update_after_bind: vk::TRUE,
+            descriptor_binding_storage_buffer_update_after_bind: vk::TRUE,
+            descriptor_binding_sampled_image_update_after_bind: vk::TRUE,
             ..Default::default()
         };
         let device_create_info = vk::DeviceCreateInfo {

@@ -5,13 +5,13 @@ use crate::renderer::{memory_binder::DeviceMemory};
 use super::*;
 
 pub(crate) struct Image {
-    pub(super) handle: NonZeroU64,
-    pub(super) memory: Option<Box<dyn DeviceMemory>>,
-    pub(super) view: RwLock<Option<NonZeroU64>>,
-    pub(super) device: Arc<ash::Device>,
-    pub(super) state: RwLock<ImageState>,
-    pub(super) properties: ImageProperties,
-    pub(super) component_mapping: ComponentMapping,
+    pub handle: NonZeroU64,
+    pub memory: Option<Box<dyn DeviceMemory>>,
+    pub view: RwLock<Option<NonZeroU64>>,
+    pub device: Arc<ash::Device>,
+    pub state: RwLock<ImageState>,
+    pub properties: ImageProperties,
+    pub component_mapping: ComponentMapping,
 }
 
 impl Image {

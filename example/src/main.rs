@@ -1,4 +1,8 @@
-use std::{os::unix::ffi::OsStrExt, path::PathBuf, ptr::NonNull};
+use std::{path::{Path, PathBuf}, ptr::NonNull};
+
+use core::f32::consts::PI;
+
+use glam::{f32::*, Vec4Swizzles};
 
 use nox::{
     interface::Interface,
@@ -85,7 +89,14 @@ const CUBE_VERTICES: &[Vertex] = &[
 ];
 
 const CUBE_OFF: &[VertexOff] = &[
-    VertexOff::new(-0.8), VertexOff::new(0.0), VertexOff::new(0.8),
+    VertexOff::new(0.0),
+    VertexOff::new(PI / 4.0),
+    VertexOff::new(PI / 2.0),
+    VertexOff::new(3.0 * PI / 4.0),
+    VertexOff::new(PI),
+    VertexOff::new(5.0 * PI / 4.0),
+    VertexOff::new(3.0 * PI / 2.0),
+    VertexOff::new(7.0 * PI / 4.0),
 ];
 
 const CUBE_INDICES: &[u32] = &[
@@ -97,78 +108,101 @@ const CUBE_INDICES: &[u32] = &[
     20, 21, 22, 20, 22, 23,
 ];
 
-#[allow(dead_code)]
+#[repr(C)]
 struct Matrices {
-    model: [f32; 16],
-    projection: [f32; 16],
+    model: glam::Mat4,
+    projection: glam::Mat4,
+    view: glam::Mat4,
 }
 
-struct Quat {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
+#[repr(C)]
+struct LightInfo {
+    pos: Vec3,
 }
 
-impl Quat {
+#[derive(Default)]
+struct ImageAsset {
+    ptr: Option<NonNull<u8>>,
+    dim: Dimensions,
+    ch: u32,
+}
 
-    fn angle_axis(angle: f32, axis: [f32; 3]) -> Self {
-        let half = angle / 2.0;
-        let sin = half.sin();
-        let mag = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
-        Self {
-            x: axis[0] / mag * sin,
-            y: axis[1] / mag * sin,
-            z: axis[2] / mag * sin,
-            w: half.cos(),
+impl ImageAsset {
+
+    fn new(filepath: &Path, channels: u32) -> Result<Self, nox::Error> {
+        let mut x = 0;
+        let mut y = 0;
+        let mut ch = 0;
+        let ptr = unsafe {
+            NonNull::new(stb_image::stb_image::stbi_load(
+                filepath.to_str().unwrap().as_ptr() as _,
+                &mut x,
+                &mut y,
+                &mut ch,
+                channels as i32,
+            ))
+        };
+        let dim = Dimensions::new(x as u32, y as u32, 1);
+        if ptr.is_none() {
+            unsafe {
+                let err = stb_image::stb_image::stbi_failure_reason();
+                return Err(nox::Error::UserError(
+                    std::ffi::CStr::from_ptr(err).to_str().unwrap().into()
+                ))
+            }
+        }
+        Ok(Self {
+            ptr,
+            dim,
+            ch: channels,
+        })
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self.ptr.unwrap().as_ptr(),
+                (self.dim.width * self.dim.height * self.ch) as usize
+            )
         }
     }
-
-    fn to_matrix(self) -> [f32; 16] {
-        let num1 = self.x * self.x;
-        let num2 = self.y * self.y;
-        let num3 = self.z * self.z;
-        return [
-            1.0 - 2.0 * (num2 + num3), 2.0 * (self.x * self.y + self.z * self.w), 2.0 * (self.x * self.z - self.y * self.w), 0.0,
-            2.0 * (self.x * self.y - self.z * self.w), 1.0 - 2.0 * (num1 + num3), 2.0 * (self.y * self.z + self.x * self.w), 0.0,
-            2.0 * (self.x * self.z + self.y * self.w), 2.0 * (self.y * self.z - self.x * self.w), 1.0 - 2.0 * (num1 + num2), 0.0,
-            0.0, 0.0, 2.0, 1.0,
-        ];
-    }
 }
 
-fn mat4_project(fov: f32, aspect_ratio: f32, z_near: f32, z_far: f32) -> [f32; 16] {
-    let half_tan = (fov / 2.0).tan();
-    [
-        1.0 / (aspect_ratio * half_tan), 0.0, 0.0 ,0.0,
-        0.0, 1.0 / half_tan, 0.0, 0.0,
-        0.0, 0.0, (z_far - z_near) / (z_far + z_near), 1.0,
-        0.0, 0.0, (-2.0 * z_far * z_near) / (z_far + z_near), 1.0,
-    ]
+impl Drop for ImageAsset {
+
+    fn drop(&mut self) {
+        if let Some(ptr) = self.ptr {
+            unsafe {
+                stb_image::stb_image::stbi_image_free(ptr.as_ptr() as _);
+            }
+        } 
+    }
 }
 
 struct App {
-    image: Option<NonNull<u8>>,
-    image_size: Dimensions,
+    asset1: ImageAsset,
     color_format: ColorFormat,
     depth_stencil_format: DepthStencilFormat,
-    image_id: ImageID,
-    sampler_id: SamplerID,
-    vertex_shader_id: ShaderID,
-    fragment_shader_id: ShaderID,
+    depth_format: DepthStencilFormat,
+    image: ImageID,
+    sampler: SamplerID,
+    vertex_shader: ShaderID,
+    fragment_shader: ShaderID,
     outline_vertex: ShaderID,
     outline_fragment: ShaderID,
     pipeline_layouts: [PipelineLayoutID; 2],
     pipelines: [GraphicsPipelineID; 2],
     outline_layout: PipelineLayoutID,
-    vertex_buffer_id: BufferID,
+    vertex_buffer: BufferID,
     vertex_instance_buffer: BufferID,
-    index_buffer_id: BufferID,
-    uniform_buffer_id: BufferID,
-    shader_resources: [ShaderResourceID; 2],
+    index_buffer: BufferID,
+    matrices_buffer: BufferID,
     matrices_map: NonNull<Matrices>,
-    first_pass_id: PassID,
-    second_pass_id: PassID,
+    light_info_buffer: BufferID,
+    light_info_map: NonNull<LightInfo>,
+    shader_resources: [ShaderResourceID; 2],
+    first_pass: PassID,
+    second_pass: PassID,
     rot: f32,
 }
 
@@ -179,27 +213,29 @@ impl App {
 
     fn new() -> Self {
         Self {
-            image: None,
-            image_size: Default::default(),
+            asset1: Default::default(),
             color_format: ColorFormat::SrgbRGBA8,
             depth_stencil_format: DepthStencilFormat::D32S8,
-            image_id: Default::default(),
-            sampler_id: Default::default(),
-            vertex_shader_id: Default::default(),
-            fragment_shader_id: Default::default(),
+            depth_format: DepthStencilFormat::D32,
+            image: Default::default(),
+            sampler: Default::default(),
+            vertex_shader: Default::default(),
+            fragment_shader: Default::default(),
             outline_vertex: Default::default(),
             outline_fragment: Default::default(),
             outline_layout: Default::default(),
             pipeline_layouts: Default::default(),
             pipelines: Default::default(),
-            vertex_buffer_id: Default::default(),
+            vertex_buffer: Default::default(),
             vertex_instance_buffer: Default::default(),
-            index_buffer_id: Default::default(),
-            uniform_buffer_id: Default::default(),
-            shader_resources: Default::default(),
+            index_buffer: Default::default(),
+            matrices_buffer: Default::default(),
             matrices_map: NonNull::dangling(),
-            first_pass_id: Default::default(),
-            second_pass_id: Default::default(),
+            light_info_buffer: Default::default(),
+            light_info_map: NonNull::dangling(),
+            shader_resources: Default::default(),
+            first_pass: Default::default(),
+            second_pass: Default::default(),
             rot: 0.0,
         }
     }
@@ -223,25 +259,10 @@ impl Interface for App {
             Err(_) => PathBuf::new(),
         };
         path.pop();
-        path.push("../../nightreign.jpg");
-        let mut x = 0;
-        let mut y = 0;
-        let mut ch = 0;
-        unsafe {
-            self.image = NonNull::new(stb_image::stb_image::stbi_load(
-                path.as_os_str().as_bytes().as_ptr() as _,
-                &mut x,
-                &mut y,
-                &mut ch,
-                4,
-            ));
-        }
-        self.image_size = Dimensions::new(x as u32, y as u32, 1);
-        if self.image.is_none() {
-            return Err(nox::Error::UserError("failed to load image".into()))
-        }
+        path.push("../../rock_color.jpg");
+        self.asset1 = ImageAsset::new(&path, 4)?;
         renderer_context.edit_resources(|r| {
-            self.vertex_shader_id = r.create_shader(
+            self.vertex_shader = r.create_shader(
                 "#version 450
 
                 layout(location = 0) in vec3 in_pos;
@@ -252,44 +273,56 @@ impl Interface for App {
 
                 layout(location = 0) out vec3 out_normal;
                 layout(location = 1) out vec2 out_uv;
+                layout(location = 2) out vec3 out_pos;
 
                 layout(set = 0, binding = 0) uniform Matrices {
                     mat4 model;
                     mat4 projection;
+                    mat4 view;
                 } matrices;
 
                 void main() {
                     mat3 normal_matrix = transpose(inverse(mat3(matrices.model)));
                     out_normal = normal_matrix * in_normal;
                     mat4 model = matrices.model;
-                    model[3].x += in_off;
-                    gl_Position = matrices.projection * model * vec4(in_pos, 1.0);
+                    vec4 off = vec4(
+                        cos(in_off) * 3.0,
+                        sin(in_off) * 3.0,
+                        0.0,
+                        0.0
+                    );
+                    model[3] += off;
+                    gl_Position = matrices.projection * matrices.view * model * vec4(in_pos, 1.0);
                     out_uv = in_uv;
+                    vec4 pos = model * vec4(in_pos, 1.0);
+                    out_pos = pos.xyz;
                 }
                 ",
                 "vertex shader",
                 ShaderStage::Vertex,
             )?;
-            self.fragment_shader_id = r.create_shader(
+            self.fragment_shader = r.create_shader(
                 "#version 450
 
                 layout(location = 0) in vec3 in_normal;
                 layout(location = 1) in vec2 in_uv;
+                layout(location = 2) in vec3 in_pos;
 
                 layout(location = 0) out vec4 out_color;
 
-                layout(set = 1, binding = 1) uniform sampler2D tex;
+                layout(set = 1, binding = 0) uniform sampler2D tex;
+                layout(set = 1, binding = 1) uniform LightInfo {
+                    vec3 pos;
+                } light_info;
                 
                 void main() {
-                    /*
-                    const vec3 light_color = vec3(0.5, 0.5, 0.5);
-                    const vec3 light_dir = normalize(vec3(-5.0, -2.0, -5.0));
+
+                    vec3 light_color = vec3(0.5, 0.5, 0.5);
+                    vec3 light_dir = normalize(light_info.pos - in_pos);
                     const float diff = max(dot(normalize(in_normal), light_dir), 0.0);
                     vec3 diffuse = diff * light_color;
                     vec4 color = texture(tex, in_uv);
                     out_color = vec4(color.xyz * 0.5f + (diffuse * light_color), 1.0);
-                    */
-                    out_color = texture(tex, in_uv);
                 }
                 ",
                 "fragment shader",
@@ -307,16 +340,23 @@ impl Interface for App {
                 layout(set = 0, binding = 0) uniform Matrices {
                     mat4 model;
                     mat4 projection;
+                    mat4 view;
                 } matrices;
 
                 void main() {
                     mat4 model = matrices.model;
-                    model[3].x += in_off;
+                    vec4 off = vec4(
+                        cos(in_off) * 3.0,
+                        sin(in_off) * 3.0,
+                        0.0,
+                        0.0
+                    );
                     model[0] *= 1.08;
                     model[1] *= 1.08;
                     model[2] *= 1.08;
+                    model[3] += off;
 
-                    gl_Position = matrices.projection * model * vec4(in_pos, 1.0);
+                    gl_Position = matrices.projection * matrices.view * model * vec4(in_pos, 1.0);
                 }
                 ",
                 "outline vertex",
@@ -335,7 +375,7 @@ impl Interface for App {
             )?;
             self.pipeline_layouts = [
                     r.create_pipeline_layout(
-                        [self.vertex_shader_id, self.fragment_shader_id],
+                        [self.vertex_shader, self.fragment_shader],
                     )?,
                     r.create_pipeline_layout(
                         [self.outline_vertex, self.outline_fragment],
@@ -352,16 +392,20 @@ impl Interface for App {
                 DepthStencilFormat::all_depth_stencil(),
                 FormatFeature::DepthStencilAttachment,
             ).unwrap();
-            self.image_id = r.create_image(
+            self.depth_format = r.supported_image_format(
+                DepthStencilFormat::all_depth(),
+                FormatFeature::SampledImage | FormatFeature::DepthStencilAttachment,
+            ).unwrap();
+            self.image = r.create_image(
+                &mut r.default_binder(),
                 |builder| {
                     builder
                         .with_usage(ImageUsage::TransferDst)
                         .with_usage(ImageUsage::Sampled)
-                        .with_dimensions(self.image_size)
+                        .with_dimensions(self.asset1.dim)
                         .with_format(self.color_format, false);
-                },
-                &mut r.default_binder())?;
-            self.sampler_id = r.create_sampler(
+            })?;
+            self.sampler = r.create_sampler(
                 |_| {},
             )?;
             let mut graphics_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[0]);
@@ -425,7 +469,7 @@ impl Interface for App {
                 |i, id| { self.pipelines[i] = id; },
                 &GLOBAL_ALLOC
             )?;
-            self.vertex_buffer_id = r.create_buffer(
+            self.vertex_buffer = r.create_buffer(
                 (CUBE_VERTICES.len() * size_of!(Vertex)) as u64,
                 &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
                 &mut r.default_binder(),
@@ -435,18 +479,26 @@ impl Interface for App {
                 &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
                 &mut r.default_binder(),
             )?;
-            self.index_buffer_id = r.create_buffer(
+            self.index_buffer = r.create_buffer(
                 (CUBE_INDICES.len() * size_of!(u32)) as u64,
                 &[BufferUsage::IndexBuffer , BufferUsage::TransferDst],
                 &mut r.default_binder(),
             )?;
-            self.uniform_buffer_id = r.create_buffer(
+            self.matrices_buffer = r.create_buffer(
                 size_of!(Matrices) as u64,
                 &[BufferUsage::UniformBuffer],
                 &mut r.default_binder_mappable(),
             )?;
             self.matrices_map = unsafe {
-                r.map_buffer(self.uniform_buffer_id).unwrap().cast::<Matrices>()
+                r.map_buffer(self.matrices_buffer).unwrap().cast::<Matrices>()
+            };
+            self.light_info_buffer = r.create_buffer(
+                size_of!(LightInfo) as u64,
+                &[BufferUsage::UniformBuffer],
+                &mut r.default_binder_mappable(),
+            )?;
+            self.light_info_map = unsafe {
+                r.map_buffer(self.light_info_buffer).unwrap().cast::<LightInfo>()
             };
             r.allocate_shader_resources(
                 &[
@@ -457,7 +509,7 @@ impl Interface for App {
                     ShaderResourceInfo {
                         layout_id: self.pipeline_layouts[0],
                         set: 1,
-                    }
+                    },
                 ],
                 |i, v| self.shader_resources[i] = v,
                 &GLOBAL_ALLOC,
@@ -466,13 +518,13 @@ impl Interface for App {
                 &[
                     ShaderResourceImageUpdate {
                         resource: self.shader_resources[1],
-                        binding: 1,
+                        binding: 0,
                         starting_index: 0,
                         infos: &[ShaderResourceImageInfo {
-                            sampler: self.sampler_id,
-                            image_source: self.image_id.into(),
+                            sampler: self.sampler,
+                            image_source: self.image.into(),
                         }]
-                    }
+                    },
                 ],
                 &[
                     ShaderResourceBufferUpdate {
@@ -480,14 +532,25 @@ impl Interface for App {
                         binding: 0,
                         starting_index: 0,
                         infos: &[ShaderResourceBufferInfo {
-                            buffer: self.uniform_buffer_id,
+                            buffer: self.matrices_buffer,
                             offset: 0,
                             size: size_of!(Matrices) as u64,
                         }],
-                    }
+                    },
+                    ShaderResourceBufferUpdate {
+                        resource: self.shader_resources[1],
+                        binding: 1,
+                        starting_index: 0,
+                        infos: &[ShaderResourceBufferInfo {
+                            buffer: self.light_info_buffer,
+                            offset: 0,
+                            size: size_of!(LightInfo) as u64,
+                        }],
+                    },
                 ],
                 &[],
-                &GLOBAL_ALLOC)?;
+                &GLOBAL_ALLOC
+            )?;
             Ok(())
         })?;
         renderer_context
@@ -496,13 +559,58 @@ impl Interface for App {
         Ok(())
     }
 
-    fn update(&mut self, _nox: &mut Nox<Self>, _renderer_contexts: &mut nox::renderer::RendererContext) {
+    fn update(
+        &mut self,
+        nox: &mut Nox<Self>,
+        _renderer: &mut RendererContext,
+        frame_buffer_size: (u32, u32),
+    )
+    {
+        let (cursor_x, cursor_y) = nox.cursor_position();
+        let relative_cursor = glam::vec3(
+            1.0 - 2.0 * cursor_x as f32 / frame_buffer_size.0 as f32,
+            2.0 * cursor_y as f32 / frame_buffer_size.1 as f32 - 1.0,
+            0.0,
+        );
+        let proj = Mat4::perspective_lh(
+            PI / 1.6,
+            frame_buffer_size.0 as f32 / frame_buffer_size.1 as f32,
+            0.01,
+            100.0
+        );
+        //let proj = fix * Mat4::orthographic_lh(-5.0, 5.0, -5.0, 5.0, 0.1, 100.0);
+        let view = Mat4::look_at_lh(vec3(0.0, 1.0, -2.0), vec3(0.0, 0.0, 3.0), vec3(0.0, 1.0, 0.0));
+        let inv_proj = proj.inverse();
+        let near_world = inv_proj * glam::vec4(relative_cursor.x, relative_cursor.y, 0.0, 1.0);
+        let far_world = inv_proj * glam::vec4(relative_cursor.x, relative_cursor.y, 1.0, 1.0);
+        let near_world = near_world.xyz() / near_world.w;
+        let far_world = far_world.xyz() / far_world.w;
+        let ray = (far_world - near_world).normalize();
+        let plane_normal = vec3(0.0, 0.0, -1.0);
+        let denom = plane_normal.dot(ray);
+        let t = (vec3(0.0, 0.0, 3.0) - near_world).dot(plane_normal) / denom;
+        let light_pos = near_world + ray * t;
+        let mut tf = glam::Mat4::from_axis_angle(vec3(0.0, 0.0, 1.0), self.rot);
+        tf.col_mut(3).z = 3.0;
+        unsafe {
+            self.matrices_map.write(
+                Matrices {
+                    model: tf,
+                    projection: proj,
+                    view,
+                }
+            );
+            self.light_info_map.write(
+                LightInfo { pos: light_pos }
+            );
+        }
+        self.rot += 0.000;
     }
 
     fn render<'a>(
         &mut self,
         frame_graph: &'a mut dyn FrameGraphInit,
-        pending_transfers: &[nox::renderer::CommandRequestID]
+        pending_transfers: &[nox::renderer::CommandRequestID],
     ) -> Result<(), nox::renderer::Error>
     {
         if !pending_transfers.is_empty() {
@@ -510,20 +618,6 @@ impl Interface for App {
         }
         let frame_graph = frame_graph.init(2)?;
         let frame_buffer_size = frame_graph.frame_buffer_size();
-        unsafe {
-            self.matrices_map.write(
-                Matrices {
-                    model: Quat::angle_axis(self.rot, [-0.52, 1.0, 0.3]).to_matrix(),
-                    projection: mat4_project(
-                        90.0,
-                        frame_buffer_size.width as f32 / frame_buffer_size.height as f32,
-                        0.1,
-                        100.0
-                    ),
-                }
-            );
-        }
-        self.rot += 0.001;
         let depth_stencil_output = frame_graph.add_transient_image(
             &mut |builder| {
                 builder
@@ -541,10 +635,10 @@ impl Interface for App {
                     .with_dimensions(frame_buffer_size);
             }
         )?;
-        let texture = frame_graph.add_image(self.image_id.into())?;
+        let texture = frame_graph.add_image(self.image.into())?;
         frame_graph.set_render_image(color_output);
-        self.first_pass_id = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, max_reads: 1, ..Default::default() },
+        self.first_pass = frame_graph.add_pass(
+            PassInfo { max_color_writes: 1, max_reads: 2, ..Default::default() },
             &mut |builder| {
                 builder
                     .with_read(ReadInfo { resource_id: texture, range_info: None })
@@ -560,11 +654,11 @@ impl Interface for App {
                         None,
                         AttachmentLoadOp::Clear,
                         AttachmentStoreOp::Store,
-                        ClearValue::DepthStencil(ClearDepthStencilValue { depth: 1.0, stencil: 0 }),
+                        ClearValue::DepthStencil{ depth: 1.0, stencil: 0 },
                     ));
             }
         )?;
-        self.second_pass_id = frame_graph.add_pass(
+        self.second_pass = frame_graph.add_pass(
             PassInfo { max_color_writes: 1, ..Default::default() },
             &mut |builder| {
                 builder
@@ -584,7 +678,7 @@ impl Interface for App {
                     ));
             }
         )?;
-        //let id = frame_graph.add_image(self.image_id.into())?;
+        //let id = frame_graph.add_image(self.image.into())?;
         //frame_graph.set_render_image(id);
         Ok(())
     }
@@ -596,7 +690,7 @@ impl Interface for App {
     ) -> Result<(), nox::renderer::Error>
     {
         match pass {
-            x if x == self.first_pass_id => {
+            x if x == self.first_pass => {
                 commands.bind_pipeline(self.pipelines[0])?;
                 commands.bind_shader_resources(|i| {
                     self.shader_resources[i as usize]
@@ -604,17 +698,17 @@ impl Interface for App {
                 commands.draw_indexed(
                     DrawInfo {
                         index_count: CUBE_INDICES.len() as u32,
-                        instance_count: 3,
+                        instance_count: 8,
                         ..Default::default()
                     },
                     [
-                        DrawBufferInfo::new(self.vertex_buffer_id, 0),
+                        DrawBufferInfo::new(self.vertex_buffer, 0),
                         DrawBufferInfo::new(self.vertex_instance_buffer, 0),
                     ].into(),
-                    DrawBufferInfo::new(self.index_buffer_id, 0),
+                    DrawBufferInfo::new(self.index_buffer, 0),
                 )?;
             },
-            x if x == self.second_pass_id => {
+            x if x == self.second_pass => {
                 commands.bind_pipeline(self.pipelines[1])?;
                 commands.bind_shader_resources(|_| {
                     self.shader_resources[0]
@@ -622,14 +716,14 @@ impl Interface for App {
                 commands.draw_indexed(
                     DrawInfo {
                         index_count: CUBE_INDICES.len() as u32,
-                        instance_count: 3,
+                        instance_count: 8,
                         ..Default::default()
                     },
                     [
-                        DrawBufferInfo::new(self.vertex_buffer_id, 0),
+                        DrawBufferInfo::new(self.vertex_buffer, 0),
                         DrawBufferInfo::new(self.vertex_instance_buffer, 0),
                     ].into(),
-                    DrawBufferInfo::new(self.index_buffer_id, 0),
+                    DrawBufferInfo::new(self.index_buffer, 0),
                 )?
             }
             _ => {}
@@ -644,18 +738,13 @@ impl Interface for App {
     )
     {
         command_buffer.copy_data_to_image(
-            self.image_id,
-            unsafe {
-                core::slice::from_raw_parts(
-                    self.image.unwrap().as_ptr(),
-                    (self.image_size.width * self.image_size.height) as usize * 4
-                )
-            },
+            self.image,
+            self.asset1.as_bytes(),
             None, None, None,
         ).unwrap();
         let vertices = unsafe { slice_as_bytes(CUBE_VERTICES) }.unwrap();
         command_buffer.copy_data_to_buffer(
-            self.vertex_buffer_id,
+            self.vertex_buffer,
             vertices, 0, vertices.len() as u64,
         ).unwrap();
         let vertices_instance = unsafe { slice_as_bytes(CUBE_OFF) }.unwrap();
@@ -665,22 +754,11 @@ impl Interface for App {
         ).unwrap();
         let indices = unsafe { slice_as_bytes(CUBE_INDICES) }.unwrap();
         command_buffer.copy_data_to_buffer(
-            self.index_buffer_id,
+            self.index_buffer,
             indices,
             0,
             indices.len() as u64,
         ).unwrap();
-    }
-}
-
-impl Drop for App {
-
-    fn drop(&mut self) {
-        if let Some(image) = self.image {
-            unsafe {
-                stb_image::stb_image::stbi_image_free(image.as_ptr() as _);
-            }
-        } 
     }
 }
 

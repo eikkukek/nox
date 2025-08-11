@@ -118,26 +118,10 @@ impl From<ClearColorValue> for vk::ClearValue {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq)]
-pub struct ClearDepthStencilValue {
-    pub depth: f32,
-    pub stencil: u32,
-}
-
-impl From<ClearDepthStencilValue> for vk::ClearDepthStencilValue {
-
-    fn from(value: ClearDepthStencilValue) -> Self {
-        Self {
-            depth: value.depth,
-            stencil: value.stencil,
-        }
-    }
-}
-
 #[derive(Clone, Copy, PartialEq)]
 pub enum ClearValue {
     Color(ClearColorValue),
-    DepthStencil(ClearDepthStencilValue),
+    DepthStencil{ depth: f32, stencil: u32 },
 }
 
 impl Default for ClearValue {
@@ -156,9 +140,12 @@ impl From<ClearValue> for vk::ClearValue {
                     color: v.into(),
                 }
             },
-            ClearValue::DepthStencil(v) => {
+            ClearValue::DepthStencil { depth, stencil } => {
                 Self {
-                    depth_stencil: v.into(),
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth,
+                        stencil,
+                    },
                 }
             },
         }

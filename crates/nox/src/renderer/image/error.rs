@@ -19,4 +19,7 @@ pub enum ImageError {
         copy_offset: Offset,
         copy_dimensions: Dimensions,
     },
+    InvalidCubeMap {
+        layer_count: u32,
+    },
 }

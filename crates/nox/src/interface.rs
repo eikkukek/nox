@@ -1,14 +1,9 @@
 #![allow(unused_variables)]
 
-use crate::{
-    renderer::{
-        self,
-        RendererContext,
-        CommandRequestID,
-        TransferCommandbuffer,
-        RenderCommands,
-        frame_graph::PassID,
-    }
+use crate::renderer::{
+    self,
+    frame_graph::PassID,
+    *,
 };
 
 use super::{
@@ -30,9 +25,12 @@ pub trait Interface
         renderer: &mut RendererContext,
     ) -> Result<(), Error>;
 
-    fn update(&mut self, nox: &mut Nox<Self>, renderer: &mut RendererContext);
-
-    fn surface_update(&mut self, nox: &mut Nox<Self>, surface_size: [u32; 2], image_count: u32) {}
+    fn update(
+        &mut self,
+        nox: &mut Nox<Self>,
+        renderer: &mut RendererContext,
+        frame_buffer_size: (u32, u32),
+    );
 
     fn render<'a>(
         &mut self,

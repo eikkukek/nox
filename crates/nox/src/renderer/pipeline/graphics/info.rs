@@ -105,8 +105,8 @@ impl GraphicsPipelineInfo {
         self
     }
 
-    pub fn with_depth_bias(&mut self, depth_bias_info: Option<DepthBiasInfo>) -> &mut Self {
-        self.depth_bias_info = depth_bias_info;
+    pub fn with_depth_bias(&mut self, depth_bias_info: DepthBiasInfo) -> &mut Self {
+        self.depth_bias_info = Some(depth_bias_info);
         self
     }
 
@@ -233,7 +233,7 @@ impl GraphicsPipelineInfo {
             depth_bias_enable: self.depth_bias_info.is_some().into(),
             depth_bias_constant_factor: depth_bias_info.constant_factor.to_inner(),
             depth_bias_clamp: depth_bias_info.clamp.to_inner(),
-            depth_bias_slope_factor: depth_bias_info.constant_factor.to_inner(),
+            depth_bias_slope_factor: depth_bias_info.slope_factor.to_inner(),
             line_width: 1.0,
             ..Default::default()
         };

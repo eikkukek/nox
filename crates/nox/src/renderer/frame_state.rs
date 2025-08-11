@@ -17,7 +17,7 @@ use crate::renderer::{
 
 pub(crate) struct FrameState {
     render_image: Option<ResourceID>,
-    resource_pool: ResourcePool,
+    pub resource_pool: ResourcePool,
     command_buffer: vk::CommandBuffer,
 }
 
@@ -69,9 +69,10 @@ impl FrameState {
         &mut self,
         resource_id: ResourceID,
         range_info: ImageRangeInfo,
+        cube_map: bool,
     ) -> Result<ResourceID, Error>
     {
-        self.resource_pool.add_transient_image_subresource(resource_id, range_info)
+        self.resource_pool.add_transient_image_subresource(resource_id, range_info, cube_map)
     }
 
     #[inline(always)]
@@ -99,7 +100,7 @@ impl FrameState {
         &self,
         id: ResourceID,
         state: ImageState
-    ) -> Result<Option<SubresourceResetGuard>, Error>
+    ) -> Result<(), Error>
     {
         self.resource_pool.cmd_memory_barrier(id, state, self.command_buffer)
     }

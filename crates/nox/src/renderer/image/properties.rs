@@ -10,6 +10,7 @@ pub struct ImageProperties {
     pub(crate) array_layers: u32,
     pub(crate) mip_levels: u32,
     pub(crate) create_flags: vk::ImageCreateFlags,
+    pub(crate) always_cube_map: bool,
 }
 
 impl ImageProperties {
@@ -18,8 +19,15 @@ impl ImageProperties {
     pub(crate) fn view_type(&self) -> vk::ImageViewType {
         if self.dimensions.depth > 1 {
             vk::ImageViewType::TYPE_3D
-        }
-        else {
+        } else if self.always_cube_map {
+            if self.array_layers > 6 {
+                vk::ImageViewType::CUBE_ARRAY
+            } else {
+                vk::ImageViewType::CUBE
+            }
+        } else if self.array_layers > 1 {
+            vk::ImageViewType::TYPE_2D_ARRAY
+        } else {
             vk::ImageViewType::TYPE_2D
         }
     }

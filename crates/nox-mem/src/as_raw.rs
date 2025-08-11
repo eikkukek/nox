@@ -38,6 +38,20 @@ macro_rules! impl_as_raw_bit_op {
     ($($t:ty),+ $(,)?) => {
         $(
 
+        impl PartialEq<<$t as AsRaw>::Repr> for $t {
+
+            fn eq(&self, rhs: &<$t as AsRaw>::Repr) -> bool {
+                *self as <$t as AsRaw>::Repr == *rhs
+            }
+        }
+
+        impl PartialEq<$t> for <$t as AsRaw>::Repr {
+
+            fn eq(&self, rhs: &$t) -> bool {
+                *self == *rhs as Self
+            }
+        }
+
         impl core::ops::BitAnd for $t {
 
             type Output = <Self as AsRaw>::Repr;

@@ -27,10 +27,11 @@ pub struct Nox<'mem, I>
         I: Interface,
 {
     interface: Arc<RwLock<I>>,
-    window: Option<Window>,
+    window: Option<Arc<Window>>,
     memory: &'mem Memory,
     renderer: Option<Renderer<'mem>>,
     error_flag: bool,
+    cursor_pos: (f64, f64),
 }
 
 impl<'mem, I: Interface> Nox<'mem, I>
@@ -44,6 +45,7 @@ impl<'mem, I: Interface> Nox<'mem, I>
                 memory,
                 renderer: None,
                 error_flag: false,
+                cursor_pos: (0.0, 0.0),
             }
         )
     }
@@ -60,6 +62,10 @@ impl<'mem, I: Interface> Nox<'mem, I>
             .unwrap()
             .device_info()
             .device_name().clone()
+    }
+
+    pub fn cursor_position(&self) -> (f64, f64) {
+        self.cursor_pos
     }
 }
 
@@ -79,6 +85,9 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
             return
         }
         match event {
+            WindowEvent::CursorMoved { device_id: _, position } => {
+                self.cursor_pos = (position.x, position.y);
+            },
             WindowEvent::CloseRequested => event_loop.exit(), // terminate app,
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
@@ -88,12 +97,14 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
             WindowEvent::RedrawRequested => {
                 let interface = self.interface.clone();
                 let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
-                interface.write().unwrap().update(
-                    self,
-                    &mut renderer_context,
-                );
                 let renderer_allocators = self.memory.renderer_allocators();
-                if let Some(window) = &self.window {
+                if let Some(window) = self.window.clone() {
+                    let win_size = window.inner_size();
+                    interface.write().unwrap().update(
+                        self,
+                        &mut renderer_context,
+                        (win_size.width, win_size.height),
+                    );
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
                         let mut handles = renderer.command_requests(self.interface.clone(), renderer_context.command_requests);
@@ -155,7 +166,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                     return
                 }
             };
-            self.window = Some(window);
+            self.window = Some(Arc::new(window));
             let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
             if let Err(e) = self.interface
                 .clone()

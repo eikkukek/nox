@@ -609,8 +609,8 @@ impl GlobalResources {
     #[inline(always)]
     pub fn create_image<F, Binder: MemoryBinder>(
         &mut self,
-        mut f: F,
         binder: &mut Binder,
+        mut f: F,
     ) -> Result<ImageID, Error>
         where
             F: FnMut(&mut ImageBuilder)
@@ -633,11 +633,22 @@ impl GlobalResources {
     pub fn create_image_subresource(
         &mut self,
         id: ImageID,
-        range_info: ImageRangeInfo
+        range_info: ImageRangeInfo,
+        cube_map: bool,
     ) -> Result<ImageSubresourceID, Error>
     {
         let image = self.images.get_mut(id.0)?;
-        let subresource = ImageSubresourceRange::new(image.image.clone(), range_info)?;
+        if cube_map {
+            if !range_info.subresource_info.layer_count.get().is_multiple_of(6) {
+                return Err(Error::ImageError(
+                    ImageError::InvalidCubeMap {
+                        layer_count: range_info.subresource_info.layer_count.get(),
+                    }
+                ))
+            }
+        }
+        let subresource = ImageSubresourceRange::new(image.image.clone(), range_info, cube_map)?;
+        image.image.state.write().unwrap().layout = vk::ImageLayout::UNDEFINED;
         Ok(ImageSubresourceID(id.0, image.subresources.insert(subresource)))
     }
 
@@ -688,18 +699,6 @@ impl GlobalResources {
     ) -> Result<Arc<Image>, SlotMapError>
     {
         self.images.get(id.0).map(|v| v.image.clone())
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_mut_image_subresource(
-        &mut self,
-        id: ImageSubresourceID,
-    ) -> Result<&mut ImageSubresourceRange, SlotMapError>
-    {
-        self.images
-            .get_mut(id.0)?
-            .subresources
-            .get_mut(id.1)
     }
 
     #[inline(always)]

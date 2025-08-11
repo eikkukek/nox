@@ -4,10 +4,13 @@ use ash::vk;
 
 use nox_mem::{Allocator, CapacityError, vec_types::{FixedVec, Vector}};
 
-use crate::renderer::{
-    *,
-    frame_state::ResourceID,
-    image::ImageSubresourceRangeInfo,
+use crate::{
+    renderer::{
+        *,
+        frame_state::*,
+        image::ImageSubresourceRangeInfo,
+    },
+    has_not_bits,
 };
 
 pub(crate) struct Pass<'alloc, Alloc: Allocator> {
@@ -101,6 +104,9 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
 impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
 
     fn with_read(&mut self, read_info: ReadInfo) -> &mut dyn PassAttachmentBuilder<'a> {
+        if has_not_bits!(read_info.resource_id.flags, ResourceFlags::Sampleable) {
+            panic!("image read must be sampleable")
+        }
         self.reads
             .push(read_info)
             .expect("read capacity exceeded");

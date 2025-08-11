@@ -47,7 +47,7 @@ pub struct ShaderResourceImageUpdate<'a> {
     pub infos: &'a [ShaderResourceImageInfo],
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct ShaderResourceBufferUpdate<'a> {
     pub resource: ShaderResourceID,
     pub binding: u32,

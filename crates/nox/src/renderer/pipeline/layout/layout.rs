@@ -67,9 +67,24 @@ impl PipelineLayout {
             }}
         );
         for info in &set_infos {
+            let binding_count = info.len() as u32;
+            let flags = &[
+                vk::DescriptorBindingFlags::UPDATE_AFTER_BIND,
+                vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
+                vk::DescriptorBindingFlags::PARTIALLY_BOUND,
+            ];
+            let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo {
+                s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+                binding_count: binding_count,
+                p_binding_flags: flags.as_ptr(),
+                ..Default::default()
+
+            };
             let create_info = vk::DescriptorSetLayoutCreateInfo {
                 s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                binding_count: info.len() as u32,
+                p_next: &binding_flags as *const _ as *const _,
+                flags: vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL,
+                binding_count: binding_count,
                 p_bindings: info.as_ptr(),
                 ..Default::default()
             };

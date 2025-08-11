@@ -10,3 +10,5 @@ pub use traits::*;
 
 use pass_impl::*;
 pub(crate) use frame_graph_impl::*;
+
+pub use super::frame_state::ResourceID;

@@ -10,7 +10,6 @@ use crate::{
     renderer::{
         *,
         global_resources::*,
-        frame_state::SubresourceResetGuard,
         image::{
             ImageState,
             ImageBuilder,
@@ -104,9 +103,10 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         &mut self,
         resource_id: ResourceID,
         range_info: crate::renderer::image::ImageRangeInfo,
+        cube_map: bool,
     ) -> Result<ResourceID, Error>
     {
-        self.frame_state.borrow_mut().add_transient_image_subresource(resource_id, range_info)
+        self.frame_state.borrow_mut().add_transient_image_subresource(resource_id, range_info, cube_map)
     }
 
     fn add_pass(
@@ -138,13 +138,12 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
         let graphics_queue_index = self.queue_family_indices.graphics_index();
         for pass in passes.iter() {
             let color_output_count = pass.writes.len();
-            let mut reset_guards = FixedVec::<SubresourceResetGuard, Alloc>::with_capacity(pass.reads.len() + color_output_count + 2, alloc)?;
             for read in pass.reads.iter() {
                 let resource_id = read.resource_id;
                 let image_properties = frame_state.get_image_properties(resource_id)?;
                 assert!(has_bits!(image_properties.usage, vk::ImageUsageFlags::SAMPLED),
                     "read image usage must contain ImageUsage::Sampled bit");
-                let reset_guard = frame_state.cmd_memory_barrier(
+                frame_state.cmd_memory_barrier(
                     resource_id,
                     ImageState::new(
                         vk::AccessFlags::SHADER_READ,
@@ -153,9 +152,6 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                         vk::PipelineStageFlags::FRAGMENT_SHADER,
                     ),
                 )?;
-                if let Some(guard) = reset_guard {
-                    reset_guards.push(guard).unwrap();
-                }
             }
             let mut render_extent = vk::Extent2D { width: u32::MAX, height: u32::MAX };
             enum AttachmentType {
@@ -201,7 +197,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                             )
                         }
                 };
-                let reset_guard = frame_state.cmd_memory_barrier(
+                frame_state.cmd_memory_barrier(
                     resource_id,
                     ImageState::new(
                         access,
@@ -213,9 +209,6 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                 render_extent.width = render_extent.width.min(image_properties.dimensions.width);
                 render_extent.height = render_extent.height.min(image_properties.dimensions.height);
                 let (image_view, image_layout) = frame_state.get_image_view(resource_id)?;
-                if let Some(guard) = reset_guard {
-                    reset_guards.push(guard).unwrap();
-                }
                 Ok(vk::RenderingAttachmentInfo {
                     s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
                     image_view,

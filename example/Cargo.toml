@@ -7,3 +7,4 @@ edition = "2024"
 nox = { path = "../crates/nox" }
 stb_image = "0.3.0"
 memmap2 = "0.9.2"
+glam = "0.30.5"

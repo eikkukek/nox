@@ -78,6 +78,14 @@ impl<'a> RenderCommands<'a> {
     }
 
     #[inline(always)]
+    pub fn edit_resources(
+        &mut self,
+        mut f: impl FnMut(&mut GlobalResources) -> Result<(), Error>
+    ) -> Result<(), Error> {
+        f(&mut *self.global_resources.write().unwrap())
+    }
+
+    #[inline(always)]
     pub fn bind_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
         let handle = self.global_resources
             .read()

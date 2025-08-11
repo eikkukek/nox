@@ -145,6 +145,22 @@ impl Format for IntegerFormat {
     }
 }
 
+#[repr(i32)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+pub enum FloatFormat {
+    R32 = vk::Format::R32_SFLOAT.as_raw(),
+    RG32 = vk::Format::R32G32_SFLOAT.as_raw(),
+    RGB32 = vk::Format::R32G32B32_SFLOAT.as_raw(),
+    RGBA32 = vk::Format::R32G32B32A32_SFLOAT.as_raw(),
+}
+
+impl Format for FloatFormat {
+
+    fn aspects(self) -> &'static [ImageAspect] {
+        &[ImageAspect::Color]
+    }
+}
+
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum FormatFeature {

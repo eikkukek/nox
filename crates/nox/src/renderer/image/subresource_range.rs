@@ -8,6 +8,7 @@ pub(crate) struct ImageSubresourceRange {
     pub state: ImageState,
     pub subresource_info: ImageSubresourceRangeInfo,
     pub component_info: ComponentInfo,
+    pub cube_map: bool,
 }
 
 impl ImageSubresourceRange {
@@ -16,6 +17,7 @@ impl ImageSubresourceRange {
     pub fn new(
         image: Arc<Image>,
         range_info: ImageRangeInfo,
+        cube_map: bool,
     ) -> Result<Self, Error>
     {
         if let Some(err) = image.validate_range(range_info) {
@@ -27,6 +29,7 @@ impl ImageSubresourceRange {
             state: *image.state.read().unwrap(),
             subresource_info: range_info.subresource_info,
             component_info: range_info.component_info.unwrap_or(image.component_info()),
+            cube_map,
         })
     }
     
@@ -61,10 +64,26 @@ impl ImageSubresourceRange {
             let device = self.image.device();
             let subresource_info = self.subresource_info;
             let component_info = self.component_info;
+            let mut view_type = vk::ImageViewType::TYPE_2D;
+            if self.image.properties.dimensions.depth > 1 {
+                view_type = vk::ImageViewType::TYPE_3D
+            }
+            else if self.cube_map {
+                debug_assert!(self.subresource_info.layer_count.get().is_multiple_of(6));
+                if self.subresource_info.layer_count.get() > 6 {
+                    view_type = vk::ImageViewType::CUBE_ARRAY;
+                }
+                else {
+                    view_type = vk::ImageViewType::CUBE;
+                }
+            }
+            else if self.subresource_info.layer_count.get() > 1 {
+                view_type = vk::ImageViewType::TYPE_2D_ARRAY;
+            }
             let create_info = vk::ImageViewCreateInfo {
                 s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
                 image: self.image.handle(),
-                view_type: self.image.view_type(),
+                view_type: view_type,
                 format: component_info.format,
                 components: self.component_info.component_mapping.into(),
                 subresource_range: subresource_info.into(),
@@ -107,6 +126,7 @@ impl ImageSubresourceRange {
             );
         }
         self.state = state;
+        self.image.state.write().unwrap().layout = self.layout();
     }
 }
 

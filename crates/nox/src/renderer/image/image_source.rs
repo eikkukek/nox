@@ -76,7 +76,7 @@ pub(crate) enum ImageSourceMut<'a> {
 impl<'a> ImageSourceMut<'a> {
 
     #[inline(always)]
-    pub fn state(&self) -> ImageState {
+    pub fn _state(&self) -> ImageState {
         match self {
             Self::Image(s) => {
                 s.state()
@@ -96,6 +96,18 @@ impl<'a> ImageSourceMut<'a> {
             Self::Subresource(s) => {
                 s.layout()
             }
+        }
+    }
+
+    #[inline(always)]
+    pub fn _properties(&self) -> ImageProperties {
+        match self {
+            Self::Image(s) => {
+                s.properties()
+            },
+            Self::Subresource(s) => {
+                s.properties()
+            },
         }
     }
 
