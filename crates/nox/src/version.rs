@@ -59,3 +59,14 @@ impl Default for Version {
         Self::new(1, 0, 0)
     }
 }
+
+impl core::fmt::Display for Version {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.major().fmt(f)?;
+        ".".fmt(f)?;
+        self.minor().fmt(f)?;
+        ".".fmt(f)?;
+        self.patch().fmt(f)
+    }
+}

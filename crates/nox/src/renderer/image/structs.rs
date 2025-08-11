@@ -5,7 +5,7 @@ use core::{
 
 use ash::vk;
 
-use super::{ComponentSwizzle, Format};
+use super::*;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Dimensions {
@@ -181,14 +181,14 @@ pub struct ImageSubresourceLayers {
 
 impl ImageSubresourceLayers {
 
-    pub fn new(
-        aspect_mask: u32,
+    pub fn new<A: Into<u32>>(
+        aspect_mask: A,
         mip_level: u32,
         base_array_layer: u32,
         layer_count: u32,
     ) -> Option<Self> {
         Some(Self {
-            aspect_mask,
+            aspect_mask: aspect_mask.into(),
             mip_level,
             base_array_layer,
             layer_count: NonZeroU32::new(layer_count)?,

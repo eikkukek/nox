@@ -48,5 +48,5 @@ pub trait Interface
         &mut self,
         id: CommandRequestID,
         command_buffer: &mut TransferCommandbuffer,
-    );
+    ) -> Result<(), renderer::Error>;
 }

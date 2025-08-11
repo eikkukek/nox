@@ -324,7 +324,8 @@ impl<'mem> Renderer<'mem> {
                 interface
                     .write()
                     .expect("Interface lock poisoned")
-                    .transfer_commands(id, &mut command_buffer);
+                    .transfer_commands(id, &mut command_buffer)
+                    .unwrap();
                 transfer_commands
                     .write()
                     .expect("Transfer commands lock poisoned")

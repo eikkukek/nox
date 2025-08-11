@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, ptr::NonNull};
+use std::{ffi::CString, path::{Path, PathBuf}, ptr::NonNull};
 
 use core::f32::consts::PI;
 
@@ -6,9 +6,9 @@ use glam::{f32::*, Vec4Swizzles};
 
 use nox::{
     interface::Interface,
-    mem::{size_of, slice_as_bytes, GLOBAL_ALLOC},
+    mem::{size_of, slice_as_bytes, vec_types::ArrayVec, GLOBAL_ALLOC},
     renderer::{
-        *, frame_graph::*, image::*, pipeline::*,
+        frame_graph::*, image::*, pipeline::*, *
     },
     InitSettings,
     Memory,
@@ -133,9 +133,10 @@ impl ImageAsset {
         let mut x = 0;
         let mut y = 0;
         let mut ch = 0;
+        let c_string = CString::new(filepath.to_str().unwrap()).unwrap();
         let ptr = unsafe {
             NonNull::new(stb_image::stb_image::stbi_load(
-                filepath.to_str().unwrap().as_ptr() as _,
+                c_string.as_ptr(),
                 &mut x,
                 &mut y,
                 &mut ch,
@@ -180,7 +181,7 @@ impl Drop for ImageAsset {
 }
 
 struct App {
-    asset1: ImageAsset,
+    assets: [ImageAsset; 8],
     color_format: ColorFormat,
     depth_stencil_format: DepthStencilFormat,
     depth_format: DepthStencilFormat,
@@ -213,7 +214,7 @@ impl App {
 
     fn new() -> Self {
         Self {
-            asset1: Default::default(),
+            assets: Default::default(),
             color_format: ColorFormat::SrgbRGBA8,
             depth_stencil_format: DepthStencilFormat::D32S8,
             depth_format: DepthStencilFormat::D32,
@@ -259,8 +260,21 @@ impl Interface for App {
             Err(_) => PathBuf::new(),
         };
         path.pop();
-        path.push("../../rock_color.jpg");
-        self.asset1 = ImageAsset::new(&path, 4)?;
+        path.push("../..");
+        let mut paths = ArrayVec::<PathBuf, 8>::with_len(path, 8).unwrap();
+        paths[0].push("rock_035.jpg");
+        paths[1].push("rock_051.jpg");
+        paths[2].push("rock_058.jpg");
+        paths[3].push("onyx.jpg");
+        paths[4].push("diamond_plate.jpg");
+        paths[5].push("ground.jpg");
+        paths[6].push("marble.jpg");
+        paths[7].push("wood_floor.jpg");
+        for (i, path) in paths.iter().enumerate() {
+            self.assets[i] = ImageAsset
+                ::new(path, 4)
+                .map_err(|e| nox::Error::UserError(format!("failed to open {:?} ( {:?} )", path, e)))?;
+        }
         renderer_context.edit_resources(|r| {
             self.vertex_shader = r.create_shader(
                 "#version 450
@@ -274,6 +288,7 @@ impl Interface for App {
                 layout(location = 0) out vec3 out_normal;
                 layout(location = 1) out vec2 out_uv;
                 layout(location = 2) out vec3 out_pos;
+                layout(location = 3) out flat uint instance_index;
 
                 layout(set = 0, binding = 0) uniform Matrices {
                     mat4 model;
@@ -296,6 +311,7 @@ impl Interface for App {
                     out_uv = in_uv;
                     vec4 pos = model * vec4(in_pos, 1.0);
                     out_pos = pos.xyz;
+                    instance_index = gl_InstanceIndex;
                 }
                 ",
                 "vertex shader",
@@ -307,22 +323,23 @@ impl Interface for App {
                 layout(location = 0) in vec3 in_normal;
                 layout(location = 1) in vec2 in_uv;
                 layout(location = 2) in vec3 in_pos;
+                layout(location = 3) in flat uint instance_index;
 
                 layout(location = 0) out vec4 out_color;
 
-                layout(set = 1, binding = 0) uniform sampler2D tex;
+                layout(set = 1, binding = 0) uniform sampler2DArray tex;
                 layout(set = 1, binding = 1) uniform LightInfo {
                     vec3 pos;
                 } light_info;
                 
                 void main() {
 
-                    vec3 light_color = vec3(0.5, 0.5, 0.5);
+                    vec3 light_color = vec3(0.4, 0.4, 0.4);
                     vec3 light_dir = normalize(light_info.pos - in_pos);
                     const float diff = max(dot(normalize(in_normal), light_dir), 0.0);
                     vec3 diffuse = diff * light_color;
-                    vec4 color = texture(tex, in_uv);
-                    out_color = vec4(color.xyz * 0.5f + (diffuse * light_color), 1.0);
+                    vec4 color = texture(tex, vec3(in_uv, instance_index));
+                    out_color = vec4(color.xyz * 0.8f + (diffuse * light_color), 1.0);
                 }
                 ",
                 "fragment shader",
@@ -402,8 +419,9 @@ impl Interface for App {
                     builder
                         .with_usage(ImageUsage::TransferDst)
                         .with_usage(ImageUsage::Sampled)
-                        .with_dimensions(self.asset1.dim)
-                        .with_format(self.color_format, false);
+                        .with_dimensions(self.assets[0].dim)
+                        .with_format(self.color_format, false)
+                        .with_array_layers(8);
             })?;
             self.sampler = r.create_sampler(
                 |_| {},
@@ -590,7 +608,7 @@ impl Interface for App {
         let denom = plane_normal.dot(ray);
         let t = (vec3(0.0, 0.0, 3.0) - near_world).dot(plane_normal) / denom;
         let light_pos = near_world + ray * t;
-        let mut tf = glam::Mat4::from_axis_angle(vec3(0.0, 0.0, 1.0), self.rot);
+        let mut tf = glam::Mat4::from_axis_angle(vec3(0.23, 1.0, 0.41).normalize(), self.rot);
         tf.col_mut(3).z = 3.0;
         unsafe {
             self.matrices_map.write(
@@ -604,7 +622,7 @@ impl Interface for App {
                 LightInfo { pos: light_pos }
             );
         }
-        self.rot += 0.000;
+        self.rot += 0.001;
     }
 
     fn render<'a>(
@@ -636,24 +654,7 @@ impl Interface for App {
             }
         )?;
         let texture = frame_graph.add_image(self.image.into())?;
-        frame_graph.set_render_image(color_output,
-            Some(
-                ImageRangeInfo::new(
-                    ImageSubresourceRangeInfo::new(
-                        ImageAspect::Color.into(), 0, 1, 0, 1
-                    ).unwrap(),
-                    Some(ComponentInfo::new(
-                        ComponentMapping {
-                            r: ComponentSwizzle::B,
-                            g: ComponentSwizzle::R,
-                            b: ComponentSwizzle::G,
-                            a: ComponentSwizzle::Identity,
-                        },
-                        self.color_format)
-                    )
-                )
-            )
-        )?;
+        frame_graph.set_render_image(color_output, None)?;
         self.first_pass = frame_graph.add_pass(
             PassInfo { max_color_writes: 1, max_reads: 2, ..Default::default() },
             &mut |builder| {
@@ -752,13 +753,17 @@ impl Interface for App {
         &mut self,
         _id: nox::renderer::CommandRequestID,
         command_buffer: &mut nox::renderer::TransferCommandbuffer,
-    )
+    ) -> Result<(), Error>
     {
-        command_buffer.copy_data_to_image(
-            self.image,
-            self.asset1.as_bytes(),
-            None, None, None,
-        ).unwrap();
+        for (i, asset) in self.assets.iter().enumerate() {
+            command_buffer.copy_data_to_image(
+                self.image,
+                asset.as_bytes(),
+                ImageSubresourceLayers::new(ImageAspect::Color, 0, i as u32, 1),
+                None,
+                None,
+            ).unwrap();
+        }
         let vertices = unsafe { slice_as_bytes(CUBE_VERTICES) }.unwrap();
         command_buffer.copy_data_to_buffer(
             self.vertex_buffer,
@@ -776,6 +781,7 @@ impl Interface for App {
             0,
             indices.len() as u64,
         ).unwrap();
+        Ok(())
     }
 }
 
