@@ -417,9 +417,9 @@ impl<T> GlobalSlotMap<T>
         }
     }
 
-    pub fn with_capacity(capacity: u32) -> Result<Self> {
+    pub fn with_capacity(capacity: u32) -> Self {
         if capacity == 0 {
-            return Ok(Self::new())
+            return Self::new()
         }
         let data: Pointer<Slot<T>> = unsafe { GLOBAL_ALLOC
             .allocate_uninit(capacity as usize)
@@ -430,7 +430,7 @@ impl<T> GlobalSlotMap<T>
                 else {
                     AllocFailed { new_capacity: capacity as usize }
                 }
-            )?
+            ).unwrap()
             .into()
         };
         for i in 0..capacity - 1 {
@@ -439,14 +439,14 @@ impl<T> GlobalSlotMap<T>
             }
         }
         unsafe { data.add(capacity as usize - 1).write(Slot::empty(None)) };
-        Ok(Self {
+        Self {
             data,
             capacity,
             len: 0,
             free_head: Some(0),
             alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
             _marker: PhantomData,
-        })
+        }
     }
 
     #[inline(always)]

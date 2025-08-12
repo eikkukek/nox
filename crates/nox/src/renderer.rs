@@ -3,7 +3,6 @@ pub mod pipeline;
 pub mod image;
 pub mod memory_binder;
 
-mod errors;
 mod memory_layout;
 mod handle;
 mod helpers;
@@ -47,13 +46,13 @@ use nox_math::clamp;
 use super::{
     interface::Interface,
     Version,
-    AppName
+    AppName,
+    error::Error,
 };
 
 pub use vk::Format as VkFormat;
 
 pub use enums::*;
-pub use errors::Error;
 pub use memory_layout::MemoryLayout;
 pub use handle::{Handle, RaiiHandle};
 pub use image::{ImageBuilder, ImageError};
@@ -321,9 +320,7 @@ impl<'mem> Renderer<'mem> {
     ) -> GlobalVec<Option<JoinHandle<()>>>
     {
 
-        let mut handles = GlobalVec
-            ::with_capacity(command_requests.task_count())
-            .unwrap();
+        let mut handles = GlobalVec::with_capacity(command_requests.task_count());
 
         let staging_alloc = Arc::new(RwLock::new(LinearDeviceAlloc::new(
             self.device.clone(),
@@ -388,11 +385,10 @@ impl<'mem> Renderer<'mem> {
                 transfer_commands
                     .write()
                     .expect("Transfer commands lock poisoned")
-                    .push(command_buffer)
-                    .unwrap();
+                    .push(command_buffer);
             });
 
-            handles.push(Some(handle)).unwrap();
+            handles.push(Some(handle));
         }
 
         handles
@@ -409,12 +405,8 @@ impl<'mem> Renderer<'mem> {
         let mut pending_transfers = Default::default();
         if !self.transfer_commands.read().unwrap().is_empty() {
             let mut transfer_commands = self.transfer_commands.write().unwrap();
-            pending_transfers = GlobalVec
-                ::with_capacity(transfer_commands.len())
-                .unwrap();
-            let mut ready_transfers = GlobalVec
-                ::with_capacity(transfer_commands.len())
-                .unwrap();
+            pending_transfers = GlobalVec::with_capacity(transfer_commands.len());
+            let mut ready_transfers = GlobalVec::with_capacity(transfer_commands.len());
             for (i, command) in transfer_commands.iter_mut().enumerate() {
                 let (new, fence) = command
                     .get_fence()
@@ -443,10 +435,10 @@ impl<'mem> Renderer<'mem> {
                 unsafe {
                     match device.wait_for_fences(&[fence], true, SwapchainContext::frame_timeout()) {
                         Ok(()) => {
-                            ready_transfers.push(i).unwrap();
+                            ready_transfers.push(i);
                         },
                         Err(vk::Result::TIMEOUT) => {
-                            pending_transfers.push(command.id()).unwrap();
+                            pending_transfers.push(command.id());
                         }
                         Err(e) => {
                             return Err(format!("unexpected fence wait error: {:?}", e))
@@ -481,7 +473,6 @@ impl<'mem> Renderer<'mem> {
                 None => return Ok(())
             };
         if recreated {
-            println!("{:?}", self.frame_buffer_size);
             self.frame_buffer_size = frame_data.extent.into();
             render_context.frame_buffer_size = self.frame_buffer_size;
             interface

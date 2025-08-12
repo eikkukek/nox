@@ -4,13 +4,14 @@ use ash::vk;
 
 use rspirv_reflect::Reflection;
 
-use nox_mem::{vec_types::{Vector, GlobalVec}, AsRaw};
-
-use crate::Version;
+use nox_mem::{
+    vec_types::GlobalVec,
+    AsRaw,
+    slice_as_bytes,
+};
 
 use super::{
     Handle,
-    shader_fn::glsl_to_spirv,
     pipeline::create_shader_module,
     Error,
 };
@@ -124,21 +125,13 @@ impl Shader {
 
     pub fn new(
         device: Arc<ash::Device>,
-        input: &str,
-        name: &str,
+        spirv: &[u32],
         stage: ShaderStage,
-        vulkan_version: Version,
     ) -> Result<Self, Error>
     {
-        let spirv = glsl_to_spirv(
-            input,
-            name,
-            stage.into(),
-            vulkan_version,
-        )?;
-        let reflect = Reflection::new_from_spirv(spirv.as_binary_u8())?;
+        let reflect = Reflection::new_from_spirv(unsafe { slice_as_bytes(spirv).unwrap() })?;
         let sets = reflect.get_descriptor_sets()?;
-        let mut uniforms = GlobalVec::with_capacity(sets.len()).unwrap();
+        let mut uniforms = GlobalVec::with_capacity(sets.len());
         for (set, info) in sets {
             for (binding, info) in info {
                 let count = match info.binding_count {
@@ -152,7 +145,7 @@ impl Shader {
                     binding,
                     count,
                     ty: vk::DescriptorType::from_raw(info.ty.0 as i32),
-                }).unwrap();
+                });
             }
         }
         let push_constant = reflect
@@ -164,7 +157,7 @@ impl Shader {
                     size: v.size,
                 }
             });
-        let module = create_shader_module(&device, spirv.as_binary())?;
+        let module = create_shader_module(&device, spirv)?;
         Ok(Self {
             device,
             module,

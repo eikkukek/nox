@@ -4,7 +4,7 @@ use ash::vk;
 
 use nox_mem::{
     slot_map::{GlobalSlotMap, SlotIndex},
-    vec_types::{GlobalVec, Vector}
+    vec_types::GlobalVec,
 };
 
 use crate::{
@@ -59,7 +59,7 @@ impl ResourcePool
         let mut g = self.global_resources.write().unwrap();
         assert!(self.render_image == None);
         for resource in &self.transient_images {
-            g.destroy_image(*resource).unwrap();
+            g.destroy_image(*resource);
         }
         self.transient_images.clear_elements();
         for (image, index) in &self.subviews {
@@ -67,7 +67,7 @@ impl ResourcePool
                 image.destroy_subview(*index).unwrap();
             }
         }
-        self.subviews.resize(0, Default::default()).unwrap();
+        self.subviews.resize(0, Default::default());
         unsafe {
             self.device_alloc.reset();
         }
@@ -264,7 +264,7 @@ impl ResourcePool
         let g = self.global_resources.write().unwrap();
         let image = g.get_image(id.image_id)?;
         let (index, view) = image.create_subview(range_info)?;
-        self.subviews.push((id.image_id, index)).unwrap();
+        self.subviews.push((id.image_id, index));
         Ok((view, image.layout()))
     }
 

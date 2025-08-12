@@ -71,7 +71,7 @@ impl GraphicsPipelineInfo {
             }
         }
         self.vertex_input_attribute_count += binding.attributes.len() as u32;
-        self.vertex_input_bindings.push(binding).unwrap();
+        self.vertex_input_bindings.push(binding);
         self
     }
 
@@ -136,7 +136,7 @@ impl GraphicsPipelineInfo {
         blend_state: Option<ColorOutputBlendState>
     ) -> &mut Self
     {
-        self.color_output_formats.push(format.as_vk_format()).unwrap();
+        self.color_output_formats.push(format.as_vk_format());
         self.color_blend_info.add_attachment(write_mask, blend_state);
         self
     }
@@ -148,7 +148,7 @@ impl GraphicsPipelineInfo {
         blend_state: Option<ColorOutputBlendState>
     ) -> &mut Self
     {
-        self.color_output_formats.push(format).unwrap();
+        self.color_output_formats.push(format);
         self.color_blend_info.add_attachment(write_mask, blend_state);
         self
     }
@@ -164,7 +164,7 @@ impl GraphicsPipelineInfo {
     }
 
     pub fn with_dynamic_states(&mut self, dynamic_state: &[DynamicState]) -> &mut Self {
-        self.dynamic_states.append_map(dynamic_state, |v| (*v).into()).unwrap();
+        self.dynamic_states.append_map(dynamic_state, |v| (*v).into());
         self
     }
 
@@ -190,15 +190,18 @@ impl GraphicsPipelineInfo {
             };
             if shader.stage() == ShaderStage::Vertex {
                 if vertex_shader_included {
-                    return Err(Error::ShaderError(String::from("Vertex shader included twice in pipeline")))
+                    return Err(Error::ShaderError(format!("vertex shader included twice in pipeline")))
                 }
                 vertex_shader_included = true;
             }
             if shader.stage() == ShaderStage::Fragment {
                 if fragment_shader_included {
-                    return Err(Error::ShaderError(String::from("Fragment shader included twice in pipeline")))
+                    return Err(Error::ShaderError(format!("fragment shader included twice in pipeline")))
                 }
                 fragment_shader_included = true;
+            }
+            if !vertex_shader_included {
+                return Err(Error::ShaderError(format!("no vertex shader included in pipeline")))
             }
             shader_stage_infos.push(vk::PipelineShaderStageCreateInfo {
                 s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,

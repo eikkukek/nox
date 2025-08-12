@@ -35,7 +35,7 @@ impl PipelineLayout {
         for shader in &shaders {
             for uniform in shader.uniforms().iter().map(|v| *v) {
                 if uniform.set >= set_infos.len() as u32 {
-                    set_infos.resize(uniform.set as usize + 1, GlobalVec::new()).unwrap();
+                    set_infos.resize(uniform.set as usize + 1, GlobalVec::new());
                 }
                 let bindings = &mut set_infos[uniform.set as usize];
                 if uniform.binding >= bindings.len() as u32 {
@@ -55,11 +55,11 @@ impl PipelineLayout {
                 bindings[uniform.binding as usize] = uniform.into();
             }
             for push_constant in shader.push_constant().iter().map(|v| *v) {
-                push_constants.push(push_constant.into()).unwrap();
+                push_constants.push(push_constant.into());
             }
         }
         let mut set_layouts = RaiiHandle::new(
-            GlobalVec::with_capacity(set_infos.capacity()).unwrap(),
+            GlobalVec::with_capacity(set_infos.capacity()),
             |v| { unsafe {
                 for layout in &v {
                     device.destroy_descriptor_set_layout(*layout, None);
@@ -68,12 +68,12 @@ impl PipelineLayout {
         );
         for info in &set_infos {
             let binding_count = info.len() as u32;
-            let mut flags = GlobalVec::with_capacity(info.len()).unwrap();
+            let mut flags = GlobalVec::with_capacity(info.len());
             for _ in 0..binding_count {
                 flags.push(
                     vk::DescriptorBindingFlags::UPDATE_AFTER_BIND |
                     vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING
-                ).unwrap();
+                );
             }
             let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo {
                 s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
@@ -92,8 +92,7 @@ impl PipelineLayout {
             };
             unsafe {
                 set_layouts
-                    .push(device.create_descriptor_set_layout(&create_info, None)?)
-                    .unwrap();
+                    .push(device.create_descriptor_set_layout(&create_info, None)?);
             }
         }
         let info = vk::PipelineLayoutCreateInfo {
@@ -108,12 +107,11 @@ impl PipelineLayout {
             device.create_pipeline_layout(&info, None)?
         };
         let set_layouts = set_layouts.into_inner();
-        let mut pipeline_descriptor_sets = GlobalVec::with_capacity(set_layouts.len()).unwrap();
+        let mut pipeline_descriptor_sets = GlobalVec::with_capacity(set_layouts.len());
         for (i, layout) in set_layouts.iter().enumerate() {
             let set_info = &set_infos[i];
             let mut types = GlobalVec
-                ::with_capacity(set_info.len())
-                .unwrap();
+                ::with_capacity(set_info.len());
             for binding in set_info {
                 types.push(
                     if binding.stage_flags.is_empty() { None }
@@ -123,7 +121,7 @@ impl PipelineLayout {
             pipeline_descriptor_sets.push((
                 types,
                 *layout,
-            )).unwrap();
+            ));
         }
         Ok(Self {
             pipeline_descriptor_sets,

@@ -1,4 +1,8 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    fs::{self, File}, io::Write, path::PathBuf, sync::{Arc, RwLock}
+};
+
+use memmap2::Mmap;
 
 use ash::vk;
 
@@ -22,9 +26,14 @@ pub(crate) struct SwapchainPassPipelineData {
     pipelines: GlobalVec<(GraphicsPipelineID, vk::Format)>,
     last_pipeline: Option<(GraphicsPipelineID, vk::Format)>,
     shaders: [ShaderID; 2],
+    pipeline_cache_id: PipelineCacheID,
+    cache_dir: PathBuf,
 }
 
 impl SwapchainPassPipelineData {
+
+
+    const CACHE_NAME: &str = "sc_pass_cache.nox";
 
     pub fn new(
         global_resources: Arc<RwLock<GlobalResources>>,
@@ -35,6 +44,24 @@ impl SwapchainPassPipelineData {
         assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
 
         let mut g = global_resources.write().unwrap();
+
+        let mut cache_dir = std::env::current_exe()?;
+        cache_dir.pop();
+        cache_dir.push(Self::CACHE_NAME);
+
+        let pipeline_cache_id = 
+            if fs::exists(&cache_dir)? {
+                let file = File
+                    ::open(&cache_dir)?;
+                let map = unsafe {
+                    Mmap::map(&file)?
+                };
+                g.create_pipeline_cache(Some(&map))?
+            }
+            else {
+                File::create_new(&cache_dir)?;
+                g.create_pipeline_cache(None)?
+            };
 
         let shaders = [
             g.create_shader(Self::vertex_shader_input(), "swapchain_pass_vertex", ShaderStage::Vertex)?,
@@ -67,6 +94,8 @@ impl SwapchainPassPipelineData {
             pipelines: GlobalVec::new(),
             last_pipeline: Default::default(),
             shaders,
+            pipeline_cache_id,
+            cache_dir,
         })
     }
 
@@ -117,8 +146,12 @@ impl SwapchainPassPipelineData {
         self.global_resources
             .write()
             .unwrap()
-            .create_graphics_pipelines(&[info], |_, v| { pipeline = Some(v) }, &stack_guard)?;
-        let pipeline = self.pipelines.push((pipeline.unwrap(), format)).unwrap();
+            .create_graphics_pipelines(
+                &[info],
+                Some(self.pipeline_cache_id),
+                &stack_guard, |_, v| { pipeline = Some(v) },
+            )?;
+        let pipeline = self.pipelines.push((pipeline.unwrap(), format));
         Ok(self.global_resources.read().unwrap().get_graphics_pipeline(pipeline.0)?.handle)
     }
 
@@ -212,11 +245,16 @@ impl Drop for SwapchainPassPipelineData {
     fn drop(&mut self) {
         let mut g = self.global_resources.write().unwrap();
         for shader in self.shaders {
-            g.destroy_shader(shader).ok();
+            g.destroy_shader(shader);
         }
         for pipeline in &self.pipelines {
-            g.destroy_graphics_pipeline(pipeline.0).ok();
+            g.destroy_graphics_pipeline(pipeline.0);
         }
-        g.destroy_sampler(self.sampler).ok();
+        g.destroy_sampler(self.sampler);
+        if let Ok(mut file) = File::create(&self.cache_dir) {
+            if let Ok(data) = g.retrieve_pipeline_cache_data(self.pipeline_cache_id) {
+                file.write(&data).ok();
+            }
+        }
     }
 }

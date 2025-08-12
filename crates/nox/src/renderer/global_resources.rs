@@ -41,6 +41,7 @@ pub struct GlobalResources {
     physical_device: vk::PhysicalDevice,
     shaders: GlobalSlotMap<Shader>,
     pipeline_layouts: GlobalSlotMap<pipeline::PipelineLayout>,
+    pipeline_caches: GlobalSlotMap<PipelineCache>,
     graphics_pipelines: GlobalSlotMap<GraphicsPipeline>,
     compute_pipelines: GlobalSlotMap<ComputePipeline>,
     shader_resources: GlobalSlotMap<ShaderResource>,
@@ -117,14 +118,15 @@ impl GlobalResources {
             device,
             physical_device,
             instance,
-            shaders: GlobalSlotMap::with_capacity(16).unwrap(),
-            pipeline_layouts: GlobalSlotMap::with_capacity(16).unwrap(),
-            graphics_pipelines: GlobalSlotMap::with_capacity(16).unwrap(),
-            compute_pipelines: GlobalSlotMap::with_capacity(16).unwrap(),
-            shader_resources: GlobalSlotMap::with_capacity(16).unwrap(),
-            images: GlobalSlotMap::with_capacity(16).unwrap(),
-            buffers: GlobalSlotMap::with_capacity(16).unwrap(),
-            samplers: GlobalSlotMap::with_capacity(4).unwrap(),
+            shaders: GlobalSlotMap::with_capacity(16),
+            pipeline_layouts: GlobalSlotMap::with_capacity(16),
+            pipeline_caches: GlobalSlotMap::with_capacity(4),
+            graphics_pipelines: GlobalSlotMap::with_capacity(16),
+            compute_pipelines: GlobalSlotMap::with_capacity(16),
+            shader_resources: GlobalSlotMap::with_capacity(16),
+            images: GlobalSlotMap::with_capacity(16),
+            buffers: GlobalSlotMap::with_capacity(16),
+            samplers: GlobalSlotMap::with_capacity(4),
             default_binder,
             default_binder_mappable,
             dummy_descriptor_set,
@@ -173,23 +175,41 @@ impl GlobalResources {
         stage: ShaderStage,
     ) -> Result<ShaderID, Error>
     {
+        let spriv = shader_fn::glsl_to_spirv(
+            &input,
+            name,
+            stage.into(),
+            self.api_version,
+        )?;
         let shader = Shader::new(
             self.device.clone(),
-            input,
-            name,
+            spriv.as_binary(),
             stage,
-            self.api_version,
         )?;
         Ok(ShaderID(self.shaders.insert(shader)))
     }
 
     #[inline(always)]
-    pub fn destroy_shader(
+    pub fn add_shader(
         &mut self,
-        shader: ShaderID,
-    ) -> Result<(), Error>
+        spirv: &[u32],
+        stage: ShaderStage,
+    ) -> Result<ShaderID, Error>
     {
-        self.shaders.remove(shader.0).map_err(Into::into).map(|_| {})
+        if spirv.len() % 4 != 0 {
+            return Err(Error::ShaderError(format!("spirv binary size must be a multiple of 4")))
+        }
+        let shader = Shader::new(
+            self.device.clone(),
+            spirv,
+            stage,
+        )?;
+        Ok(ShaderID(self.shaders.insert(shader)))
+    }
+
+    #[inline(always)]
+    pub fn destroy_shader(&mut self,shader: ShaderID) {
+        self.shaders.remove(shader.0).ok();
     }
 
     #[inline(always)]
@@ -305,7 +325,7 @@ impl GlobalResources {
                     image.destroy_subview(*index).unwrap();
                 }
             }
-            set.image_views.resize(0, Default::default()).unwrap();
+            set.image_views.resize(0, Default::default());
             let vk_set = set.descriptor_set;
             let Some(ty) = self.pipeline_layouts
                 .get(set.layout_id.0)?
@@ -325,7 +345,7 @@ impl GlobalResources {
                     if let Some(range_info) = range_info {
                         let (index, view) = self.get_image(id)?.create_subview(range_info)?;
                         let set = self.shader_resources.get_mut(update.resource.0)?;
-                        set.image_views.push((id, index)).unwrap();
+                        set.image_views.push((id, index));
                         view
                     }
                     else {
@@ -429,11 +449,74 @@ impl GlobalResources {
     }
 
     #[inline(always)]
+    pub fn create_pipeline_cache(
+        &mut self,
+        initial_data: Option<&[u8]>,
+    ) -> Result<PipelineCacheID, Error>
+    {
+        let initial_data = initial_data.unwrap_or(&[]);
+        let info = vk::PipelineCacheCreateInfo {
+            s_type: vk::StructureType::PIPELINE_CACHE_CREATE_INFO,
+            initial_data_size: initial_data.len(),
+            p_initial_data: initial_data.as_ptr() as _,
+            ..Default::default()
+        };
+        let handle = unsafe {
+            self.device.create_pipeline_cache(&info, None)?
+        };
+        let index =  self.pipeline_caches.insert(PipelineCache {
+            device: self.device.clone(),
+            handle: handle,
+        });
+        Ok(PipelineCacheID(index))
+    }
+
+    #[inline(always)]
+    pub fn retrieve_pipeline_cache_data(
+        &mut self,
+        id: PipelineCacheID,
+    ) -> Result<GlobalVec<u8>, Error>
+    {
+        let device = &*self.device;
+        let handle = self.pipeline_caches.get(id.0)?.handle;
+        unsafe {
+            let mut cache_size = 0;
+            let result = (device.fp_v1_0().get_pipeline_cache_data)(
+                device.handle(),
+                handle,
+                &mut cache_size,
+                Default::default(),
+            );
+            if result != vk::Result::SUCCESS {
+                return Err(result.into())
+            }
+            let mut data = GlobalVec::with_capacity(cache_size as usize);
+            let result = (device.fp_v1_0().get_pipeline_cache_data)(
+                device.handle(),
+                handle,
+                &mut cache_size,
+                data.as_mut_ptr() as _,
+            );
+            if result != vk::Result::SUCCESS {
+                return Err(result.into())
+            }
+            data.set_len(cache_size as usize);
+            Ok(data)
+        }
+    }
+
+    #[inline(always)]
+    pub fn destroy_pipeline_cache(&mut self, id: PipelineCacheID) {
+        self.pipeline_caches.remove(id.0).ok();
+    }
+
+    #[inline(always)]
     pub fn create_graphics_pipelines(
         &mut self,
         infos: &[pipeline::GraphicsPipelineInfo],
-        mut collect: impl FnMut(usize, GraphicsPipelineID),
+        cache_id: Option<PipelineCacheID>,
         alloc: &impl Allocator,
+        mut collect: impl FnMut(usize, GraphicsPipelineID),
     ) -> Result<(), Error>
     {
         let pipeline_count = infos.len();
@@ -475,9 +558,12 @@ impl GlobalResources {
         let mut pipelines = FixedVec::with_capacity(create_infos.len(), alloc)?;
         unsafe {
             let device = &*self.device;
+            let pipeline_cache = cache_id
+                .map(|v| self.pipeline_caches.get(v.0).map(|v| v.handle))
+                .unwrap_or(Ok(Default::default()))?;
             let result = (device.fp_v1_0().create_graphics_pipelines)(
                 device.handle(),
-                vk::PipelineCache::null(),
+                pipeline_cache,
                 vk_infos.len() as u32,
                 vk_infos.as_ptr(),
                 core::ptr::null(),
@@ -505,15 +591,16 @@ impl GlobalResources {
         Ok(())
     }
 
-    pub fn destroy_graphics_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
-        self.graphics_pipelines.remove(id.0).map_err(Into::into).map(|_| {})
+    pub fn destroy_graphics_pipeline(&mut self, id: GraphicsPipelineID) {
+        self.graphics_pipelines.remove(id.0).ok();
     }
 
     pub fn create_compute_pipelines(
         &mut self,
         infos: &[pipeline::ComputePipelineInfo],
-        mut collect: impl FnMut(usize, ComputePipelineID),
+        cache_id: Option<PipelineCacheID>,
         alloc: &impl Allocator,
+        mut collect: impl FnMut(usize, ComputePipelineID),
     ) -> Result<(), Error>
     {
         let pipeline_count = infos.len();
@@ -527,9 +614,12 @@ impl GlobalResources {
         let mut pipelines = FixedVec::with_capacity(vk_infos.len(), alloc)?;
         unsafe {
             let device = &*self.device;
+            let pipeline_cache = cache_id 
+                .map(|v| self.pipeline_caches.get(v.0).map(|v| v.handle))
+                .unwrap_or(Ok(Default::default()))?;
             let result = (self.device.fp_v1_0().create_compute_pipelines)(
                 device.handle(),
-                vk::PipelineCache::null(),
+                pipeline_cache,
                 vk_infos.len() as u32,
                 vk_infos.as_ptr(),
                 core::ptr::null(),
@@ -553,8 +643,8 @@ impl GlobalResources {
         Ok(())
     }
 
-    pub fn destroy_compute_pipeline(&mut self, id: ComputePipelineID) -> Result<(), Error> {
-        self.compute_pipelines.remove(id.0).map_err(Into::into).map(|_| {})
+    pub fn destroy_compute_pipeline(&mut self, id: ComputePipelineID) {
+        self.compute_pipelines.remove(id.0).ok();
     }
 
     pub(crate) fn pipeline_get_shader_resource<'a, F, Alloc>(
@@ -667,17 +757,13 @@ impl GlobalResources {
         let mut builder = SamplerBuilder::new();
         f(&mut builder);
         let handle = builder.build(&self.device)?;
-        let index = self.samplers.insert(Sampler { handle, _builder: builder, });
+        let index = self.samplers.insert(Sampler { device: self.device.clone(), handle, _builder: builder, });
         Ok(SamplerID(index))
     }
 
     #[inline(always)]
-    pub fn destroy_sampler(&mut self, sampler: SamplerID) -> Result<(), SlotMapError> {
-        let sampler = self.samplers.remove(sampler.0)?.handle;
-        unsafe {
-            self.device.destroy_sampler(sampler, None);
-        }
-        Ok(())
+    pub fn destroy_sampler(&mut self, sampler: SamplerID) {
+        self.samplers.remove(sampler.0).ok();
     }
 
     #[inline(always)]
@@ -701,8 +787,8 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn destroy_image(&mut self, id: ImageID) -> Result<(), SlotMapError> {
-        self.images.remove(id.0).map(|_| {})
+    pub fn destroy_image(&mut self, id: ImageID) {
+        self.images.remove(id.0).ok();
     }
 
     #[inline(always)]
@@ -723,9 +809,6 @@ impl GlobalResources {
         unsafe {
             self.device.destroy_descriptor_set_layout(self.dummy_descriptor_set_layout, None);
             self.device.destroy_descriptor_pool(self.dummy_descriptor_pool, None);
-            for sampler in &self.samplers {
-                self.device.destroy_sampler(sampler.handle, None);
-            }
             self.samplers.clear();
             self.buffers.clear();
             self.images.clear();

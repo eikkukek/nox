@@ -1,8 +1,12 @@
-use std::{ffi::CString, path::{Path, PathBuf}, ptr::NonNull};
+use std::{
+    ffi::CString, fs::{self, File}, io::Write, path::{Path, PathBuf}, ptr::NonNull
+};
 
 use core::f32::consts::PI;
 
 use glam::{f32::*, Vec4Swizzles};
+
+use memmap2::Mmap;
 
 use nox::{
     interface::Interface,
@@ -14,6 +18,7 @@ use nox::{
     Memory,
     Nox,
     Version,
+    Error,
 };
 
 #[repr(C)]
@@ -211,6 +216,8 @@ struct App {
     cube_pass: PassID,
     outline_pass: PassID,
     frame_buffer_size: image::Dimensions,
+    cache_dir: PathBuf,
+    pipeline_cache: PipelineCacheID,
     heat_in: u32,
     fire_transfer_id: CommandRequestID,
     rot: f32,
@@ -222,6 +229,9 @@ unsafe impl Sync for App {}
 impl App {
 
     fn new() -> Self {
+        let mut cache_dir = std::env::current_exe().unwrap();
+        cache_dir.pop();
+        cache_dir.push("example.cache");
         Self {
             assets: Default::default(),
             color_format: ColorFormat::SrgbRGBA8,
@@ -254,6 +264,8 @@ impl App {
             outline_pass: Default::default(),
             fire_transfer_id: Default::default(),
             frame_buffer_size: Default::default(),
+            cache_dir,
+            pipeline_cache: Default::default(),
             heat_in: 0,
             rot: 0.0,
         }
@@ -294,6 +306,18 @@ impl Interface for App {
                 .map_err(|e| nox::Error::UserError(format!("failed to open {:?} ( {:?} )", path, e)))?;
         }
         renderer.edit_resources(|r| {
+            self.pipeline_cache =
+                if fs::exists(&self.cache_dir)? {
+                    let file = File::open(&self.cache_dir)?;
+                    let map = unsafe {
+                        Mmap::map(&file)?
+                    };
+                    r.create_pipeline_cache(Some(&map))?
+                }
+                else {
+                    File::create_new(&self.cache_dir)?;
+                    r.create_pipeline_cache(None)?
+                };
             self.vertex_shader = r.create_shader(
                 "#version 450
 
@@ -649,13 +673,16 @@ impl Interface for App {
                 );
             r.create_graphics_pipelines(
                 &[graphics_pipeline_info, outline_pipeline_info, fire_effect_pipeline_info],
+                Some(self.pipeline_cache),
+                &GLOBAL_ALLOC,
                 |i, id| { self.pipelines[i] = id; },
-                &GLOBAL_ALLOC
             )?;
             let fire_pipeline_info = ComputePipelineInfo::new(self.pipeline_layouts[2]);
-            r.create_compute_pipelines(&[fire_pipeline_info],
-                |_, id| { self.fire_pipeline = id },
+            r.create_compute_pipelines(
+                &[fire_pipeline_info],
+                Some(self.pipeline_cache),
                 &GLOBAL_ALLOC,
+                |_, id| { self.fire_pipeline = id },
             )?;
             self.vertex_buffer = r.create_buffer(
                 (CUBE_VERTICES.len() * size_of!(Vertex)) as u64,
@@ -765,7 +792,7 @@ impl Interface for App {
         renderer.edit_resources(|r| {
             for image in self.fire_images.iter_mut() {
                 if r.is_valid_image(*image) {
-                    r.destroy_image(*image)?;
+                    r.destroy_image(*image);
                 }
                 *image = r.create_image(
                     &mut r.default_binder(),
@@ -840,7 +867,7 @@ impl Interface for App {
     fn compute(
         &mut self,
         commands: &mut ComputeCommands,
-    ) -> Result<(), nox::renderer::Error>
+    ) -> Result<(), Error>
     {
         struct Params {
             _density: f32,
@@ -908,7 +935,7 @@ impl Interface for App {
         &mut self,
         frame_graph: &'a mut dyn FrameGraphInit,
         pending_transfers: &[nox::renderer::CommandRequestID],
-    ) -> Result<(), nox::renderer::Error>
+    ) -> Result<(), Error>
     {
         if !pending_transfers.is_empty() {
             return Ok(())
@@ -1015,11 +1042,52 @@ impl Interface for App {
         Ok(())
     }
 
+    fn transfer_commands(
+        &mut self,
+        id: nox::renderer::CommandRequestID,
+        commands: &mut nox::renderer::TransferCommands,
+    ) -> Result<(), Error>
+    {
+        if id == self.fire_transfer_id {
+            for image in &self.fire_images {
+                commands.clear_color_image(*image, [0.0, 0.0, 0.0, 0.0].into(), None)?;
+            }
+            return Ok(())
+        }
+        for (i, asset) in self.assets.iter().enumerate() {
+            commands.copy_data_to_image(
+                self.image,
+                asset.as_bytes(),
+                ImageSubresourceLayers::new(ImageAspect::Color, 0, i as u32, 1),
+                None,
+                None,
+            ).unwrap();
+        }
+        let vertices = unsafe { slice_as_bytes(CUBE_VERTICES) }.unwrap();
+        commands.copy_data_to_buffer(
+            self.vertex_buffer,
+            vertices, 0, vertices.len() as u64,
+        ).unwrap();
+        let vertices_instance = unsafe { slice_as_bytes(CUBE_OFF) }.unwrap();
+        commands.copy_data_to_buffer(
+            self.vertex_instance_buffer,
+            vertices_instance, 0, vertices_instance.len() as u64
+        ).unwrap();
+        let indices = unsafe { slice_as_bytes(CUBE_INDICES) }.unwrap();
+        commands.copy_data_to_buffer(
+            self.index_buffer,
+            indices,
+            0,
+            indices.len() as u64,
+        ).unwrap();
+        Ok(())
+    }
+
     fn render_commands(
         &mut self,
         pass: PassID,
         commands: &mut RenderCommands,
-    ) -> Result<(), nox::renderer::Error>
+    ) -> Result<(), Error>
     {
         match pass {
             x if x == self.fire_pass => {
@@ -1070,45 +1138,18 @@ impl Interface for App {
         Ok(())
     }
 
-    fn transfer_commands(
+    fn clean_up(
         &mut self,
-        id: nox::renderer::CommandRequestID,
-        commands: &mut nox::renderer::TransferCommands,
-    ) -> Result<(), Error>
+        renderer: &mut RendererContext,
+    )
     {
-        if id == self.fire_transfer_id {
-            for image in &self.fire_images {
-                commands.clear_color_image(*image, [0.0, 0.0, 0.0, 0.0].into(), None)?;
-            }
-            return Ok(())
-        }
-        for (i, asset) in self.assets.iter().enumerate() {
-            commands.copy_data_to_image(
-                self.image,
-                asset.as_bytes(),
-                ImageSubresourceLayers::new(ImageAspect::Color, 0, i as u32, 1),
-                None,
-                None,
-            ).unwrap();
-        }
-        let vertices = unsafe { slice_as_bytes(CUBE_VERTICES) }.unwrap();
-        commands.copy_data_to_buffer(
-            self.vertex_buffer,
-            vertices, 0, vertices.len() as u64,
-        ).unwrap();
-        let vertices_instance = unsafe { slice_as_bytes(CUBE_OFF) }.unwrap();
-        commands.copy_data_to_buffer(
-            self.vertex_instance_buffer,
-            vertices_instance, 0, vertices_instance.len() as u64
-        ).unwrap();
-        let indices = unsafe { slice_as_bytes(CUBE_INDICES) }.unwrap();
-        commands.copy_data_to_buffer(
-            self.index_buffer,
-            indices,
-            0,
-            indices.len() as u64,
-        ).unwrap();
-        Ok(())
+        renderer.edit_resources(|r| {
+            let mut file = File::create(&self.cache_dir)?;
+            let data = r.retrieve_pipeline_cache_data(self.pipeline_cache)?;
+            file.write(&data)?;
+            println!("cache written, len {}", data.len());
+            Ok(())
+        }).ok();
     }
 }
 

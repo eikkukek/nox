@@ -1,16 +1,16 @@
 #![allow(unused_variables)]
 
-use crate::renderer::{
-    self,
-    frame_graph::PassID,
-    *,
+use crate::{
+    renderer::{
+        frame_graph::*,
+        *,
+    },
 };
 
 use super::{
     Nox,
     InitSettings,
-    Error,
-    renderer::frame_graph::FrameGraphInit,
+    Error
 };
 
 pub trait Interface
@@ -40,23 +40,28 @@ pub trait Interface
     fn compute(
         &mut self,
         commands: &mut ComputeCommands,
-    ) -> Result<(), renderer::Error>;
+    ) -> Result<(), Error>;
 
     fn render<'a>(
         &mut self,
         frame_graph: &'a mut dyn FrameGraphInit,
         pending_transfers: &[CommandRequestID],
-    ) -> Result<(), renderer::Error>;
-
-    fn render_commands(
-        &mut self,
-        pass: PassID,
-        commands: &mut RenderCommands,
-    ) -> Result<(), renderer::Error>;
+    ) -> Result<(), Error>;
 
     fn transfer_commands(
         &mut self,
         id: CommandRequestID,
         commands: &mut TransferCommands,
-    ) -> Result<(), renderer::Error>;
+    ) -> Result<(), Error>;
+
+    fn render_commands(
+        &mut self,
+        pass: PassID,
+        commands: &mut RenderCommands,
+    ) -> Result<(), Error>;
+
+    fn clean_up(
+        &mut self,
+        renderer: &mut RendererContext,
+    );
 }

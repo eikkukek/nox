@@ -54,7 +54,7 @@ impl TransferCommands {
             command_buffer,
             command_pool,
             global_resources,
-            staging_buffers: GlobalVec::with_capacity(staging_buffer_capacity as usize)?,
+            staging_buffers: GlobalVec::with_capacity(staging_buffer_capacity as usize),
             linear_device_alloc,
             fence: None,
             transfer_queue_index,
@@ -277,9 +277,7 @@ impl TransferCommands {
             );
         };
 
-        self.staging_buffers
-            .push(staging_buffer)
-            .unwrap();
+        self.staging_buffers.push(staging_buffer);
 
         if dst_state.queue_family_index != state.queue_family_index {
             dst_state.queue_family_index = state.queue_family_index;
@@ -388,9 +386,7 @@ impl TransferCommands {
             );
         };
 
-        self.staging_buffers
-            .push(staging_buffer)
-            .unwrap();
+        self.staging_buffers.push(staging_buffer);
 
         if dst_state.queue_family_index != state.queue_family_index {
             dst_state.queue_family_index = state.queue_family_index;

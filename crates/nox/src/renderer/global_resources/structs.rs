@@ -112,13 +112,40 @@ impl Drop for ComputePipeline {
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct ComputePipelineID(pub(super) SlotIndex<ComputePipeline>);
 
+pub(crate) struct PipelineCache {
+    pub device: Arc<ash::Device>,
+    pub handle: vk::PipelineCache,
+}
+
+impl Drop for PipelineCache {
+    
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_pipeline_cache(self.handle, None);
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PipelineCacheID(pub(super) SlotIndex<PipelineCache>);
+
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct ImageID(pub(super) SlotIndex<Arc<Image>>);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct Sampler {
+    pub device: Arc<ash::Device>,
     pub handle: vk::Sampler,
     pub _builder: SamplerBuilder,
+}
+
+impl Drop for Sampler {
+
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_sampler(self.handle, None);
+        }
+    }
 }
 
 #[derive(Default, Clone, Copy)]

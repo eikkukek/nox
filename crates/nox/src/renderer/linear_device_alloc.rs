@@ -154,11 +154,11 @@ impl LinearDeviceAlloc {
     ) -> Result<Self>
     {
         let memory_properties = physical_device_info.memory_properties();
-        let mut blocks = GlobalVec::with_capacity(4).unwrap();
+        let mut blocks = GlobalVec::with_capacity(4);
         for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize].iter().enumerate() {
             let property_flags = memory_type.property_flags;
             if has_bits!(property_flags, required_properties) && !property_flags.intersects(forbidden_properties) {
-                blocks.push((GlobalVec::with_len(1, Block::new()).unwrap(), i as u32, 0)).unwrap();
+                blocks.push((GlobalVec::with_len(1, Block::new()), i as u32, 0));
             }
         }
         Ok(Self {
@@ -265,7 +265,7 @@ impl MemoryBinder for LinearDeviceAlloc {
                     if let Error::OutOfDeviceMemory { size: _, align: _, avail: _ } = err {
                         *free_index += 1;
                         if *free_index == blocks.len() {
-                            blocks.push(Block::new()).unwrap();
+                            blocks.push(Block::new());
                         }
                         res = blocks[*free_index].bind_image_memory(
                             device, image, memory_requirements, self.block_size, *type_index, self.granularity,
@@ -291,7 +291,7 @@ impl MemoryBinder for LinearDeviceAlloc {
                     if let Error::OutOfDeviceMemory { size: _, align: _, avail: _ } = err {
                         *free_index += 1;
                         if *free_index == blocks.len() {
-                            blocks.push(Block::new()).unwrap();
+                            blocks.push(Block::new());
                         }
                         res = blocks[*free_index].bind_buffer_memory(
                             device, buffer, memory_requirements, self.block_size, *type_index, self.granularity, self.map_memory

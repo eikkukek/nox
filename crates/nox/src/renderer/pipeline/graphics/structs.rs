@@ -291,8 +291,7 @@ impl ColorBlendInfo {
         self.color_blend_attachment_states
             .push(
                 ColorOutputState(write_mask, blend_state).into()
-            )
-            .unwrap();
+            );
     }
 
     pub fn attachments(&self) -> &[vk::PipelineColorBlendAttachmentState] {

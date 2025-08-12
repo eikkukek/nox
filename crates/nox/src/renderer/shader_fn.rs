@@ -2,7 +2,7 @@ use crate::Version;
 
 #[inline(always)]
 pub fn glsl_to_spirv(
-    src: &str,
+    input: &str,
     input_name: &str,
     shader_kind: shaderc::ShaderKind,
     vulkan_version: Version,
@@ -17,7 +17,7 @@ pub fn glsl_to_spirv(
     options.set_source_language(shaderc::SourceLanguage::GLSL);
     options.set_optimization_level(shaderc::OptimizationLevel::Performance);
     Ok(compiler.compile_into_spirv(
-        src,
+        input,
         shader_kind,
         input_name,
         "main",

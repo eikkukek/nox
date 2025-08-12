@@ -22,7 +22,7 @@ impl Outline {
 
     #[inline(always)]
     fn insert_vertex(&mut self, vert: Vec2) {
-        self.vertices.push(vert).unwrap();
+        self.vertices.push(vert);
     }
 
     #[inline(always)]
@@ -40,7 +40,7 @@ impl Outline {
 
     #[inline(always)]
     fn join(&self, vertices: &mut GlobalVec<Vec2>) {
-        vertices.append(&self.vertices).unwrap();
+        vertices.append(&self.vertices);
     }
 }
 
@@ -99,28 +99,20 @@ impl OutlineBuilder {
 
     fn finalize(self) -> Result<(GlobalVec<Vec2>, GlobalVec<u32>), earcutr::Error> {
 
-        let mut outers = GlobalVec
-            ::with_capacity(self.outlines.len())
-            .unwrap();
-        let mut holes = GlobalVec
-            ::with_capacity(self.outlines.len())
-            .unwrap();
+        let mut outers = GlobalVec::with_capacity(self.outlines.len());
+        let mut holes = GlobalVec::with_capacity(self.outlines.len());
 
         for outline in &self.outlines {
             if outline.is_clock_wise() {
-                holes.push(outline).unwrap();
+                holes.push(outline);
             } else {
-                outers.push(outline).unwrap();
+                outers.push(outline);
             }
         }
 
-        let mut vertices = GlobalVec
-            ::with_capacity(self.vertex_count as usize)
-            .unwrap();
+        let mut vertices = GlobalVec::with_capacity(self.vertex_count as usize);
 
-        let mut indices = GlobalVec
-            ::with_capacity(3 * self.vertex_count as usize)
-            .unwrap();
+        let mut indices = GlobalVec::with_capacity(3 * self.vertex_count as usize);
 
         for outer in &outers {
             let offset = vertices.len();
@@ -130,7 +122,7 @@ impl OutlineBuilder {
             for hole in &holes {
                 let p = hole.vertices[0];
                 if point_in_polygon(p, &outer.vertices) {
-                    hole_indices.push(index_offset).unwrap();
+                    hole_indices.push(index_offset);
                     index_offset += hole.vertices.len();
                     hole.join(&mut vertices);
                 }
@@ -139,8 +131,7 @@ impl OutlineBuilder {
                 .append_map(
                     &earcutr::earcut(flatten_vertices(&vertices[offset..vertices.len()]), &hole_indices, 2)?,
                     |v| *v as u32
-                )
-            .unwrap();
+                );
         }
         
         Ok((
@@ -243,8 +234,7 @@ impl ttf_parser::OutlineBuilder for OutlineBuilder {
         let outline = self.current_outline.take().unwrap();
         self.vertex_count += outline.vertices.len() as u32;
         self.outlines
-            .push(outline)
-            .unwrap();
+            .push(outline);
         self.current_outline = Some(Outline::new());
     }
 }

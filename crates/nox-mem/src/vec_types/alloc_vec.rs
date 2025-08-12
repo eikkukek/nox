@@ -220,9 +220,9 @@ impl<T> GlobalVec<T> {
 
     pub fn with_capacity(
         capacity: usize,
-    ) -> Result<Self> {
+    ) -> Self {
         if capacity == 0 {
-            return Ok(Default::default())
+            return Default::default()
         }
         let true_capacity =
             if <Self as Vector<T>>::CapacityPol::power_of_two() {
@@ -240,26 +240,26 @@ impl<T> GlobalVec<T> {
                 else {
                     AllocFailed { new_capacity: true_capacity }
                 }
-            })?.into()
+            }).unwrap().into()
         };
-        Ok(Self {
+        Self {
             data,
             capacity: true_capacity,
             len: 0,
             alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
             _markers: PhantomData,
-        })
+        }
     }
 
     pub fn with_len(
         len: usize,
         value: T,
-    ) -> Result<Self>
+    ) -> Self
         where
             T: Clone
     {
         if len == 0 {
-            return Ok(Default::default())
+            return Default::default()
         }
         let capacity =
             if <Self as Vector<T>>::CapacityPol::power_of_two() {
@@ -277,29 +277,29 @@ impl<T> GlobalVec<T> {
                 else {
                     AllocFailed { new_capacity: capacity }
                 }
-            })?.into()
+            }).unwrap().into()
         };
         for i in 0..len {
             unsafe { data.add(i).write(value.clone()) };
         }
-        Ok(Self {
+        Self {
             data,
             capacity,
             len,
             alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
             _markers: PhantomData,
-        })
+        }
     }
 
     pub fn with_len_with<F>(
         len: usize,
         mut f: F,
-    ) -> Result<Self>
+    ) -> Self
         where
             F: FnMut() -> T,
     {
         if len == 0 {
-            return Ok(Default::default())
+            return Default::default()
         }
         let capacity =
             if <Self as Vector<T>>::CapacityPol::power_of_two() {
@@ -317,18 +317,52 @@ impl<T> GlobalVec<T> {
                 else {
                     AllocFailed { new_capacity: capacity }
                 }
-            })?.into()
+            }).unwrap().into()
         };
         for i in 0..len {
             unsafe { data.add(i).write(f()) };
         }
-        Ok(Self {
+        Self {
             data,
             capacity,
             len,
             alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
             _markers: PhantomData,
-        })
+        }
+    }
+
+    #[inline(always)]
+    pub fn reserve(&mut self, capacity: usize) {
+        <Self as Vector<T>>::reserve(self, capacity).unwrap()
+    }
+
+    #[inline(always)]
+    pub fn push(&mut self, value: T) -> &mut T {
+        <Self as Vector<T>>::push(self, value).unwrap()
+    }
+
+    #[inline(always)]
+    pub fn resize(&mut self, len: usize, value: T)
+        where
+            T: Clone
+    {
+        <Self as Vector<T>>::resize(self, len, value).unwrap()
+    }
+
+    #[inline(always)]
+    pub fn append(&mut self, slice: &[T])
+        where
+            T: Clone
+    {
+        <Self as Vector<T>>::append(self, slice).unwrap()
+    }
+
+    #[inline(always)]
+    pub fn append_map<U, F>(&mut self, slice: &[U], f: F)
+        where
+            F: FnMut(&U) -> T
+    {
+        <Self as Vector<T>>::append_map(self, slice, f).unwrap()
     }
 }
 
@@ -818,7 +852,7 @@ impl_traits!{
 
         #[inline(always)]
         fn clone(&self) -> Self {
-            let mut clone = GlobalVec::with_capacity(self.capacity).unwrap();
+            let mut clone = GlobalVec::with_capacity(self.capacity);
             unsafe {
                 self.data.clone_elements(clone.data, self.len);
             }
@@ -831,7 +865,7 @@ impl_traits!{
         #[inline(always)]
         fn from(value: &[T]) -> Self {
             let len = value.len();
-            let mut vec = GlobalVec::with_capacity(len).unwrap();
+            let mut vec = GlobalVec::with_capacity(len);
             unsafe {
                 Pointer
                     ::new(value.as_ptr() as _)

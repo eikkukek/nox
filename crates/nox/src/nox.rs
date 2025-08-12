@@ -73,6 +73,10 @@ impl<'mem, I: Interface> Drop for Nox<'mem, I> {
 
     fn drop(&mut self) {
         if let Some(mut renderer) = self.renderer.take() {
+            self.interface
+                .write()
+                .unwrap()
+                .clean_up(&mut renderer.renderer_context());
             renderer.clean_up(self.memory.renderer_allocators());
         }
     }
