@@ -306,6 +306,12 @@ pub enum PresentResult {
     OutOfDate,
 }
 
+pub struct SubmitSemaphores {
+    pub wait_semaphore: vk::Semaphore,
+    pub wait_stage: vk::PipelineStageFlags,
+    pub signal_semaphore: vk::Semaphore,
+}
+
 pub struct SwapchainContext<'mem> {
     resources: Resources<'mem>,
     images: FixedVec<'mem, vk::Image, ArenaAlloc>,
@@ -562,7 +568,7 @@ impl<'mem> SwapchainContext<'mem> {
         device: &ash::Device,
         src_image_state: ImageState,
         graphics_queue_index: u32,
-    ) -> (vk::SubmitInfo<'_>, vk::Fence) {
+    ) -> (SubmitSemaphores, vk::Fence) {
         let (untied_resources, command_buffer) = self.resources.get_untied_resources(self.frame_index);
         let tied_resources = self.resources.get_tied_resources(self.image_index);
         let image_index = self.image_index as usize;
@@ -589,18 +595,11 @@ impl<'mem> SwapchainContext<'mem> {
             );
         }
         self.image_states[image_index] = dst_image_state;
-        const WAIT_STAGE_MASK: vk::PipelineStageFlags = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         (
-            vk::SubmitInfo {
-                s_type: vk::StructureType::SUBMIT_INFO,
-                wait_semaphore_count: 1,
-                p_wait_semaphores: &untied_resources.image_ready_semaphore,
-                p_wait_dst_stage_mask: &WAIT_STAGE_MASK,
-                command_buffer_count: 1,
-                p_command_buffers: command_buffer,
-                signal_semaphore_count: 1,
-                p_signal_semaphores: &tied_resources.present_wait_semaphore,
-                ..Default::default()
+            SubmitSemaphores {
+                wait_semaphore: untied_resources.image_ready_semaphore,
+                wait_stage: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                signal_semaphore: tied_resources.present_wait_semaphore,
             },
             untied_resources.frame_ready_fence,
         )

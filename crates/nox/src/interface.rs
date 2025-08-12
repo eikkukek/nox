@@ -25,12 +25,22 @@ pub trait Interface
         renderer: &mut RendererContext,
     ) -> Result<(), Error>;
 
+    fn frame_buffer_size_callback(
+        &mut self,
+        renderer: &mut RendererContext
+    ) -> Result<(), Error>;
+
     fn update(
         &mut self,
         nox: &mut Nox<Self>,
         renderer: &mut RendererContext,
         frame_buffer_size: (u32, u32),
     );
+
+    fn compute(
+        &mut self,
+        commands: &mut ComputeCommands,
+    ) -> Result<(), renderer::Error>;
 
     fn render<'a>(
         &mut self,
@@ -47,6 +57,6 @@ pub trait Interface
     fn transfer_commands(
         &mut self,
         id: CommandRequestID,
-        command_buffer: &mut TransferCommandbuffer,
+        commands: &mut TransferCommands,
     ) -> Result<(), renderer::Error>;
 }

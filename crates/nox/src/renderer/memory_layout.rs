@@ -12,6 +12,7 @@ pub struct MemoryLayout {
     uniform_sampled_images: u32,
     uniform_buffers: u32,
     uniform_storage_buffers: u32,
+    uniform_storage_images: u32,
 }
 
 impl MemoryLayout {
@@ -28,6 +29,7 @@ impl MemoryLayout {
             uniform_sampled_images: 4096,
             uniform_buffers: 2048,
             uniform_storage_buffers: 1024,
+            uniform_storage_images: 1024,
         }
     }
 
@@ -69,5 +71,9 @@ impl MemoryLayout {
 
     pub fn uniform_storage_buffers(&self) -> u32 {
         self.uniform_storage_buffers
+    }
+
+    pub fn uniform_storage_images(&self) -> u32 {
+        self.uniform_storage_images
     }
 }

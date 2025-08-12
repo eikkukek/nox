@@ -39,9 +39,10 @@ pub struct GlobalResources {
     device: Arc<ash::Device>,
     instance: Arc<ash::Instance>,
     physical_device: vk::PhysicalDevice,
-    graphics_pipelines: GlobalSlotMap<GraphicsPipeline>,
     shaders: GlobalSlotMap<Shader>,
     pipeline_layouts: GlobalSlotMap<pipeline::PipelineLayout>,
+    graphics_pipelines: GlobalSlotMap<GraphicsPipeline>,
+    compute_pipelines: GlobalSlotMap<ComputePipeline>,
     shader_resources: GlobalSlotMap<ShaderResource>,
     images: GlobalSlotMap<Arc<Image>>,
     buffers: GlobalSlotMap<Buffer>,
@@ -116,9 +117,10 @@ impl GlobalResources {
             device,
             physical_device,
             instance,
-            graphics_pipelines: GlobalSlotMap::with_capacity(16).unwrap(),
             shaders: GlobalSlotMap::with_capacity(16).unwrap(),
             pipeline_layouts: GlobalSlotMap::with_capacity(16).unwrap(),
+            graphics_pipelines: GlobalSlotMap::with_capacity(16).unwrap(),
+            compute_pipelines: GlobalSlotMap::with_capacity(16).unwrap(),
             shader_resources: GlobalSlotMap::with_capacity(16).unwrap(),
             images: GlobalSlotMap::with_capacity(16).unwrap(),
             buffers: GlobalSlotMap::with_capacity(16).unwrap(),
@@ -332,7 +334,12 @@ impl GlobalResources {
                 let vk_info = vk::DescriptorImageInfo {
                     sampler,
                     image_view,
-                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    image_layout:
+                        if info.storage_image {
+                            vk::ImageLayout::GENERAL
+                        } else {
+                            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+                        },
                 };
                 vk_infos.push(vk_info).unwrap();
             }
@@ -422,25 +429,21 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn create_graphics_pipelines<F>(
+    pub fn create_graphics_pipelines(
         &mut self,
         infos: &[pipeline::GraphicsPipelineInfo],
-        mut collect: F,
+        mut collect: impl FnMut(usize, GraphicsPipelineID),
         alloc: &impl Allocator,
     ) -> Result<(), Error>
-        where
-            F: FnMut(usize, GraphicsPipelineID)
     {
         let pipeline_count = infos.len();
         if pipeline_count == 0 {
             return Ok(())
         }
         let mut create_infos = FixedVec::with_capacity(pipeline_count, alloc)?;
-        for info in infos {
-            create_infos.push(info.as_create_info(&self, alloc)?).unwrap();
-        }
         let mut vk_infos = FixedVec::with_capacity(pipeline_count, alloc)?;
-        for info in &create_infos {
+        for info in infos {
+            let info = create_infos.push(info.as_create_info(&self, alloc)?).unwrap();
             const VIEWPORT_STATE: vk::PipelineViewportStateCreateInfo = vk::PipelineViewportStateCreateInfo {
                 s_type: vk::StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
                 p_next: core::ptr::null(),
@@ -471,7 +474,7 @@ impl GlobalResources {
         }
         let mut pipelines = FixedVec::with_capacity(create_infos.len(), alloc)?;
         unsafe {
-            let device = &self.device;
+            let device = &*self.device;
             let result = (device.fp_v1_0().create_graphics_pipelines)(
                 device.handle(),
                 vk::PipelineCache::null(),
@@ -489,9 +492,9 @@ impl GlobalResources {
             let info = &infos[i];
             let index = self.graphics_pipelines.insert(GraphicsPipeline {
                 device: self.device.clone(),
+                handle: *handle,
                 _color_formats: info.color_output_formats.clone(),
                 _dynamic_states: info.dynamic_states.clone(),
-                handle: *handle,
                 layout_id: info.layout_id,
                 samples: info.sample_shading_info.map(|v| v.samples).unwrap_or(MSAA::X1),
                 _depth_format: info.depth_output_format,
@@ -502,13 +505,61 @@ impl GlobalResources {
         Ok(())
     }
 
-    pub fn destroy_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
+    pub fn destroy_graphics_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
         self.graphics_pipelines.remove(id.0).map_err(Into::into).map(|_| {})
+    }
+
+    pub fn create_compute_pipelines(
+        &mut self,
+        infos: &[pipeline::ComputePipelineInfo],
+        mut collect: impl FnMut(usize, ComputePipelineID),
+        alloc: &impl Allocator,
+    ) -> Result<(), Error>
+    {
+        let pipeline_count = infos.len();
+        if pipeline_count == 0 {
+            return Ok(())
+        }
+        let mut vk_infos = FixedVec::with_capacity(pipeline_count, alloc)?;
+        for info in infos {
+            vk_infos.push(info.as_create_info(self)?).unwrap();
+        }
+        let mut pipelines = FixedVec::with_capacity(vk_infos.len(), alloc)?;
+        unsafe {
+            let device = &*self.device;
+            let result = (self.device.fp_v1_0().create_compute_pipelines)(
+                device.handle(),
+                vk::PipelineCache::null(),
+                vk_infos.len() as u32,
+                vk_infos.as_ptr(),
+                core::ptr::null(),
+                pipelines.as_mut_ptr(),
+
+            );
+            if result != vk::Result::SUCCESS {
+                return Err(result.into())
+            }
+            pipelines.set_len(vk_infos.len());
+        };
+        for (i, handle) in pipelines.iter().enumerate() {
+            let info = &infos[i];
+            let index = self.compute_pipelines.insert(ComputePipeline {
+                device: self.device.clone(),
+                handle: *handle,
+                layout_id: info.layout_id,
+            });
+            collect(i, ComputePipelineID(index));
+        }
+        Ok(())
+    }
+
+    pub fn destroy_compute_pipeline(&mut self, id: ComputePipelineID) -> Result<(), Error> {
+        self.compute_pipelines.remove(id.0).map_err(Into::into).map(|_| {})
     }
 
     pub(crate) fn pipeline_get_shader_resource<'a, F, Alloc>(
         &self,
-        id: GraphicsPipelineID,
+        layout_id: PipelineLayoutID,
         mut f: F,
         alloc: &'a Alloc,
     ) -> Result<(vk::PipelineLayout, FixedVec<'a, vk::DescriptorSet, Alloc>), Error>
@@ -516,8 +567,7 @@ impl GlobalResources {
             F: FnMut(u32) -> ShaderResourceID,
             Alloc: Allocator,
     {
-        let pipeline = self.graphics_pipelines.get(id.0)?;
-        let layout = self.pipeline_layouts.get(pipeline.layout_id.0)?;
+        let layout = self.pipeline_layouts.get(layout_id.0)?;
         let sets = layout.pipeline_descriptor_sets();
         let mut res = FixedVec::with_capacity(sets.len(), alloc)?;
         for (i, set) in sets.iter().enumerate() {
@@ -534,7 +584,7 @@ impl GlobalResources {
 
     pub(crate) fn pipeline_get_push_constants<'a, 'b, F, Alloc>(
         &self,
-        id: GraphicsPipelineID,
+        layout_id: PipelineLayoutID,
         mut f: F,
         alloc: &'a Alloc,
     ) -> Result<(vk::PipelineLayout, FixedVec<'a, (vk::PushConstantRange, &'b [u8]), Alloc>), Error>
@@ -542,8 +592,7 @@ impl GlobalResources {
             F: FnMut(PushConstant) -> &'b [u8],
             Alloc: Allocator,
     {
-        let pipeline = self.graphics_pipelines.get(id.0)?;
-        let layout = self.pipeline_layouts.get(pipeline.layout_id.0)?;
+        let layout = self.pipeline_layouts.get(layout_id.0)?;
         let push_constants = layout.push_constant_ranges();
         let mut res = FixedVec::with_capacity(push_constants.len(), alloc)?;
         for pc in push_constants.iter().map(|v| *v) {
@@ -554,8 +603,13 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_pipeline(&self, id: GraphicsPipelineID) -> Result<&GraphicsPipeline, SlotMapError> {
+    pub(crate) fn get_graphics_pipeline(&self, id: GraphicsPipelineID) -> Result<&GraphicsPipeline, SlotMapError> {
         self.graphics_pipelines.get(id.0)
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_compute_pipeline(&self, id: ComputePipelineID) -> Result<&ComputePipeline, SlotMapError> {
+        self.compute_pipelines.get(id.0)
     }
 
     #[inline(always)]

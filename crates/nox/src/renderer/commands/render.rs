@@ -96,7 +96,7 @@ impl<'a> RenderCommands<'a> {
     #[inline(always)]
     pub fn bind_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
         let g = self.global_resources.read().unwrap();
-        let pipeline = g.get_pipeline(id)?;
+        let pipeline = g.get_graphics_pipeline(id)?;
         assert!(pipeline.samples == self.current_sample_count,
             "pipeline sample count must match pass sample count, pass sample count {:?}, pipeline sample count {:?}",
             self.current_sample_count, pipeline.samples,
@@ -118,8 +118,11 @@ impl<'a> RenderCommands<'a> {
     {
         let guard = ArenaGuard::new(&*self.tmp_alloc);
         let g = self.global_resources.read().unwrap();
+        let pipeline = g.get_graphics_pipeline(
+            self.current_pipeline.expect("attempting to bind shader resources with no pipeline attached")
+        )?;
         let (layout, sets) = g.pipeline_get_shader_resource(
-            self.current_pipeline.expect("attempting to bind shader resources with no pipeline attached"),
+            pipeline.layout_id,
             f,
             &guard,
         )?;
@@ -144,8 +147,11 @@ impl<'a> RenderCommands<'a> {
     {
         let guard = ArenaGuard::new(&*self.tmp_alloc);
         let g = self.global_resources.read().unwrap();
+        let pipeline = g.get_graphics_pipeline(
+            self.current_pipeline.expect("attempting to bind shader resources with no pipeline attached")
+        )?;
         let (layout, pcs) = g.pipeline_get_push_constants(
-            self.current_pipeline.expect("attempting to push constants with not pipeline attached"),
+            pipeline.layout_id,
             f,
             &guard,
         )?;
@@ -219,5 +225,13 @@ impl<'a> RenderCommands<'a> {
             );
         }
         Ok(())
+    }
+
+    #[inline(always)]
+    pub fn draw_bufferless(&self, vertex_count: u32, instance_count: u32) {
+        assert!(self.current_pipeline.is_some(), "attempting to draw with no pipeline attached");
+        unsafe {
+            self.device.cmd_draw(self.command_buffer, vertex_count, instance_count, 0, 0);
+        }
     }
 }

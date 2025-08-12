@@ -1,12 +1,12 @@
-pub mod graphics;
-pub mod layout;
 pub mod vertex_input;
+mod layout;
+mod graphics;
+mod compute;
 
-pub(crate) use layout::{
-    PipelineLayout,
-};
+pub(crate) use layout::*;
 
 pub use graphics::*;
+pub use compute::*;
 
 use ash::vk;
 

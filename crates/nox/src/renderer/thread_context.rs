@@ -50,7 +50,7 @@ impl ThreadContext {
         self.transfer_pool
     }
 
-    pub fn _compute_pool(&self) -> vk::CommandPool {
+    pub fn compute_pool(&self) -> vk::CommandPool {
         self.compute_pool
     }
 }

@@ -120,6 +120,7 @@ impl Allocators {
 pub struct RendererContext {
     global_resources: Arc<RwLock<GlobalResources>>,
     pub(crate) command_requests: CommandRequests,
+    frame_buffer_size: image::Dimensions,
 }
 
 impl RendererContext {
@@ -135,20 +136,33 @@ impl RendererContext {
     pub fn command_requests(&mut self) -> &mut CommandRequests {
         &mut self.command_requests
     }
+
+    pub fn frame_buffer_size(&self) -> image::Dimensions {
+        self.frame_buffer_size
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ComputeState {
+    command_buffer: vk::CommandBuffer,
+    semaphore: vk::Semaphore,
+    timeline_value: u64,
 }
 
 pub struct Renderer<'mem> {
-    transfer_commands: Arc<RwLock<GlobalVec<TransferCommandbuffer>>>,
+    transfer_commands: Arc<RwLock<GlobalVec<TransferCommands>>>,
     main_thread_context: ThreadContext,
     thread_contexts: Arc<RwLock<FxHashMap<ThreadId, ThreadContext>>>,
     frame_states: ArrayVec<Rc<RefCell<FrameState>>, {MAX_BUFFERED_FRAMES as usize}>,
+    compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
     swapchain_pass_pipeline_data: SwapchainPassPipelineData,
     global_resources: Arc<RwLock<GlobalResources>>,
     device: Arc<ash::Device>,
     vulkan_context: VulkanContext<'mem>,
     memory_layout: MemoryLayout,
     buffered_frame_count: u32,
-    tmp_alloc: ArenaAlloc,
+    tmp_alloc: Arc<ArenaAlloc>,
+    frame_buffer_size: image::Dimensions,
 }
 
 impl<'mem> Renderer<'mem> {
@@ -166,7 +180,7 @@ impl<'mem> Renderer<'mem> {
         buffered_frame_count = clamp(buffered_frame_count, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
         assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
         allocators.realloc_frame_graphs(buffered_frame_count);
-        let tmp_alloc = ArenaAlloc::new(memory_layout.tmp_size()).ok_or(format!("failed to create tmp alloc"))?;
+        let tmp_alloc = Arc::new(ArenaAlloc::new(memory_layout.tmp_size()).ok_or(format!("failed to create tmp alloc"))?);
         let vulkan_context = VulkanContext
             ::new(
                 window,
@@ -205,6 +219,7 @@ impl<'mem> Renderer<'mem> {
             thread_contexts: Default::default(),
             vulkan_context,
             frame_states: Default::default(),
+            compute_states: Default::default(),
             swapchain_pass_pipeline_data,
             global_resources: global_resources.clone(),
             device: device.clone(),
@@ -212,6 +227,7 @@ impl<'mem> Renderer<'mem> {
             buffered_frame_count,
             transfer_commands: Default::default(),
             tmp_alloc,
+            frame_buffer_size: image::Dimensions::new(1, 1, 1),
         };
         let mut frame_states = ArrayVec::new();
         let mut i = 0;
@@ -227,12 +243,54 @@ impl<'mem> Renderer<'mem> {
                     false,
                 ).unwrap();
                 let s = Rc::new(RefCell::new(
-                    FrameState::new(device.clone(), global_resources.clone(), device_alloc)
+                    FrameState::new(device.clone(), global_resources.clone(), device_alloc).unwrap()
                 ));
                 i += 1;
                 s
             }
         ).unwrap();
+        let mut compute_command_buffers = ArrayVec::<vk::CommandBuffer, {MAX_BUFFERED_FRAMES as usize}>::new();
+        let mut compute_semaphores = ArrayVec::<vk::Semaphore, {MAX_BUFFERED_FRAMES as usize}>::new();
+        unsafe {
+            let alloc_info = vk::CommandBufferAllocateInfo {
+                s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                command_pool: s.main_thread_context.compute_pool(),
+                level: vk::CommandBufferLevel::PRIMARY,
+                command_buffer_count: buffered_frame_count,
+                ..Default::default()
+            };
+            let result = (device.fp_v1_0().allocate_command_buffers)(
+                device.handle(),
+                &alloc_info,
+                compute_command_buffers.as_mut_ptr(),
+            );
+            if result != vk::Result::SUCCESS {
+                return Err(format!("failed to allocate compute command buffers {:?}", result))
+            }
+            compute_command_buffers.set_len(buffered_frame_count as usize);
+            let mut timeline_info = vk::SemaphoreTypeCreateInfo {
+                s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
+                semaphore_type: vk::SemaphoreType::TIMELINE,
+                initial_value: 0,
+                ..Default::default()
+            };
+            let mut semaphore_info = vk::SemaphoreCreateInfo {
+                s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
+                ..Default::default()
+            };
+            semaphore_info = semaphore_info.push_next(&mut timeline_info);
+            for _ in 0..buffered_frame_count {
+                let fence = device.create_semaphore(&semaphore_info, None).unwrap();
+                compute_semaphores.push(fence).unwrap();
+            }
+        }
+        for (i, buffer) in compute_command_buffers.iter().enumerate() {
+            s.compute_states.push(ComputeState {
+                command_buffer: *buffer,
+                semaphore: compute_semaphores[i],
+                timeline_value: 0,
+            }).unwrap();
+        }
         s.frame_states = frame_states;
         Ok(s)
     }
@@ -243,10 +301,11 @@ impl<'mem> Renderer<'mem> {
     }
 
     #[inline(always)]
-    pub (crate) fn renderer_context(&mut self) -> RendererContext {
+    pub(crate) fn renderer_context(&mut self) -> RendererContext {
         RendererContext {
             global_resources: self.global_resources.clone(),
             command_requests: CommandRequests::new(),
+            frame_buffer_size: self.frame_buffer_size,
         }
     }
 
@@ -311,7 +370,7 @@ impl<'mem> Renderer<'mem> {
                 helpers
                     ::begin_command_buffer(&device, vk_cmd_buffer)
                     .unwrap();
-                let mut command_buffer = TransferCommandbuffer::new(
+                let mut command_buffer = TransferCommands::new(
                     device,
                     vk_cmd_buffer,
                     command_pool,
@@ -402,7 +461,9 @@ impl<'mem> Renderer<'mem> {
         let swapchain_loader = self.vulkan_context.swapchain_loader().clone();
         let queue_family_indices = self.vulkan_context.queue_family_indices();
         let graphics_queue = self.vulkan_context.graphics_queue();
-        let swapchain_context = self.vulkan_context
+        let compute_queue = self.vulkan_context.compute_queue();
+        let mut render_context = self.renderer_context();
+        let (swapchain_context, recreated) = self.vulkan_context
             .get_swapchain_context(
                 self.main_thread_context.graphics_pool(),
                 &self.tmp_alloc,
@@ -419,6 +480,71 @@ impl<'mem> Renderer<'mem> {
                 Some(r) => r,
                 None => return Ok(())
             };
+        if recreated {
+            println!("{:?}", self.frame_buffer_size);
+            self.frame_buffer_size = frame_data.extent.into();
+            render_context.frame_buffer_size = self.frame_buffer_size;
+            interface
+                .write()
+                .unwrap()
+                .frame_buffer_size_callback(&mut render_context)
+                .map_err(|e| format!("interface frame buffer size callback failed ( {:?} )", e))?;
+        }
+        let compute_state = self.compute_states[frame_data.frame_index as usize];
+        unsafe {
+            device.reset_command_buffer(
+                compute_state.command_buffer, vk::CommandBufferResetFlags::RELEASE_RESOURCES
+            ).unwrap();
+        }
+        helpers::begin_command_buffer(&device, compute_state.command_buffer).unwrap();
+        let mut compute_commands = ComputeCommands::new(
+            self.device.clone(),
+            compute_state.command_buffer,
+            self.global_resources.clone(),
+            &self.tmp_alloc,
+            queue_family_indices.compute_index(),
+        );
+        interface
+            .write()
+            .unwrap()
+            .compute(&mut compute_commands)
+            .map_err(|e| format!("interface failed to record compute commands ( {:?} )", e))?;
+        unsafe {
+            device.end_command_buffer(compute_state.command_buffer).unwrap();
+        }
+        let wait_value = compute_state.timeline_value;
+        let signal_value = compute_state.timeline_value + 1;
+        let mut timeline_submit = vk::TimelineSemaphoreSubmitInfo {
+            s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
+            wait_semaphore_value_count: 1,
+            p_wait_semaphore_values: &wait_value,
+            signal_semaphore_value_count: 1,
+            p_signal_semaphore_values: &signal_value,
+            ..Default::default()
+        };
+        let wait_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+        let mut compute_submit = vk::SubmitInfo {
+            s_type: vk::StructureType::SUBMIT_INFO,
+            command_buffer_count: 1,
+            p_command_buffers: &compute_state.command_buffer,
+            wait_semaphore_count: 1,
+            p_wait_semaphores: &compute_state.semaphore,
+            p_wait_dst_stage_mask: &wait_stage,
+            signal_semaphore_count: 1,
+            p_signal_semaphores: &compute_state.semaphore,
+            ..Default::default()
+        };
+        compute_submit = compute_submit.push_next(&mut timeline_submit);
+        unsafe {
+            let result = device.queue_submit(
+                compute_queue,
+                &[compute_submit],
+                Default::default(),
+            );
+            if let Err(err) = result {
+                return Err(format!("failed to submit to compute queue ( {:?} )", err))
+            }
+        }
         if let Err(e) = helpers::begin_command_buffer(&device, frame_data.command_buffer) {
             return Err(format!("failed to begin command buffer {:?}", e))
         }
@@ -545,7 +671,7 @@ impl<'mem> Renderer<'mem> {
                 frame_state.render_done();
             }
         }
-        let (submit_info, fence) = swapchain_context
+        let (semaphores, fence) = swapchain_context
             .setup_submit(
                 &device,
                 image_state,
@@ -554,7 +680,32 @@ impl<'mem> Renderer<'mem> {
         if let Err(e) = unsafe { device.end_command_buffer(frame_data.command_buffer) } {
             return Err(format!("failed to end command buffer {:?}", e))
         }
-        if let Err(e) = unsafe { device.queue_submit(graphics_queue, slice::from_ref(&submit_info), fence) } {
+        let wait_values = [0, compute_state.timeline_value + 1];
+        let signal_values = [0, compute_state.timeline_value + 2];
+        let wait_semaphores = [semaphores.wait_semaphore, compute_state.semaphore];
+        let wait_stages = [semaphores.wait_stage, vk::PipelineStageFlags::COMPUTE_SHADER];
+        let signal_semaphores = [semaphores.signal_semaphore, compute_state.semaphore];
+        let mut timeline_submit = vk::TimelineSemaphoreSubmitInfo {
+            s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
+            wait_semaphore_value_count: 2,
+            p_wait_semaphore_values: wait_values.as_ptr(),
+            signal_semaphore_value_count: 2,
+            p_signal_semaphore_values: signal_values.as_ptr(),
+            ..Default::default()
+        };
+        let mut submit_info = vk::SubmitInfo {
+            s_type: vk::StructureType::SUBMIT_INFO,
+            wait_semaphore_count: 2,
+            p_wait_semaphores: wait_semaphores.as_ptr(),
+            p_wait_dst_stage_mask: wait_stages.as_ptr(),
+            signal_semaphore_count: 2,
+            p_signal_semaphores: signal_semaphores.as_ptr(),
+            command_buffer_count: 1,
+            p_command_buffers: &frame_data.command_buffer,
+            ..Default::default()
+        };
+        submit_info = submit_info.push_next(&mut timeline_submit);
+        if let Err(e) = unsafe { device.queue_submit(graphics_queue, &[submit_info], fence) } {
             return Err(format!("graphics queue submit failed {:?}", e))
         }
         let present_result = swapchain_context
@@ -563,6 +714,7 @@ impl<'mem> Renderer<'mem> {
         if present_result != PresentResult::Success || frame_data.suboptimal {
             self.vulkan_context.request_swapchain_update(self.buffered_frame_count, window.inner_size());
         }
+        self.compute_states[frame_data.frame_index as usize].timeline_value += 2;
         Ok(())
     }
 
@@ -574,6 +726,13 @@ impl<'mem> Renderer<'mem> {
         for state in &self.frame_states {
             unsafe {
                 state.borrow_mut().force_clean_up();
+            }
+        }
+        for state in &self.compute_states {
+            unsafe {
+                self.device.destroy_semaphore(
+                    state.semaphore, None
+                );
             }
         }
         self.global_resources.write().unwrap().clean_up();

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use nox_mem::vec_types::{Vector, GlobalVec, ArrayVec};
+use nox_mem::vec_types::{ArrayVec, GlobalVec, Vector};
 
 use crate::renderer::{
     *,
@@ -68,11 +68,13 @@ impl PipelineLayout {
         );
         for info in &set_infos {
             let binding_count = info.len() as u32;
-            let flags = &[
-                vk::DescriptorBindingFlags::UPDATE_AFTER_BIND,
-                vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING,
-                vk::DescriptorBindingFlags::PARTIALLY_BOUND,
-            ];
+            let mut flags = GlobalVec::with_capacity(info.len()).unwrap();
+            for _ in 0..binding_count {
+                flags.push(
+                    vk::DescriptorBindingFlags::UPDATE_AFTER_BIND |
+                    vk::DescriptorBindingFlags::UPDATE_UNUSED_WHILE_PENDING
+                ).unwrap();
+            }
             let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo {
                 s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
                 binding_count: binding_count,

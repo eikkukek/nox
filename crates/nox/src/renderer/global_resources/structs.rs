@@ -40,6 +40,7 @@ pub struct ShaderResourceBufferInfo {
 pub struct ShaderResourceImageInfo {
     pub sampler: SamplerID,
     pub image_source: (ImageID, Option<ImageRangeInfo>),
+    pub storage_image: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -72,9 +73,9 @@ pub struct ShaderResourceCopy {
 #[derive(Clone)]
 pub(crate) struct GraphicsPipeline {
     pub device: Arc<ash::Device>,
+    pub handle: vk::Pipeline,
     pub _color_formats: GlobalVec<vk::Format>,
     pub _dynamic_states: GlobalVec<vk::DynamicState>,
-    pub handle: vk::Pipeline,
     pub layout_id: PipelineLayoutID,
     pub _depth_format: vk::Format,
     pub _stencil_format: vk::Format,
@@ -92,6 +93,24 @@ impl Drop for GraphicsPipeline {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct GraphicsPipelineID(pub(super) SlotIndex<GraphicsPipeline>);
+
+pub(crate) struct ComputePipeline {
+    pub device: Arc<ash::Device>,
+    pub handle: vk::Pipeline,
+    pub layout_id: PipelineLayoutID,
+}
+
+impl Drop for ComputePipeline {
+
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_pipeline(self.handle, None);
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub struct ComputePipelineID(pub(super) SlotIndex<ComputePipeline>);
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct ImageID(pub(super) SlotIndex<Arc<Image>>);

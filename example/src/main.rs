@@ -185,15 +185,20 @@ struct App {
     color_format: ColorFormat,
     depth_stencil_format: DepthStencilFormat,
     depth_format: DepthStencilFormat,
+    fire_format: FloatFormat,
     image: ImageID,
+    fire_images: [ImageID; 2],
     sampler: SamplerID,
     vertex_shader: ShaderID,
     fragment_shader: ShaderID,
     outline_vertex: ShaderID,
     outline_fragment: ShaderID,
-    pipeline_layouts: [PipelineLayoutID; 2],
-    pipelines: [GraphicsPipelineID; 2],
-    outline_layout: PipelineLayoutID,
+    fire_effect_compute: ShaderID,
+    fire_effect_vertex: ShaderID,
+    fire_effect_fragment: ShaderID,
+    pipeline_layouts: [PipelineLayoutID; 4],
+    pipelines: [GraphicsPipelineID; 3],
+    fire_pipeline: ComputePipelineID,
     vertex_buffer: BufferID,
     vertex_instance_buffer: BufferID,
     index_buffer: BufferID,
@@ -201,9 +206,13 @@ struct App {
     matrices_map: NonNull<Matrices>,
     light_info_buffer: BufferID,
     light_info_map: NonNull<LightInfo>,
-    shader_resources: [ShaderResourceID; 2],
-    first_pass: PassID,
-    second_pass: PassID,
+    shader_resources: [ShaderResourceID; 4],
+    fire_pass: PassID,
+    cube_pass: PassID,
+    outline_pass: PassID,
+    frame_buffer_size: image::Dimensions,
+    heat_in: u32,
+    fire_transfer_id: CommandRequestID,
     rot: f32,
 }
 
@@ -219,14 +228,19 @@ impl App {
             depth_stencil_format: DepthStencilFormat::D32S8,
             depth_format: DepthStencilFormat::D32,
             image: Default::default(),
+            fire_format: FloatFormat::R32,
+            fire_images: Default::default(),
             sampler: Default::default(),
             vertex_shader: Default::default(),
             fragment_shader: Default::default(),
             outline_vertex: Default::default(),
             outline_fragment: Default::default(),
-            outline_layout: Default::default(),
+            fire_effect_compute: Default::default(),
+            fire_effect_vertex: Default::default(),
+            fire_effect_fragment: Default::default(),
             pipeline_layouts: Default::default(),
             pipelines: Default::default(),
+            fire_pipeline: Default::default(),
             vertex_buffer: Default::default(),
             vertex_instance_buffer: Default::default(),
             index_buffer: Default::default(),
@@ -235,8 +249,12 @@ impl App {
             light_info_buffer: Default::default(),
             light_info_map: NonNull::dangling(),
             shader_resources: Default::default(),
-            first_pass: Default::default(),
-            second_pass: Default::default(),
+            fire_pass: Default::default(),
+            cube_pass: Default::default(),
+            outline_pass: Default::default(),
+            fire_transfer_id: Default::default(),
+            frame_buffer_size: Default::default(),
+            heat_in: 0,
             rot: 0.0,
         }
     }
@@ -251,7 +269,7 @@ impl Interface for App {
     fn init_callback(
         &mut self,
         nox: &mut Nox<Self>,
-        renderer_context: &mut nox::renderer::RendererContext
+        renderer: &mut nox::renderer::RendererContext
     ) -> Result<(), nox::Error>
     {
         println!("GPU: {}", nox.gpu_name());
@@ -275,7 +293,7 @@ impl Interface for App {
                 ::new(path, 4)
                 .map_err(|e| nox::Error::UserError(format!("failed to open {:?} ( {:?} )", path, e)))?;
         }
-        renderer_context.edit_resources(|r| {
+        renderer.edit_resources(|r| {
             self.vertex_shader = r.create_shader(
                 "#version 450
 
@@ -390,6 +408,135 @@ impl Interface for App {
                 "outline fragment",
                 ShaderStage::Fragment,
             )?;
+            self.fire_effect_compute = r.create_shader(
+                "#version 450
+
+                layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+                layout(binding = 0, r32F) uniform image2D smoke_in;
+                layout(binding = 1, r32F) uniform image2D smoke_out;
+
+                layout(push_constant) uniform Params {
+                    float density;
+                    float noise_strength;
+                    float time;
+                } params;
+
+                float rand(vec2 co) {
+                    return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+                }
+
+                void main() {
+
+                    ivec2 uv = ivec2(gl_GlobalInvocationID.xy);
+                    ivec2 size = imageSize(smoke_in);
+
+                    float s = imageLoad(smoke_in, uv).r;
+
+                    float down = imageLoad(smoke_in, uv + ivec2(0, 1)).r;
+                    float right = imageLoad(smoke_in, uv + ivec2(1, 0)).r;
+                    float left = imageLoad(smoke_in, uv - ivec2(1, 0)).r;
+
+                    if (down > right && down > left) {
+                        s = max(mix(s, down, 0.5), s);
+                    }
+                    if (right > left) {
+                        s = mix(s, right, 0.00);
+                    }
+                    else {
+                        s = mix(s, left, 0.00);
+                    }
+
+                    s *= params.density;
+
+                    if (uv.y == size.y - 1 && abs(s) < 0.5) {
+                        s = rand(uv * params.time);
+                        //if (s < 0.7) s = 0.0;
+                        //s = params.noise_strength * s;
+                    }
+
+                    imageStore(smoke_out, uv, vec4(s, 0.0, 0.0, 1.0));
+                }
+                ",
+                "fire effect",
+                ShaderStage::Compute,
+            )?;
+            self.fire_effect_vertex = r.create_shader(
+                "#version 450
+
+                layout(location = 0) out vec2 out_uv;
+
+                vec2 positions[6] = vec2[](
+                    vec2(1.0, 1.0),
+                    vec2(-1.0, 1.0),
+                    vec2(-1.0, -1.0),
+                    vec2(1.0, -1.0),
+                    vec2(1.0, 1.0),
+                    vec2(-1.0, -1.0)
+                );
+
+                vec2 uvs[6] = vec2[](
+                    vec2(0.0, 1.0),
+                    vec2(1.0, 1.0),
+                    vec2(1.0, 0.0),
+                    vec2(0.0, 0.0),
+                    vec2(0.0, 1.0),
+                    vec2(1.0, 0.0)
+                );
+
+                void main() {
+                    int vertex_index = gl_VertexIndex;
+                    out_uv = uvs[vertex_index];
+                    gl_Position = vec4(positions[vertex_index], 0.0, 1.0);
+                }
+                ",
+                "fire effect vertex",
+                ShaderStage::Vertex,
+            )?;
+            self.fire_effect_fragment = r.create_shader(
+                "#version 450
+
+                layout(location = 0) in vec2 in_uv;
+
+                layout(location = 0) out vec4 out_color;
+
+                layout(set = 0, binding = 0) uniform sampler2D fire_tex;
+
+                const float hot = 12.0 / 360.0;
+                const float warm = 188.0 / 360.0;
+
+                const float sat = 1.0;
+                const float light = 0.63;
+
+                float hue_to_rgb(float p, float q, float t) {
+                    if (t < 0.0) t += 1.0;
+                    if (t > 1.0) t -= 1.0;
+                    if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
+                    if (t < 0.5) return q;
+                    if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+                    return p;
+                }
+
+                vec3 hsl_to_rgb(float h, float s, float l) {
+                    const float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+                    const float p = 2.0 * l - q;
+                    float r = hue_to_rgb(p, q, h + 1.0 / 3.0);
+                    float g = hue_to_rgb(p, q, h);
+                    float b = hue_to_rgb(p, q, h - 1.0 / 3.0);
+                    return vec3(r, g, b);
+                }
+
+                void main() {
+                    float r = texture(fire_tex, in_uv).r;
+                    float a = r;
+                    float hue = mix(warm, hot, r);
+                    vec3 rgb = hsl_to_rgb(hue, sat, light);
+                    out_color = vec4(rgb * a, 1.0);
+                }
+                ",
+                "fire effect fragment",
+                ShaderStage::Fragment,
+            )?;
             self.pipeline_layouts = [
                     r.create_pipeline_layout(
                         [self.vertex_shader, self.fragment_shader],
@@ -397,10 +544,13 @@ impl Interface for App {
                     r.create_pipeline_layout(
                         [self.outline_vertex, self.outline_fragment],
                     )?,
+                    r.create_pipeline_layout(
+                        [self.fire_effect_compute],
+                    )?,
+                    r.create_pipeline_layout(
+                        [self.fire_effect_vertex, self.fire_effect_fragment],
+                    )?,
             ];
-            self.outline_layout = r.create_pipeline_layout(
-                [self.outline_vertex, self.outline_fragment],
-            )?;
             self.color_format = r.supported_image_format(
                 &[ColorFormat::SrgbRGBA8, ColorFormat::UnormRGBA8],
                 FormatFeature::SampledImage | FormatFeature::ColorAttachment,
@@ -413,6 +563,10 @@ impl Interface for App {
                 DepthStencilFormat::all_depth(),
                 FormatFeature::SampledImage | FormatFeature::DepthStencilAttachment,
             ).unwrap();
+            self.fire_format = r.supported_image_format(
+                &[FloatFormat::R32],
+                FormatFeature::SampledImage | FormatFeature::StorageImage
+            ).unwrap();
             self.image = r.create_image(
                 &mut r.default_binder(),
                 |builder| {
@@ -422,7 +576,8 @@ impl Interface for App {
                         .with_dimensions(self.assets[0].dim)
                         .with_format(self.color_format, false)
                         .with_array_layers(8);
-            })?;
+                }
+            )?;
             self.sampler = r.create_sampler(
                 |_| {},
             )?;
@@ -484,10 +639,23 @@ impl Interface for App {
                     }),
                     write_enable: true,
                 });
+            let mut fire_effect_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[3]);
+            fire_effect_pipeline_info
+                .with_sample_shading(SampleShadingInfo::new(MSAA::X4, 0.2, false, false))
+                .with_color_output(
+                    self.color_format,
+                    WriteMask::all(),
+                    None,
+                );
             r.create_graphics_pipelines(
-                &[graphics_pipeline_info, outline_pipeline_info],
+                &[graphics_pipeline_info, outline_pipeline_info, fire_effect_pipeline_info],
                 |i, id| { self.pipelines[i] = id; },
                 &GLOBAL_ALLOC
+            )?;
+            let fire_pipeline_info = ComputePipelineInfo::new(self.pipeline_layouts[2]);
+            r.create_compute_pipelines(&[fire_pipeline_info],
+                |_, id| { self.fire_pipeline = id },
+                &GLOBAL_ALLOC,
             )?;
             self.vertex_buffer = r.create_buffer(
                 (CUBE_VERTICES.len() * size_of!(Vertex)) as u64,
@@ -530,6 +698,14 @@ impl Interface for App {
                         layout_id: self.pipeline_layouts[0],
                         set: 1,
                     },
+                    ShaderResourceInfo {
+                        layout_id: self.pipeline_layouts[2],
+                        set: 0,
+                    },
+                    ShaderResourceInfo {
+                        layout_id: self.pipeline_layouts[3],
+                        set: 0,
+                    },
                 ],
                 |i, v| self.shader_resources[i] = v,
                 &GLOBAL_ALLOC,
@@ -543,6 +719,7 @@ impl Interface for App {
                         infos: &[ShaderResourceImageInfo {
                             sampler: self.sampler,
                             image_source: (self.image, None),
+                            storage_image: false,
                         }]
                     },
                 ],
@@ -573,9 +750,42 @@ impl Interface for App {
             )?;
             Ok(())
         })?;
-        renderer_context
+        renderer
             .command_requests()
             .add_transfer_request(TransferRequest::new(1));
+        self.frame_buffer_size = renderer.frame_buffer_size();
+        Ok(())
+    }
+
+    fn frame_buffer_size_callback(
+        &mut self,
+        renderer: &mut RendererContext
+    ) -> Result<(), nox::Error>
+    {
+        renderer.edit_resources(|r| {
+            for image in self.fire_images.iter_mut() {
+                if r.is_valid_image(*image) {
+                    r.destroy_image(*image)?;
+                }
+                *image = r.create_image(
+                    &mut r.default_binder(),
+                    |builder| {
+                        builder
+                            .with_usage(ImageUsage::Storage)
+                            .with_usage(ImageUsage::Sampled)
+                            .with_usage(ImageUsage::TransferDst)
+                            .with_dimensions(renderer.frame_buffer_size())
+                            .with_format(self.fire_format, false);
+                    }
+                )?;
+                self.heat_in = 0;
+            }
+            Ok(())
+        })?;
+        self.fire_transfer_id = renderer
+            .command_requests()
+            .add_transfer_request(TransferRequest::new(0));
+        self.frame_buffer_size = renderer.frame_buffer_size();
         Ok(())
     }
 
@@ -627,6 +837,73 @@ impl Interface for App {
         self.rot += 0.001;
     }
 
+    fn compute(
+        &mut self,
+        commands: &mut ComputeCommands,
+    ) -> Result<(), nox::renderer::Error>
+    {
+        struct Params {
+            _density: f32,
+            _noise_strength: f32,
+            _time: f32,
+        }
+        let params = &[Params {
+            _density: 0.995,
+            _noise_strength: 0.5,
+            _time: self.rot,
+        }];
+        commands.edit_resources(|r| {
+            r.update_shader_resources(
+                &[
+                    ShaderResourceImageUpdate {
+                        resource: self.shader_resources[2],
+                        binding: 0,
+                        starting_index: 0,
+                        infos: &[ShaderResourceImageInfo {
+                            sampler: self.sampler,
+                            image_source: (self.fire_images[self.heat_in as usize], None),
+                            storage_image: true,
+                        }]
+                    },
+                    ShaderResourceImageUpdate {
+                        resource: self.shader_resources[2],
+                        binding: 1,
+                        starting_index: 0,
+                        infos: &[ShaderResourceImageInfo {
+                            sampler: self.sampler,
+                            image_source: (self.fire_images[(self.heat_in + 1) as usize % 2], None),
+                            storage_image: true,
+                        }]
+                    },
+                    ShaderResourceImageUpdate {
+                        resource: self.shader_resources[3],
+                        binding: 0,
+                        starting_index: 0,
+                        infos: &[ShaderResourceImageInfo {
+                            sampler: self.sampler,
+                            image_source: (self.fire_images[self.heat_in as usize], None),
+                            storage_image: false,
+                        }]
+                    }
+                ],
+                &[],
+                &[],
+                &GLOBAL_ALLOC
+            )?;
+            Ok(())
+        })?;
+        commands.prepare_storage_image(self.fire_images[0])?;
+        commands.prepare_storage_image(self.fire_images[1])?;
+        commands.bind_pipeline(self.fire_pipeline)?;
+        commands.bind_shader_resources(|_| self.shader_resources[2])?;
+        commands.push_constants(|_|
+            unsafe { slice_as_bytes(params).unwrap() }
+        )?;
+        commands.dispatch((self.frame_buffer_size.width + 7) / 8, (self.frame_buffer_size.height + 7) / 8, 1);
+        self.heat_in = (self.heat_in + 1) % 2;
+        Ok(())
+    }
+
     fn render<'a>(
         &mut self,
         frame_graph: &'a mut dyn FrameGraphInit,
@@ -636,7 +913,7 @@ impl Interface for App {
         if !pending_transfers.is_empty() {
             return Ok(())
         }
-        let frame_graph = frame_graph.init(2)?;
+        let frame_graph = frame_graph.init(3)?;
         let frame_buffer_size = frame_graph.frame_buffer_size();
         let depth_stencil_output = frame_graph.add_transient_image(
             &mut |builder| {
@@ -665,9 +942,26 @@ impl Interface for App {
                     .with_dimensions(frame_buffer_size);
             }
         )?;
-        let texture = frame_graph.add_image(self.image.into())?;
+        let fire_tex = frame_graph.add_image(self.fire_images[self.heat_in as usize])?;
+        let texture = frame_graph.add_image(self.image)?;
         frame_graph.set_render_image(color_output_resolve, None)?;
-        self.first_pass = frame_graph.add_pass(
+        self.fire_pass = frame_graph.add_pass(
+            PassInfo { max_color_writes: 1, max_reads: 1, msaa_samples: MSAA::X4 },
+            &mut |builder| {
+                builder
+                    .with_read(ReadInfo::new(fire_tex, None))
+                    .with_write(WriteInfo::new(
+                        color_output,
+                        None,
+                        None,
+                        None,
+                        AttachmentLoadOp::Clear,
+                        AttachmentStoreOp::Store,
+                        Default::default(),
+                    ));
+            },
+        )?;
+        self.cube_pass = frame_graph.add_pass(
             PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4 },
             &mut |builder| {
                 builder
@@ -677,10 +971,10 @@ impl Interface for App {
                         None,
                         None,
                         None,
-                        AttachmentLoadOp::Clear,
+                        AttachmentLoadOp::Load,
                         AttachmentStoreOp::Store,
-                        Default::default())
-                    )
+                        Default::default()
+                    ))
                     .with_depth_stencil_write(WriteInfo::new(
                         depth_stencil_output,
                         None,
@@ -692,7 +986,7 @@ impl Interface for App {
                     ));
             }
         )?;
-        self.second_pass = frame_graph.add_pass(
+        self.outline_pass = frame_graph.add_pass(
             PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4 },
             &mut |builder| {
                 builder
@@ -728,7 +1022,14 @@ impl Interface for App {
     ) -> Result<(), nox::renderer::Error>
     {
         match pass {
-            x if x == self.first_pass => {
+            x if x == self.fire_pass => {
+                commands.bind_pipeline(self.pipelines[2])?;
+                commands.bind_shader_resources(|_|
+                    self.shader_resources[3]
+                )?;
+                commands.draw_bufferless(6, 1);
+            },
+            x if x == self.cube_pass => {
                 commands.bind_pipeline(self.pipelines[0])?;
                 commands.bind_shader_resources(|i| {
                     self.shader_resources[i as usize]
@@ -746,7 +1047,7 @@ impl Interface for App {
                     DrawBufferInfo::new(self.index_buffer, 0),
                 )?;
             },
-            x if x == self.second_pass => {
+            x if x == self.outline_pass => {
                 commands.bind_pipeline(self.pipelines[1])?;
                 commands.bind_shader_resources(|_| {
                     self.shader_resources[0]
@@ -771,12 +1072,18 @@ impl Interface for App {
 
     fn transfer_commands(
         &mut self,
-        _id: nox::renderer::CommandRequestID,
-        command_buffer: &mut nox::renderer::TransferCommandbuffer,
+        id: nox::renderer::CommandRequestID,
+        commands: &mut nox::renderer::TransferCommands,
     ) -> Result<(), Error>
     {
+        if id == self.fire_transfer_id {
+            for image in &self.fire_images {
+                commands.clear_color_image(*image, [0.0, 0.0, 0.0, 0.0].into(), None)?;
+            }
+            return Ok(())
+        }
         for (i, asset) in self.assets.iter().enumerate() {
-            command_buffer.copy_data_to_image(
+            commands.copy_data_to_image(
                 self.image,
                 asset.as_bytes(),
                 ImageSubresourceLayers::new(ImageAspect::Color, 0, i as u32, 1),
@@ -785,17 +1092,17 @@ impl Interface for App {
             ).unwrap();
         }
         let vertices = unsafe { slice_as_bytes(CUBE_VERTICES) }.unwrap();
-        command_buffer.copy_data_to_buffer(
+        commands.copy_data_to_buffer(
             self.vertex_buffer,
             vertices, 0, vertices.len() as u64,
         ).unwrap();
         let vertices_instance = unsafe { slice_as_bytes(CUBE_OFF) }.unwrap();
-        command_buffer.copy_data_to_buffer(
+        commands.copy_data_to_buffer(
             self.vertex_instance_buffer,
             vertices_instance, 0, vertices_instance.len() as u64
         ).unwrap();
         let indices = unsafe { slice_as_bytes(CUBE_INDICES) }.unwrap();
-        command_buffer.copy_data_to_buffer(
+        commands.copy_data_to_buffer(
             self.index_buffer,
             indices,
             0,

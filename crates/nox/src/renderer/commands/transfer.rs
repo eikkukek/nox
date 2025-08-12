@@ -6,9 +6,9 @@ use core::ptr;
 
 use ash::vk;
 
-use super::*;
+use nox_mem::{vec_types::{FixedVec, GlobalVec, Vector}, GLOBAL_ALLOC};
 
-use nox_mem::{vec_types::{Vector, GlobalVec}};
+use super::*;
 
 use crate::{
     has_not_bits,
@@ -16,6 +16,7 @@ use crate::{
         global_resources::*,
         image::*,
         buffer::*,
+        frame_graph::ClearColorValue,
         linear_device_alloc::LinearDeviceAlloc,
         memory_binder::MemoryBinder,
         BufferError,
@@ -23,7 +24,7 @@ use crate::{
     }
 };
 
-pub struct TransferCommandbuffer {
+pub struct TransferCommands {
     device: Arc<ash::Device>,
     command_buffer: vk::CommandBuffer,
     command_pool: vk::CommandPool,
@@ -35,7 +36,7 @@ pub struct TransferCommandbuffer {
     id: CommandRequestID,
 }
 
-impl TransferCommandbuffer {
+impl TransferCommands {
 
     pub(crate) fn new(
         device: Arc<ash::Device>,
@@ -85,6 +86,128 @@ impl TransferCommandbuffer {
     }
 
     #[inline(always)]
+    pub fn clear_color_image(
+        &mut self,
+        image_id: ImageID,
+        clear_value: ClearColorValue,
+        subresources: Option<&[ImageSubresourceRangeInfo]>,
+    ) -> Result<(), Error>
+    {
+        let g = self.global_resources.read().unwrap();
+        let image = g.get_image(image_id)?;
+        if has_not_bits!(image.properties.usage, vk::ImageUsageFlags::TRANSFER_DST) {
+            return Err(ImageError::UsageMismatch {
+                missing_usage: vk::ImageUsageFlags::TRANSFER_DST,
+            }.into())
+        }
+        let state = image.state();
+        let mut dst_state = ImageState::new(
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            self.transfer_queue_index,
+            vk::PipelineStageFlags::TRANSFER,
+        );
+        image.cmd_memory_barrier(
+            ImageState::new(
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                self.transfer_queue_index,
+                vk::PipelineStageFlags::TRANSFER
+            ),
+            self.command_buffer,
+            None,
+        )?;
+        let mut ranges = FixedVec::with_capacity(
+            subresources.map(|v| v.len()).unwrap_or(1),
+            &GLOBAL_ALLOC
+        )?;
+        if let Some(infos) = subresources {
+            for info in infos.iter().map(|v| *v) {
+                if let Some(err) = image.validate_range(ImageRangeInfo::new(info, None)) {
+                    return Err(err.into())
+                }
+                ranges.push(info.into()).unwrap();
+            }
+        }
+        else {
+            ranges.push(image.properties.whole_subresource().into()).unwrap();
+        }
+        unsafe {
+            self.device.cmd_clear_color_image(
+                self.command_buffer,
+                image.handle(),
+                image.layout(),
+                &clear_value.into(),
+                &ranges,
+            );
+        }
+        if state.queue_family_index != dst_state.queue_family_index {
+            dst_state.queue_family_index = state.queue_family_index;
+            image.cmd_memory_barrier(dst_state, self.command_buffer, None).unwrap();
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn clear_depth_stencil_image(
+        &mut self,
+        image_id: ImageID,
+        depth: f32,
+        stencil: u32,
+        subresources: Option<&[ImageSubresourceRangeInfo]>,
+    ) -> Result<(), Error>
+    {
+        let g = self.global_resources.read().unwrap();
+        let image = g.get_image(image_id)?;
+        if has_not_bits!(image.properties.usage, vk::ImageUsageFlags::TRANSFER_DST) {
+            return Err(ImageError::UsageMismatch {
+                missing_usage: vk::ImageUsageFlags::TRANSFER_DST,
+            }.into())
+        }
+        let state = image.state();
+        let mut dst_state = ImageState::new(
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            self.transfer_queue_index,
+            vk::PipelineStageFlags::TRANSFER,
+        );
+        image.cmd_memory_barrier(
+            dst_state,
+            self.command_buffer,
+            None,
+        )?;
+        let mut ranges = FixedVec::with_capacity(
+            subresources.map(|v| v.len()).unwrap_or(1),
+            &GLOBAL_ALLOC,
+        )?;
+        if let Some(infos) = subresources {
+            for info in infos.iter().map(|v| *v) {
+                if let Some(err) = image.validate_range(ImageRangeInfo::new(info, None)) {
+                    return Err(err.into())
+                }
+                ranges.push(info.into()).unwrap();
+            }
+        }
+        else {
+            ranges.push(image.properties.whole_subresource().into()).unwrap();
+        }
+        unsafe {
+            self.device.cmd_clear_depth_stencil_image(
+                self.command_buffer,
+                image.handle(),
+                image.layout(),
+                &vk::ClearDepthStencilValue { depth, stencil },
+                &ranges,
+            );
+        }
+        if state.queue_family_index != dst_state.queue_family_index {
+            dst_state.queue_family_index = state.queue_family_index;
+            image.cmd_memory_barrier(dst_state, self.command_buffer, None).unwrap();
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
     pub fn copy_data_to_buffer(
         &mut self,
         buffer_id: BufferID, 
@@ -111,14 +234,14 @@ impl TransferCommandbuffer {
                 copy_size: size, host_buffer_size: data.len()
             })
         }
-        let mut buf_state = BufferState::new(
+        let mut dst_state = BufferState::new(
             vk::AccessFlags::TRANSFER_WRITE,
             self.transfer_queue_index,
             vk::PipelineStageFlags::TRANSFER,
         );
-        let buf_queue = buffer.state().queue_family_index;
+        let state = buffer.state();
         buffer.cmd_memory_barrier(
-            buf_state,
+            dst_state,
             self.command_buffer,
         );
         let device = &self.device;
@@ -158,9 +281,9 @@ impl TransferCommandbuffer {
             .push(staging_buffer)
             .unwrap();
 
-        if buf_state.queue_family_index != buf_queue {
-            buf_state.queue_family_index = buf_queue;
-            buffer.cmd_memory_barrier(buf_state, self.command_buffer);
+        if dst_state.queue_family_index != state.queue_family_index {
+            dst_state.queue_family_index = state.queue_family_index;
+            buffer.cmd_memory_barrier(dst_state, self.command_buffer);
         }
 
         Ok(())
@@ -184,15 +307,15 @@ impl TransferCommandbuffer {
                 missing_usage: vk::ImageUsageFlags::TRANSFER_DST
             }.into())
         }
-        let mut img_state = ImageState::new(
+        let mut dst_state = ImageState::new(
             vk::AccessFlags::TRANSFER_WRITE,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             self.transfer_queue_index,
             vk::PipelineStageFlags::TRANSFER
         );
-        let img_queue = image.state().queue_family_index;
+        let state = image.state();
         image.cmd_memory_barrier(
-            img_state,
+            dst_state,
             self.command_buffer,
             None,
         ).unwrap();
@@ -269,16 +392,16 @@ impl TransferCommandbuffer {
             .push(staging_buffer)
             .unwrap();
 
-        if img_state.queue_family_index != img_queue {
-            img_state.queue_family_index = img_queue;
-            image.cmd_memory_barrier(img_state, self.command_buffer, None).unwrap();
+        if dst_state.queue_family_index != state.queue_family_index {
+            dst_state.queue_family_index = state.queue_family_index;
+            image.cmd_memory_barrier(dst_state, self.command_buffer, None).unwrap();
         }
 
         Ok(())
     }
 }
 
-impl Drop for TransferCommandbuffer {
+impl Drop for TransferCommands {
 
     fn drop(&mut self) {
         unsafe {

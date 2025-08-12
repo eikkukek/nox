@@ -5,7 +5,7 @@ pub struct DescriptorPool {
     handle: vk::DescriptorPool,
     allocated_sets: u32,
     max_sets: u32,
-    _pool_sizes: [vk::DescriptorPoolSize; 3],
+    _pool_sizes: [vk::DescriptorPoolSize; 4],
 }
 
 impl DescriptorPool {
@@ -28,10 +28,15 @@ impl DescriptorPool {
                 ty: vk::DescriptorType::STORAGE_BUFFER,
                 descriptor_count: memory_layout.uniform_storage_buffers(),
             },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::STORAGE_IMAGE,
+                descriptor_count: memory_layout.uniform_storage_images(),
+            },
         ];
         let info = vk::DescriptorPoolCreateInfo {
             s_type: vk::StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-            flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET | vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND,
+            flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET |
+                    vk::DescriptorPoolCreateFlags::UPDATE_AFTER_BIND,
             max_sets: memory_layout.max_descriptor_sets(),
             pool_size_count: pool_sizes.len() as u32,
             p_pool_sizes: pool_sizes.as_ptr(),

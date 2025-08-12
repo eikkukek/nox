@@ -8,6 +8,13 @@ use nox_mem::{
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CommandRequestID(u32);
 
+impl Default for CommandRequestID {
+
+    fn default() -> Self {
+        Self(u32::MAX)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct TransferRequest {
     pub staging_buffer_capacity: u32,
@@ -48,7 +55,7 @@ impl CommandRequests {
         CommandRequestID(index)
     }
 
-    pub fn transfer_iter(&self) -> impl Iterator<Item = (CommandRequestID, TransferRequest)> {
+    pub(crate) fn transfer_iter(&self) -> impl Iterator<Item = (CommandRequestID, TransferRequest)> {
         self.transfer_requests
             .iter()
             .enumerate()

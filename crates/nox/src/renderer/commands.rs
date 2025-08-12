@@ -1,7 +1,9 @@
 mod requests;
-mod transfer;
 mod render;
+mod transfer;
+mod compute;
 
 pub use requests::*;
-pub use transfer::*;
 pub use render::*;
+pub use transfer::*;
+pub use compute::*;

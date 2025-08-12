@@ -28,13 +28,13 @@ impl FrameState {
         device: Arc<ash::Device>,
         global_resources: Arc<RwLock<GlobalResources>>,
         device_alloc: LinearDeviceAlloc,
-    ) -> Self
+    ) -> Result<Self, Error>
     {
-        Self {
+        Ok(Self {
             render_image: None,
             resource_pool: ResourcePool::new(device, global_resources, device_alloc),
             command_buffer: vk::CommandBuffer::null(),
-        }
+        })
     }
 
     #[inline(always)]

@@ -103,12 +103,12 @@ impl SwapchainPassPipelineData {
     {
         if let Some(pipeline) = self.last_pipeline {
             if format == pipeline.1 {
-                return Ok(self.global_resources.read().unwrap().get_pipeline(pipeline.0)?.handle)
+                return Ok(self.global_resources.read().unwrap().get_graphics_pipeline(pipeline.0)?.handle)
             }
         }
         if let Some(pipeline) = self.pipelines.iter().find(|p| p.1 == format) {
             self.last_pipeline = Some(*pipeline);
-            return Ok(self.global_resources.read().unwrap().get_pipeline(pipeline.0)?.handle)
+            return Ok(self.global_resources.read().unwrap().get_graphics_pipeline(pipeline.0)?.handle)
         }
         let mut info = GraphicsPipelineInfo::new(self.layout_id);
         info.with_color_output_vk(format, WriteMask::all(), None);
@@ -119,7 +119,7 @@ impl SwapchainPassPipelineData {
             .unwrap()
             .create_graphics_pipelines(&[info], |_, v| { pipeline = Some(v) }, &stack_guard)?;
         let pipeline = self.pipelines.push((pipeline.unwrap(), format)).unwrap();
-        Ok(self.global_resources.read().unwrap().get_pipeline(pipeline.0)?.handle)
+        Ok(self.global_resources.read().unwrap().get_graphics_pipeline(pipeline.0)?.handle)
     }
 
     pub fn get_pipeline_layout(&mut self) -> Result<vk::PipelineLayout, Error>
@@ -151,6 +151,7 @@ impl SwapchainPassPipelineData {
                 ShaderResourceImageInfo {
                     sampler: self.sampler,
                     image_source: (image, range_info),
+                    storage_image: false,
             }],
         };
         g.update_shader_resources(&[update], &[], &[], &stack_guard)?;
@@ -214,7 +215,7 @@ impl Drop for SwapchainPassPipelineData {
             g.destroy_shader(shader).ok();
         }
         for pipeline in &self.pipelines {
-            g.destroy_pipeline(pipeline.0).ok();
+            g.destroy_graphics_pipeline(pipeline.0).ok();
         }
         g.destroy_sampler(self.sampler).ok();
     }

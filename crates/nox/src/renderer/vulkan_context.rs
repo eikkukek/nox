@@ -45,7 +45,7 @@ pub(crate) struct VulkanContext<'mem> {
     device: ash::Device,
     graphics_queue: vk::Queue,
     transfer_queue: vk::Queue,
-    _compute_queue: vk::Queue,
+    compute_queue: vk::Queue,
     swapchain_context: Option<SwapchainContext<'mem>>,
     swapchain_state: SwapchainState,
 }
@@ -206,6 +206,7 @@ impl<'mem> VulkanContext<'mem> {
             descriptor_binding_update_unused_while_pending: vk::TRUE,
             descriptor_binding_uniform_buffer_update_after_bind: vk::TRUE,
             descriptor_binding_storage_buffer_update_after_bind: vk::TRUE,
+            descriptor_binding_storage_image_update_after_bind: vk::TRUE,
             descriptor_binding_sampled_image_update_after_bind: vk::TRUE,
             ..Default::default()
         };
@@ -244,7 +245,7 @@ impl<'mem> VulkanContext<'mem> {
                 device,
                 graphics_queue,
                 transfer_queue: transfer_queue,
-                _compute_queue: compute_queue,
+                compute_queue: compute_queue,
                 swapchain_context: None,
                 swapchain_state: SwapchainState::OutOfDate(buffered_frame_count, window.inner_size()),
             },
@@ -279,8 +280,8 @@ impl<'mem> VulkanContext<'mem> {
         self.transfer_queue
     }
 
-    pub fn _compute_queue(&self) -> vk::Queue {
-        self._compute_queue
+    pub fn compute_queue(&self) -> vk::Queue {
+        self.compute_queue
     }
 
     pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
@@ -335,10 +336,12 @@ impl<'mem> VulkanContext<'mem> {
         graphics_command_pool: vk::CommandPool,
         tmp_alloc: &ArenaAlloc,
         allocators: &'mem Allocators,
-    ) -> Result<&mut SwapchainContext<'mem>, String> {
+    ) -> Result<(&mut SwapchainContext<'mem>, bool), String> {
+        let mut recreated = false;
         match self.swapchain_state {
             SwapchainState::Valid => {},
             SwapchainState::OutOfDate(buffered_frame_count, framebuffer_size) => {
+                recreated = true;
                 self 
                     .update_swapchain(framebuffer_size, graphics_command_pool, buffered_frame_count, tmp_alloc, allocators)
                     .map_err(|e| {
@@ -346,7 +349,7 @@ impl<'mem> VulkanContext<'mem> {
                     })?;
             },
         }
-        Ok(self.swapchain_context.as_mut().unwrap())
+        Ok((self.swapchain_context.as_mut().unwrap(), recreated))
     }
 
     pub fn destroy_swapchain(
