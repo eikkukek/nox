@@ -6,10 +6,6 @@ use core::{
 
 use crate::impl_traits;
 
-pub trait CloneStrategy<T: Sized> {
-    unsafe fn clone_elements(&self, to: Self, len: usize);
-}
-
 #[derive(Eq)]
 pub struct Pointer<T: Sized>(NonNull<T>);
 
@@ -82,6 +78,25 @@ impl<T: Sized> Pointer<T> {
             }
         }
     }
+
+    #[inline(always)]
+    pub unsafe fn clone_elements(&self, to: Self, len: usize)
+        where
+            T: Clone
+    {
+        if needs_drop::<T>() {
+            unsafe {
+                for i in 0..len {
+                    to.add(i).write(self.add(i).read().clone());
+                }
+            }
+        }
+        else {
+            unsafe {
+                self.copy_to_nonoverlapping(*to, len);
+            }
+        }
+    }
 }
 
 impl_traits!{
@@ -106,26 +121,4 @@ impl_traits!{
             Self(value)
         }
     ,
-}
-
-impl<T: Clone> CloneStrategy<T> for Pointer<T> {
-
-    #[inline(always)]
-    default unsafe fn clone_elements(&self, to: Self, len: usize) {
-        unsafe {
-            for i in 0..len {
-                to.add(i).write(self.add(i).read().clone());
-            }
-        }
-    }
-}
-
-impl<T: Copy> CloneStrategy<T> for Pointer<T> {
-
-    #[inline(always)]
-    unsafe fn clone_elements(&self, to: Self, len: usize) {
-        unsafe {
-            self.copy_to_nonoverlapping(*to, len);
-        }
-    }
 }

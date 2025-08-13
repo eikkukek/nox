@@ -41,13 +41,12 @@ use nox_mem::{
 
 use nox_alloc::arena_alloc::*;
 
-use nox_math::clamp;
-
 use super::{
     interface::Interface,
     Version,
     AppName,
     error::Error,
+    utility::clamp,
 };
 
 pub use vk::Format as VkFormat;

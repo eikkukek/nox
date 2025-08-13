@@ -6,9 +6,8 @@ use nox_mem::{Allocator, vec_types::{Vector, FixedVec}};
 
 use nox_alloc::arena_alloc::*;
 
-use nox_math::clamp;
-
 use crate::{
+    utility::clamp,
     has_bits, has_not_bits,
 };
 

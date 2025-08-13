@@ -5,6 +5,5 @@ edition = "2024"
 
 [dependencies]
 nox-mem = { path = "../nox-mem" }
-nox-math = { path = "../nox-math" }
 ttf-parser = "0.25.1"
 earcutr = "0.5.0"

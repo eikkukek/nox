@@ -3,11 +3,11 @@ resolver = "3"
 members = [
 	"crates/nox",
 	"crates/nox-font",
-	"crates/nox-math",
 	"crates/nox-mem",
 	"crates/nox-derive",
-	"crates/nox-ser"
-, "crates/nox-alloc"]
+	"crates/nox-ser",
+	"crates/nox-alloc"
+]
 exclude = [
 	"example"
 ]

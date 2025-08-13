@@ -14,7 +14,6 @@ use crate::{
 use super::{
     Vector,
     Pointer,
-    CloneStrategy,
 };
 
 pub struct ArrayVec<T, const N: usize>

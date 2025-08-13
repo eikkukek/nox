@@ -2,13 +2,11 @@ use core::slice;
 
 use nox_mem::{vec_types::{Vector, GlobalVec}};
 
-use nox_math::Vec2;
-
 use super::*;
 
 #[derive(Debug)]
 struct Outline {
-    vertices: GlobalVec<Vec2>,
+    vertices: GlobalVec<[f32; 2]>,
 }
 
 impl Outline {
@@ -21,7 +19,7 @@ impl Outline {
     }
 
     #[inline(always)]
-    fn insert_vertex(&mut self, vert: Vec2) {
+    fn insert_vertex(&mut self, vert: [f32; 2]) {
         self.vertices.push(vert);
     }
 
@@ -33,13 +31,13 @@ impl Outline {
         for i in 0..len {
             let a = vertices[i];
             let b = vertices[(i + 1) % len];
-            area += a.x * b.y - b.x * a.y;
+            area += a[0] * b[1] - b[0] * a[1];
         }
         area < 0.0
     }
 
     #[inline(always)]
-    fn join(&self, vertices: &mut GlobalVec<Vec2>) {
+    fn join(&self, vertices: &mut GlobalVec<[f32; 2]>) {
         vertices.append(&self.vertices);
     }
 }
@@ -47,12 +45,12 @@ impl Outline {
 struct OutlineBuilder {
     outlines: GlobalVec<Outline>,
     current_outline: Option<Outline>,
-    pos: Vec2,
+    pos: [f32; 2],
     vertex_count: u32,
 }
 
 #[inline(always)]
-fn flatten_vertices(vertices: &[Vec2]) -> &[f32] {
+fn flatten_vertices(vertices: &[[f32; 2]]) -> &[f32] {
     let ptr = vertices.as_ptr() as *const f32;
     unsafe {
         slice::from_raw_parts(ptr, vertices.len() * 2)
@@ -60,14 +58,14 @@ fn flatten_vertices(vertices: &[Vec2]) -> &[f32] {
 }
 
 #[inline(always)]
-fn point_in_polygon(point: Vec2, polygon: &[Vec2]) -> bool {
+fn point_in_polygon(point: [f32; 2], polygon: &[[f32; 2]]) -> bool {
     let mut inside = false;
     let len = polygon.len();
     for i in 0..len {
         let a  = polygon[i];
         let b = polygon[(i + 1) % len];
-        if ((a.y > point.y) != (b.y > point.y)) &&
-            point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y + f32::EPSILON) + a.x
+        if ((a[1] > point[1]) != (b[1] > point[1])) &&
+            point[0] < (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1] + f32::EPSILON) + a[0]
         {
             inside = !inside;
         }
@@ -88,7 +86,7 @@ impl OutlineBuilder {
     }
 
     #[inline(always)]
-    fn insert_vertex(&mut self, vert: Vec2) {
+    fn insert_vertex(&mut self, vert: [f32; 2]) {
         unsafe {
             self.current_outline
                 .as_mut()
@@ -97,7 +95,7 @@ impl OutlineBuilder {
         }
     }
 
-    fn finalize(self) -> Result<(GlobalVec<Vec2>, GlobalVec<u32>), earcutr::Error> {
+    fn finalize(self) -> Result<(GlobalVec<[f32; 2]>, GlobalVec<u32>), earcutr::Error> {
 
         let mut outers = GlobalVec::with_capacity(self.outlines.len());
         let mut holes = GlobalVec::with_capacity(self.outlines.len());
@@ -141,23 +139,39 @@ impl OutlineBuilder {
     }
 }
 
-fn flatten_quad(p0: Vec2, p1: Vec2, p2: Vec2, tolerance: f32, out: &mut Outline) {
+fn mag(v: [f32; 2]) -> f32 {
+    (v[0] * v[0] + v[1] * v[1]).sqrt()
+}
+
+fn add(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
+    [a[0] + b[0], a[1] + b[1]]
+}
+
+fn sub(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
+    [a[0] - b[0], a[1] - b[1]]
+}
+
+fn mul(a: [f32; 2], s: f32) -> [f32; 2] {
+    [a[0] * s, a[1] * s]
+}
+
+fn flatten_quad(p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], tolerance: f32, out: &mut Outline) {
     fn recurse(
-        p0: Vec2,
-        p1: Vec2,
-        p2: Vec2,
+        p0: [f32; 2],
+        p1: [f32; 2],
+        p2: [f32; 2],
         depth: u32,
         tolerance: f32,
         out: &mut Outline
     ) {
-        let mid = (p0 + p1) * 0.5;
-        let mag = (p1 - mid).mag();
+        let mid = mul(add(p0, p1), 0.5);
+        let mag = mag(sub(p1, mid));
         if depth >= 10 || mag < tolerance {
             out.insert_vertex(p2);
         } else {
-            let p0p1 = (p0 + p1) * 0.5;
-            let p1p2 = (p1 + p2) * 0.5;
-            let p01_12 = (p0p1 + p1p2) * 0.5;
+            let p0p1 = mul(add(p0, p1), 0.5);
+            let p1p2 = mul(add(p1, p2), 0.5);
+            let p01_12 = mul(add(p0p1, p1p2),0.5);
             recurse(p0, p0p1, p01_12, depth + 1, tolerance, out);
             recurse(p01_12, p1p2, p2, depth + 1, tolerance, out);
         }
@@ -165,31 +179,31 @@ fn flatten_quad(p0: Vec2, p1: Vec2, p2: Vec2, tolerance: f32, out: &mut Outline)
     recurse(p0, p1, p2, 0, tolerance, out);
 }
 
-fn flatten_cubic(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, tolerance: f32, out: &mut Outline) {
+fn flatten_cubic(p0: [f32; 2], p1: [f32; 2], p2: [f32; 2], p3: [f32; 2], tolerance: f32, out: &mut Outline) {
     fn recurse(
-        p0: Vec2,
-        p1: Vec2,
-        p2: Vec2,
-        p3: Vec2,
+        p0: [f32; 2],
+        p1: [f32; 2],
+        p2: [f32; 2],
+        p3: [f32; 2],
         depth: u32,
         tolerance: f32,
         out: &mut Outline
     ) {
-        let u = 3.0 * p1 - 2.0 * p0 - p3;
-        let v = 3.0 * p2 - 2.0 * p3 - p0;
-        let dx = u.x * u.x;
-        let dy = u.y * u.y;
-        let ex = v.x * v.y;
-        let ey = v.y * v.y;
+        let u = sub(sub(mul(p1, 3.0), mul(p0, 2.0)), p3);
+        let v = sub(sub(mul(p2, 3.0), mul(p3, 2.0)), p0);
+        let dx = u[0] * u[0];
+        let dy = u[1] * u[1];
+        let ex = v[0] * v[0];
+        let ey = v[1] * v[1];
         if depth >= 10 || dx.max(dy).max(ex).max(ey) < tolerance * tolerance * 16.0 {
             out.insert_vertex(p3);
         } else {
-            let p01 = (p0 + p1) * 0.5;
-            let p12 = (p1 + p2) * 0.5;
-            let p23 = (p2 + p3) * 0.5;
-            let p012 = (p01 + p12) * 0.5;
-            let p123 = (p12 + p23) * 0.5;
-            let p0123 = (p012 + p123) * 0.5;
+            let p01 = mul(add(p0, p1), 0.5);
+            let p12 = mul(add(p1, p2), 0.5);
+            let p23 = mul(add(p2, p3), 0.5);
+            let p012 = mul(add(p01, p12), 0.5);
+            let p123 = mul(add(p12, p23), 0.5);
+            let p0123 = mul(add(p012, p123), 0.5);
             recurse(p0, p01, p012, p0123, depth + 1, tolerance, out);
             recurse(p0123, p123, p23, p3, depth + 1, tolerance, out);
         }
@@ -201,28 +215,28 @@ fn flatten_cubic(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, tolerance: f32, out: &m
 impl ttf_parser::OutlineBuilder for OutlineBuilder {
 
     fn move_to(&mut self, x: f32, y: f32) {
-        self.pos = Vec2::new(x, y);
+        self.pos = [x, y];
         self.insert_vertex(self.pos);
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
-        let end = Vec2::new(x, y);
+        let end = [x, y];
         self.insert_vertex(end);
         self.pos = end;
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        let end = Vec2::new(x, y);
-        flatten_quad(self.pos, Vec2::new(x1, y1), end, 0.1, self.current_outline.as_mut().unwrap());
+        let end = [x, y];
+        flatten_quad(self.pos, [x1, y1], end, 0.1, self.current_outline.as_mut().unwrap());
         self.pos = end;
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        let end = Vec2::new(x, y);
+        let end = [x, y];
         flatten_cubic(
             self.pos,
-            Vec2::new(x1, y1),
-            Vec2::new(x2, y2),
+            [x1, y1],
+            [x2, y2],
             end,
             0.1,
             self.current_outline.as_mut().unwrap()
@@ -242,7 +256,7 @@ impl ttf_parser::OutlineBuilder for OutlineBuilder {
 pub fn triangulate(
     glyph: char,
     face: &Face
-) -> Option<(GlobalVec<Vec2>, GlobalVec<u32>)>
+) -> Option<(GlobalVec<[f32; 2]>, GlobalVec<u32>)>
 {
     let id = face.glyph_index(glyph)?;
     let mut builder = OutlineBuilder::new();

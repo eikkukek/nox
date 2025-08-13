@@ -20,7 +20,6 @@ use crate::{
 use super::{
     Vector,
     Pointer,
-    CloneStrategy,
 };
 
 use CapacityError::{FixedCapacity, InvalidReservation, AllocFailed, ZeroSizedElement};

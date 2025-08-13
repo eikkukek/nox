@@ -1,4 +1,3 @@
-#![feature(min_specialization)]
 #[macro_use]
 
 pub mod nox;
@@ -15,7 +14,6 @@ mod init_settings;
 pub use nox_mem as mem;
 pub use nox_alloc as alloc;
 pub use nox_font as font;
-pub use nox_math as math;
 
 pub use error::Error;
 pub use version::Version;
