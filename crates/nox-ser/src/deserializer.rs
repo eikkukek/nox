@@ -1,4 +1,4 @@
-use nox_mem::{Vector, vec_types::GlobalVec};
+use nox_mem::{vec_types::GlobalVec};
 
 use super::{Reader, Primitive};
 
@@ -31,10 +31,9 @@ impl<R: Reader> Deserializer<R> {
     {
         let len: u32 = self.deserialize_primitive()?;
         let mut vec = GlobalVec::<P>
-            ::with_capacity(len as usize)
-            .unwrap();
+            ::with_capacity(len as usize);
         for _ in 0..len {
-            vec.push(self.deserialize_primitive()?).unwrap();
+            vec.push(self.deserialize_primitive()?);
         }
         Ok(vec)
     }
