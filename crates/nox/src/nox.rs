@@ -37,17 +37,15 @@ pub struct Nox<'mem, I>
 impl<'mem, I: Interface> Nox<'mem, I>
 {
 
-    pub fn new(interface: I, memory: &'mem mut Memory) -> Option<Self> {
-        Some(
-            Nox {
-                interface: Arc::new(RwLock::new(interface)),
-                window: None,
-                memory,
-                renderer: None,
-                error_flag: false,
-                cursor_pos: (0.0, 0.0),
-            }
-        )
+    pub fn new(interface: I, memory: &'mem mut Memory) -> Self {
+        Nox {
+            interface: Arc::new(RwLock::new(interface)),
+            window: None,
+            memory,
+            renderer: None,
+            error_flag: false,
+            cursor_pos: (0.0, 0.0),
+        }
     }
 
     pub fn run(mut self) {

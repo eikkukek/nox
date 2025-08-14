@@ -1037,8 +1037,6 @@ impl Interface for App {
                     ));
             }
         )?;
-        //let id = frame_graph.add_image(self.image.into())?;
-        //frame_graph.set_render_image(id);
         Ok(())
     }
 
@@ -1162,7 +1160,6 @@ fn main() {
             return
         }
     };
-    if let Some(nox) = Nox::new(app, &mut memory) {
-        nox.run();
-    }
+    let nox = Nox::new(app, &mut memory);
+    nox.run();
 }
