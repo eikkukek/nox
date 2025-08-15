@@ -1,7 +1,8 @@
 use core::ops::{Deref, DerefMut};
 
-use nox_mem::impl_traits;
+use nox::mem::impl_traits;
 
+#[derive(Clone)]
 pub struct Face<'a> {
     face: ttf_parser::Face<'a>,
 }

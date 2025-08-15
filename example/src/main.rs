@@ -9,16 +9,11 @@ use glam::{f32::*, Vec4Swizzles};
 use memmap2::Mmap;
 
 use nox::{
-    interface::Interface,
     mem::{size_of, slice_as_bytes, vec_types::ArrayVec, GLOBAL_ALLOC},
     renderer::{
         frame_graph::*, image::*, pipeline::*, *
     },
-    InitSettings,
-    Memory,
-    Nox,
-    Version,
-    Error,
+    *,
 };
 
 #[repr(C)]
@@ -1153,13 +1148,6 @@ impl Interface for App {
 
 fn main() {
     let app = App::new();
-    let mut memory = match Memory::default() {
-        Some(r) => r,
-        None => {
-            eprintln!("failed to create memory");
-            return
-        }
-    };
-    let nox = Nox::new(app, &mut memory);
-    nox.run();
+    let mut memory = Default::default();
+    Nox::new(app, &mut memory).run();
 }

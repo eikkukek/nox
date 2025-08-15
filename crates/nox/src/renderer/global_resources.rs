@@ -1,4 +1,4 @@
-mod default_binder;
+pub mod default_binder;
 mod enums;
 mod structs;
 mod descriptor_pool;
@@ -30,7 +30,7 @@ use super::{
     memory_binder::MemoryBinder,
 };
 
-pub use default_binder::*;
+pub use default_binder::{DefaultBinder};
 pub use enums::*;
 pub use structs::*;
 use descriptor_pool::*;

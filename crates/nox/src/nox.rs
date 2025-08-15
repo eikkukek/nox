@@ -20,8 +20,6 @@ use super::{
 
 pub type AppName = ArrayString<128>;
 
-pub type ShaderID = u64;
-
 pub struct Nox<'mem, I>
     where
         I: Interface,

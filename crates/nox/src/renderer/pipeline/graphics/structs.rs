@@ -205,9 +205,11 @@ impl AsRaw for WriteMask {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ColorOutputBlendState {
-    pub color_blend_factor: (BlendFactor, BlendFactor),
+    pub src_color_blend_factor: BlendFactor,
+    pub dst_color_blend_factor: BlendFactor,
     pub color_blend_op: BlendOp,
-    pub alpha_blend_factor: (BlendFactor, BlendFactor),
+    pub src_alpha_blend_factor: BlendFactor,
+    pub dst_alpha_blend_factor: BlendFactor,
     pub alpha_blend_op: BlendOp,
 }
 
@@ -228,11 +230,11 @@ impl From<ColorOutputState> for vk::PipelineColorBlendAttachmentState {
             Some(b) => {
                 Self {
                     blend_enable: 1,
-                    src_color_blend_factor: b.color_blend_factor.0.into(),
-                    dst_color_blend_factor: b.color_blend_factor.1.into(),
+                    src_color_blend_factor: b.src_color_blend_factor.into(),
+                    dst_color_blend_factor: b.dst_color_blend_factor.into(),
                     color_blend_op: b.color_blend_op.into(),
-                    src_alpha_blend_factor: b.alpha_blend_factor.0.into(),
-                    dst_alpha_blend_factor: b.alpha_blend_factor.1.into(),
+                    src_alpha_blend_factor: b.src_alpha_blend_factor.into(),
+                    dst_alpha_blend_factor: b.dst_alpha_blend_factor.into(),
                     alpha_blend_op: b.alpha_blend_op.into(),
                     color_write_mask: value.0.into(),
                 }
@@ -247,15 +249,11 @@ impl From<vk::PipelineColorBlendAttachmentState> for ColorOutputState {
         let mut s = Self(value.color_write_mask.into(), None);
         if value.blend_enable == 1 {
             s.1 = Some(ColorOutputBlendState {
-                color_blend_factor: (
-                    BlendFactor::from_vk(value.src_color_blend_factor).unwrap(),
-                    BlendFactor::from_vk(value.dst_color_blend_factor).unwrap(),
-                ),
+                src_color_blend_factor: BlendFactor::from_vk(value.src_color_blend_factor).unwrap(),
+                dst_color_blend_factor: BlendFactor::from_vk(value.dst_alpha_blend_factor).unwrap(),
                 color_blend_op: BlendOp::from_vk(value.color_blend_op).unwrap(),
-                alpha_blend_factor:  (
-                    BlendFactor::from_vk(value.src_alpha_blend_factor).unwrap(),
-                    BlendFactor::from_vk(value.dst_alpha_blend_factor).unwrap(),
-                ),
+                src_alpha_blend_factor: BlendFactor::from_vk(value.src_alpha_blend_factor).unwrap(),
+                dst_alpha_blend_factor: BlendFactor::from_vk(value.dst_alpha_blend_factor).unwrap(),
                 alpha_blend_op: BlendOp::from_vk(value.alpha_blend_op).unwrap(),
             });
         }

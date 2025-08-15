@@ -39,7 +39,7 @@ pub trait Interface
         nox: &mut Nox<Self>,
         renderer: &mut RendererContext,
         frame_buffer_size: (u32, u32),
-    );
+    ) {}
 
     /// Gets called every frame before `render`.
     ///

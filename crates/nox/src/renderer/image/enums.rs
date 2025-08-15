@@ -49,8 +49,10 @@ pub trait Format: Copy + AsRaw<Repr = i32> {
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum ColorFormat {
+    #[default]
+    Undefined = vk::Format::UNDEFINED.as_raw(),
     UnormR8 = vk::Format::R8_UNORM.as_raw(),
     UnormRG8 = vk::Format::R8G8_UNORM.as_raw(),
     UnormRGB8 = vk::Format::R8G8B8_UNORM.as_raw(),
@@ -64,13 +66,20 @@ pub enum ColorFormat {
 impl Format for ColorFormat {
 
     fn aspects(self) -> &'static [ImageAspect] {
-        &[ImageAspect::Color]
+        if self == Self::Undefined {
+            &[]
+        }
+        else {
+            &[ImageAspect::Color]
+        }
     }
 }
 
 #[repr(i32)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
 pub enum DepthStencilFormat {
+    #[default]
+    Undefined = vk::Format::UNDEFINED.as_raw(),
     D32 = vk::Format::D32_SFLOAT.as_raw(),
     D16 = vk::Format::D16_UNORM.as_raw(),
     S8 = vk::Format::S8_UINT.as_raw(),
@@ -109,6 +118,9 @@ impl Format for DepthStencilFormat {
 
     fn aspects(self) -> &'static [ImageAspect] {
         match self {
+            Self::Undefined => {
+                &[]
+            }
             Self::D32 | Self::D16 => {
                 &[ImageAspect::Depth]
             },

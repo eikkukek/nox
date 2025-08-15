@@ -42,7 +42,7 @@ use nox_mem::{
 use nox_alloc::arena_alloc::*;
 
 use super::{
-    interface::Interface,
+    Interface,
     Version,
     AppName,
     error::Error,
@@ -54,10 +54,11 @@ pub use vk::Format as VkFormat;
 pub use enums::*;
 pub use memory_layout::MemoryLayout;
 pub use handle::{Handle, RaiiHandle};
-pub use image::{ImageBuilder, ImageError};
+pub use image::*;
 pub use buffer::*;
 pub use physical_device::QueueFamilyIndices;
 pub use global_resources::*;
+pub use pipeline::*;
 pub use commands::*;
 pub use nox_derive::VertexInput;
 pub use shader::*;
@@ -72,7 +73,6 @@ use frame_state::FrameState;
 use frame_graph::FrameGraphImpl;
 use swapchain_context::PresentResult;
 use thread_context::ThreadContext;
-use image::ImageState;
 
 use swapchain_pass::SwapchainPassPipelineData;
 

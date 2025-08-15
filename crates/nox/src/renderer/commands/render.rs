@@ -228,6 +228,53 @@ impl<'a> RenderCommands<'a> {
     }
 
     #[inline(always)]
+    pub fn draw<const VERTEX_BUFFER_COUNT: usize>(
+        &self,
+        first_vertex: u32,
+        vertex_count: u32,
+        first_instance: u32,
+        instance_count: u32,
+        first_binding: u32,
+        bindings: ArrayVec<DrawBufferInfo, VERTEX_BUFFER_COUNT>,
+    ) -> Result<(), Error>
+    {
+        assert!(self.current_pipeline.is_some(), "attempting to draw with no pipeline attached");
+        unsafe {
+            let command_buffer = self.command_buffer;
+            let resources = self.global_resources.read().unwrap();
+            let mut vert = ArrayVec::<vk::Buffer, VERTEX_BUFFER_COUNT>::new();
+            let mut vert_off = ArrayVec::<vk::DeviceSize, VERTEX_BUFFER_COUNT>::new();
+            for (id, offset) in bindings.iter().map(|v| (v.id, v.offset)) {
+                let buf = resources.get_buffer(id)?;
+                let properties = buf.properties();
+                let size = properties.size;
+                if size <= offset {
+                    return Err(BufferError::OutOfRange {
+                        buffer_size: size,
+                        requested_offset: offset, requested_size: 1,
+                    }.into())
+                }
+                if has_not_bits!(properties.usage, vk::BufferUsageFlags::VERTEX_BUFFER) {
+                    return Err(BufferError::UsageMismatch {
+                        missing_usage: vk::BufferUsageFlags::VERTEX_BUFFER
+                    }.into())
+                }
+                vert.push(buf.handle()).unwrap();
+                vert_off.push(offset).unwrap();
+            }
+            self.device.cmd_bind_vertex_buffers(command_buffer, first_binding, &vert, &vert_off);
+            self.device.cmd_draw(
+                command_buffer,
+                vertex_count,
+                instance_count,
+                first_vertex,
+                first_instance
+            );
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
     pub fn draw_bufferless(&self, vertex_count: u32, instance_count: u32) {
         assert!(self.current_pipeline.is_some(), "attempting to draw with no pipeline attached");
         unsafe {

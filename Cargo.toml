@@ -7,7 +7,8 @@ members = [
 	"crates/nox-derive",
 	"crates/nox-ser",
 	"crates/nox-alloc"
-, "scratch/font-test"]
+]
 exclude = [
-	"example"
+	"example",
+	"font-example",
 ]
