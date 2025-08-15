@@ -2,9 +2,9 @@ use core::ops::{Deref, DerefMut};
 
 use nox::mem::impl_traits;
 
-#[derive(Clone)]
 pub struct Face<'a> {
     face: ttf_parser::Face<'a>,
+    pub(crate) hb_font: harfbuzz_rs::Owned<harfbuzz_rs::Font<'a>>,
 }
 
 impl<'a> Face<'a> {
@@ -16,6 +16,7 @@ impl<'a> Face<'a> {
     {
         Ok(Self {
             face: ttf_parser::Face::parse(data, index)?,
+            hb_font: harfbuzz_rs::Font::new(harfbuzz_rs::Face::from_bytes(data, index)),
         })
     }
 }

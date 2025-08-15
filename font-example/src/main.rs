@@ -41,13 +41,14 @@ impl Interface for App {
         _nox: &mut Nox<Self>,
         renderer: &mut renderer::RendererContext,
     ) -> Result<(), Error> {
-        let font = File::open("HackNerdFontMono-Regular.ttf")?;
+        //let font = File::open("HackNerdFontMono-Regular.ttf")?;
+        let font = File::open("adobe-garamond/AGaramondPro-Regular.otf")?;
         let map = unsafe {
             Mmap::map(&font)?
         };
         let face = Face::parse(&map, 0).unwrap();
         let mut text = VertexTextRenderer::new(face, 2);
-        self.rendered_text = text.render("fn hello()").unwrap();
+        self.rendered_text = text.render("To AV").unwrap();
         renderer.edit_resources(|r| {
             self.vertex_shader = r.create_shader(
                 "#version 450

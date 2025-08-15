@@ -2,11 +2,13 @@ use std::sync::Arc;
 
 use core::slice;
 
-use nox::mem::vec_types::GlobalVec;
+use nox::mem::{
+    vec_types::GlobalVec,
+    slice,
+};
 
 use super::*;
 
-#[derive(Clone)]
 pub struct VertexTextRenderer<'a> {
     trigs: GlobalVec<Option<Arc<GlyphTriangles>>>,
     offsets: GlobalVec<Option<GlobalVec<VertexOffset>>>,
@@ -44,34 +46,39 @@ impl<'a> VertexTextRenderer<'a> {
     ) -> Option<RenderedText>
     {
         self.offsets.fill(Default::default());
-        let mut result = GlobalVec::with_capacity(16);
-        let mut pen_x = 0.0;
+        let buffer = harfbuzz_rs::UnicodeBuffer
+            ::new()
+            .add_str(text);
+        let features = harfbuzz_rs::Feature::new(
+            harfbuzz_rs::Tag::new('g', 'b', 'o', 's'), 1, 0..usize::MAX);
+        let output = harfbuzz_rs::shape(&self.face.hb_font, buffer, &[features]);
+        let positions = output.get_glyph_positions();
         let face = &self.face;
         let trigs = &mut self.trigs;
         let offsets = &mut self.offsets;
+        let curve_depth = self.curve_depth;
         let units_per_em = face.units_per_em() as f32;
-        for c in text.chars() {
-            let index = c as usize;
-            if trigs[index].is_none() {
-                if let Some(trig) = triangulate(c, &self.face, self.curve_depth) {
-                    trigs[index] = Some(Arc::new(trig));
+        let mut pen_x = 0.0;
+        for (i, c) in text.chars().enumerate() {
+            let glyph_index = c as usize;
+            let trigs = &mut trigs[glyph_index];
+            if trigs.is_none() {
+                if let Some(trig) = triangulate(c, face, curve_depth) {
+                    *trigs = Some(Arc::new(trig));
                 }
             }
-            let glyph_id = face.glyph_index(c)?;
-            if trigs[index].is_some() {
-                let lsb = face.glyph_hor_side_bearing(glyph_id)? as f32 / units_per_em;
-                let glyph_x = pen_x + lsb;
-                let offsets = &mut offsets[index];
-                if offsets.is_none() {
-                    *offsets = Some(GlobalVec::with_capacity(4));
-                }
-                unsafe {
-                    offsets.as_mut().unwrap_unchecked().push(VertexOffset { offset: glyph_x });
-                }
+            let position = positions[i];
+            let glyph_x = pen_x + position.x_offset as f32 / units_per_em;
+            let offsets = &mut offsets[glyph_index];
+            if let Some(offsets) = offsets.as_mut() {
+                offsets.push(VertexOffset { offset: glyph_x });
             }
-            let advance = face.glyph_hor_advance(glyph_id)? as f32 / units_per_em;
-            pen_x += advance;
+            else if trigs.is_some() {
+                *offsets = Some(slice![VertexOffset { offset: glyph_x }].into());
+            }
+            pen_x += position.x_advance as f32 / units_per_em;
         }
+        let mut result = GlobalVec::with_capacity(8);
         for (i, offsets) in self.offsets.iter_mut().enumerate() {
             if let Some(offsets) = offsets.take() {
                 let text = InstancedText {
