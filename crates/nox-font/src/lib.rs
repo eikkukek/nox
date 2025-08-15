@@ -18,5 +18,5 @@ pub struct Vertex {
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug, VertexInput)]
 pub struct VertexOffset {
-    offset: f32,
+    offset: [f32; 2],
 }

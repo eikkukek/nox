@@ -8,3 +8,4 @@ nox = { path = "../nox" }
 ttf-parser = "0.25.1"
 harfbuzz_rs = "2.0.1"
 earcutr = "0.5.0"
+unicode-segmentation = "1.12.0"

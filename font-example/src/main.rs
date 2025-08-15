@@ -47,8 +47,8 @@ impl Interface for App {
             Mmap::map(&font)?
         };
         let face = Face::parse(&map, 0).unwrap();
-        let mut text = VertexTextRenderer::new(face, 2);
-        self.rendered_text = text.render("To AV").unwrap();
+        let mut text = VertexTextRenderer::new(face, 4);
+        self.rendered_text = text.render("To AV moi", true, 4.0).unwrap();
         renderer.edit_resources(|r| {
             self.vertex_shader = r.create_shader(
                 "#version 450
@@ -56,7 +56,7 @@ impl Interface for App {
                 layout(location = 0) in vec2 in_pos;
                 layout(location = 1) in vec3 in_bary;
 
-                layout(location = 2) in float in_offset;
+                layout(location = 2) in vec2 in_offset;
 
                 layout(location = 0) out vec3 out_bary;
 
@@ -66,7 +66,7 @@ impl Interface for App {
                 } pc;
 
                 void main() {
-                    vec2 pos = in_pos + vec2(in_offset, 0.0) - vec2(1.0, 0.5) - vec2(pc.text_size.x / 2.0, 0.0);
+                    vec2 pos = in_pos + vec2(in_offset.x, in_offset.y) - vec2(1.0, 0.5) - vec2(pc.text_size.x / 2.0, 0.0);
                     pos.y *= pc.aspect_ratio * pc.text_size.y;
                     pos /= 10.0;
                     gl_Position = vec4(pos, 0.0, 1.0);
