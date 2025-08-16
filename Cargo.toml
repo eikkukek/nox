@@ -6,7 +6,7 @@ members = [
 	"crates/nox-mem",
 	"crates/nox-derive",
 	"crates/nox-ser",
-	"crates/nox-alloc"
+	"crates/nox-alloc",
 ]
 exclude = [
 	"example",

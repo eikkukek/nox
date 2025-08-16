@@ -408,7 +408,7 @@ impl Drop for TransferCommands {
             if let Some(fence) = self.fence.take() {
                 self.device.destroy_fence(fence, None);
             }
-            self.device.free_command_buffers(self.command_pool, &[self.command_buffer]);
+            self.device.destroy_command_pool(self.command_pool, None);
         }
     }
 }

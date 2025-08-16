@@ -22,17 +22,14 @@ mod commands;
 mod swapchain_pass;
 
 use std::{
-    rc::Rc, sync::{Arc, RwLock}, thread::{self, JoinHandle, ThreadId}
+    rc::Rc, sync::{Arc, RwLock}, thread::{JoinHandle}
 };
 
 use core::{
-    slice,
     cell::{UnsafeCell, RefCell},
 };
 
 use ash::vk;
-
-use fxhash::FxHashMap;
 
 use nox_mem::{
     string_types::*,
@@ -148,9 +145,8 @@ pub struct ComputeState {
 }
 
 pub struct Renderer<'mem> {
-    transfer_commands: Arc<RwLock<GlobalVec<TransferCommands>>>,
+    transfer_commands: GlobalVec<TransferCommands>,
     main_thread_context: ThreadContext,
-    thread_contexts: Arc<RwLock<FxHashMap<ThreadId, ThreadContext>>>,
     frame_states: ArrayVec<Rc<RefCell<FrameState>>, {MAX_BUFFERED_FRAMES as usize}>,
     compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
     swapchain_pass_pipeline_data: SwapchainPassPipelineData,
@@ -214,7 +210,6 @@ impl<'mem> Renderer<'mem> {
             .map_err(|e| format!("failed to create full screen pass data ( {:?} )", e))?;
         let mut s = Self {
             main_thread_context,
-            thread_contexts: Default::default(),
             vulkan_context,
             frame_states: Default::default(),
             compute_states: Default::default(),
@@ -316,7 +311,7 @@ impl<'mem> Renderer<'mem> {
         &mut self,
         interface: Arc<RwLock<I>>,
         command_requests: CommandRequests,
-    ) -> GlobalVec<Option<JoinHandle<()>>>
+    ) -> Result<GlobalVec<Option<JoinHandle<()>>>, Error>
     {
 
         let mut handles = GlobalVec::with_capacity(command_requests.task_count());
@@ -330,67 +325,57 @@ impl<'mem> Renderer<'mem> {
             true,
         ).unwrap()));
 
+        let device = self.device.clone();
+        let alloc = staging_alloc.clone();
+        let transfer_commands = &mut self.transfer_commands;
+        let queue_families = self.vulkan_context.queue_family_indices();
+        let interface = interface.clone();
+        let global_resources = self.global_resources.clone();
+
         for (id, request) in command_requests.transfer_iter() {
 
-            let device = self.device.clone();
             let capacity = request.staging_buffer_capacity;
-            let alloc = staging_alloc.clone();
-            let transfer_commands = self.transfer_commands.clone();
-            let interface = interface.clone();
-            let thread_contexts = self.thread_contexts.clone();
-            let queue_families = self.vulkan_context.queue_family_indices();
-            let global_resources = self.global_resources.clone();
 
-            let handle = thread::spawn(move || {
-                let mut thread_contexts = thread_contexts
-                    .write()
-                    .expect("ThreadContext lock poisoned");
-                let thread_context = thread_contexts
-                    .entry(thread::current().id())
-                    .or_insert(ThreadContext
-                        ::new(device.clone(), queue_families)
-                        .unwrap()
-                    );
-                let mut vk_cmd_buffer = vk::CommandBuffer::null();
-                let command_pool = thread_context.transfer_pool();
-                let info = vk::CommandBufferAllocateInfo {
-                    s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                    command_pool,
-                    level: vk::CommandBufferLevel::PRIMARY,
-                    command_buffer_count: 1,
-                    ..Default::default()
-                };
-                helpers
-                    ::allocate_command_buffers(&device, &info, slice::from_mut(&mut vk_cmd_buffer))
-                    .unwrap();
-                helpers
-                    ::begin_command_buffer(&device, vk_cmd_buffer)
-                    .unwrap();
-                let mut command_buffer = TransferCommands::new(
-                    device,
-                    vk_cmd_buffer,
-                    command_pool,
-                    global_resources,
-                    alloc,
-                    capacity,
-                    queue_families.transfer_index(),
-                    id,
-                ).unwrap();
-                interface
-                    .write()
-                    .expect("Interface lock poisoned")
-                    .transfer_commands(id, &mut command_buffer)
-                    .unwrap();
-                transfer_commands
-                    .write()
-                    .expect("Transfer commands lock poisoned")
-                    .push(command_buffer);
-            });
+            let command_pool = helpers::create_command_pool(
+                &device,
+                vk::CommandPoolCreateFlags::TRANSIENT,
+                queue_families.transfer_index(),
+            )?;
 
-            handles.push(Some(handle));
+            let mut vk_cmd_buffer = vk::CommandBuffer::null();
+            let info = vk::CommandBufferAllocateInfo {
+                s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                command_pool,
+                level: vk::CommandBufferLevel::PRIMARY,
+                command_buffer_count: 1,
+                ..Default::default()
+            };
+            helpers
+                ::allocate_command_buffers(&device, &info, core::slice::from_mut(&mut vk_cmd_buffer))?;
+            helpers
+                ::begin_command_buffer(&device, vk_cmd_buffer)?;
+
+            let mut commands = transfer_commands.push(TransferCommands::new(
+                device.clone(),
+                vk_cmd_buffer,
+                command_pool,
+                global_resources.clone(),
+                alloc.clone(),
+                capacity,
+                queue_families.transfer_index(),
+                id,
+            ).unwrap());
+
+            let handle = interface
+                .write()
+                .unwrap()
+                .transfer_commands(id, &mut commands)
+                .unwrap();
+
+            handles.push(handle);
         }
 
-        handles
+        Ok(handles)
     }
 
     pub(crate) fn render<I: Interface>(
@@ -402,8 +387,8 @@ impl<'mem> Renderer<'mem> {
     {
         let device = self.device.clone();
         let mut pending_transfers = Default::default();
-        if !self.transfer_commands.read().unwrap().is_empty() {
-            let mut transfer_commands = self.transfer_commands.write().unwrap();
+        if !self.transfer_commands.is_empty() {
+            let transfer_commands = &mut self.transfer_commands;
             pending_transfers = GlobalVec::with_capacity(transfer_commands.len());
             let mut ready_transfers = GlobalVec::with_capacity(transfer_commands.len());
             for (i, command) in transfer_commands.iter_mut().enumerate() {

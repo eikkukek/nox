@@ -15,22 +15,16 @@ use super::{
 
 pub trait Interface
     where
-        Self: Sized + Send + Sync + 'static
+        Self: Sized
 {
     /// Provides the initialization settings for Nox.
     fn init_settings(&self) -> InitSettings;
 
-    /// Get called once right after start up.
+    /// Gets called once right after start up.
     fn init_callback(
         &mut self,
         nox: &mut Nox<Self>,
         renderer: &mut RendererContext,
-    ) -> Result<(), Error>;
-
-    /// Gets called when window is resized.
-    fn frame_buffer_size_callback(
-        &mut self,
-        renderer: &mut RendererContext
     ) -> Result<(), Error> { Ok(()) }
 
     /// Gets called every frame before `compute`.
@@ -40,6 +34,12 @@ pub trait Interface
         renderer: &mut RendererContext,
         frame_buffer_size: (u32, u32),
     ) {}
+
+    /// Gets called when window is resized.
+    fn frame_buffer_size_callback(
+        &mut self,
+        renderer: &mut RendererContext
+    ) -> Result<(), Error> { Ok(()) }
 
     /// Gets called every frame before `render`.
     ///
@@ -79,7 +79,7 @@ pub trait Interface
         &mut self,
         id: CommandRequestID,
         commands: &mut TransferCommands,
-    ) -> Result<(), Error>;
+    ) -> Result<Option<std::thread::JoinHandle<()>>, Error>;
 
     /// Gets called after frame graph construction in `render` 
     ///

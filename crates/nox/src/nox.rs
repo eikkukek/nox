@@ -107,10 +107,20 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                     );
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
-                        let mut handles = renderer.command_requests(self.interface.clone(), renderer_context.command_requests);
+                        let mut handles = match renderer.command_requests(self.interface.clone(), renderer_context.command_requests) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                event_loop.exit();
+                                self.error_flag = true;
+                                eprintln!("Failed to record transfer commands: {:?}", e);
+                                return
+                            },
+                        };
                         for handle in &mut handles {
-                            if let Err(e) = handle.take().unwrap().join() {
-                                panic!("thread poisoned during command requests: {:?}", e)
+                            if let Some(handle) = handle.take() {
+                                if let Err(e) = handle.join() {
+                                    panic!("thread poisoned during transfer commands: {:?}", e)
+                                }
                             }
                         }
                         if let Err(e) = renderer.render(&window, self.interface.clone(), renderer_allocators) {
@@ -177,7 +187,25 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                 self.error_flag = true;
                 eprintln!("Nox error: init callback error ( {:?} )", e);
             }
-            self.renderer.as_mut().unwrap().command_requests(self.interface.clone(), renderer_context.command_requests);
+            let mut handles = match self.renderer
+                .as_mut()
+                .unwrap()
+                .command_requests(self.interface.clone(), renderer_context.command_requests) {
+                Ok(v) => v,
+                Err(e) => {
+                    event_loop.exit();
+                    self.error_flag = true;
+                    eprintln!("Failed to record transfer commands: {:?}", e);
+                    return
+                },
+            };
+            for handle in &mut handles {
+                if let Some(handle) = handle.take() {
+                    if let Err(e) = handle.join() {
+                        panic!("thread poisoned during transfer commands: {:?}", e)
+                    }
+                }
+            }
         }
     }
 }

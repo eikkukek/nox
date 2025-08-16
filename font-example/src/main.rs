@@ -195,7 +195,7 @@ impl Interface for App {
         &mut self,
         _id: renderer::CommandRequestID,
         commands: &mut renderer::TransferCommands,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<std::thread::JoinHandle<()>>, Error> {
         for (i, text) in self.rendered_text.iter().enumerate() {
             let vertices = unsafe { slice_as_bytes(&text.trigs.vertices) }.unwrap();
             commands.copy_data_to_buffer(
@@ -208,7 +208,7 @@ impl Interface for App {
                 offsets, 0, offsets.len() as u64
             )?;
         }
-        Ok(())
+        Ok(None)
     }
 
     fn render_commands(

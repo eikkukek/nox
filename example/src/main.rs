@@ -218,9 +218,6 @@ struct App {
     rot: f32,
 }
 
-unsafe impl Send for App {}
-unsafe impl Sync for App {}
-
 impl App {
 
     fn new() -> Self {
@@ -1039,13 +1036,13 @@ impl Interface for App {
         &mut self,
         id: nox::renderer::CommandRequestID,
         commands: &mut nox::renderer::TransferCommands,
-    ) -> Result<(), Error>
+    ) -> Result<Option<std::thread::JoinHandle<()>>, Error>
     {
         if id == self.fire_transfer_id {
             for image in &self.fire_images {
                 commands.clear_color_image(*image, [0.0, 0.0, 0.0, 0.0].into(), None)?;
             }
-            return Ok(())
+            return Ok(None)
         }
         for (i, asset) in self.assets.iter().enumerate() {
             commands.copy_data_to_image(
@@ -1073,7 +1070,7 @@ impl Interface for App {
             0,
             indices.len() as u64,
         ).unwrap();
-        Ok(())
+        Ok(None)
     }
 
     fn render_commands(

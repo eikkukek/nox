@@ -46,7 +46,7 @@ impl ThreadContext {
         self.graphics_pool
     }
 
-    pub fn transfer_pool(&self) -> vk::CommandPool {
+    pub fn _transfer_pool(&self) -> vk::CommandPool {
         self.transfer_pool
     }
 
