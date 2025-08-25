@@ -12,7 +12,6 @@ pub use nox::renderer::VertexInput;
 #[derive(Default, Clone, Copy, Debug, VertexInput)]
 pub struct Vertex {
     pos: [f32; 2],
-    bary: [f32; 3],
 }
 
 #[repr(C)]

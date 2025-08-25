@@ -56,13 +56,13 @@ impl<'a> VertexTextRenderer<'a> {
         let curve_depth = self.curve_depth;
         let units_per_em = face.units_per_em() as f32;
         let height = (face.ascender() - face.descender() + face.line_gap()) as f32 / units_per_em;
-        let mut pen_x = 0.0;
         let space = face.glyph_hor_advance(face.glyph_index(' ')?)? as f32 / units_per_em;
+        let mut pen_x = 0.0;
         let mut shapes = GlobalVec::<(Option<f32>, &str, harfbuzz_rs::GlyphBuffer)>
-            ::with_capacity(text.unicode_words().count());
+            ::with_capacity(text.split_word_bounds().count());
         let mut line_start = 0;
         let width_div_2 = normalized_width / 2.0;
-        for word in text.unicode_words() {
+        for word in text.split_word_bounds() {
             let buffer = harfbuzz_rs::UnicodeBuffer
                 ::new()
                 .add_str(word);
@@ -76,6 +76,12 @@ impl<'a> VertexTextRenderer<'a> {
                 continue
             }
             if pen_x + word_width > normalized_width {
+                if word == " " {
+                    continue
+                }
+                if shapes.back().unwrap().1 == " " {
+                    pen_x -= space;
+                }
                 shapes[line_start].0 =
                     if line_center {
                         Some(width_div_2 - pen_x / 2.0)
@@ -86,7 +92,7 @@ impl<'a> VertexTextRenderer<'a> {
                 line_start = shapes.len();
             }
             shapes.push((None, word, shape));
-            pen_x += word_width + space;
+            pen_x += word_width;
         }
         if shapes.len() == 0 {
             return None
@@ -99,8 +105,8 @@ impl<'a> VertexTextRenderer<'a> {
             };
         let mut pen_y = -height;
         for (start, word, shape) in &shapes {
-            if let Some(start) = start {
-                pen_x = *start;
+            if let &Some(start) = start {
+                pen_x = start;
                 pen_y += height;
             }
             let positions = shape.get_glyph_positions();
@@ -128,7 +134,6 @@ impl<'a> VertexTextRenderer<'a> {
                 }
                 pen_x += position.x_advance as f32 / units_per_em;
             }
-            pen_x += space;
         }
         let mut result = GlobalVec::with_capacity(8);
         for (i, offsets) in self.offsets.iter_mut().enumerate() {

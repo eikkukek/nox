@@ -1,6 +1,8 @@
-use core::slice;
+use nox::mem::{
+    vec_types::{GlobalVec, Vector},
+};
 
-use nox::mem::{vec_types::{Vector, GlobalVec}};
+use nox_geom::{earcut, fn_2d::*};
 
 use super::*;
 
@@ -40,11 +42,6 @@ impl Outline {
         }
         area * winding_rule < 0.0
     }
-
-    #[inline(always)]
-    fn join(&self, vertices: &mut GlobalVec<[f32; 2]>) {
-        vertices.append(&self.vertices);
-    }
 }
 
 struct OutlineBuilder {
@@ -59,31 +56,7 @@ struct OutlineBuilder {
 
 pub struct GlyphTriangles {
     pub vertices: GlobalVec<Vertex>,
-}
-
-#[inline(always)]
-fn flatten_vertices(vertices: &[[f32; 2]]) -> &[f32] {
-    let ptr = vertices.as_ptr() as *const f32;
-    unsafe {
-        slice::from_raw_parts(ptr, vertices.len() * 2)
-    }
-}
-
-#[inline(always)]
-fn point_in_polygon(point: [f32; 2], polygon: &[[f32; 2]]) -> bool {
-    let mut inside = false;
-    let len = polygon.len();
-    for i in 0..len {
-        let a  = polygon[i];
-        let b = polygon[(i + 1) % len];
-        if ((a[1] > point[1]) != (b[1] > point[1])) &&
-            point[0] < (b[0] - a[0]) * (point[1] - a[1]) /
-            (b[1] - a[1] + f32::EPSILON) + a[0]
-        {
-            inside = !inside;
-        }
-    }
-    inside
+    pub indices: GlobalVec<u32>,
 }
 
 impl OutlineBuilder {
@@ -111,54 +84,44 @@ impl OutlineBuilder {
         }
     }
 
-    fn finalize(self) -> Result<GlyphTriangles, earcutr::Error> {
+    fn finalize(self) -> Option<GlyphTriangles> {
 
-        let mut outers = GlobalVec::with_capacity(self.outlines.len());
-        let mut holes = GlobalVec::with_capacity(self.outlines.len());
+        let mut vertices = GlobalVec::new();
+        let mut indices = GlobalVec::new();
 
-        for outline in &self.outlines {
-            if outline.is_hole(self.winding_rule as f32) {
-                holes.push(outline);
-            } else {
-                outers.push(outline);
+        let winding_rule = self.winding_rule as f32;
+        let clock_wise = if self.winding_rule < 0 { true } else { false };
+
+        let outlines = &self.outlines;
+
+        for outline in outlines {
+
+            if outline.is_hole(winding_rule) {
+                continue
             }
-        }
 
-        let mut flat_vertices = GlobalVec::with_capacity(self.vertex_count as usize);
-        let mut indices = GlobalVec::with_capacity(3 * self.vertex_count as usize);
+            let outer = &outline.vertices;
 
-        let mut vertices = GlobalVec::with_capacity(self.vertex_count as usize);
+            let mut holes = GlobalVec::new();
 
-        for outer in &outers {
-            let offset = flat_vertices.len();
-            let mut index_offset = outer.vertices.len();
-            outer.join(&mut flat_vertices);
-            let mut hole_indices = GlobalVec::new();
-            for hole in &holes {
-                let p = hole.vertices[0];
-                if point_in_polygon(p, &outer.vertices) {
-                    hole_indices.push(index_offset);
-                    index_offset += hole.vertices.len();
-                    hole.join(&mut flat_vertices);
+            for o in outlines {
+                if o.is_hole(winding_rule) &&
+                    point_in_polygon(o.vertices[0].into(), outer) {
+                    holes.push(o.vertices.as_slice());
                 }
             }
-            indices
-                .append_map(
-                    &earcutr::earcut(flatten_vertices(&flat_vertices[offset..flat_vertices.len()]), &hole_indices, 2)?,
-                    |v| *v as u32 + offset as u32
-                );
-            let mut bary = 0;
-            for index in indices.iter().map(|v| *v as usize) {
-                let flat = flat_vertices[index];
-                let vertex: &mut Vertex = vertices.push(Default::default());
-                vertex.pos = flat;
-                vertex.bary[bary] = 1.0;
-                bary = (bary + 1) % 3;
-            }
+
+            let (vert, ind) = earcut(&outer, &holes, clock_wise)?;
+
+            let index_off = vertices.len();
+            indices.append_map(&ind, |&v| (v + index_off) as u32);
+            vertices.append_map(&vert, |&v| Vertex { pos: v });
+
         }
-        
-        Ok(GlyphTriangles {
+        println!("here");
+        Some(GlyphTriangles {
             vertices,
+            indices,
         })
     }
 }
@@ -320,5 +283,5 @@ pub fn triangulate(
     }
     let mut builder = OutlineBuilder::new(curve_depth, face.units_per_em(), winding_rule?);
     face.outline_glyph(id, &mut builder)?;
-    Some(builder.finalize().ok()?)
+    builder.finalize()
 }

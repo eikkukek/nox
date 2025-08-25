@@ -2,6 +2,7 @@ use core::{
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
+    fmt::{Debug, Display},
     slice
 };
 
@@ -202,8 +203,8 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     #[inline(always)]
     fn pop(&mut self) -> Option<T> {
         if self.len == 0 { return None }
-        let ptr = unsafe { self.as_mut_ptr().add(self.len).cast::<T>() };
         self.len -= 1;
+        let ptr = unsafe { self.as_mut_ptr().add(self.len).cast::<T>() };
         Some(unsafe { ptr.read() })
     }
 
@@ -227,7 +228,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         }       
     }
 
-    fn insert(&mut self, value: T, index: usize) -> Result<&mut T, CapacityError> {
+    fn insert(&mut self, index: usize, value: T) -> Result<&mut T, CapacityError> {
         if index >= self.len {
             panic!("index {} was out of bounds with len {} when inserting", index, self.len)
         }
@@ -399,6 +400,35 @@ impl_traits! {
         #[inline(always)]
         fn into_iter(self) -> Self::IntoIter {
             self.iter()
+        }
+    ,
+    Clone where T: Clone =>
+    
+        #[inline(always)]
+        fn clone(&self) -> Self {
+            ArrayVec::new().clone_from(self).unwrap()
+        }
+    ,
+    Debug where T: Debug =>
+
+        fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+            self.as_slice().fmt(f)
+        }
+    ,
+    Display where T: Display =>
+
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if self.len == 0 {
+                <str as Display>::fmt(&"[]", f)?;
+                return Ok(())
+            }
+            <char as Display>::fmt(&'[', f)?;
+            for value in &self[0..self.len - 1] {
+                value.fmt(f)?;
+                <str as Display>::fmt(&", ", f)?;
+            }
+            self.back().unwrap().fmt(f)?;
+            <char as Display>::fmt(&']', f)
         }
     ,
 }

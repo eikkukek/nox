@@ -17,6 +17,7 @@ pub struct App {
     color_format: ColorFormat,
     vertex_buffers: GlobalVec<BufferID>,
     vertex_offset_buffers: GlobalVec<BufferID>,
+    index_buffers: GlobalVec<BufferID>,
     vertex_shader: ShaderID,
     fragment_shader: ShaderID,
     pipeline_layout: PipelineLayoutID,
@@ -41,24 +42,20 @@ impl Interface for App {
         _nox: &mut Nox<Self>,
         renderer: &mut renderer::RendererContext,
     ) -> Result<(), Error> {
-        //let font = File::open("HackNerdFontMono-Regular.ttf")?;
-        let font = File::open("adobe-garamond/AGaramondPro-Regular.otf")?;
+        let font = File::open("adobe-garamond/AGaramondPro-Italic.otf")?;
         let map = unsafe {
             Mmap::map(&font)?
         };
         let face = Face::parse(&map, 0).unwrap();
         let mut text = VertexTextRenderer::new(face, 4);
-        self.rendered_text = text.render("To AV moi", true, 4.0).unwrap();
+        self.rendered_text = text.render("To AV moi @ 2 gå", true, 5.0).unwrap();
         renderer.edit_resources(|r| {
             self.vertex_shader = r.create_shader(
                 "#version 450
 
                 layout(location = 0) in vec2 in_pos;
-                layout(location = 1) in vec3 in_bary;
 
-                layout(location = 2) in vec2 in_offset;
-
-                layout(location = 0) out vec3 out_bary;
+                layout(location = 1) in vec2 in_offset;
 
                 layout(push_constant) uniform PushConstant {
                     vec2 text_size;
@@ -70,7 +67,6 @@ impl Interface for App {
                     pos.y *= pc.aspect_ratio * pc.text_size.y;
                     pos /= 10.0;
                     gl_Position = vec4(pos, 0.0, 1.0);
-                    out_bary = in_bary;
                 }
                 ",
                 "vertex shader",
@@ -79,16 +75,9 @@ impl Interface for App {
             self.fragment_shader = r.create_shader(
                 "#version 450
 
-                layout(location = 0) in vec3 in_bary;
-
                 layout(location = 0) out vec4 out_color;
 
                 void main() {
-                    /*
-                    float min_bary = min(in_bary.x, min(in_bary.y, in_bary.z));
-                    float w = fwidth(min_bary); 
-                    float alpha = 1.0 - smoothstep(0.0, w, min_bary);
-                    */
                     float alpha = 1.0;
                     out_color = vec4(1.0, 1.0, 1.0, alpha);
                 }
@@ -106,7 +95,7 @@ impl Interface for App {
             let mut pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layout);
             pipeline_info
                 .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
-                .with_vertex_input_binding(VertexInputBinding::new::<2, VertexOffset>(1, VertexInputRate::Instance))
+                .with_vertex_input_binding(VertexInputBinding::new::<1, VertexOffset>(1, VertexInputRate::Instance))
                 .with_sample_shading(SampleShadingInfo::new(MSAA::X8, 0.2, false, false))
                 .with_color_output(
                     self.color_format,
@@ -135,6 +124,11 @@ impl Interface for App {
                 self.vertex_offset_buffers.push(r.create_buffer(
                     (text.offsets.len() * size_of!(VertexOffset)) as u64, 
                     &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
+                    &mut r.default_binder(),
+                )?);
+                self.index_buffers.push(r.create_buffer(
+                    (text.trigs.indices.len() * size_of!(u32)) as u64,
+                    &[BufferUsage::IndexBuffer, BufferUsage::TransferDst],
                     &mut r.default_binder(),
                 )?);
             }
@@ -207,6 +201,11 @@ impl Interface for App {
                 self.vertex_offset_buffers[i],
                 offsets, 0, offsets.len() as u64
             )?;
+            let indices = unsafe { slice_as_bytes(&text.trigs.indices) }.unwrap();
+            commands.copy_data_to_buffer(
+                self.index_buffers[i],
+                indices, 0, indices.len() as u64
+            )?;
         }
         Ok(None)
     }
@@ -226,16 +225,17 @@ impl Interface for App {
             unsafe { value_as_bytes(&pc) }.unwrap()
         })?;
         for (i, text) in self.rendered_text.iter().enumerate() {
-            commands.draw(
-                0,
-                text.trigs.vertices.len() as u32,
-                0,
-                text.offsets.len() as u32,
-                0,
+            commands.draw_indexed(
+                DrawInfo {
+                    index_count: text.trigs.indices.len() as u32,
+                    instance_count: text.offsets.len() as u32,
+                    ..Default::default()
+                },
                 [
                     DrawBufferInfo::new(self.vertex_buffers[i], 0),
                     DrawBufferInfo::new(self.vertex_offset_buffers[i], 0),
                 ].into(),
+                DrawBufferInfo::new(self.index_buffers[i], 0)
             )?;
         }
         Ok(())

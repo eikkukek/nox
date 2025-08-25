@@ -341,6 +341,11 @@ impl<T> GlobalVec<T> {
     }
 
     #[inline(always)]
+    pub fn insert(&mut self, index: usize, value: T) -> &mut T {
+        <Self as Vector<T>>::insert(self, index, value).unwrap()
+    }
+
+    #[inline(always)]
     pub fn resize(&mut self, len: usize, value: T)
         where
             T: Clone
@@ -555,8 +560,8 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
     #[inline(always)]
     fn pop(&mut self) -> Option<T> {
         if self.len == 0 { return None }
-        let ptr = unsafe { self.data.add(self.len) };
         self.len -= 1;
+        let ptr = unsafe { self.data.add(self.len) };
         Some(unsafe { ptr.read() })
     }
 
@@ -588,7 +593,8 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         }
     }
 
-    fn insert(&mut self, value: T, index: usize) -> Result<&mut T> {
+    #[inline(always)]
+    fn insert(&mut self, index: usize, value: T) -> Result<&mut T> {
         if index > self.len {
             panic!("index {} was out of bounds with len {} when inserting", index, self.len)
         }
@@ -603,7 +609,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
     }
 
     fn remove(&mut self, index: usize) -> Option<T> {
-        if index == self.len { debug_assert!(false); return None }
+        if index >= self.len { panic!("index {} was out of bound with len {} when removing", index, self.len); }
         let removed = unsafe { self.data.add(index).read() };
         for i in index..self.len - 1 {
             unsafe { self.data.add(i).write(
@@ -631,13 +637,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         unsafe {
             self.data.drop_in_place(self.len);
         }
-        unsafe { self.alloc.free_uninit(
-            *self.data,
-            self.capacity)
-        }
         self.len = 0;
-        self.capacity = 0;
-        self.data = Pointer::dangling();
     }
 
     fn clone_from(mut self, from: &[T]) -> Result<Self>
@@ -718,7 +718,15 @@ impl_traits!{
 
         #[inline(always)]
         fn drop(&mut self) {
-            self.clear()
+            self.clear();
+            if self.capacity != 0 {
+                unsafe { self.alloc.free_uninit(
+                    *self.data,
+                    self.capacity)
+                }
+            }
+            self.capacity = 0;
+            self.data = Pointer::dangling();
         }
     ,
     AsRef<[T]> =>
@@ -805,8 +813,12 @@ impl_traits!{
     Display where T: Display =>
 
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            if self.len == 0 {
+                <str as Display>::fmt(&"[]", f)?;
+                return Ok(())
+            }
             <char as Display>::fmt(&'[', f)?;
-            for value in &self[0..self.len() - 1] {
+            for value in &self[0..self.len - 1] {
                 value.fmt(f)?;
                 <str as Display>::fmt(&", ", f)?;
             }
