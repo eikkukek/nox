@@ -107,7 +107,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                     );
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
-                        let mut handles = match renderer.command_requests(self.interface.clone(), renderer_context.command_requests) {
+                        let mut handles = match renderer.transfer_requests(self.interface.clone(), renderer_context.transfer_requests) {
                             Ok(v) => v,
                             Err(e) => {
                                 event_loop.exit();
@@ -190,7 +190,7 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
             let mut handles = match self.renderer
                 .as_mut()
                 .unwrap()
-                .command_requests(self.interface.clone(), renderer_context.command_requests) {
+                .transfer_requests(self.interface.clone(), renderer_context.transfer_requests) {
                 Ok(v) => v,
                 Err(e) => {
                     event_loop.exit();

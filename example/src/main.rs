@@ -770,8 +770,8 @@ impl Interface for App {
             Ok(())
         })?;
         renderer
-            .command_requests()
-            .add_transfer_request(TransferRequest::new(1));
+            .transfer_requests()
+            .add_request(1 << 28);
         self.frame_buffer_size = renderer.frame_buffer_size();
         Ok(())
     }
@@ -802,8 +802,8 @@ impl Interface for App {
             Ok(())
         })?;
         self.fire_transfer_id = renderer
-            .command_requests()
-            .add_transfer_request(TransferRequest::new(0));
+            .transfer_requests()
+            .add_request(1 << 28);
         self.frame_buffer_size = renderer.frame_buffer_size();
         Ok(())
     }

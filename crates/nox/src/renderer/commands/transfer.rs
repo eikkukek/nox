@@ -30,7 +30,7 @@ pub struct TransferCommands {
     command_pool: vk::CommandPool,
     global_resources: Arc<RwLock<GlobalResources>>,
     staging_buffers: GlobalVec<vk::Buffer>,
-    linear_device_alloc: Arc<RwLock<LinearDeviceAlloc>>,
+    linear_device_alloc: LinearDeviceAlloc,
     fence: Option<vk::Fence>,
     transfer_queue_index: u32,
     id: CommandRequestID,
@@ -38,13 +38,13 @@ pub struct TransferCommands {
 
 impl TransferCommands {
 
+    #[inline(always)]
     pub(crate) fn new(
         device: Arc<ash::Device>,
         command_buffer: vk::CommandBuffer,
         command_pool: vk::CommandPool,
         global_resources: Arc<RwLock<GlobalResources>>,
-        linear_device_alloc: Arc<RwLock<LinearDeviceAlloc>>,
-        staging_buffer_capacity: u32,
+        linear_device_alloc: LinearDeviceAlloc,
         transfer_queue_index: u32,
         id: CommandRequestID,
     ) -> Result<Self, Error>
@@ -54,7 +54,7 @@ impl TransferCommands {
             command_buffer,
             command_pool,
             global_resources,
-            staging_buffers: GlobalVec::with_capacity(staging_buffer_capacity as usize),
+            staging_buffers: GlobalVec::new(),
             linear_device_alloc,
             fence: None,
             transfer_queue_index,
@@ -62,14 +62,17 @@ impl TransferCommands {
         })
     }
 
+    #[inline(always)]
     pub(crate) fn vk_command_buffer(&self) -> vk::CommandBuffer {
         self.command_buffer
     }
 
+    #[inline(always)]
     pub(crate) fn id(&self) -> CommandRequestID {
         self.id
     }
 
+    #[inline(always)]
     pub(crate) fn get_fence(&mut self) -> Result<(bool, vk::Fence), vk::Result> {
         let mut new = false;
         if self.fence.is_none() {
@@ -83,6 +86,11 @@ impl TransferCommands {
             new = true;
         }
         Ok((new, self.fence.unwrap()))
+    }
+
+    #[inline(always)]
+    pub fn reserve_staging_buffers(&mut self, capacity: usize) {
+        self.staging_buffers.reserve(capacity);
     }
 
     #[inline(always)]
@@ -256,8 +264,6 @@ impl TransferCommands {
             device.create_buffer(&buffer_info, None)?
         };
         let memory = self.linear_device_alloc
-            .write()
-            .expect("LinearDeviceAlloc lock poisoned")
             .bind_buffer_memory(staging_buffer)?;
         let ptr = unsafe { memory.get_mapped_memory() }.unwrap();
 
@@ -361,8 +367,6 @@ impl TransferCommands {
             device.create_buffer(&buffer_info, None)?
         };
         let memory = self.linear_device_alloc
-            .write()
-            .expect("LinearDeviceAlloc lock poisoned")
             .bind_buffer_memory(staging_buffer)?;
         let ptr = unsafe { memory.get_mapped_memory() }.unwrap();
 

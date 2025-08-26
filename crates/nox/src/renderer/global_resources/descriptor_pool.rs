@@ -18,19 +18,19 @@ impl DescriptorPool {
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: memory_layout.uniform_sampled_images(),
+                descriptor_count: memory_layout.max_uniform_sampled_images(),
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: memory_layout.uniform_buffers(),
+                descriptor_count: memory_layout.max_uniform_buffers(),
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: memory_layout.uniform_storage_buffers(),
+                descriptor_count: memory_layout.max_uniform_storage_buffers(),
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::STORAGE_IMAGE,
-                descriptor_count: memory_layout.uniform_storage_images(),
+                descriptor_count: memory_layout.max_uniform_storage_images(),
             },
         ];
         let info = vk::DescriptorPoolCreateInfo {

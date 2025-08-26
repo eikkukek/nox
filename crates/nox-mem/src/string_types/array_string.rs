@@ -1,5 +1,8 @@
-use core::fmt::Write;
-use core::cmp::PartialEq;
+use core::{
+    fmt::Write,
+    cmp::PartialEq,
+    hash::Hash,
+};
 
 #[derive(Copy, Clone)]
 pub struct ArrayString<const N: usize> {
@@ -73,7 +76,7 @@ impl<const N: usize> ArrayString<N> {
     }
 
     pub fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.string[..self.len]).unwrap_or("<invalid utf-8>")
+        core::str::from_utf8(&self.string[..self.len]).unwrap_or("<invalid utf-8>")
     }
 
     pub fn as_bytes(&self) -> &[u8] {
@@ -105,16 +108,25 @@ impl<const N: usize, const M: usize> PartialEq<ArrayString::<M>> for ArrayString
     }
 }
 
+impl<const N: usize> Eq for ArrayString<N> {}
+
+impl<const N: usize> Hash for ArrayString<N> {
+
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
+    }
+}
+
 impl<const N: usize> core::fmt::Debug for ArrayString<N> {
 
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ArrayString<{}>({:?})", N, self.as_str())
     }
 }
 
 impl<const N: usize> core::fmt::Display for ArrayString<N> {
 
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
 }

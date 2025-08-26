@@ -102,7 +102,7 @@ impl Allocators {
         assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
         unsafe { &mut *self.frame_graphs.get() }.resize_with(
             buffered_frame_count as usize,
-            || ArenaAlloc::new(self._memory_layout.frame_graphs_size()).unwrap()
+            || ArenaAlloc::new(self._memory_layout.frame_graph_arena_size()).unwrap()
         ).unwrap();
     }
 
@@ -114,7 +114,7 @@ impl Allocators {
 
 pub struct RendererContext {
     global_resources: Arc<RwLock<GlobalResources>>,
-    pub(crate) command_requests: CommandRequests,
+    pub(crate) transfer_requests: TransferRequests,
     frame_buffer_size: image::Dimensions,
 }
 
@@ -128,8 +128,8 @@ impl RendererContext {
         f(&mut resources)
     }
 
-    pub fn command_requests(&mut self) -> &mut CommandRequests {
-        &mut self.command_requests
+    pub fn transfer_requests(&mut self) -> &mut TransferRequests {
+        &mut self.transfer_requests
     }
 
     pub fn frame_buffer_size(&self) -> image::Dimensions {
@@ -153,7 +153,7 @@ pub struct Renderer<'mem> {
     global_resources: Arc<RwLock<GlobalResources>>,
     device: Arc<ash::Device>,
     vulkan_context: VulkanContext<'mem>,
-    memory_layout: MemoryLayout,
+    _memory_layout: MemoryLayout,
     buffered_frame_count: u32,
     tmp_alloc: Arc<ArenaAlloc>,
     frame_buffer_size: image::Dimensions,
@@ -174,7 +174,7 @@ impl<'mem> Renderer<'mem> {
         buffered_frame_count = clamp(buffered_frame_count, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
         assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
         allocators.realloc_frame_graphs(buffered_frame_count);
-        let tmp_alloc = Arc::new(ArenaAlloc::new(memory_layout.tmp_size()).ok_or(format!("failed to create tmp alloc"))?);
+        let tmp_alloc = Arc::new(ArenaAlloc::new(memory_layout.tmp_arena_size()).ok_or(format!("failed to create tmp alloc"))?);
         let vulkan_context = VulkanContext
             ::new(
                 window,
@@ -216,7 +216,7 @@ impl<'mem> Renderer<'mem> {
             swapchain_pass_pipeline_data,
             global_resources: global_resources.clone(),
             device: device.clone(),
-            memory_layout,
+            _memory_layout: memory_layout,
             buffered_frame_count,
             transfer_commands: Default::default(),
             tmp_alloc,
@@ -229,7 +229,7 @@ impl<'mem> Renderer<'mem> {
             || {
                 let device_alloc = LinearDeviceAlloc::new(
                     device.clone(),
-                    memory_layout.device_frame_size(),
+                    memory_layout.frame_graph_device_block_size(),
                     vk::MemoryPropertyFlags::DEVICE_LOCAL,
                     vk::MemoryPropertyFlags::LAZILY_ALLOCATED | vk::MemoryPropertyFlags::PROTECTED,
                     &physical_device_info,
@@ -297,7 +297,7 @@ impl<'mem> Renderer<'mem> {
     pub(crate) fn renderer_context(&mut self) -> RendererContext {
         RendererContext {
             global_resources: self.global_resources.clone(),
-            command_requests: CommandRequests::new(),
+            transfer_requests: TransferRequests::new(),
             frame_buffer_size: self.frame_buffer_size,
         }
     }
@@ -307,34 +307,22 @@ impl<'mem> Renderer<'mem> {
         self.vulkan_context.request_swapchain_update(self.buffered_frame_count, size);
     }
 
-    pub(crate) fn command_requests<I: Interface>(
+    pub(crate) fn transfer_requests<I: Interface>(
         &mut self,
         interface: Arc<RwLock<I>>,
-        command_requests: CommandRequests,
+        command_requests: TransferRequests,
     ) -> Result<GlobalVec<Option<JoinHandle<()>>>, Error>
     {
 
         let mut handles = GlobalVec::with_capacity(command_requests.task_count());
 
-        let staging_alloc = Arc::new(RwLock::new(LinearDeviceAlloc::new(
-            self.device.clone(),
-            self.memory_layout.device_staging_size(),
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            vk::MemoryPropertyFlags::from_raw(0),
-            self.vulkan_context.physical_device_info(),
-            true,
-        ).unwrap()));
-
         let device = self.device.clone();
-        let alloc = staging_alloc.clone();
         let transfer_commands = &mut self.transfer_commands;
         let queue_families = self.vulkan_context.queue_family_indices();
         let interface = interface.clone();
         let global_resources = self.global_resources.clone();
 
-        for (id, request) in command_requests.transfer_iter() {
-
-            let capacity = request.staging_buffer_capacity;
+        for (id, staging_block_size) in command_requests.transfer_iter() {
 
             let command_pool = helpers::create_command_pool(
                 &device,
@@ -355,13 +343,21 @@ impl<'mem> Renderer<'mem> {
             helpers
                 ::begin_command_buffer(&device, vk_cmd_buffer)?;
 
+            let alloc = LinearDeviceAlloc::new(
+                self.device.clone(),
+                staging_block_size,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                vk::MemoryPropertyFlags::from_raw(0),
+                self.vulkan_context.physical_device_info(),
+                true,
+            ).unwrap();
+
             let mut commands = transfer_commands.push(TransferCommands::new(
                 device.clone(),
                 vk_cmd_buffer,
                 command_pool,
                 global_resources.clone(),
-                alloc.clone(),
-                capacity,
+                alloc,
                 queue_families.transfer_index(),
                 id,
             ).unwrap());

@@ -15,28 +15,14 @@ impl Default for CommandRequestID {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct TransferRequest {
-    pub staging_buffer_capacity: u32,
+pub struct TransferRequests {
+    pub(crate) transfer_requests: AllocVec<'static, u64, GlobalAlloc, slot_map::Dyn>,
 }
 
-impl TransferRequest {
-
-    pub fn new(staging_buffer_capacity: u32) -> Self {
-        Self {
-            staging_buffer_capacity,
-        }
-    }
-}
-
-pub struct CommandRequests {
-    pub(crate) transfer_requests: AllocVec<'static, TransferRequest, GlobalAlloc, slot_map::Dyn>,
-}
-
-impl CommandRequests {
+impl TransferRequests {
 
     pub(crate) fn new() -> Self {
-        CommandRequests {
+        TransferRequests {
             transfer_requests: AllocVec::new(&GLOBAL_ALLOC).unwrap(),
         }
     }
@@ -49,13 +35,13 @@ impl CommandRequests {
         self.transfer_requests.reserve(capacity as usize).unwrap();
     }
 
-    pub fn add_transfer_request(&mut self, request: TransferRequest) -> CommandRequestID {
+    pub fn add_request(&mut self, staging_block_size: u64) -> CommandRequestID {
         let index = self.transfer_requests.len() as u32;
-        self.transfer_requests.push(request).unwrap();
+        self.transfer_requests.push(staging_block_size).unwrap();
         CommandRequestID(index)
     }
 
-    pub(crate) fn transfer_iter(&self) -> impl Iterator<Item = (CommandRequestID, TransferRequest)> {
+    pub(crate) fn transfer_iter(&self) -> impl Iterator<Item = (CommandRequestID, u64)> {
         self.transfer_requests
             .iter()
             .enumerate()

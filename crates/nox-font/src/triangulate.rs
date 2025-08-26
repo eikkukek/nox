@@ -54,11 +54,6 @@ struct OutlineBuilder {
     units_per_em: u16,
 }
 
-pub struct GlyphTriangles {
-    pub vertices: GlobalVec<Vertex>,
-    pub indices: GlobalVec<u32>,
-}
-
 impl OutlineBuilder {
 
     #[inline(always)]
@@ -84,7 +79,13 @@ impl OutlineBuilder {
         }
     }
 
+    #[inline(always)]
     fn finalize(self) -> Option<GlyphTriangles> {
+
+        if self.vertex_count == 0 {
+            println!("white space");
+            return None
+        }
 
         let mut vertices = GlobalVec::new();
         let mut indices = GlobalVec::new();
@@ -118,7 +119,6 @@ impl OutlineBuilder {
             vertices.append_map(&vert, |&v| Vertex { pos: v });
 
         }
-        println!("here");
         Some(GlyphTriangles {
             vertices,
             indices,
@@ -265,6 +265,12 @@ impl ttf_parser::OutlineBuilder for OutlineBuilder {
             .push(outline);
         self.current_outline = Some(Outline::new(self.units_per_em as f32));
     }
+}
+
+#[derive(Default, Clone)]
+pub struct GlyphTriangles {
+    pub vertices: GlobalVec<Vertex>,
+    pub indices: GlobalVec<u32>,
 }
 
 pub fn triangulate(

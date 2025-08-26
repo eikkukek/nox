@@ -42,13 +42,31 @@ impl Interface for App {
         _nox: &mut Nox<Self>,
         renderer: &mut renderer::RendererContext,
     ) -> Result<(), Error> {
-        let font = File::open("adobe-garamond/AGaramondPro-Italic.otf")?;
-        let map = unsafe {
-            Mmap::map(&font)?
+        let regular = File::open("adobe-garamond/AGaramondPro-Regular.otf")?;
+        let regular = unsafe {
+            Mmap::map(&regular)?
         };
-        let face = Face::parse(&map, 0).unwrap();
-        let mut text = VertexTextRenderer::new(face, 4);
-        self.rendered_text = text.render("To AV moi @ 2 gå", true, 5.0).unwrap();
+        let regular = Face::parse(&regular, 0).unwrap();
+        let italic = File::open("adobe-garamond/AGaramondPro-Italic.otf")?;
+        let italic = unsafe {
+            Mmap::map(&italic)?
+        };
+        let italic = Face::parse(&italic, 0).unwrap();
+        let bold = File::open("adobe-garamond/AGaramondPro-Bold.otf")?;
+        let bold = unsafe {
+            Mmap::map(&bold)?
+        };
+        let bold = Face::parse(&bold, 0).unwrap();
+        let mut text = VertexTextRenderer::new([("regular", regular), ("italic", italic), ("bold", bold)], 4);
+        self.rendered_text = text.render(
+            &[
+                text_segment("To AV moi @ 2 gå ", "italic"),
+                text_segment("this is bold ", "bold"),
+                text_segment("this is regular", "regular"),
+            ],
+            true,
+            5.0
+        ).unwrap();
         renderer.edit_resources(|r| {
             self.vertex_shader = r.create_shader(
                 "#version 450
@@ -58,13 +76,19 @@ impl Interface for App {
                 layout(location = 1) in vec2 in_offset;
 
                 layout(push_constant) uniform PushConstant {
-                    vec2 text_size;
+                    float text_width;
+                    float font_height;
+                    uint text_rows;
                     float aspect_ratio;
                 } pc;
 
                 void main() {
-                    vec2 pos = in_pos + vec2(in_offset.x, in_offset.y) - vec2(1.0, 0.5) - vec2(pc.text_size.x / 2.0, 0.0);
-                    pos.y *= pc.aspect_ratio * pc.text_size.y;
+                    vec2 pos =
+                        in_pos +
+                        vec2(in_offset.x, in_offset.y) -
+                        vec2(1.0, 0.5) -
+                        vec2(pc.text_width / 2.0, pc.text_rows * pc.font_height / 2.0);
+                    pos.y *= pc.aspect_ratio * pc.font_height;
                     pos /= 10.0;
                     gl_Position = vec4(pos, 0.0, 1.0);
                 }
@@ -135,9 +159,34 @@ impl Interface for App {
             Ok(())
         })?;
         renderer
-            .command_requests()
-            .add_transfer_request(TransferRequest::new(1));
+            .transfer_requests()
+            .add_request(1 << 14);
         Ok(())
+    }
+
+    fn transfer_commands(
+        &mut self,
+        _id: renderer::CommandRequestID,
+        commands: &mut renderer::TransferCommands,
+    ) -> Result<Option<std::thread::JoinHandle<()>>, Error> {
+        for (i, text) in self.rendered_text.iter().enumerate() {
+            let vertices = unsafe { slice_as_bytes(&text.trigs.vertices) }.unwrap();
+            commands.copy_data_to_buffer(
+                self.vertex_buffers[i],
+                vertices, 0, vertices.len() as u64,
+            )?;
+            let offsets = unsafe { slice_as_bytes(&text.offsets) }.unwrap();
+            commands.copy_data_to_buffer(
+                self.vertex_offset_buffers[i],
+                offsets, 0, offsets.len() as u64
+            )?;
+            let indices = unsafe { slice_as_bytes(&text.trigs.indices) }.unwrap();
+            commands.copy_data_to_buffer(
+                self.index_buffers[i],
+                indices, 0, indices.len() as u64
+            )?;
+        }
+        Ok(None)
     }
 
     fn render<'a>(
@@ -185,42 +234,24 @@ impl Interface for App {
         Ok(())
     }
 
-    fn transfer_commands(
-        &mut self,
-        _id: renderer::CommandRequestID,
-        commands: &mut renderer::TransferCommands,
-    ) -> Result<Option<std::thread::JoinHandle<()>>, Error> {
-        for (i, text) in self.rendered_text.iter().enumerate() {
-            let vertices = unsafe { slice_as_bytes(&text.trigs.vertices) }.unwrap();
-            commands.copy_data_to_buffer(
-                self.vertex_buffers[i],
-                vertices, 0, vertices.len() as u64,
-            )?;
-            let offsets = unsafe { slice_as_bytes(&text.offsets) }.unwrap();
-            commands.copy_data_to_buffer(
-                self.vertex_offset_buffers[i],
-                offsets, 0, offsets.len() as u64
-            )?;
-            let indices = unsafe { slice_as_bytes(&text.trigs.indices) }.unwrap();
-            commands.copy_data_to_buffer(
-                self.index_buffers[i],
-                indices, 0, indices.len() as u64
-            )?;
-        }
-        Ok(None)
-    }
-
     fn render_commands(
         &mut self,
         _pass_id: frame_graph::PassID,
         commands: &mut renderer::RenderCommands,
     ) -> Result<(), Error> {
         commands.bind_pipeline(self.pipeline)?;
-        let pc = [
-            self.rendered_text.width,
-            self.rendered_text.height,
-            self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32,
-        ];
+        struct PC {
+            _text_width: f32,
+            _font_height: f32,
+            _text_rows: u32,
+            _aspect_ratio: f32,
+        }
+        let pc = PC {
+            _text_width: self.rendered_text.text_width,
+            _font_height: self.rendered_text.font_height,
+            _text_rows: self.rendered_text.text_rows,
+            _aspect_ratio: self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32,
+        };
         commands.push_constants(|_| {
             unsafe { value_as_bytes(&pc) }.unwrap()
         })?;
