@@ -91,11 +91,12 @@ pub fn earcut(
     let mut indices = GlobalVec::with_capacity(points.len());
     let mut idx = GlobalVec::with_capacity(points.len());
 
-    for i in 0..points.len() {
+    let winding = if clock_wise { -1.0 } else { 1.0 };
+
+    let n_points = points.len();
+    for i in 0..n_points {
         idx.push(i);
     }
-
-    let winding = if clock_wise { -1.0 } else { 1.0 };
 
     while idx.len() > 3 {
         let n = idx.len();
@@ -108,11 +109,10 @@ pub fn earcut(
             let c = points[idx[next]].0;
             if orient(a, b, c) * winding < -1e-6  { continue }
             ok = true;
-            for k in 0..n {
-                if k == prev || k == i || k == next { continue }
-                let kp = points[idx[k]].0;
+            for j in 0..n {
+                let kp = points[idx[j]].0;
                 if kp == a || kp == b || kp == c { continue }
-                if point_in_triangle(a, b, c, points[idx[k]].0.into()) { ok = false; break }
+                if point_in_triangle(a, b, c, kp) { ok = false; break }
             }
             if ok {
                 let prev = (i + n - 1) % n;
