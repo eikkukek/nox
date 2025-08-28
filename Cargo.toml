@@ -7,7 +7,7 @@ members = [
 	"crates/nox-derive",
 	"crates/nox-ser",
 	"crates/nox-alloc",
-	"crates/nox-geom",
+	"crates/nox-geom", "crates/nox-gui",
 ]
 exclude = [
 	"example",
