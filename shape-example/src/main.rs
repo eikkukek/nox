@@ -164,7 +164,7 @@ impl Interface for Example {
             self.indices.clear();
             self.hole.clear();
 
-            self.current_rect = self.current_rect.lerp(target_rect, 0.01);
+            self.current_rect = self.current_rect.lerp(target_rect, 10.0 * nox.delta_time().as_secs_f32());
 
             self.current_rect.to_points_cw(5, |p| { self.hole.push(p.into()); });
             self.points = GlobalVec::with_capacity(self.hole.len());

@@ -1,5 +1,7 @@
 use std::sync::{Arc, RwLock};
 
+use std::time;
+
 use rustc_hash::FxHashMap;
 
 use winit::{
@@ -48,6 +50,8 @@ pub struct Nox<'mem, I>
     physical_keys: FxHashMap<PhysicalKey, InputState>,
     logical_keys: FxHashMap<Key, InputState>,
     input_text: Option<SmolStr>,
+    delta_counter: time::Instant,
+    delta_time: time::Duration,
 }
 
 impl<'mem, I: Interface> Nox<'mem, I>
@@ -66,6 +70,8 @@ impl<'mem, I: Interface> Nox<'mem, I>
             physical_keys: Default::default(),
             logical_keys: Default::default(),
             input_text: None,
+            delta_counter: time::Instant::now(),
+            delta_time: time::Duration::ZERO,
         }
     }
 
@@ -81,6 +87,10 @@ impl<'mem, I: Interface> Nox<'mem, I>
             .unwrap()
             .device_info()
             .device_name().clone()
+    }
+
+    pub fn delta_time(&self) -> time::Duration {
+        self.delta_time
     }
 
     pub fn cursor_position(&self) -> (f64, f64) {
@@ -205,10 +215,12 @@ impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
                 let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
                 let renderer_allocators = self.memory.renderer_allocators();
                 if let Some(window) = self.window.clone() {
+                    self.delta_time = self.delta_counter.elapsed();
+                    self.delta_counter = time::Instant::now();
                     if let Err(e) = interface
                         .write()
                         .unwrap()
-                        .update(self,&mut renderer_context)
+                        .update(self, &mut renderer_context)
                     {
                         event_loop.exit();
                         self.error_flag = true;
