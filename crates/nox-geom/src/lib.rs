@@ -3,4 +3,4 @@ pub mod fn_2d;
 
 mod earcut;
 
-pub use earcut::earcut;
+pub use earcut::*;

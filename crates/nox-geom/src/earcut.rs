@@ -2,28 +2,38 @@ use nox_mem::vec_types::{Vector, GlobalVec};
 
 use super::{structs_2d::*, fn_2d::*};
 
+#[derive(Clone, Copy)]
+pub struct Hole<'a> {
+    points: &'a [[f32; 2]],
+    choose_right_most_index: bool,
+}
+
+pub fn earcut_hole(points: &[[f32; 2]], choose_right_most_index: bool) -> Hole {
+    Hole { points, choose_right_most_index }
+}
+
 pub fn earcut(
-    outer: &[[f32; 2]],
-    holes: &[&[[f32; 2]]],
-    clock_wise: bool
+    outline: &[[f32; 2]],
+    holes: &[Hole],
+    clock_wise: bool,
 ) -> Option<(GlobalVec<[f32; 2]>, GlobalVec<usize>)>
 {
     let mut points = GlobalVec::<(Point, bool)>::new();
-    points.append_map(outer, |&v| (v.into(), false));
+    points.append_map(outline, |&v| (v.into(), false));
     let mut holes = GlobalVec::from(holes);
 
     while let Some(hole) = holes.pop() {
         let mut out_idx: Option<usize> = None;
-        let mut inner: Point = hole[0].into();
+        let mut inner: Point = hole.points[0].into();
         let mut inner_idx = 0;
-        for (i, &v) in hole.iter().enumerate() {
+        for (i, &v) in hole.points.iter().enumerate() {
             if v[0] > inner.x {
                 inner = v.into();
                 inner_idx = i
             }
         }
         let n = points.len();
-        for _ in 0..hole.len() {
+        for _ in 0..hole.points.len() {
             for j in 0..n {
                 let point = points[j];
                 if point.1 {
@@ -31,8 +41,8 @@ pub fn earcut(
                 }
                 let mut valid = true;
                 for k in 0..n {
-                    let p0 = points[k].0;
-                    let p1 = points[(k + 1) % n].0;
+                    let p0 = unsafe { points.get_unchecked(k).0 };
+                    let p1 = unsafe { points.get_unchecked((k + 1) % n).0 };
                     if segments_cross(inner, point.0, p0, p1) {
                         valid = false;
                         break
@@ -40,20 +50,20 @@ pub fn earcut(
                 }
                 if !valid { continue }
                 for h in &holes {
-                    let m = h.len();
+                    let m = h.points.len();
                     for k in 0..m {
-                        let p0 = h[k];
-                        let p1 = h[(k + 1) % m];
+                        let p0 = unsafe { *h.points.get_unchecked(k) };
+                        let p1 = unsafe { *h.points.get_unchecked((k + 1) % m) };
                         if segments_cross(inner, point.0, p0.into(), p1.into()) {
                             valid = false;
                             break
                         }
                     }
                 }
-                let m = hole.len();
-                for k in 0..hole.len() {
-                    let p0 = hole[k];
-                    let p1 = hole[(k + 1) % m];
+                let m = hole.points.len();
+                for k in 0..hole.points.len() {
+                    let p0 = unsafe { *hole.points.get_unchecked(k) };
+                    let p1 = unsafe { *hole.points.get_unchecked((k + 1) % m) };
                     if segments_cross(inner, point.0, p0.into(), p1.into()) {
                         valid = false;
                         break
@@ -61,8 +71,13 @@ pub fn earcut(
                 }
                 if valid {
                     if let Some(out) = out_idx {
-                        if points[j].0.mag(inner) < points[out].0.mag(inner) {
-                            out_idx = Some(j)
+                        if !hole.choose_right_most_index {
+                            if points[j].0.mag_to(inner) < points[out].0.mag_to(inner) {
+                                out_idx = Some(j)
+                            }
+                        } else {
+                            out_idx = Some(j);
+                            break
                         }
                     } else {
                         out_idx = Some(j);
@@ -72,15 +87,15 @@ pub fn earcut(
             if out_idx.is_some() {
                 break
             }
-            inner_idx = (inner_idx + 1) % hole.len();
-            inner = hole[inner_idx].into();
+            inner_idx = (inner_idx + 1) % hole.points.len();
+            inner = unsafe { *hole.points.get_unchecked(inner_idx) }.into();
         }
         let Some(out_idx) = out_idx else {
             return None
         };
         let a = points[out_idx].0;
-        let mut hole_cycle = GlobalVec::from(&hole[inner_idx..]);
-        hole_cycle.append(&hole[..inner_idx]);
+        let mut hole_cycle = GlobalVec::from(&hole.points[inner_idx..]);
+        hole_cycle.append(&hole.points[..inner_idx]);
         for &p in hole_cycle.iter().rev() {
             points.insert(out_idx + 1, (p.into(), true));
         }
@@ -104,20 +119,26 @@ pub fn earcut(
         for i in 0..n {
             let prev = (i + n - 1) % n;
             let next = (i + 1) % n;
-            let a = points[idx[prev]].0;
-            let b = points[idx[i]].0;
-            let c = points[idx[next]].0;
+            let (a, b, c) = unsafe {(
+                points.get_unchecked(*idx.get_unchecked(prev)).0,
+                points.get_unchecked(*idx.get_unchecked(i)).0,
+                points.get_unchecked(*idx.get_unchecked(next)).0
+            )};
             if orient(a, b, c) * winding < -1e-6  { continue }
             ok = true;
             for j in 0..n {
-                let kp = points[idx[j]].0;
+                let kp = unsafe { points.get_unchecked(*idx.get_unchecked(j)).0 };
                 if kp == a || kp == b || kp == c { continue }
                 if point_in_triangle(a, b, c, kp) { ok = false; break }
             }
             if ok {
                 let prev = (i + n - 1) % n;
                 let next = (i + 1) % n;
-                let (a, b, c) = (idx[prev], idx[i], idx[next]);
+                let (a, b, c) = unsafe {(
+                    *idx.get_unchecked(prev),
+                    *idx.get_unchecked(i),
+                    *idx.get_unchecked(next)
+                )};
                 indices.append(&[a, b, c]);
                 idx.remove(i);
                 break

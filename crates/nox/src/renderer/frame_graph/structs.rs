@@ -169,7 +169,7 @@ impl ReadInfo {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct WriteInfo {
     pub main_id: ResourceID,
     pub range_info: Option<ImageRangeInfo>,

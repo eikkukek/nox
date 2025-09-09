@@ -710,6 +710,9 @@ impl GlobalResources {
         binder: &mut Binder,
     ) -> Result<BufferID, Error>
     {
+        if size == 0 {
+            return Err(Error::BufferError(BufferError::ZeroSized))
+        }
         let mut vk_usage = vk::BufferUsageFlags::from_raw(0);
         for usage in usage {
             vk_usage |= vk::BufferUsageFlags::from_raw(usage.as_raw());
@@ -728,6 +731,7 @@ impl GlobalResources {
         ))
     }
 
+    #[inline(always)]
     pub unsafe fn map_buffer(
         &mut self,
         buffer: BufferID,
@@ -736,6 +740,11 @@ impl GlobalResources {
         unsafe {
             self.buffers.get_mut(buffer.0).ok()?.map_memory()
         }
+    }
+
+    #[inline(always)]
+    pub fn buffer_size(&self, buffer: BufferID) -> Option<u64> {
+        self.buffers.get(buffer.0).ok().map(|v| v.properties().size)
     }
 
     #[inline(always)]

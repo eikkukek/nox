@@ -120,6 +120,7 @@ pub struct RendererContext {
 
 impl RendererContext {
 
+    #[inline(always)]
     pub fn edit_resources<F>(&self, mut f: F) -> Result<(), Error>
         where
             F: FnMut(&mut GlobalResources) -> Result<(), Error>
@@ -128,12 +129,19 @@ impl RendererContext {
         f(&mut resources)
     }
 
+    #[inline(always)]
     pub fn transfer_requests(&mut self) -> &mut TransferRequests {
         &mut self.transfer_requests
     }
 
+    #[inline(always)]
     pub fn frame_buffer_size(&self) -> image::Dimensions {
         self.frame_buffer_size
+    }
+
+    #[inline(always)]
+    pub fn buffer_size(&self, buffer: BufferID) -> Option<u64> {
+        self.global_resources.read().unwrap().buffer_size(buffer)
     }
 }
 

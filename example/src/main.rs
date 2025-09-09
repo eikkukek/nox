@@ -812,18 +812,17 @@ impl Interface for App {
         &mut self,
         nox: &mut Nox<Self>,
         _renderer: &mut RendererContext,
-        frame_buffer_size: (u32, u32),
     )
     {
         let (cursor_x, cursor_y) = nox.cursor_position();
         let relative_cursor = glam::vec3(
-            1.0 - 2.0 * cursor_x as f32 / frame_buffer_size.0 as f32,
-            2.0 * cursor_y as f32 / frame_buffer_size.1 as f32 - 1.0,
+            1.0 - 2.0 * cursor_x as f32 / self.frame_buffer_size.width as f32,
+            2.0 * cursor_y as f32 / self.frame_buffer_size.height as f32 - 1.0,
             0.0,
         );
         let proj = Mat4::perspective_lh(
             PI / 1.6,
-            frame_buffer_size.0 as f32 / frame_buffer_size.1 as f32,
+            self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32,
             0.01,
             100.0
         );

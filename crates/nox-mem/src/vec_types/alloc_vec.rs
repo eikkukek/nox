@@ -341,6 +341,14 @@ impl<T> GlobalVec<T> {
     }
 
     #[inline(always)]
+    pub fn push_if_unique(&mut self, value: T) -> Option<&mut T>
+        where 
+            T: PartialEq
+    {
+        <Self as Vector<T>>::push_if_unique(self, value).unwrap()
+    }
+
+    #[inline(always)]
     pub fn insert(&mut self, index: usize, value: T) -> &mut T {
         <Self as Vector<T>>::insert(self, index, value).unwrap()
     }

@@ -1,16 +1,8 @@
 #![allow(unused_variables)]
 
 use crate::{
-    renderer::{
-        frame_graph::*,
-        *,
-    },
-};
-
-use super::{
-    Nox,
-    InitSettings,
-    Error
+    frame_graph::*,
+    *
 };
 
 pub trait Interface
@@ -32,8 +24,7 @@ pub trait Interface
         &mut self,
         nox: &mut Nox<Self>,
         renderer: &mut RendererContext,
-        frame_buffer_size: (u32, u32),
-    ) {}
+    ) -> Result<(), Error> { Ok(()) }
 
     /// Gets called when window is resized.
     fn frame_buffer_size_callback(

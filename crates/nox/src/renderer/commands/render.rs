@@ -173,7 +173,7 @@ impl<'a> RenderCommands<'a> {
     pub fn draw_indexed<const VERTEX_BUFFER_COUNT: usize>(
         &self,
         info: DrawInfo,
-        bindings: ArrayVec<DrawBufferInfo, VERTEX_BUFFER_COUNT>,
+        bindings: [DrawBufferInfo; VERTEX_BUFFER_COUNT],
         index_buffer: DrawBufferInfo,
     ) -> Result<(), Error>
     {

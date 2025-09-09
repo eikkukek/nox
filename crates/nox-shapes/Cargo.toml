@@ -1,9 +1,9 @@
 [package]
-name = "nox-gui"
+name = "nox-shapes"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 nox-mem = { path = "../nox-mem" }
-nox-font = { path = "../nox-font" }
+nox-geom = { path = "../nox-geom" }
 rustc-hash = "2.1.1"
