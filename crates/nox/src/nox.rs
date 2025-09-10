@@ -35,14 +35,14 @@ struct InputState {
     repeat: bool,
 }
 
-pub struct Nox<'mem, I>
+pub struct Nox<'a, I>
     where
         I: Interface,
 {
     interface: Arc<RwLock<I>>,
     window: Option<Arc<Window>>,
-    memory: &'mem Memory,
-    renderer: Option<Renderer<'mem>>,
+    memory: &'a Memory,
+    renderer: Option<Renderer<'a>>,
     error_flag: bool,
     cursor_pos: (f64, f64),
     mouse_scroll_delta: (f64, f64),
@@ -54,10 +54,10 @@ pub struct Nox<'mem, I>
     delta_time: time::Duration,
 }
 
-impl<'mem, I: Interface> Nox<'mem, I>
+impl<'a, I: Interface> Nox<'a, I>
 {
 
-    pub fn new(interface: I, memory: &'mem mut Memory) -> Self {
+    pub fn new(interface: I, memory: &'a mut Memory) -> Self {
         Nox {
             interface: Arc::new(RwLock::new(interface)),
             window: None,
@@ -154,7 +154,7 @@ impl<'mem, I: Interface> Nox<'mem, I>
     }
 }
 
-impl<'mem, I: Interface> Drop for Nox<'mem, I> {
+impl<'a, I: Interface> Drop for Nox<'a, I> {
 
     fn drop(&mut self) {
         if let Some(mut renderer) = self.renderer.take() {
@@ -167,7 +167,7 @@ impl<'mem, I: Interface> Drop for Nox<'mem, I> {
     }
 }
 
-impl<'mem, I: Interface> ApplicationHandler for Nox<'mem, I> {
+impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
         if self.error_flag {

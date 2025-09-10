@@ -812,7 +812,7 @@ impl Interface for App {
         &mut self,
         nox: &mut Nox<Self>,
         _renderer: &mut RendererContext,
-    )
+    ) -> Result<(), Error>
     {
         let (cursor_x, cursor_y) = nox.cursor_position();
         let relative_cursor = glam::vec3(
@@ -852,7 +852,8 @@ impl Interface for App {
                 LightInfo { pos: light_pos }
             );
         }
-        self.rot += 0.001;
+        self.rot += PI * nox.delta_time().as_secs_f32();
+        Ok(())
     }
 
     fn compute(

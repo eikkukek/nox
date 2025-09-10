@@ -26,10 +26,21 @@ use std::{
 };
 
 use core::{
-    cell::{UnsafeCell, RefCell},
+    cell::{UnsafeCell},
 };
 
 use ash::vk;
+
+use winit::{
+    dpi::PhysicalSize, window::Window
+};
+
+use token_cell::{
+    prelude::*,
+    runtime_token,
+};
+
+runtime_token!(pub(crate) FrameToken);
 
 use nox_mem::{
     string_types::*,
@@ -72,10 +83,6 @@ use swapchain_context::PresentResult;
 use thread_context::ThreadContext;
 
 use swapchain_pass::SwapchainPassPipelineData;
-
-use winit::{
-    dpi::PhysicalSize, window::Window
-};
 
 pub type DeviceName = ArrayString<{ash::vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 
@@ -152,22 +159,23 @@ pub struct ComputeState {
     timeline_value: u64,
 }
 
-pub struct Renderer<'mem> {
+pub struct Renderer<'a> {
     transfer_commands: GlobalVec<TransferCommands>,
     main_thread_context: ThreadContext,
-    frame_states: ArrayVec<Rc<RefCell<FrameState>>, {MAX_BUFFERED_FRAMES as usize}>,
+    frame_states: ArrayVec<Rc<TokenCell<FrameState, FrameToken>>, {MAX_BUFFERED_FRAMES as usize}>,
     compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
     swapchain_pass_pipeline_data: SwapchainPassPipelineData,
     global_resources: Arc<RwLock<GlobalResources>>,
     device: Arc<ash::Device>,
-    vulkan_context: VulkanContext<'mem>,
+    vulkan_context: VulkanContext<'a>,
     _memory_layout: MemoryLayout,
     buffered_frame_count: u32,
     tmp_alloc: Arc<ArenaAlloc>,
     frame_buffer_size: image::Dimensions,
+    frame_token: FrameToken,
 }
 
-impl<'mem> Renderer<'mem> {
+impl<'a> Renderer<'a> {
 
     pub(crate) fn new(
         window: &Window,
@@ -176,7 +184,7 @@ impl<'mem> Renderer<'mem> {
         enable_validation: bool,
         memory_layout: MemoryLayout,
         mut buffered_frame_count: u32,
-        allocators: &'mem Allocators,
+        allocators: &'a Allocators,
     ) -> Result<Self, String>
     {
         buffered_frame_count = clamp(buffered_frame_count, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
@@ -229,6 +237,7 @@ impl<'mem> Renderer<'mem> {
             transfer_commands: Default::default(),
             tmp_alloc,
             frame_buffer_size: image::Dimensions::new(1, 1, 1),
+            frame_token: FrameToken::new().unwrap(),
         };
         let mut frame_states = ArrayVec::new();
         let mut i = 0;
@@ -243,8 +252,9 @@ impl<'mem> Renderer<'mem> {
                     &physical_device_info,
                     false,
                 ).unwrap();
-                let s = Rc::new(RefCell::new(
-                    FrameState::new(device.clone(), global_resources.clone(), device_alloc).unwrap()
+                let s = Rc::new(TokenCell::new(
+                    FrameState::new(device.clone(), global_resources.clone(), device_alloc).unwrap(),
+                    &s.frame_token,
                 ));
                 i += 1;
                 s
@@ -386,7 +396,7 @@ impl<'mem> Renderer<'mem> {
         &mut self,
         window: &Window,
         interface: Arc<RwLock<I>>,
-        allocators: &'mem Allocators,
+        allocators: &'a Allocators,
     ) -> Result<(), String>
     {
         let device = self.device.clone();
@@ -534,29 +544,32 @@ impl<'mem> Renderer<'mem> {
         unsafe {
             alloc.force_clear();
         }
-        let mut frame_graph = FrameGraphImpl::new(
-            self.frame_states[frame_data.frame_index as usize].clone(),
-            frame_data.extent.into(),
-            frame_data.command_buffer, 
-            alloc,
-            frame_data.frame_index,
-            queue_family_indices,
-        );
-        interface
-            .write()
-            .unwrap()
-            .render(&mut frame_graph, &pending_transfers)
-            .map_err(|e| format!("interface failed to render ( {:?} )", e))?;
-        let mut render_commands = RenderCommands::new(
-            device.clone(),
-            frame_data.command_buffer,
-            self.global_resources.clone(),
-            &self.tmp_alloc,
-        );
-        frame_graph
-            .render(&mut *interface.write().unwrap(), &mut render_commands)
-            .map_err(|e| format!("frame graph failed to render ( {:?} )", e))?;
-        let frame_state = &mut self.frame_states[frame_data.frame_index as usize].borrow_mut();
+        {
+            let mut frame_graph = FrameGraphImpl::new(
+                self.frame_states[frame_data.frame_index as usize].clone(),
+                frame_data.extent.into(),
+                frame_data.command_buffer, 
+                alloc,
+                frame_data.frame_index,
+                queue_family_indices,
+                &mut self.frame_token,
+            );
+            interface
+                .write()
+                .unwrap()
+                .render(&mut frame_graph, &pending_transfers)
+                .map_err(|e| format!("interface failed to render ( {:?} )", e))?;
+            let mut render_commands = RenderCommands::new(
+                device.clone(),
+                frame_data.command_buffer,
+                self.global_resources.clone(),
+                &self.tmp_alloc,
+            );
+            frame_graph
+                .render(&mut *interface.write().unwrap(), &mut render_commands)
+                .map_err(|e| format!("frame graph failed to render ( {:?} )", e))?;
+        }
+        let frame_state = self.frame_states[frame_data.frame_index as usize].borrow_mut(&mut self.frame_token);
         let mut image_state = frame_data.image_state;
         let graphics_queue_index = queue_family_indices.graphics_index();
         if let Some((render_image, range_info)) = frame_state
@@ -697,14 +710,14 @@ impl<'mem> Renderer<'mem> {
         Ok(())
     }
 
-    pub(crate) fn clean_up(&mut self, allocators: &'mem Allocators) {
+    pub(crate) fn clean_up(&mut self, allocators: &'a Allocators) {
         println!("Nox renderer message: terminating renderer");
         unsafe {
             self.device.device_wait_idle().unwrap();
         }
         for state in &self.frame_states {
             unsafe {
-                state.borrow_mut().force_clean_up();
+                state.borrow_mut(&mut self.frame_token).force_clean_up();
             }
         }
         for state in &self.compute_states {

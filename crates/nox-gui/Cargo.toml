@@ -1,0 +1,9 @@
+[package]
+name = "nox-gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nox = { path = "../nox" }
+nox-font = { path = "../nox-font" }
+nox-shapes = { path = "../nox-shapes" }

@@ -1,23 +1,26 @@
 use std::rc::Rc;
 
-use core::cell::RefCell;
-
 use ash::vk;
+
+use token_cell::prelude::TokenCell;
 
 use nox_mem::{Allocator, vec_types::{FixedVec, Vector}};
 
 use crate::{
     has_bits, renderer::{
-        frame_state::{FrameState, ResourceID}, image::{
+        frame_state::{FrameState, ResourceID},
+        image::{
             Image, ImageBuilder, ImageRangeInfo, ImageState, ImageSubresourceRangeInfo
-        }, *
-    }
+        },
+        FrameToken,
+        *
+    },
 };
 
 use super::*;
 
 pub(crate) struct FrameGraphImpl<'a, Alloc: Allocator> {
-    frame_state: Rc<RefCell<FrameState>>,
+    frame_state: Rc<TokenCell<FrameState, FrameToken>>,
     frame_buffer_size: image::Dimensions,
     command_buffer: vk::CommandBuffer,
     passes: FixedVec<'a, Pass<'a, Alloc>, Alloc>,
@@ -25,17 +28,19 @@ pub(crate) struct FrameGraphImpl<'a, Alloc: Allocator> {
     next_pass_id: u32,
     alloc: &'a Alloc,
     frame_index: u32,
+    token: &'a mut FrameToken,
 }
 
 impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
 
     pub fn new(
-        frame_state: Rc<RefCell<FrameState>>,
+        frame_state: Rc<TokenCell<FrameState, FrameToken>>,
         frame_buffer_size: image::Dimensions,
         command_buffer: vk::CommandBuffer,
         alloc: &'a Alloc,
         frame_index: u32,
         queue_family_indices: QueueFamilyIndices,
+        token: &'a mut FrameToken,
     ) -> FrameGraphImpl<'a, Alloc>
     {
         FrameGraphImpl {
@@ -47,6 +52,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             next_pass_id: 0,
             alloc,
             frame_index,
+            token,
         }
     }
 }
@@ -62,7 +68,7 @@ impl<'a, Alloc: Allocator> FrameGraphInit<'a> for FrameGraphImpl<'a, Alloc> {
             self.passes = FixedVec::with_capacity(max_passes as usize, self.alloc)?;
         }
         let command_buffer = self.command_buffer;
-        self.frame_state.borrow_mut().init(command_buffer);
+        self.frame_state.borrow_mut(self.token).init(command_buffer);
         Ok(self)
     }
 }
@@ -79,19 +85,19 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
 
     fn set_render_image(&mut self, id: ResourceID, range_info: Option<ImageRangeInfo>) -> Result<(), Error>
     {
-        assert!(self.frame_state.borrow().is_valid_resource_id(id), "invalid id");
-        self.frame_state.borrow_mut().set_render_image(id, range_info)
+        assert!(self.frame_state.borrow(self.token).is_valid_resource_id(id), "invalid id");
+        self.frame_state.borrow_mut(self.token).set_render_image(id, range_info)
     }
 
     fn add_image(&mut self, id: ImageID) -> Result<ResourceID, Error> {
-        self.frame_state.borrow_mut().add_image(id)
+        self.frame_state.borrow_mut(self.token).add_image(id)
     }
 
     fn add_transient_image(
         &mut self,
         f: &mut dyn FnMut(&mut ImageBuilder),
     ) -> Result<ResourceID, Error> {
-        self.frame_state.borrow_mut().add_transient_image(f)
+        self.frame_state.borrow_mut(self.token).add_transient_image(f)
     }
 
     fn add_pass(
@@ -116,7 +122,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
 
     pub fn render(&mut self, interface: &mut impl Interface, render_commands: &mut RenderCommands) -> Result<(), Error> {
         let alloc = self.alloc;
-        let mut frame_state = self.frame_state.borrow_mut();
+        let frame_state = self.frame_state.borrow_mut(self.token);
         let device = frame_state.device();
         let passes = &mut self.passes;
         let command_buffer = self.command_buffer;

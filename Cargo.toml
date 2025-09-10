@@ -9,6 +9,7 @@ members = [
 	"crates/nox-alloc",
 	"crates/nox-geom",
 	"crates/nox-shapes",
+	"crates/nox-gui",
 ]
 exclude = [
 	"example",

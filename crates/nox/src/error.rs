@@ -4,7 +4,7 @@ use nox_mem::{const_assert, size_of, CapacityError, slot_map::SlotMapError};
 
 use crate::renderer::{
     ImageError,
-    BufferError
+    BufferError,
 };
 
 #[derive(Clone, Debug)]
