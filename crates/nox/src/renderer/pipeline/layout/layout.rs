@@ -15,14 +15,14 @@ pub(crate) struct PipelineLayout {
     handle: vk::PipelineLayout,
     pipeline_descriptor_sets: GlobalVec<(GlobalVec<Option<vk::DescriptorType>>, vk::DescriptorSetLayout)>,
     push_constant_ranges: GlobalVec<vk::PushConstantRange>,
-    shader_ids: GlobalVec<ShaderID>,
+    shader_ids: GlobalVec<ShaderId>,
 }
 
 impl PipelineLayout {
 
     pub fn new<const SHADER_COUNT: usize>(
         device: Arc<ash::Device>,
-        shader_ids: [ShaderID; SHADER_COUNT],
+        shader_ids: [ShaderId; SHADER_COUNT],
         global_resources: &GlobalResources,
     ) -> Result<Self, Error>
     {
@@ -144,7 +144,7 @@ impl PipelineLayout {
         &self.push_constant_ranges
     }
 
-    pub fn shader_ids(&self) -> &[ShaderID] {
+    pub fn shader_ids(&self) -> &[ShaderId] {
         &self.shader_ids
     }
 }

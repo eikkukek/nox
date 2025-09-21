@@ -4,9 +4,6 @@ use memmap2::Mmap;
 
 use nox::{
     mem::{size_of, slice_as_bytes, value_as_bytes, vec_types::GlobalVec},
-    renderer::{
-        frame_graph::*, *
-    },
     *
 };
 
@@ -15,13 +12,13 @@ use nox_font::*;
 #[derive(Default)]
 pub struct App {
     color_format: ColorFormat,
-    vertex_buffers: GlobalVec<BufferID>,
-    vertex_offset_buffers: GlobalVec<BufferID>,
-    index_buffers: GlobalVec<BufferID>,
-    vertex_shader: ShaderID,
-    fragment_shader: ShaderID,
-    pipeline_layout: PipelineLayoutID,
-    pipeline: GraphicsPipelineID,
+    vertex_buffers: GlobalVec<BufferId>,
+    vertex_offset_buffers: GlobalVec<BufferId>,
+    index_buffers: GlobalVec<BufferId>,
+    vertex_shader: ShaderId,
+    fragment_shader: ShaderId,
+    pipeline_layout: PipelineLayoutId,
+    pipeline: GraphicsPipelineId,
     rendered_text: RenderedText,
     frame_buffer_size: Dimensions,
 }
@@ -33,7 +30,7 @@ impl Interface for App {
             "font test",
             Version::new(0, 1, 0),
             [540, 540],
-            true,
+            false,
         )
     }
 
@@ -57,7 +54,7 @@ impl Interface for App {
             Mmap::map(&bold)?
         };
         let bold = Face::parse(&bold, 0).unwrap();
-        let mut text = VertexTextRenderer::new([("regular", regular), ("italic", italic), ("bold", bold)], 4);
+        let mut text = VertexTextRenderer::new([("regular", regular), ("italic", italic), ("bold", bold)], 0.1);
         self.rendered_text = text.render(
             &[
                 text_segment("To AV moi @ 2 gå ", "italic"),
@@ -166,7 +163,7 @@ impl Interface for App {
 
     fn transfer_commands(
         &mut self,
-        _id: renderer::CommandRequestID,
+        _id: renderer::CommandRequestId,
         commands: &mut renderer::TransferCommands,
     ) -> Result<Option<std::thread::JoinHandle<()>>, Error> {
         for (i, text) in self.rendered_text.iter().enumerate() {
@@ -192,7 +189,7 @@ impl Interface for App {
     fn render<'a>(
         &mut self,
         frame_graph: &'a mut dyn frame_graph::FrameGraphInit,
-        pending_transfers: &[renderer::CommandRequestID],
+        pending_transfers: &[renderer::CommandRequestId],
     ) -> Result<(), Error> {
         if !pending_transfers.is_empty() {
             return Ok(())
@@ -236,7 +233,7 @@ impl Interface for App {
 
     fn render_commands(
         &mut self,
-        _pass_id: frame_graph::PassID,
+        _pass_id: frame_graph::PassId,
         commands: &mut renderer::RenderCommands,
     ) -> Result<(), Error> {
         commands.bind_pipeline(self.pipeline)?;

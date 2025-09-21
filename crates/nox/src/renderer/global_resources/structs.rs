@@ -3,49 +3,49 @@ use crate::renderer::image::ImageRangeInfo;
 use super::*;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct ShaderID(pub(super) SlotIndex<Shader>);
+pub struct ShaderId(pub(super) SlotIndex<Shader>);
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PipelineLayoutID(pub(super) SlotIndex<pipeline::PipelineLayout>);
+pub struct PipelineLayoutId(pub(super) SlotIndex<pipeline::PipelineLayout>);
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
-pub struct BufferID(pub(super) SlotIndex<Buffer>);
+pub struct BufferId(pub(super) SlotIndex<Buffer>);
 
 #[derive(Default, Clone, Copy)]
 pub struct ShaderResourceInfo {
-    pub layout_id: PipelineLayoutID,
+    pub layout_id: PipelineLayoutId,
     pub set: u32,
 }
 
 #[derive(Clone)]
 pub(super) struct ShaderResource {
     pub descriptor_set: vk::DescriptorSet,
-    pub layout_id: PipelineLayoutID,
+    pub layout_id: PipelineLayoutId,
     pub set: u32,
     pub binding_count: u32,
-    pub image_views: GlobalVec<(ImageID, SlotIndex<vk::ImageView>)>,
+    pub image_views: GlobalVec<(ImageId, SlotIndex<vk::ImageView>)>,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
-pub struct ShaderResourceID(pub(super) SlotIndex<ShaderResource>);
+pub struct ShaderResourceId(pub(super) SlotIndex<ShaderResource>);
 
 #[derive(Default, Clone, Copy)]
 pub struct ShaderResourceBufferInfo {
-    pub buffer: BufferID,
+    pub buffer: BufferId,
     pub offset: u64,
     pub size: u64,
 }
 
 #[derive(Clone, Copy)]
 pub struct ShaderResourceImageInfo {
-    pub sampler: SamplerID,
-    pub image_source: (ImageID, Option<ImageRangeInfo>),
+    pub sampler: SamplerId,
+    pub image_source: (ImageId, Option<ImageRangeInfo>),
     pub storage_image: bool,
 }
 
 #[derive(Clone, Copy)]
 pub struct ShaderResourceImageUpdate<'a> {
-    pub resource: ShaderResourceID,
+    pub resource: ShaderResourceId,
     pub binding: u32,
     pub starting_index: u32,
     pub infos: &'a [ShaderResourceImageInfo],
@@ -53,7 +53,7 @@ pub struct ShaderResourceImageUpdate<'a> {
 
 #[derive(Default, Clone, Copy)]
 pub struct ShaderResourceBufferUpdate<'a> {
-    pub resource: ShaderResourceID,
+    pub resource: ShaderResourceId,
     pub binding: u32,
     pub starting_index: u32,
     pub infos: &'a [ShaderResourceBufferInfo],
@@ -61,10 +61,10 @@ pub struct ShaderResourceBufferUpdate<'a> {
 
 #[derive(Clone, Copy)]
 pub struct ShaderResourceCopy {
-    pub src_resource: ShaderResourceID,
+    pub src_resource: ShaderResourceId,
     pub src_binding: u32,
     pub src_starting_index: u32,
-    pub dst_resource: ShaderResourceID,
+    pub dst_resource: ShaderResourceId,
     pub dst_starting_index: u32,
     pub dst_binding: u32,
     pub array_count: u32,
@@ -76,7 +76,7 @@ pub(crate) struct GraphicsPipeline {
     pub handle: vk::Pipeline,
     pub _color_formats: GlobalVec<vk::Format>,
     pub _dynamic_states: GlobalVec<vk::DynamicState>,
-    pub layout_id: PipelineLayoutID,
+    pub layout_id: PipelineLayoutId,
     pub _depth_format: vk::Format,
     pub _stencil_format: vk::Format,
     pub samples: MSAA,
@@ -92,12 +92,12 @@ impl Drop for GraphicsPipeline {
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct GraphicsPipelineID(pub(super) SlotIndex<GraphicsPipeline>);
+pub struct GraphicsPipelineId(pub(super) SlotIndex<GraphicsPipeline>);
 
 pub(crate) struct ComputePipeline {
     pub device: Arc<ash::Device>,
     pub handle: vk::Pipeline,
-    pub layout_id: PipelineLayoutID,
+    pub layout_id: PipelineLayoutId,
 }
 
 impl Drop for ComputePipeline {
@@ -110,7 +110,7 @@ impl Drop for ComputePipeline {
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct ComputePipelineID(pub(super) SlotIndex<ComputePipeline>);
+pub struct ComputePipelineId(pub(super) SlotIndex<ComputePipeline>);
 
 pub(crate) struct PipelineCache {
     pub device: Arc<ash::Device>,
@@ -127,10 +127,10 @@ impl Drop for PipelineCache {
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
-pub struct PipelineCacheID(pub(super) SlotIndex<PipelineCache>);
+pub struct PipelineCacheId(pub(super) SlotIndex<PipelineCache>);
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct ImageID(pub(super) SlotIndex<Arc<Image>>);
+pub struct ImageId(pub(super) SlotIndex<Arc<Image>>);
 
 #[derive(Clone)]
 pub(super) struct Sampler {
@@ -149,4 +149,4 @@ impl Drop for Sampler {
 }
 
 #[derive(Default, Clone, Copy)]
-pub struct SamplerID(pub(super) SlotIndex<Sampler>);
+pub struct SamplerId(pub(super) SlotIndex<Sampler>);

@@ -14,7 +14,7 @@ use crate::{
 };
 
 pub(crate) struct Pass<'alloc, Alloc: Allocator> {
-    pub id: PassID,
+    pub id: PassId,
     pub reads: FixedVec<'alloc, ReadInfo, Alloc>,
     pub writes: FixedVec<'alloc, WriteInfo, Alloc>,
     pub depth_write: Option<(bool, WriteInfo)>,
@@ -25,7 +25,7 @@ pub(crate) struct Pass<'alloc, Alloc: Allocator> {
 impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
     
     pub fn new(
-        id: PassID,
+        id: PassId,
         info: PassInfo,
         alloc: &'alloc Alloc
     ) -> Result<Self, CapacityError> {
@@ -51,7 +51,7 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
         if self.writes.len() != 0 {
             let reads = &self.reads;
             let writes = &self.writes;
-            let mut write_ranges = FixedVec::<(ResourceID, WriteAccess<Alloc>), Alloc>
+            let mut write_ranges = FixedVec::<(ResourceId, WriteAccess<Alloc>), Alloc>
                 ::with_capacity(writes.len(), alloc)?;
             for write in writes {
 

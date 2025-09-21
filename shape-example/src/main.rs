@@ -1,5 +1,4 @@
 use nox::{
-    frame_graph::*,
     mem::{
         size_of, value_as_bytes,
         vec_types::{GlobalVec, Vector, Pointer}
@@ -7,8 +6,10 @@ use nox::{
     *
 };
 
-use nox_shapes::*;
-use nox_geom::{earcut, earcut_hole};
+use nox_geom::{
+    earcut::{earcut, earcut_hole},
+    shapes::*,
+};
 
 #[repr(C)]
 #[derive(VertexInput)]
@@ -22,15 +23,17 @@ pub struct Example {
     indices: GlobalVec<u32>,
     points: GlobalVec<[f32; 2]>,
     hole: GlobalVec<[f32; 2]>,
-    vertex_buffer: BufferID,
+    vertex_buffer: BufferId,
     vertex_buffer_map: *mut Vertex,
-    index_buffer: BufferID,
+    index_buffer: BufferId,
     index_buffer_map: *mut u32,
-    vertex_shader: ShaderID,
-    fragment_shader: ShaderID,
-    pipeline: GraphicsPipelineID,
-    pipeline_layout: PipelineLayoutID,
+    vertex_shader: ShaderId,
+    fragment_shader: ShaderId,
+    pipeline: GraphicsPipelineId,
+    pipeline_layout: PipelineLayoutId,
     output_format: ColorFormat,
+    output: ImageId,
+    output_resolve: ImageId,
     frame_buffer_size: Dimensions,
     rects: [Rect; 5],
     target_rect: usize,
@@ -44,7 +47,7 @@ impl Interface for Example {
             app_name: array_string!("shapes"),
             app_version: Default::default(),
             window_size: [540, 540],
-            enable_vulkan_validation: false,
+            enable_vulkan_validation: true,
         }
     }
 
@@ -61,9 +64,9 @@ impl Interface for Example {
         self.rects[4] = self.rects[0].translate(0.4, 0.0).heighten(0.125);
         self.target_rect = 0;
         self.current_rect = self.rects[0];
-        self.rects[0].to_points_cw(5, |p| { self.hole.push(p.into()); });
+        self.rects[0].to_points_cw(&mut |p| { self.hole.push(p.into()); });
         self.points = GlobalVec::with_capacity(self.hole.len());
-        outline_points(&self.hole, 0.075, true, |p| { self.points.push(p.into()); });
+        outline_points(&self.hole, 0.075, true, &mut |p| { self.points.push(p.into()); });
         let (vertices, indices) = earcut(&self.points, &[earcut_hole(&self.hole, true)], false).unwrap();
         self.vertices = vertices;
         self.indices.append_map(&indices, |&i| i as u32);
@@ -140,6 +143,39 @@ impl Interface for Example {
         Ok(())
     }
 
+    fn frame_buffer_size_callback(
+        &mut self,
+        renderer: &mut RendererContext
+    ) -> Result<(), Error> {
+        self.frame_buffer_size = renderer.frame_buffer_size();
+        renderer.edit_resources(|v| {
+            v.destroy_image(self.output);
+            v.destroy_image(self.output_resolve);
+            self.output = v.create_image(
+                &mut v.default_binder(),
+                |builder| {
+                    builder
+                        .with_dimensions(self.frame_buffer_size)
+                        .with_format(self.output_format, false)
+                        .with_samples(MSAA::X4)
+                        .with_usage(ImageUsage::ColorAttachment);
+                },
+            )?;
+            self.output_resolve = v.create_image(
+                &mut v.default_binder(),
+                |builder| {
+                    builder
+                        .with_dimensions(self.frame_buffer_size)
+                        .with_format(self.output_format, false)
+                        .with_usage(ImageUsage::Sampled)
+                        .with_usage(ImageUsage::ColorAttachment);
+                },
+            )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     fn update(
         &mut self,
         nox: &mut Nox<Self>,
@@ -157,7 +193,7 @@ impl Interface for Example {
             self.target_rect = 4;
         } 
         let target_rect = self.rects[self.target_rect];
-        if self.current_rect != target_rect {
+        if !self.current_rect.eq_epsilon(&target_rect, 1.0e-6) {
 
             self.points.clear();
             self.vertices.clear();
@@ -166,9 +202,9 @@ impl Interface for Example {
 
             self.current_rect = self.current_rect.lerp(target_rect, 10.0 * nox.delta_time().as_secs_f32());
 
-            self.current_rect.to_points_cw(5, |p| { self.hole.push(p.into()); });
+            self.current_rect.to_points_cw(&mut |p| { self.hole.push(p.into()); });
             self.points = GlobalVec::with_capacity(self.hole.len());
-            outline_points(&self.hole, 0.075, true, |p| { self.points.push(p.into()); });
+            outline_points(&self.hole, 0.075, true, &mut |p| { self.points.push(p.into()); });
             let (vertices, indices) = earcut(&self.points, &[earcut_hole(&self.hole, true)], false).unwrap();
             self.vertices = vertices;
             self.indices.append_map(&indices, |&i| i as u32);
@@ -196,7 +232,7 @@ impl Interface for Example {
     fn render<'a>(
         &mut self,
         frame_graph: &'a mut dyn frame_graph::FrameGraphInit,
-        pending_transfers: &[CommandRequestID],
+        pending_transfers: &[CommandRequestId],
     ) -> Result<(), Error>
     {
         if !pending_transfers.is_empty() {
@@ -204,24 +240,8 @@ impl Interface for Example {
         }
         let frame_graph = frame_graph.init(1)?;
         self.frame_buffer_size = frame_graph.frame_buffer_size();
-        let output = frame_graph.add_transient_image(
-            &mut |builder| {
-                builder
-                    .with_dimensions(self.frame_buffer_size)
-                    .with_format(self.output_format, false)
-                    .with_samples(MSAA::X4)
-                    .with_usage(ImageUsage::ColorAttachment);
-            }
-        )?;
-        let output_resolve = frame_graph.add_transient_image(
-            &mut |builder| {
-                builder
-                    .with_dimensions(self.frame_buffer_size)
-                    .with_format(self.output_format, false)
-                    .with_usage(ImageUsage::ColorAttachment)
-                    .with_usage(ImageUsage::Sampled);
-            }
-        )?;
+        let output = frame_graph.add_image(self.output)?;
+        let output_resolve = frame_graph.add_image(self.output_resolve)?;
         frame_graph.add_pass(
             PassInfo { max_color_writes: 1, msaa_samples: MSAA::X4, ..Default::default() },
             &mut |builder| {
@@ -241,7 +261,7 @@ impl Interface for Example {
 
     fn transfer_commands(
         &mut self,
-        _: CommandRequestID,
+        _: CommandRequestId,
         _: &mut TransferCommands,
     ) -> Result<Option<std::thread::JoinHandle<()>>, Error>
     {
@@ -250,7 +270,7 @@ impl Interface for Example {
 
     fn render_commands(
         &mut self,
-        _: PassID,
+        _: PassId,
         commands: &mut RenderCommands,
     ) -> Result<(), Error>
     {

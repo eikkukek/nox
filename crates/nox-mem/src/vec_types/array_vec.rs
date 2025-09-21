@@ -394,12 +394,12 @@ impl_traits! {
     ,
     IntoIterator for mut &'vec =>
 
-        type Item = &'vec T;
-        type IntoIter = slice::Iter<'vec, T>;
+        type Item = &'vec mut T;
+        type IntoIter = slice::IterMut<'vec, T>;
 
         #[inline(always)]
         fn into_iter(self) -> Self::IntoIter {
-            self.iter()
+            self.iter_mut()
         }
     ,
     Clone where T: Clone =>

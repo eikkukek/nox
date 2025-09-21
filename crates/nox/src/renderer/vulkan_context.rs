@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use winit::{dpi::PhysicalSize, window::Window};
 use ash::{
     khr::{surface, swapchain, wayland_surface, win32_surface, xcb_surface, xlib_surface},
@@ -41,7 +42,7 @@ pub(crate) struct VulkanContext<'mem> {
     swapchain_loader: swapchain::Device,
     surface_handle: vk::SurfaceKHR,
     physical_device: vk::PhysicalDevice,
-    physical_device_info: PhysicalDeviceInfo,
+    physical_device_info: Arc<PhysicalDeviceInfo>,
     device: ash::Device,
     graphics_queue: vk::Queue,
     transfer_queue: vk::Queue,
@@ -241,7 +242,7 @@ impl<'mem> VulkanContext<'mem> {
                 swapchain_loader,
                 surface_handle,
                 physical_device,
-                physical_device_info,
+                physical_device_info: Arc::new(physical_device_info),
                 device,
                 graphics_queue,
                 transfer_queue: transfer_queue,
@@ -286,6 +287,10 @@ impl<'mem> VulkanContext<'mem> {
 
     pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
         &self.physical_device_info
+    }
+
+    pub fn physical_device_info_owned(&self) -> Arc<PhysicalDeviceInfo> {
+        self.physical_device_info.clone()
     }
 
     pub fn request_swapchain_update(&mut self, buffered_frame_count: u32, size: PhysicalSize<u32>) {

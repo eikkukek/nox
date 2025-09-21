@@ -13,7 +13,7 @@ pub struct ComputeCommands<'a> {
     device: Arc<ash::Device>,
     command_buffer: vk::CommandBuffer,
     global_resources: Arc<RwLock<GlobalResources>>,
-    current_pipeline: Option<ComputePipelineID>,
+    current_pipeline: Option<ComputePipelineId>,
     tmp_alloc: &'a ArenaAlloc,
     queue_index: u32,
 }
@@ -50,7 +50,7 @@ impl<'a> ComputeCommands<'a> {
 
     pub fn prepare_storage_image(
         &mut self,
-        id: ImageID,
+        id: ImageId,
     ) -> Result<(), Error>
     {
         let g = self.global_resources.read().unwrap();
@@ -68,7 +68,7 @@ impl<'a> ComputeCommands<'a> {
         Ok(())
     }
 
-    pub fn bind_pipeline(&mut self, id: ComputePipelineID) -> Result<(), Error> {
+    pub fn bind_pipeline(&mut self, id: ComputePipelineId) -> Result<(), Error> {
         let g = self.global_resources.read().unwrap();
         let pipeline = g.get_compute_pipeline(id)?;
         unsafe {
@@ -88,7 +88,7 @@ impl<'a> ComputeCommands<'a> {
         f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(u32) -> ShaderResourceID,
+            F: FnMut(u32) -> ShaderResourceId,
     {
         let guard = ArenaGuard::new(&*self.tmp_alloc);
         let g = self.global_resources.read().unwrap();

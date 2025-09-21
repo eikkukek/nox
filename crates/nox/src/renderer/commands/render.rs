@@ -21,13 +21,13 @@ pub struct DrawInfo {
 
 #[derive(Clone, Copy)]
 pub struct DrawBufferInfo {
-    pub id: BufferID,
+    pub id: BufferId,
     pub offset: u64,
 }
 
 impl DrawBufferInfo {
 
-    pub fn new(id: BufferID, offset: u64) -> Self {
+    pub fn new(id: BufferId, offset: u64) -> Self {
         Self {
             id,
             offset,
@@ -54,9 +54,12 @@ pub struct RenderCommands<'a>{
     device: Arc<ash::Device>,
     command_buffer: vk::CommandBuffer,
     global_resources: Arc<RwLock<GlobalResources>>,
-    current_pipeline: Option<GraphicsPipelineID>,
+    current_pipeline: Option<GraphicsPipelineId>,
     current_sample_count: MSAA,
     tmp_alloc: &'a ArenaAlloc,
+    semaphore: vk::Semaphore,
+    semaphore_value: u64,
+    buffered_frames: u32,
 }
 
 impl<'a> RenderCommands<'a> {
@@ -66,7 +69,10 @@ impl<'a> RenderCommands<'a> {
         device: Arc<ash::Device>,
         command_buffer: vk::CommandBuffer,
         global_resources: Arc<RwLock<GlobalResources>>,
+        semaphore: vk::Semaphore,
+        semaphore_value: u64,
         tmp_alloc: &'a ArenaAlloc,
+        buffered_frames: u32,
     ) -> Self
     {
         Self {
@@ -75,14 +81,11 @@ impl<'a> RenderCommands<'a> {
             global_resources,
             current_pipeline: None,
             current_sample_count: MSAA::X1,
+            semaphore,
+            semaphore_value,
             tmp_alloc,
+            buffered_frames,
         }
-    }
-
-    #[inline(always)]
-    pub fn set_current_sample_count(&mut self, samples: MSAA) {
-        self.current_sample_count = samples;
-        self.current_pipeline = None;
     }
 
     #[inline(always)]
@@ -94,7 +97,35 @@ impl<'a> RenderCommands<'a> {
     }
 
     #[inline(always)]
-    pub fn bind_pipeline(&mut self, id: GraphicsPipelineID) -> Result<(), Error> {
+    pub fn buffered_frames(&self) -> u32 {
+        self.buffered_frames
+    }
+
+    #[inline(always)]
+    pub fn wait_for_previous_frame(&self) -> Result<(), Error> {
+        let semaphore = self.semaphore;
+        let value = self.semaphore_value;
+        let wait_info = vk::SemaphoreWaitInfo {
+            s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
+            semaphore_count: 1,
+            p_semaphores: &semaphore,
+            p_values: &value,
+            ..Default::default()
+        };
+        unsafe {
+            self.device.wait_semaphores(&wait_info, u64::MAX)?;
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub(crate) fn set_current_sample_count(&mut self, samples: MSAA) {
+        self.current_sample_count = samples;
+        self.current_pipeline = None;
+    }
+
+    #[inline(always)]
+    pub fn bind_pipeline(&mut self, id: GraphicsPipelineId) -> Result<(), Error> {
         let g = self.global_resources.read().unwrap();
         let pipeline = g.get_graphics_pipeline(id)?;
         assert!(pipeline.samples == self.current_sample_count,
@@ -114,7 +145,7 @@ impl<'a> RenderCommands<'a> {
         f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(u32) -> ShaderResourceID,
+            F: FnMut(u32) -> ShaderResourceId,
     {
         let guard = ArenaGuard::new(&*self.tmp_alloc);
         let g = self.global_resources.read().unwrap();

@@ -1,3 +1,5 @@
+use crate::Offset3D;
+
 use super::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -16,7 +18,7 @@ pub enum ImageError {
     },
     InvalidCopy {
         image_dimensions: Dimensions,
-        copy_offset: Offset,
+        copy_offset: Offset3D,
         copy_dimensions: Dimensions,
     },
     InvalidCubeMap {

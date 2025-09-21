@@ -2,7 +2,12 @@ use nox::mem::{
     vec_types::{GlobalVec, Vector},
 };
 
-use nox_geom::{earcut, earcut_hole, fn_2d::*};
+use nox_geom::{
+    earcut::{earcut, earcut_hole},
+    bezier::{quad, cubic},
+    fn_2d::*,
+    vec2,
+};
 
 use super::*;
 
@@ -47,7 +52,7 @@ impl Outline {
 struct OutlineBuilder {
     outlines: GlobalVec<Outline>,
     current_outline: Option<Outline>,
-    curve_depth: u32,
+    curve_tolerance: f32,
     pos: [f32; 2],
     vertex_count: u32,
     winding_rule: i16,
@@ -57,11 +62,11 @@ struct OutlineBuilder {
 impl OutlineBuilder {
 
     #[inline(always)]
-    fn new(curve_depth: u32, units_per_em: u16, winding_rule: i16) -> Self {
+    fn new(curve_tolerance: f32, units_per_em: u16, winding_rule: i16) -> Self {
         Self {
             outlines: GlobalVec::new(),
             current_outline: Some(Outline::new(units_per_em as f32)),
-            curve_depth,
+            curve_tolerance,
             pos: Default::default(),
             vertex_count: 0,
             units_per_em,
@@ -145,29 +150,16 @@ impl ttf_parser::OutlineBuilder for OutlineBuilder {
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         let end = [x, y];
         let outline = self.current_outline.as_mut().unwrap();
-        flatten_quad(
-            self.pos.into(),
-            [x1, y1].into(),
-            end.into(),
-            0.1,
-            self.curve_depth,
-            &mut |p| outline.insert_vertex(p.into())
-        );
+        quad(self.pos.into(), vec2(x1, y1), end.into())
+            .flatten(self.curve_tolerance, &mut |p| outline.insert_vertex(p.into()));
         self.pos = end;
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         let end = [x, y];
         let outline = self.current_outline.as_mut().unwrap();
-        flatten_cubic(
-            self.pos.into(),
-            [x1, y1].into(),
-            [x2, y2].into(),
-            end.into(),
-            0.1,
-            self.curve_depth,
-            &mut |p| outline.insert_vertex(p.into())
-        );
+        cubic(self.pos.into(), vec2(x1, y1), vec2(x2, y2), end.into())
+            .flatten(self.curve_tolerance, &mut |p| outline.insert_vertex(p.into()));
         self.pos = end;
     }
 
@@ -189,7 +181,7 @@ pub struct GlyphTriangles {
 pub fn triangulate(
     glyph: char,
     face: &Face,
-    curve_depth: u32,
+    curve_tolerance: f32,
 ) -> Option<GlyphTriangles>
 {
     let id = face.glyph_index(glyph)?;
@@ -200,7 +192,7 @@ pub fn triangulate(
     if face.tables().cff.is_some() || face.tables().cff2.is_some() {
         winding_rule = Some(-1);
     }
-    let mut builder = OutlineBuilder::new(curve_depth, face.units_per_em(), winding_rule?);
+    let mut builder = OutlineBuilder::new(curve_tolerance, face.units_per_em(), winding_rule?);
     face.outline_glyph(id, &mut builder)?;
     builder.finalize()
 }

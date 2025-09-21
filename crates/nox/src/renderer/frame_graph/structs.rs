@@ -3,15 +3,16 @@ use ash::vk;
 use crate::renderer::{
     image::ImageRangeInfo,
     MSAA,
-    frame_state::ResourceID,
+    frame_state::ResourceId,
+    Offset2D
 };
 
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct PassID(pub(crate) u32);
+pub struct PassId(pub(crate) u32);
 
-impl Default for PassID {
+impl Default for PassId {
 
     fn default() -> Self {
         Self(u32::MAX)
@@ -25,27 +26,11 @@ pub struct PassInfo {
     pub msaa_samples: MSAA,
 }
 
-#[derive(Default, Clone, Copy)]
-pub struct Offset {
-    x: i32,
-    y: i32
-}
-
-impl From<Offset> for vk::Offset2D {
-
-    fn from(value: Offset) -> Self {
-        Self {
-            x: value.x,
-            y: value.y,
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct RenderArea {
     width: u32,
     height: u32,
-    offset: Offset,
+    offset: Offset2D,
 }
 
 impl From<RenderArea> for vk::Rect2D {
@@ -154,14 +139,14 @@ impl From<ClearValue> for vk::ClearValue {
 
 #[derive(Clone, Copy)]
 pub struct ReadInfo {
-    pub resource_id: ResourceID,
+    pub resource_id: ResourceId,
     pub range_info: Option<ImageRangeInfo>,
 }
 
 impl ReadInfo {
 
     #[inline(always)]
-    pub fn new(resource_id: ResourceID, range_info: Option<ImageRangeInfo>) -> Self {
+    pub fn new(resource_id: ResourceId, range_info: Option<ImageRangeInfo>) -> Self {
         Self {
             resource_id,
             range_info,
@@ -171,9 +156,9 @@ impl ReadInfo {
 
 #[derive(Default, Clone, Copy)]
 pub struct WriteInfo {
-    pub main_id: ResourceID,
+    pub main_id: ResourceId,
     pub range_info: Option<ImageRangeInfo>,
-    pub resolve: Option<(ResourceID, ResolveMode)>,
+    pub resolve: Option<(ResourceId, ResolveMode)>,
     pub resolve_range_info: Option<ImageRangeInfo>,
     pub load_op: AttachmentLoadOp,
     pub store_op: AttachmentStoreOp,
@@ -184,9 +169,9 @@ impl WriteInfo {
 
     #[inline(always)]
     pub fn new(
-        main_id: ResourceID,
+        main_id: ResourceId,
         range_info: Option<ImageRangeInfo>,
-        resolve: Option<(ResourceID, ResolveMode)>,
+        resolve: Option<(ResourceId, ResolveMode)>,
         resolve_range_info: Option<ImageRangeInfo>,
         load_op: AttachmentLoadOp,
         store_op: AttachmentStoreOp,

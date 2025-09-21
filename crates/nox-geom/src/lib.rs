@@ -1,6 +1,8 @@
-pub mod structs_2d;
+mod vec2;
+
 pub mod fn_2d;
+pub mod earcut;
+pub mod bezier;
+pub mod shapes;
 
-mod earcut;
-
-pub use earcut::*;
+pub use vec2::*;

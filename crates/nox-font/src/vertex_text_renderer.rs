@@ -19,19 +19,19 @@ pub use structs::*;
 
 pub struct VertexTextRenderer<'a, H: Clone + PartialEq + Eq + Hash> {
     faces: FxHashMap<H, FaceCache<'a>>,
-    curve_depth: u32,
+    curve_tolerance: f32,
 }
 
 impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
 
-    pub fn new(fonts: impl IntoIterator<Item = (H, Face<'a>)>, curve_depth: u32) -> Self {
+    pub fn new(fonts: impl IntoIterator<Item = (H, Face<'a>)>, curve_tolerance: f32) -> Self {
         let mut faces = FxHashMap::default();
         for face in fonts {
             faces.insert(face.0, FaceCache { face: face.1, trigs: Default::default(), offsets: Default::default() });
         }
         Self {
             faces,
-            curve_depth,
+            curve_tolerance,
         }
     }
 
@@ -43,7 +43,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
     ) -> Option<RenderedText>
     {
         let faces = &mut self.faces;
-        let curve_depth = self.curve_depth;
+        let curve_depth = self.curve_tolerance;
         let width_div_2 = normalized_width / 2.0;
         let mut pen_x = 0.0;
         let mut shapes = GlobalVec::<(Option<f32>, &str, H, harfbuzz_rs::GlyphBuffer)>::new();

@@ -1,8 +1,8 @@
 use crate::renderer::{
     *,
     image::ImageRangeInfo,
-    global_resources::{ImageID},
-    frame_state::ResourceID,
+    global_resources::{ImageId},
+    frame_state::ResourceId,
 };
 
 use super::*;
@@ -26,20 +26,20 @@ pub trait FrameGraph<'a> {
 
     fn frame_buffer_size(&self) -> image::Dimensions;
 
-    fn set_render_image(&mut self, id: ResourceID, range_info: Option<ImageRangeInfo>) -> Result<(), Error>;
+    fn set_render_image(&mut self, id: ResourceId, range_info: Option<ImageRangeInfo>) -> Result<(), Error>;
 
-    fn add_image(&mut self, id: ImageID) -> Result<ResourceID, Error>;
+    fn add_image(&mut self, id: ImageId) -> Result<ResourceId, Error>;
 
     fn add_transient_image(
         &mut self, 
         f: &mut dyn FnMut(&mut ImageBuilder),
-    ) -> Result<ResourceID, Error>;
+    ) -> Result<ResourceId, Error>;
 
     fn add_pass(
         &mut self,
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder),
-    ) -> Result<PassID, Error>;
+    ) -> Result<PassId, Error>;
 }
 
 pub trait FrameGraphInit<'a> {

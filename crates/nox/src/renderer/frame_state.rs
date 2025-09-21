@@ -9,14 +9,14 @@ use std::sync::{Arc, RwLock};
 use ash::vk;
 
 use crate::renderer::{
-    global_resources::{GlobalResources, ImageID},
+    global_resources::{GlobalResources, ImageId},
     image::*,
     linear_device_alloc::LinearDeviceAlloc,
     Error,
 };
 
 pub(crate) struct FrameState {
-    render_image: Option<(ResourceID, Option<ImageRangeInfo>)>,
+    render_image: Option<(ResourceId, Option<ImageRangeInfo>)>,
     pub resource_pool: ResourcePool,
     command_buffer: vk::CommandBuffer,
 }
@@ -51,7 +51,7 @@ impl FrameState {
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, id: ImageID) -> Result<ResourceID, Error> {
+    pub fn add_image(&mut self, id: ImageId) -> Result<ResourceId, Error> {
         self.resource_pool.add_image(id)
     }
 
@@ -59,7 +59,7 @@ impl FrameState {
     pub fn add_transient_image<F: FnMut(&mut ImageBuilder)>(
         &mut self,
         f: F,
-    ) -> Result<ResourceID, Error>
+    ) -> Result<ResourceId, Error>
     {
         self.resource_pool.add_transient_image(f)
     }
@@ -67,7 +67,7 @@ impl FrameState {
     #[inline(always)]
     pub fn set_render_image(
         &mut self,
-        id: ResourceID,
+        id: ResourceId,
         range_info: Option<ImageRangeInfo>,
     ) -> Result<(), Error>
     {
@@ -79,7 +79,7 @@ impl FrameState {
     pub fn get_render_image(
         &mut self,
         graphics_queue: u32,
-    ) -> Result<Option<(ImageID, Option<ImageRangeInfo>)>, Error>
+    ) -> Result<Option<(ImageId, Option<ImageRangeInfo>)>, Error>
     {
         self.resource_pool.get_render_image(graphics_queue, self.command_buffer)
     }
@@ -90,19 +90,19 @@ impl FrameState {
     }
 
     #[inline(always)]
-    pub fn is_valid_resource_id(&self, id: ResourceID) -> bool {
+    pub fn is_valid_resource_id(&self, id: ResourceId) -> bool {
         self.resource_pool.is_valid_id(id)
     }
 
     #[inline(always)]
-    pub fn get_image(&self, resource_id: ResourceID) -> Result<Arc<Image>, Error> {
+    pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>, Error> {
         self.resource_pool.get_image(resource_id)
     }
 
     #[inline(always)]
     pub fn cmd_memory_barrier(
         &self,
-        id: ResourceID,
+        id: ResourceId,
         state: ImageState,
         subresource_info: Option<ImageSubresourceRangeInfo>
     ) -> Result<(), Error>
@@ -111,14 +111,14 @@ impl FrameState {
     }
 
     #[inline(always)]
-    pub fn get_image_view(&self, id: ResourceID) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
+    pub fn get_image_view(&self, id: ResourceId) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
         self.resource_pool.get_image_view(id)
     }
 
     #[inline(always)]
     pub fn create_image_view(
         &mut self,
-        id: ResourceID,
+        id: ResourceId,
         range_info: ImageRangeInfo,
     ) -> Result<(vk::ImageView, vk::ImageLayout), Error>
     {

@@ -2,6 +2,7 @@ pub mod frame_graph;
 pub mod pipeline;
 pub mod image;
 pub mod memory_binder;
+pub mod linear_device_alloc;
 
 mod memory_layout;
 mod handle;
@@ -9,12 +10,12 @@ mod helpers;
 mod shader_fn;
 mod shader;
 mod enums;
+mod structs;
 mod physical_device;
 mod vulkan_context;
 mod swapchain_context;
 mod thread_context;
 mod frame_state;
-mod linear_device_alloc;
 mod buffer;
 mod global_resources;
 mod commands;
@@ -40,8 +41,6 @@ use token_cell::{
     runtime_token,
 };
 
-runtime_token!(pub(crate) FrameToken);
-
 use nox_mem::{
     string_types::*,
     vec_types::{ArrayVec, GlobalVec, Vector},
@@ -60,6 +59,7 @@ use super::{
 pub use vk::Format as VkFormat;
 
 pub use enums::*;
+pub use structs::*;
 pub use memory_layout::MemoryLayout;
 pub use handle::{Handle, RaiiHandle};
 pub use image::*;
@@ -71,6 +71,7 @@ pub use commands::*;
 pub use nox_derive::VertexInput;
 pub use shader::*;
 pub use pipeline::vertex_input::*;
+pub use frame_graph::*;
 
 //use device_allocators::DeviceAllocators;
 use linear_device_alloc::LinearDeviceAlloc;
@@ -83,6 +84,8 @@ use swapchain_context::PresentResult;
 use thread_context::ThreadContext;
 
 use swapchain_pass::SwapchainPassPipelineData;
+
+runtime_token!(pub(crate) FrameToken);
 
 pub type DeviceName = ArrayString<{ash::vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 
@@ -105,10 +108,10 @@ impl Allocators {
         })
     }
 
-    fn realloc_frame_graphs(&self, buffered_frame_count: u32) {
-        assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
+    fn realloc_frame_graphs(&self, buffered_frames: u32) {
+        assert!(buffered_frames <= MAX_BUFFERED_FRAMES);
         unsafe { &mut *self.frame_graphs.get() }.resize_with(
-            buffered_frame_count as usize,
+            buffered_frames as usize,
             || ArenaAlloc::new(self._memory_layout.frame_graph_arena_size()).unwrap()
         ).unwrap();
     }
@@ -123,6 +126,8 @@ pub struct RendererContext {
     global_resources: Arc<RwLock<GlobalResources>>,
     pub(crate) transfer_requests: TransferRequests,
     frame_buffer_size: image::Dimensions,
+    pub(crate) device: Arc<ash::Device>,
+    physical_device_info: Arc<PhysicalDeviceInfo>,
 }
 
 impl RendererContext {
@@ -147,7 +152,7 @@ impl RendererContext {
     }
 
     #[inline(always)]
-    pub fn buffer_size(&self, buffer: BufferID) -> Option<u64> {
+    pub fn buffer_size(&self, buffer: BufferId) -> Option<u64> {
         self.global_resources.read().unwrap().buffer_size(buffer)
     }
 }
@@ -169,7 +174,7 @@ pub struct Renderer<'a> {
     device: Arc<ash::Device>,
     vulkan_context: VulkanContext<'a>,
     _memory_layout: MemoryLayout,
-    buffered_frame_count: u32,
+    buffered_frames: u32,
     tmp_alloc: Arc<ArenaAlloc>,
     frame_buffer_size: image::Dimensions,
     frame_token: FrameToken,
@@ -183,20 +188,20 @@ impl<'a> Renderer<'a> {
         app_version: Version,
         enable_validation: bool,
         memory_layout: MemoryLayout,
-        mut buffered_frame_count: u32,
+        mut buffered_frames: u32,
         allocators: &'a Allocators,
     ) -> Result<Self, String>
     {
-        buffered_frame_count = clamp(buffered_frame_count, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
-        assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
-        allocators.realloc_frame_graphs(buffered_frame_count);
+        buffered_frames = clamp(buffered_frames, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
+        assert!(buffered_frames <= MAX_BUFFERED_FRAMES);
+        allocators.realloc_frame_graphs(buffered_frames);
         let tmp_alloc = Arc::new(ArenaAlloc::new(memory_layout.tmp_arena_size()).ok_or(format!("failed to create tmp alloc"))?);
         let vulkan_context = VulkanContext
             ::new(
                 window,
                 &app_name,
                 app_version,
-                buffered_frame_count,
+                buffered_frames,
                 enable_validation,
                 &tmp_alloc
             )
@@ -222,7 +227,7 @@ impl<'a> Renderer<'a> {
                 .map_err(|e| format!("failed to create global resources ( {:?} ) ", e))?
         ));
         let swapchain_pass_pipeline_data = SwapchainPassPipelineData
-            ::new(global_resources.clone(), buffered_frame_count, &tmp_alloc)
+            ::new(global_resources.clone(), buffered_frames, &tmp_alloc)
             .map_err(|e| format!("failed to create full screen pass data ( {:?} )", e))?;
         let mut s = Self {
             main_thread_context,
@@ -233,7 +238,7 @@ impl<'a> Renderer<'a> {
             global_resources: global_resources.clone(),
             device: device.clone(),
             _memory_layout: memory_layout,
-            buffered_frame_count,
+            buffered_frames,
             transfer_commands: Default::default(),
             tmp_alloc,
             frame_buffer_size: image::Dimensions::new(1, 1, 1),
@@ -242,7 +247,7 @@ impl<'a> Renderer<'a> {
         let mut frame_states = ArrayVec::new();
         let mut i = 0;
         frame_states.resize_with(
-            buffered_frame_count as usize,
+            buffered_frames as usize,
             || {
                 let device_alloc = LinearDeviceAlloc::new(
                     device.clone(),
@@ -267,7 +272,7 @@ impl<'a> Renderer<'a> {
                 s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 command_pool: s.main_thread_context.compute_pool(),
                 level: vk::CommandBufferLevel::PRIMARY,
-                command_buffer_count: buffered_frame_count,
+                command_buffer_count: buffered_frames,
                 ..Default::default()
             };
             let result = (device.fp_v1_0().allocate_command_buffers)(
@@ -278,7 +283,7 @@ impl<'a> Renderer<'a> {
             if result != vk::Result::SUCCESS {
                 return Err(format!("failed to allocate compute command buffers {:?}", result))
             }
-            compute_command_buffers.set_len(buffered_frame_count as usize);
+            compute_command_buffers.set_len(buffered_frames as usize);
             let mut timeline_info = vk::SemaphoreTypeCreateInfo {
                 s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
                 semaphore_type: vk::SemaphoreType::TIMELINE,
@@ -290,7 +295,7 @@ impl<'a> Renderer<'a> {
                 ..Default::default()
             };
             semaphore_info = semaphore_info.push_next(&mut timeline_info);
-            for _ in 0..buffered_frame_count {
+            for _ in 0..buffered_frames {
                 let fence = device.create_semaphore(&semaphore_info, None).unwrap();
                 compute_semaphores.push(fence).unwrap();
             }
@@ -317,12 +322,14 @@ impl<'a> Renderer<'a> {
             global_resources: self.global_resources.clone(),
             transfer_requests: TransferRequests::new(),
             frame_buffer_size: self.frame_buffer_size,
+            device: self.device.clone(),
+            physical_device_info: self.vulkan_context.physical_device_info_owned(),
         }
     }
 
     #[inline(always)]
     pub(crate) fn request_resize(&mut self, size: PhysicalSize<u32>) {
-        self.vulkan_context.request_swapchain_update(self.buffered_frame_count, size);
+        self.vulkan_context.request_swapchain_update(self.buffered_frames, size);
     }
 
     pub(crate) fn transfer_requests<I: Interface>(
@@ -548,7 +555,7 @@ impl<'a> Renderer<'a> {
             let mut frame_graph = FrameGraphImpl::new(
                 self.frame_states[frame_data.frame_index as usize].clone(),
                 frame_data.extent.into(),
-                frame_data.command_buffer, 
+                frame_data.command_buffer,
                 alloc,
                 frame_data.frame_index,
                 queue_family_indices,
@@ -563,7 +570,10 @@ impl<'a> Renderer<'a> {
                 device.clone(),
                 frame_data.command_buffer,
                 self.global_resources.clone(),
+                compute_state.semaphore,
+                compute_state.timeline_value,
                 &self.tmp_alloc,
+                self.buffered_frames,
             );
             frame_graph
                 .render(&mut *interface.write().unwrap(), &mut render_commands)
@@ -704,7 +714,7 @@ impl<'a> Renderer<'a> {
             .present_submit(&swapchain_loader, graphics_queue)
             .map_err(|e| format!("queue present failed {}", e))?;
         if present_result != PresentResult::Success || frame_data.suboptimal {
-            self.vulkan_context.request_swapchain_update(self.buffered_frame_count, window.inner_size());
+            self.vulkan_context.request_swapchain_update(self.buffered_frames, window.inner_size());
         }
         self.compute_states[frame_data.frame_index as usize].timeline_value += 2;
         Ok(())

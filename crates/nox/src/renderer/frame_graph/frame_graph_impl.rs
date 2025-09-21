@@ -8,7 +8,7 @@ use nox_mem::{Allocator, vec_types::{FixedVec, Vector}};
 
 use crate::{
     has_bits, renderer::{
-        frame_state::{FrameState, ResourceID},
+        frame_state::{FrameState, ResourceId},
         image::{
             Image, ImageBuilder, ImageRangeInfo, ImageState, ImageSubresourceRangeInfo
         },
@@ -83,20 +83,20 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         self.frame_buffer_size
     }
 
-    fn set_render_image(&mut self, id: ResourceID, range_info: Option<ImageRangeInfo>) -> Result<(), Error>
+    fn set_render_image(&mut self, id: ResourceId, range_info: Option<ImageRangeInfo>) -> Result<(), Error>
     {
         assert!(self.frame_state.borrow(self.token).is_valid_resource_id(id), "invalid id");
         self.frame_state.borrow_mut(self.token).set_render_image(id, range_info)
     }
 
-    fn add_image(&mut self, id: ImageID) -> Result<ResourceID, Error> {
+    fn add_image(&mut self, id: ImageId) -> Result<ResourceId, Error> {
         self.frame_state.borrow_mut(self.token).add_image(id)
     }
 
     fn add_transient_image(
         &mut self,
         f: &mut dyn FnMut(&mut ImageBuilder),
-    ) -> Result<ResourceID, Error> {
+    ) -> Result<ResourceId, Error> {
         self.frame_state.borrow_mut(self.token).add_transient_image(f)
     }
 
@@ -104,10 +104,10 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         &mut self,
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder),
-    ) -> Result<PassID, Error> {
+    ) -> Result<PassId, Error> {
         let alloc = self.alloc;
         let pass = self.passes.push(Pass::new(
-            PassID(self.next_pass_id),
+            PassId(self.next_pass_id),
             info,
             alloc
         )?).expect("pass capacity exceeded");

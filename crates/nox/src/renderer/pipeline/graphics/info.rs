@@ -22,14 +22,14 @@ pub struct GraphicsPipelineInfo {
     pub(crate) depth_output_format: vk::Format,
     pub(crate) stencil_output_format: vk::Format,
     vertex_input_attribute_count: u32,
-    pub(crate) layout_id: PipelineLayoutID,
+    pub(crate) layout_id: PipelineLayoutId,
     depth_clamp: bool,
     rasterizer_discard: bool,
 }
 
 impl GraphicsPipelineInfo {
 
-    pub fn new(layout_id: PipelineLayoutID) -> Self {
+    pub fn new(layout_id: PipelineLayoutId) -> Self {
         Self {
             dynamic_states: GlobalVec::from(slice![
                 vk::DynamicState::VIEWPORT,

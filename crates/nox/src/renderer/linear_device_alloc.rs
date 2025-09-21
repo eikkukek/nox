@@ -6,7 +6,7 @@ use ash::vk;
 
 use nox_mem::{vec_types::{GlobalVec, Vector}};
 
-use crate::{renderer::memory_binder::DeviceMemory, has_bits};
+use crate::{has_bits, renderer::memory_binder::DeviceMemory, RendererContext};
 
 use super::{
     PhysicalDeviceInfo,
@@ -134,7 +134,7 @@ impl Block {
     }
 }
 
-pub(crate) struct LinearDeviceAlloc {
+pub struct LinearDeviceAlloc {
     device: Arc<ash::Device>,
     blocks: GlobalVec<(GlobalVec<Block>, u32, usize)>,
     block_size: vk::DeviceSize,
@@ -144,7 +144,7 @@ pub(crate) struct LinearDeviceAlloc {
 
 impl LinearDeviceAlloc {
 
-    pub fn new(
+    pub(crate) fn new(
         device: Arc<ash::Device>,
         block_size: vk::DeviceSize,
         required_properties: vk::MemoryPropertyFlags,
@@ -170,6 +170,20 @@ impl LinearDeviceAlloc {
         })
     }
 
+    pub fn memory_mappable(block_size: u64, context: &RendererContext) -> Result<Self> {
+        if block_size == 0 {
+            return Err(Error::ZeroSizeAlloc)
+        }
+        Self::new(
+            context.device.clone(),
+            block_size,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            vk::MemoryPropertyFlags::empty(),
+            &context.physical_device_info,
+            true,
+        )
+    }
+
     pub unsafe fn reset(&mut self) {
         unsafe {
             for (blocks, _, i) in self.blocks.iter_mut() {
@@ -193,7 +207,7 @@ impl LinearDeviceAlloc {
     }
 }
 
-pub(crate) struct Memory {
+pub struct Memory {
     memory: vk::DeviceMemory,
     map: Option<NonNull<u8>>,
     offset: vk::DeviceSize,

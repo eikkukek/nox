@@ -1,9 +1,6 @@
 #![allow(unused_variables)]
 
-use crate::{
-    frame_graph::*,
-    *
-};
+use crate::*;
 
 pub trait Interface
     where
@@ -26,7 +23,7 @@ pub trait Interface
         renderer: &mut RendererContext,
     ) -> Result<(), Error> { Ok(()) }
 
-    /// Gets called when window is resized.
+    /// Gets called when the frame buffer is (re)created.
     fn frame_buffer_size_callback(
         &mut self,
         renderer: &mut RendererContext
@@ -57,29 +54,32 @@ pub trait Interface
     fn render<'a>(
         &mut self,
         frame_graph: &'a mut dyn FrameGraphInit,
-        pending_transfers: &[CommandRequestID],
+        pending_transfers: &[CommandRequestId],
     ) -> Result<(), Error>;
 
     /// Gets called every frame before for each requested
     /// transfer command.
     ///
     /// # Arguments
-    /// `id`: current transfer request ID
+    /// `id`: current transfer request Id
     /// `commands`: used to dispatch transfer commands on the GPU
     fn transfer_commands(
         &mut self,
-        id: CommandRequestID,
+        id: CommandRequestId,
         commands: &mut TransferCommands,
-    ) -> Result<Option<std::thread::JoinHandle<()>>, Error>;
+    ) -> Result<Option<std::thread::JoinHandle<()>>, Error>
+    {
+        Ok(None)
+    }
 
     /// Gets called after frame graph construction in `render` 
     ///
     /// # Arguments
-    /// `pass_id`: current pass ID
+    /// `pass_id`: current pass Id
     /// `commands`: used to dispatch render commands on the GPU
     fn render_commands(
         &mut self,
-        pass_id: PassID,
+        pass_id: PassId,
         commands: &mut RenderCommands,
     ) -> Result<(), Error>;
 

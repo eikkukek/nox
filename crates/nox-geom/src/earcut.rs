@@ -1,30 +1,33 @@
 use nox_mem::vec_types::{Vector, GlobalVec};
 
-use super::{structs_2d::*, fn_2d::*};
+use super::{*, fn_2d::*};
 
 #[derive(Clone, Copy)]
-pub struct Hole<'a> {
+pub struct EarcutHole<'a> {
     points: &'a [[f32; 2]],
     choose_right_most_index: bool,
 }
 
-pub fn earcut_hole(points: &[[f32; 2]], choose_right_most_index: bool) -> Hole {
-    Hole { points, choose_right_most_index }
+pub fn earcut_hole(points: &[[f32; 2]], choose_right_most_index: bool) -> EarcutHole {
+    EarcutHole { points, choose_right_most_index }
 }
 
 pub fn earcut(
     outline: &[[f32; 2]],
-    holes: &[Hole],
+    holes: &[EarcutHole],
     clock_wise: bool,
 ) -> Option<(GlobalVec<[f32; 2]>, GlobalVec<usize>)>
 {
-    let mut points = GlobalVec::<(Point, bool)>::new();
+    let mut points = GlobalVec::<(Vec2, bool)>::new();
     points.append_map(outline, |&v| (v.into(), false));
     let mut holes = GlobalVec::from(holes);
 
     while let Some(hole) = holes.pop() {
         let mut out_idx: Option<usize> = None;
-        let mut inner: Point = hole.points[0].into();
+        if hole.points.len() == 0 {
+            continue
+        }
+        let mut inner: Vec2 = hole.points[0].into();
         let mut inner_idx = 0;
         for (i, &v) in hole.points.iter().enumerate() {
             if v[0] > inner.x {

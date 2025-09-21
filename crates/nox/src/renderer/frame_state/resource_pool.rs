@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{
-    ResourceID,
+    ResourceId,
     ResourceFlags,
 };
 
@@ -26,9 +26,9 @@ pub(crate) struct ResourcePool
 {
     device: Arc<ash::Device>,
     pub global_resources: Arc<RwLock<GlobalResources>>,
-    transient_images: GlobalSlotMap<ImageID>,
-    subviews: GlobalVec<(ImageID, SlotIndex<vk::ImageView>)>,
-    render_image: Option<(ImageID, Option<ImageRangeInfo>)>,
+    transient_images: GlobalSlotMap<ImageId>,
+    subviews: GlobalVec<(ImageId, SlotIndex<vk::ImageView>)>,
+    render_image: Option<(ImageId, Option<ImageRangeInfo>)>,
     render_image_reset: Option<(ImageState, ImageSubresourceRangeInfo)>,
     device_alloc: LinearDeviceAlloc,
 }
@@ -100,7 +100,7 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn is_valid_id(&self, id: ResourceID) -> bool {
+    pub fn is_valid_id(&self, id: ResourceId) -> bool {
         if has_bits!(id.flags, ResourceFlags::Transient) {
             self.transient_images.contains(id.index)
         }
@@ -110,7 +110,7 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, id: ImageID) -> Result<ResourceID, Error> {
+    pub fn add_image(&mut self, id: ImageId) -> Result<ResourceId, Error> {
         let g = self.global_resources.read().unwrap();
         let image = g.get_image(id)?;
         let mut flags = 0;
@@ -118,7 +118,7 @@ impl ResourcePool
         if has_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
             flags |= ResourceFlags::Sampleable;
         }
-        Ok(ResourceID {
+        Ok(ResourceId {
             index: Default::default(),
             image_id: id,
             format: properties.format,
@@ -131,7 +131,7 @@ impl ResourcePool
     pub fn add_transient_image<F: FnMut(&mut ImageBuilder)>(
         &mut self,
         f: F,
-    ) -> Result<ResourceID, Error>
+    ) -> Result<ResourceId, Error>
     {
         let mut g = self.global_resources.write().unwrap();
         let index = self.transient_images
@@ -143,7 +143,7 @@ impl ResourcePool
         if has_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
             flags |= ResourceFlags::Sampleable;
         }
-        Ok(ResourceID {
+        Ok(ResourceId {
             index,
             image_id,
             format: properties.format,
@@ -155,7 +155,7 @@ impl ResourcePool
     #[inline(always)]
     pub fn set_render_image(
         &mut self,
-        resource_id: ResourceID,
+        resource_id: ResourceId,
         range_info: Option<ImageRangeInfo>,
     ) -> Result<(), Error>
     {
@@ -174,7 +174,7 @@ impl ResourcePool
         &mut self,
         graphics_queue: u32,
         command_buffer: vk::CommandBuffer,
-    ) -> Result<Option<(ImageID, Option<ImageRangeInfo>)>, Error>
+    ) -> Result<Option<(ImageId, Option<ImageRangeInfo>)>, Error>
     {
         if self.render_image.is_none() {
             return Ok(None)
@@ -215,7 +215,7 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn get_image(&self, resource_id: ResourceID) -> Result<Arc<Image>, Error> {
+    pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>, Error> {
         Ok(
             if has_bits!(resource_id.flags, ResourceFlags::Transient) {
                 self.global_resources
@@ -235,7 +235,7 @@ impl ResourcePool
     #[inline(always)]
     pub fn cmd_memory_barrier(
         &self,
-        id: ResourceID,
+        id: ResourceId,
         state: ImageState,
         command_buffer: vk::CommandBuffer,
         subresource_info: Option<ImageSubresourceRangeInfo>
@@ -248,7 +248,7 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn get_image_view(&self, id: ResourceID) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
+    pub fn get_image_view(&self, id: ResourceId) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
         let g = self.global_resources.write().unwrap();
         let src = g.get_image(id.image_id)?;
         Ok((src.get_view()?, src.layout()))
@@ -257,7 +257,7 @@ impl ResourcePool
     #[inline(always)]
     pub fn create_image_view(
         &mut self,
-        id: ResourceID,
+        id: ResourceId,
         range_info: ImageRangeInfo,
     ) -> Result<(vk::ImageView, vk::ImageLayout), Error>
     {

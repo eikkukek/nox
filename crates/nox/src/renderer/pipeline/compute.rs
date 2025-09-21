@@ -3,12 +3,12 @@ use ash::vk;
 use crate::renderer::{global_resources::*, Error, ShaderStage};
 
 pub struct ComputePipelineInfo {
-    pub(crate) layout_id: PipelineLayoutID,
+    pub(crate) layout_id: PipelineLayoutId,
 }
 
 impl ComputePipelineInfo {
 
-    pub fn new(layout_id: PipelineLayoutID) -> Self {
+    pub fn new(layout_id: PipelineLayoutId) -> Self {
         Self {
             layout_id,
         }

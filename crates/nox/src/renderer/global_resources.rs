@@ -173,7 +173,7 @@ impl GlobalResources {
         input: &str,
         name: &str,
         stage: ShaderStage,
-    ) -> Result<ShaderID, Error>
+    ) -> Result<ShaderId, Error>
     {
         let spriv = shader_fn::glsl_to_spirv(
             &input,
@@ -186,7 +186,7 @@ impl GlobalResources {
             spriv.as_binary(),
             stage,
         )?;
-        Ok(ShaderID(self.shaders.insert(shader)))
+        Ok(ShaderId(self.shaders.insert(shader)))
     }
 
     #[inline(always)]
@@ -194,7 +194,7 @@ impl GlobalResources {
         &mut self,
         spirv: &[u32],
         stage: ShaderStage,
-    ) -> Result<ShaderID, Error>
+    ) -> Result<ShaderId, Error>
     {
         if spirv.len() % 4 != 0 {
             return Err(Error::ShaderError(format!("spirv binary size must be a multiple of 4")))
@@ -204,24 +204,24 @@ impl GlobalResources {
             spirv,
             stage,
         )?;
-        Ok(ShaderID(self.shaders.insert(shader)))
+        Ok(ShaderId(self.shaders.insert(shader)))
     }
 
     #[inline(always)]
-    pub fn destroy_shader(&mut self,shader: ShaderID) {
+    pub fn destroy_shader(&mut self,shader: ShaderId) {
         self.shaders.remove(shader.0).ok();
     }
 
     #[inline(always)]
-    pub(crate) fn get_shader(&self, id: ShaderID) -> Result<&Shader, SlotMapError> {
+    pub(crate) fn get_shader(&self, id: ShaderId) -> Result<&Shader, SlotMapError> {
         self.shaders.get(id.0)
     }
 
     #[inline(always)]
     pub fn create_pipeline_layout<const SHADER_COUNT: usize>(
         &mut self,
-        shaders: [ShaderID; SHADER_COUNT],
-    ) -> Result<PipelineLayoutID, Error>
+        shaders: [ShaderId; SHADER_COUNT],
+    ) -> Result<PipelineLayoutId, Error>
     {
         let mut s = ArrayVec::<&Shader, SHADER_COUNT>::new();
         for id in shaders {
@@ -233,11 +233,11 @@ impl GlobalResources {
             &self,
         )?;
         let index = self.pipeline_layouts.insert(pipeline_layout);
-        Ok(PipelineLayoutID(index))
+        Ok(PipelineLayoutId(index))
     }
 
     #[inline(always)]
-    pub(crate) fn get_pipeline_layout(&self, id: PipelineLayoutID) -> Result<&PipelineLayout, SlotMapError> {
+    pub(crate) fn get_pipeline_layout(&self, id: PipelineLayoutId) -> Result<&PipelineLayout, SlotMapError> {
         self.pipeline_layouts.get(id.0)
     }
 
@@ -249,7 +249,7 @@ impl GlobalResources {
         alloc: &impl Allocator,
     ) -> Result<(), Error>
         where
-            F: FnMut(usize, ShaderResourceID)
+            F: FnMut(usize, ShaderResourceId)
     {
         let mut set_layouts = FixedVec::with_capacity(resources.len(), alloc)?;
         for resource in resources {
@@ -271,7 +271,7 @@ impl GlobalResources {
                     .0.len() as u32,
                 image_views: Default::default(),
             });
-            collect(i, ShaderResourceID(index))
+            collect(i, ShaderResourceId(index))
         }
         Ok(())
     }
@@ -279,7 +279,7 @@ impl GlobalResources {
     #[inline(always)]
     pub fn free_shader_resources(
         &mut self,
-        resources: &[ShaderResourceID],
+        resources: &[ShaderResourceId],
         alloc: &impl Allocator,
     ) -> Result<(), Error>
     {
@@ -301,7 +301,7 @@ impl GlobalResources {
     #[inline(always)]
     pub fn get_descriptor_set(
         &mut self,
-        resource_id: ShaderResourceID,
+        resource_id: ShaderResourceId,
     ) -> Result<vk::DescriptorSet, SlotMapError>
     {
         self.shader_resources.get(resource_id.0).map(|v| v.descriptor_set)
@@ -452,7 +452,7 @@ impl GlobalResources {
     pub fn create_pipeline_cache(
         &mut self,
         initial_data: Option<&[u8]>,
-    ) -> Result<PipelineCacheID, Error>
+    ) -> Result<PipelineCacheId, Error>
     {
         let initial_data = initial_data.unwrap_or(&[]);
         let info = vk::PipelineCacheCreateInfo {
@@ -468,13 +468,13 @@ impl GlobalResources {
             device: self.device.clone(),
             handle: handle,
         });
-        Ok(PipelineCacheID(index))
+        Ok(PipelineCacheId(index))
     }
 
     #[inline(always)]
     pub fn retrieve_pipeline_cache_data(
         &mut self,
-        id: PipelineCacheID,
+        id: PipelineCacheId,
     ) -> Result<GlobalVec<u8>, Error>
     {
         let device = &*self.device;
@@ -506,7 +506,7 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn destroy_pipeline_cache(&mut self, id: PipelineCacheID) {
+    pub fn destroy_pipeline_cache(&mut self, id: PipelineCacheId) {
         self.pipeline_caches.remove(id.0).ok();
     }
 
@@ -514,9 +514,9 @@ impl GlobalResources {
     pub fn create_graphics_pipelines(
         &mut self,
         infos: &[pipeline::GraphicsPipelineInfo],
-        cache_id: Option<PipelineCacheID>,
+        cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
-        mut collect: impl FnMut(usize, GraphicsPipelineID),
+        mut collect: impl FnMut(usize, GraphicsPipelineId),
     ) -> Result<(), Error>
     {
         let pipeline_count = infos.len();
@@ -586,21 +586,21 @@ impl GlobalResources {
                 _depth_format: info.depth_output_format,
                 _stencil_format: info.stencil_output_format,
             });
-            collect(i, GraphicsPipelineID(index));
+            collect(i, GraphicsPipelineId(index));
         }
         Ok(())
     }
 
-    pub fn destroy_graphics_pipeline(&mut self, id: GraphicsPipelineID) {
+    pub fn destroy_graphics_pipeline(&mut self, id: GraphicsPipelineId) {
         self.graphics_pipelines.remove(id.0).ok();
     }
 
     pub fn create_compute_pipelines(
         &mut self,
         infos: &[pipeline::ComputePipelineInfo],
-        cache_id: Option<PipelineCacheID>,
+        cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
-        mut collect: impl FnMut(usize, ComputePipelineID),
+        mut collect: impl FnMut(usize, ComputePipelineId),
     ) -> Result<(), Error>
     {
         let pipeline_count = infos.len();
@@ -638,23 +638,23 @@ impl GlobalResources {
                 handle: *handle,
                 layout_id: info.layout_id,
             });
-            collect(i, ComputePipelineID(index));
+            collect(i, ComputePipelineId(index));
         }
         Ok(())
     }
 
-    pub fn destroy_compute_pipeline(&mut self, id: ComputePipelineID) {
+    pub fn destroy_compute_pipeline(&mut self, id: ComputePipelineId) {
         self.compute_pipelines.remove(id.0).ok();
     }
 
     pub(crate) fn pipeline_get_shader_resource<'a, F, Alloc>(
         &self,
-        layout_id: PipelineLayoutID,
+        layout_id: PipelineLayoutId,
         mut f: F,
         alloc: &'a Alloc,
     ) -> Result<(vk::PipelineLayout, FixedVec<'a, vk::DescriptorSet, Alloc>), Error>
         where
-            F: FnMut(u32) -> ShaderResourceID,
+            F: FnMut(u32) -> ShaderResourceId,
             Alloc: Allocator,
     {
         let layout = self.pipeline_layouts.get(layout_id.0)?;
@@ -674,7 +674,7 @@ impl GlobalResources {
 
     pub(crate) fn pipeline_get_push_constants<'a, 'b, F, Alloc>(
         &self,
-        layout_id: PipelineLayoutID,
+        layout_id: PipelineLayoutId,
         mut f: F,
         alloc: &'a Alloc,
     ) -> Result<(vk::PipelineLayout, FixedVec<'a, (vk::PushConstantRange, &'b [u8]), Alloc>), Error>
@@ -693,12 +693,12 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_graphics_pipeline(&self, id: GraphicsPipelineID) -> Result<&GraphicsPipeline, SlotMapError> {
+    pub(crate) fn get_graphics_pipeline(&self, id: GraphicsPipelineId) -> Result<&GraphicsPipeline, SlotMapError> {
         self.graphics_pipelines.get(id.0)
     }
 
     #[inline(always)]
-    pub(crate) fn get_compute_pipeline(&self, id: ComputePipelineID) -> Result<&ComputePipeline, SlotMapError> {
+    pub(crate) fn get_compute_pipeline(&self, id: ComputePipelineId) -> Result<&ComputePipeline, SlotMapError> {
         self.compute_pipelines.get(id.0)
     }
 
@@ -708,10 +708,10 @@ impl GlobalResources {
         size: u64,
         usage: &[BufferUsage],
         binder: &mut Binder,
-    ) -> Result<BufferID, Error>
+    ) -> Result<BufferId, Error>
     {
         if size == 0 {
-            return Err(Error::BufferError(BufferError::ZeroSized))
+            return Err(Error::ZeroSizeAlloc)
         }
         let mut vk_usage = vk::BufferUsageFlags::from_raw(0);
         for usage in usage {
@@ -726,15 +726,25 @@ impl GlobalResources {
         unsafe {
             buffer.set_memory(Box::new(binder.bind_buffer_memory(buffer.handle())?));
         }
-        Ok(BufferID(
+        Ok(BufferId(
             self.buffers.insert(buffer)
         ))
     }
 
     #[inline(always)]
+    pub fn destroy_buffer(&mut self, id: BufferId) {
+        self.buffers.remove(id.0).ok();
+    }
+
+    #[inline(always)]
+    pub fn is_buffer_valid(&mut self, id: BufferId) -> bool {
+        self.buffers.contains(id.0)
+    }
+
+    #[inline(always)]
     pub unsafe fn map_buffer(
         &mut self,
-        buffer: BufferID,
+        buffer: BufferId,
     ) -> Option<NonNull<u8>>
     {
         unsafe {
@@ -743,17 +753,17 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn buffer_size(&self, buffer: BufferID) -> Option<u64> {
+    pub fn buffer_size(&self, buffer: BufferId) -> Option<u64> {
         self.buffers.get(buffer.0).ok().map(|v| v.properties().size)
     }
 
     #[inline(always)]
-    pub(crate) fn get_buffer(&self, id: BufferID) -> Result<&Buffer, SlotMapError> {
+    pub(crate) fn get_buffer(&self, id: BufferId) -> Result<&Buffer, SlotMapError> {
         self.buffers.get(id.0)
     }
 
     #[inline(always)]
-    pub(crate) fn get_mut_buffer(&mut self, id: BufferID) -> Result<&mut Buffer, SlotMapError> {
+    pub(crate) fn get_mut_buffer(&mut self, id: BufferId) -> Result<&mut Buffer, SlotMapError> {
         self.buffers.get_mut(id.0)
     }
 
@@ -761,17 +771,17 @@ impl GlobalResources {
     pub fn create_sampler<F: FnMut(&mut SamplerBuilder)>(
         &mut self,
         mut f: F,
-    ) -> Result<SamplerID, Error>
+    ) -> Result<SamplerId, Error>
     {
         let mut builder = SamplerBuilder::new();
         f(&mut builder);
         let handle = builder.build(&self.device)?;
         let index = self.samplers.insert(Sampler { device: self.device.clone(), handle, _builder: builder, });
-        Ok(SamplerID(index))
+        Ok(SamplerId(index))
     }
 
     #[inline(always)]
-    pub fn destroy_sampler(&mut self, sampler: SamplerID) {
+    pub fn destroy_sampler(&mut self, sampler: SamplerId) {
         self.samplers.remove(sampler.0).ok();
     }
 
@@ -780,7 +790,7 @@ impl GlobalResources {
         &mut self,
         binder: &mut Binder,
         mut f: F,
-    ) -> Result<ImageID, Error>
+    ) -> Result<ImageId, Error>
         where
             F: FnMut(&mut ImageBuilder)
     {
@@ -790,25 +800,25 @@ impl GlobalResources {
         unsafe {
             image.set_memory(Box::new(binder.bind_image_memory(image.handle())?));
         }
-        Ok(ImageID(
+        Ok(ImageId(
             self.images.insert(Arc::new(image))
         ))
     }
 
     #[inline(always)]
-    pub fn destroy_image(&mut self, id: ImageID) {
+    pub fn destroy_image(&mut self, id: ImageId) {
         self.images.remove(id.0).ok();
     }
 
     #[inline(always)]
-    pub fn is_valid_image(&self, id: ImageID) -> bool {
+    pub fn is_valid_image(&self, id: ImageId) -> bool {
         self.images.contains(id.0)
     }
 
     #[inline(always)]
     pub(crate) fn get_image(
         &self,
-        id: ImageID,
+        id: ImageId,
     ) -> Result<Arc<Image>, SlotMapError>
     {
         self.images.get(id.0).map(|v| v.clone())

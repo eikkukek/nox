@@ -20,13 +20,13 @@ use super::{
 
 pub(crate) struct SwapchainPassPipelineData {
     global_resources: Arc<RwLock<GlobalResources>>,
-    layout_id: PipelineLayoutID,
-    shader_resources: ArrayVec<ShaderResourceID, {MAX_BUFFERED_FRAMES as usize}>,
-    sampler: SamplerID,
-    pipelines: GlobalVec<(GraphicsPipelineID, vk::Format)>,
-    last_pipeline: Option<(GraphicsPipelineID, vk::Format)>,
-    shaders: [ShaderID; 2],
-    pipeline_cache_id: PipelineCacheID,
+    layout_id: PipelineLayoutId,
+    shader_resources: ArrayVec<ShaderResourceId, {MAX_BUFFERED_FRAMES as usize}>,
+    sampler: SamplerId,
+    pipelines: GlobalVec<(GraphicsPipelineId, vk::Format)>,
+    last_pipeline: Option<(GraphicsPipelineId, vk::Format)>,
+    shaders: [ShaderId; 2],
+    pipeline_cache_id: PipelineCacheId,
     cache_dir: PathBuf,
 }
 
@@ -167,7 +167,7 @@ impl SwapchainPassPipelineData {
 
     pub fn get_descriptor_set(
         &mut self,
-        image: ImageID,
+        image: ImageId,
         range_info: Option<ImageRangeInfo>,
         frame_index: u32,
         tmp_alloc: &ArenaAlloc,

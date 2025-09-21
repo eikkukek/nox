@@ -10,9 +10,6 @@ use memmap2::Mmap;
 
 use nox::{
     mem::{size_of, slice_as_bytes, vec_types::ArrayVec, GLOBAL_ALLOC},
-    renderer::{
-        frame_graph::*, image::*, pipeline::*, *
-    },
     *,
 };
 
@@ -186,35 +183,35 @@ struct App {
     depth_stencil_format: DepthStencilFormat,
     depth_format: DepthStencilFormat,
     fire_format: FloatFormat,
-    image: ImageID,
-    fire_images: [ImageID; 2],
-    sampler: SamplerID,
-    vertex_shader: ShaderID,
-    fragment_shader: ShaderID,
-    outline_vertex: ShaderID,
-    outline_fragment: ShaderID,
-    fire_effect_compute: ShaderID,
-    fire_effect_vertex: ShaderID,
-    fire_effect_fragment: ShaderID,
-    pipeline_layouts: [PipelineLayoutID; 4],
-    pipelines: [GraphicsPipelineID; 3],
-    fire_pipeline: ComputePipelineID,
-    vertex_buffer: BufferID,
-    vertex_instance_buffer: BufferID,
-    index_buffer: BufferID,
-    matrices_buffer: BufferID,
+    image: ImageId,
+    fire_images: [ImageId; 2],
+    sampler: SamplerId,
+    vertex_shader: ShaderId,
+    fragment_shader: ShaderId,
+    outline_vertex: ShaderId,
+    outline_fragment: ShaderId,
+    fire_effect_compute: ShaderId,
+    fire_effect_vertex: ShaderId,
+    fire_effect_fragment: ShaderId,
+    pipeline_layouts: [PipelineLayoutId; 4],
+    pipelines: [GraphicsPipelineId; 3],
+    fire_pipeline: ComputePipelineId,
+    vertex_buffer: BufferId,
+    vertex_instance_buffer: BufferId,
+    index_buffer: BufferId,
+    matrices_buffer: BufferId,
     matrices_map: NonNull<Matrices>,
-    light_info_buffer: BufferID,
+    light_info_buffer: BufferId,
     light_info_map: NonNull<LightInfo>,
-    shader_resources: [ShaderResourceID; 4],
-    fire_pass: PassID,
-    cube_pass: PassID,
-    outline_pass: PassID,
+    shader_resources: [ShaderResourceId; 4],
+    fire_pass: PassId,
+    cube_pass: PassId,
+    outline_pass: PassId,
     frame_buffer_size: image::Dimensions,
     cache_dir: PathBuf,
-    pipeline_cache: PipelineCacheID,
+    pipeline_cache: PipelineCacheId,
     heat_in: u32,
-    fire_transfer_id: CommandRequestID,
+    fire_transfer_id: CommandRequestId,
     rot: f32,
 }
 
@@ -926,7 +923,7 @@ impl Interface for App {
     fn render<'a>(
         &mut self,
         frame_graph: &'a mut dyn FrameGraphInit,
-        pending_transfers: &[nox::renderer::CommandRequestID],
+        pending_transfers: &[nox::renderer::CommandRequestId],
     ) -> Result<(), Error>
     {
         if !pending_transfers.is_empty() {
@@ -1034,7 +1031,7 @@ impl Interface for App {
 
     fn transfer_commands(
         &mut self,
-        id: nox::renderer::CommandRequestID,
+        id: nox::renderer::CommandRequestId,
         commands: &mut nox::renderer::TransferCommands,
     ) -> Result<Option<std::thread::JoinHandle<()>>, Error>
     {
@@ -1075,7 +1072,7 @@ impl Interface for App {
 
     fn render_commands(
         &mut self,
-        pass: PassID,
+        pass: PassId,
         commands: &mut RenderCommands,
     ) -> Result<(), Error>
     {

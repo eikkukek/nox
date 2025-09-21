@@ -3,7 +3,7 @@ use ash::vk;
 use nox_mem::{impl_as_raw_bit_op, slot_map::SlotIndex, AsRaw};
 
 use crate::renderer::{
-    global_resources::ImageID,
+    global_resources::ImageId,
     MSAA,
 };
 
@@ -17,15 +17,15 @@ pub enum ResourceFlags {
 impl_as_raw_bit_op!(ResourceFlags);
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
-pub struct ResourceID {
-    pub(crate) index: SlotIndex<ImageID>,
-    pub(crate) image_id: ImageID,
+pub struct ResourceId {
+    pub(crate) index: SlotIndex<ImageId>,
+    pub(crate) image_id: ImageId,
     pub(crate) format: vk::Format,
     pub(crate) samples: MSAA,
     pub(crate) flags: u32,
 }
 
-impl ResourceID {
+impl ResourceId {
 
     #[inline(always)]
     pub(crate) fn samples(&self) -> MSAA {

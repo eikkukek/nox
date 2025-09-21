@@ -17,6 +17,7 @@ pub enum Error {
     DescriptorPoolFull { max_sets: u32, allocated_sets: u32 },
     InvalidHostCopy { copy_size: u64, host_buffer_size: usize, },
     IncompatibleMemoryRequirements,
+    ZeroSizeAlloc,
     ImageError(ImageError),
     BufferError(BufferError),
     IoError(String),

@@ -20,7 +20,8 @@ use crate::{
         linear_device_alloc::LinearDeviceAlloc,
         memory_binder::MemoryBinder,
         BufferError,
-        Error
+        Error,
+        Offset3D,
     }
 };
 
@@ -33,7 +34,7 @@ pub struct TransferCommands {
     linear_device_alloc: LinearDeviceAlloc,
     fence: Option<vk::Fence>,
     transfer_queue_index: u32,
-    id: CommandRequestID,
+    id: CommandRequestId,
 }
 
 impl TransferCommands {
@@ -46,7 +47,7 @@ impl TransferCommands {
         global_resources: Arc<RwLock<GlobalResources>>,
         linear_device_alloc: LinearDeviceAlloc,
         transfer_queue_index: u32,
-        id: CommandRequestID,
+        id: CommandRequestId,
     ) -> Result<Self, Error>
     {
         Ok(Self {
@@ -68,7 +69,7 @@ impl TransferCommands {
     }
 
     #[inline(always)]
-    pub(crate) fn id(&self) -> CommandRequestID {
+    pub(crate) fn id(&self) -> CommandRequestId {
         self.id
     }
 
@@ -96,7 +97,7 @@ impl TransferCommands {
     #[inline(always)]
     pub fn clear_color_image(
         &mut self,
-        image_id: ImageID,
+        image_id: ImageId,
         clear_value: ClearColorValue,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
     ) -> Result<(), Error>
@@ -159,7 +160,7 @@ impl TransferCommands {
     #[inline(always)]
     pub fn clear_depth_stencil_image(
         &mut self,
-        image_id: ImageID,
+        image_id: ImageId,
         depth: f32,
         stencil: u32,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
@@ -218,7 +219,7 @@ impl TransferCommands {
     #[inline(always)]
     pub fn copy_data_to_buffer(
         &mut self,
-        buffer_id: BufferID, 
+        buffer_id: BufferId, 
         data: &[u8],
         offset: u64,
         size: u64,
@@ -296,10 +297,10 @@ impl TransferCommands {
     #[inline(always)]
     pub fn copy_data_to_image(
         &mut self,
-        image_id: ImageID,
+        image_id: ImageId,
         data: &[u8],
         layers: Option<ImageSubresourceLayers>,
-        offset: Option<Offset>,
+        offset: Option<Offset3D>,
         dimensions: Option<Dimensions>,
     ) -> Result<(), Error>
     {

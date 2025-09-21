@@ -59,32 +59,6 @@ impl From<vk::Extent2D> for Dimensions {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Offset {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-impl Offset {
-
-    pub fn new(x: i32, y: i32, z: i32) -> Self
-    {
-        Self {x, y, z}
-    }
-}
-
-impl From<Offset> for vk::Offset3D {
-
-    fn from(value: Offset) -> Self {
-        Self {
-            x: value.x,
-            y: value.y,
-            z: value.z,
-        }
-    }
-}
-
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentMapping {
     pub r: ComponentSwizzle,

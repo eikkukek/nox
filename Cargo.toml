@@ -8,11 +8,11 @@ members = [
 	"crates/nox-ser",
 	"crates/nox-alloc",
 	"crates/nox-geom",
-	"crates/nox-shapes",
 	"crates/nox-gui",
 ]
 exclude = [
 	"example",
 	"font-example",
 	"shape-example",
+	"gui-example",
 ]
