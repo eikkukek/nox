@@ -92,7 +92,7 @@ impl OutlineBuilder {
         }
 
         let mut vertices = GlobalVec::new();
-        let mut indices = GlobalVec::new();
+        let mut ind = GlobalVec::new();
 
         let winding_rule = self.winding_rule as f32;
         let clock_wise = if self.winding_rule < 0 { true } else { false };
@@ -116,12 +116,11 @@ impl OutlineBuilder {
                 }
             }
 
-            let (vert, ind) = earcut(&outer, &holes, clock_wise)?;
-
-            let index_off = vertices.len();
-            indices.append_map(&ind, |&v| (v + index_off) as u32);
-            vertices.append_map(&vert, |&v| Vertex { pos: v });
+            earcut(&outer, &holes, clock_wise, &mut vertices, &mut ind).unwrap();
         }
+
+        let mut indices = GlobalVec::new();
+        indices.append_map(&ind, |&v| v as u32);
 
         if vertices.len() == 0 {
             return None

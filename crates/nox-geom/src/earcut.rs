@@ -1,4 +1,7 @@
-use nox_mem::vec_types::{Vector, GlobalVec};
+use nox_mem::{
+    vec_types::{Vector, GlobalVec},
+    CapacityError,
+};
 
 use super::{*, fn_2d::*};
 
@@ -12,11 +15,15 @@ pub fn earcut_hole(points: &[[f32; 2]], choose_right_most_index: bool) -> Earcut
     EarcutHole { points, choose_right_most_index }
 }
 
-pub fn earcut(
+pub fn earcut<P>(
     outline: &[[f32; 2]],
     holes: &[EarcutHole],
     clock_wise: bool,
-) -> Option<(GlobalVec<[f32; 2]>, GlobalVec<usize>)>
+    out_vertices: &mut impl Vector<P>,
+    out_indices: &mut impl Vector<usize>,
+) -> Result<bool, CapacityError>
+    where
+        P: From<[f32; 2]>,
 {
     let mut points = GlobalVec::<(Vec2, bool)>::new();
     points.append_map(outline, |&v| (v.into(), false));
@@ -94,7 +101,7 @@ pub fn earcut(
             inner = unsafe { *hole.points.get_unchecked(inner_idx) }.into();
         }
         let Some(out_idx) = out_idx else {
-            return None
+            return Ok(false)
         };
         let a = points[out_idx].0;
         let mut hole_cycle = GlobalVec::from(&hole.points[inner_idx..]);
@@ -106,7 +113,10 @@ pub fn earcut(
         points.insert(out_idx + 1 + hole_cycle.len(), (inner, true));
     }
 
-    let mut indices = GlobalVec::with_capacity(points.len());
+    let vertex_off = out_vertices.len();
+    let index_off = out_indices.len();
+    
+    out_indices.reserve(points.len())?;
     let mut idx = GlobalVec::with_capacity(points.len());
 
     let winding = if clock_wise { -1.0 } else { 1.0 };
@@ -115,6 +125,8 @@ pub fn earcut(
     for i in 0..n_points {
         idx.push(i);
     }
+
+    let mut n_idx = 0;
 
     while idx.len() > 3 {
         let n = idx.len();
@@ -142,31 +154,32 @@ pub fn earcut(
                     *idx.get_unchecked(i),
                     *idx.get_unchecked(next)
                 )};
-                indices.append(&[a, b, c]);
+                out_indices.append(&[a + vertex_off, b + vertex_off, c + vertex_off])?;
+                n_idx += 3;
                 idx.remove(i);
                 break
             }
         }
         if !ok {
-            return None
+            return Ok(false)
         }
     }
 
     if idx.len() == 3 {
-        indices.append(&[idx[0], idx[1], idx[2]]);
+        out_indices.append(&[idx[0] + vertex_off, idx[1] + vertex_off, idx[2] + vertex_off])?;
+        n_idx += 3;
     }
 
     if clock_wise {
-        for i in 0..indices.len() / 3 {
-            let i = i * 3;
-            indices[i] = indices[i + 2] ^ indices[i];
-            indices[i + 2] = indices[i] ^ indices[i + 2];
-            indices[i] = indices[i + 2] ^ indices[i];
+        for i in 0..n_idx / 3 {
+            let i = index_off + i * 3;
+            out_indices[i] = out_indices[i + 2] ^ out_indices[i];
+            out_indices[i + 2] = out_indices[i] ^ out_indices[i + 2];
+            out_indices[i] = out_indices[i + 2] ^ out_indices[i];
         }
     }
 
-    let mut vertices = GlobalVec::new();
-    vertices.append_map(&points, |v| v.0.into());
+    out_vertices.append_map(&points, |v| <Vec2 as Into<[f32; 2]>>::into(v.0).into())?;
 
-    Some((vertices, indices))
+    Ok(true)
 }

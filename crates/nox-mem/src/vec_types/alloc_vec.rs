@@ -443,7 +443,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         }
         let new_capacity = match CapacityPol::grow(self.capacity, capacity) {
             Some(r) => r,
-            None => return Err(InvalidReservation { current: self.capacity, requested: capacity }),
+            None => return Ok(()),
         };
         let tmp = match unsafe { self.alloc.allocate_uninit(new_capacity) } {
             Some(r) => r.into(),

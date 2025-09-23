@@ -14,6 +14,13 @@ pub struct Vertex {
     pos: [f32; 2],
 }
 
+impl From<[f32; 2]> for Vertex {
+
+    fn from(value: [f32; 2]) -> Self {
+        Vertex { pos: value }
+    }
+}
+
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug, VertexInput)]
 pub struct VertexOffset {

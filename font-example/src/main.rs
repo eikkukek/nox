@@ -54,7 +54,7 @@ impl Interface for App {
             Mmap::map(&bold)?
         };
         let bold = Face::parse(&bold, 0).unwrap();
-        let mut text = VertexTextRenderer::new([("regular", regular), ("italic", italic), ("bold", bold)], 0.1);
+        let mut text = VertexTextRenderer::new([("regular", regular), ("italic", italic), ("bold", bold)], 0.07);
         self.rendered_text = text.render(
             &[
                 text_segment("To AV moi @ 2 gå ", "italic"),
@@ -157,7 +157,7 @@ impl Interface for App {
         })?;
         renderer
             .transfer_requests()
-            .add_request(1 << 14);
+            .add_request(1 << 16);
         Ok(())
     }
 

@@ -15,19 +15,31 @@ use nox::{
 
 use nox_font::{VertexTextRenderer, Face};
 
-use nox_geom::earcut::earcut;
+use nox_geom::{
+    earcut::earcut,
+    Vec2,
+};
 
-use crate::Widget;
+use crate::{ColorRGBA, Widget};
 
 #[repr(C)]
 #[derive(VertexInput)]
-struct Vertex {
-    pos: [f32; 2],
+pub(crate) struct Vertex {
+    pos: Vec2,
+}
+
+impl From<[f32; 2]> for Vertex {
+
+    fn from(value: [f32; 2]) -> Self {
+        Self {
+            pos: value.into(),
+        }
+    }
 }
 
 #[repr(C)]
 #[derive(VertexInput)]
-struct VertexUv {
+pub(crate) struct VertexUv {
     pos: [f32; 2],
     uv: [f32; 2],
 }
@@ -42,21 +54,21 @@ fn ring_buf_reg(head: usize, tail: usize) -> RingBufReg {
     RingBufReg { head, tail }
 }
 
-struct RingBuf {
+pub(crate) struct RingBuf {
     buffer: BufferId,
     map: NonNull<u8>,
     current_reg: RingBufReg,
     frame_regions: ArrayVec<RingBufReg, {MAX_BUFFERED_FRAMES as usize}>,
 }
 
-pub struct RingBufMem<T> {
-    ptr: NonNull<T>,
-    offset: u64,
+pub(crate) struct RingBufMem<T> {
+    pub ptr: NonNull<T>,
+    pub offset: u64,
 }
 
 impl RingBuf {
 
-    fn allocate<T>(
+    pub fn allocate<T>(
         &mut self,
         render_commands: &mut RenderCommands,
         count: usize,
@@ -212,7 +224,13 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         position: [f32; 2],
     ) -> WidgetId
     {
-        WidgetId(self.widgets.insert(Widget::new(size, position)))
+        WidgetId(self.widgets.insert(
+            Widget::new(
+                size,
+                position,
+                ColorRGBA::white(),
+            ))
+        )
     }
 
     fn init_buffers(&mut self, render_commands: &mut RenderCommands) -> Result<(), Error> {
@@ -274,39 +292,14 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
         for widget in &self.widgets {
-            let mut points = GlobalVec::<[f32; 2]>::new();
-            widget.main_rect.to_points(
-                &mut |p| { points.push(p.into()); }
-            );
-            let (vertices, indices) = earcut(&points, &[], false).unwrap();
-            let vert_alloc = vertex_buffer.allocate::<Vertex>(render_commands, vertices.len(), self.ring_buffer_size)?;
-            unsafe {
-                vertices.as_ptr().copy_to_nonoverlapping(vert_alloc.ptr.cast::<[f32; 2]>().as_ptr(), vertices.len());
-            }
-            let idx_alloc = index_buffer.allocate::<u32>(render_commands, indices.len(), self.ring_buffer_size)?;
-            let idx_ptr = idx_alloc.ptr;
-            for i in 0..indices.len() {
-                unsafe {
-                    idx_ptr
-                        .add(i)
-                        .write(indices[i] as u32);
-                }
-            }
-            render_commands.draw_indexed(
-                DrawInfo {
-                    index_count: indices.len() as u32,
-                    ..Default::default()
-                },
-                [
-                    DrawBufferInfo {
-                        id: vertex_buffer.buffer,
-                        offset: vert_alloc.offset,
-                    },
-                ],
-                DrawBufferInfo {
-                    id: index_buffer.buffer,
-                    offset: idx_alloc.offset,
-                }
+            widget.render(
+                render_commands,
+                vertex_buffer.buffer,
+                index_buffer.buffer,
+                |render_commands, count|
+                    vertex_buffer.allocate(render_commands, count, self.ring_buffer_size),
+                |render_commands, count|
+                    index_buffer.allocate(render_commands, count, self.ring_buffer_size),
             )?;
         }
         vertex_buffer.finish_frame();

@@ -138,7 +138,7 @@ impl Cubic {
         const N_MUL: f32 = 36.0 * 36.0 / 3.0;
         const N_POW: f32 = 1.0 / 6.0;
         let err = self.end - self.mid1 * 3.0 + self.mid0 * 3.0 - self.start;
-        let n = (err.sqr_mag() / (N_MUL * tolerance * tolerance)).powf(N_POW) as u32;
+        let mut n = (err.sqr_mag() / (N_MUL * tolerance * tolerance)).powf(N_POW) as u32;
         if n == 0 {
             collect(self.start);
             collect(self.end);
@@ -147,6 +147,8 @@ impl Cubic {
         if n == 1 {
             if let Some(quad) = self.to_quad() {
                 quad.flatten(tolerance, collect);
+            } else {
+                n = 3;
             }
         }
         let mut current = *self;
@@ -155,6 +157,8 @@ impl Cubic {
             let (left, right) = current.split(t);
             if let Some(quad) = left.to_quad() {
                 quad.flatten(tolerance, collect);
+            } else {
+                println!("here");
             }
             current = right;
         }
