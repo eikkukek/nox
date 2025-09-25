@@ -18,6 +18,31 @@ pub fn rect<P: Into<Vec2>>(min: P, max: P, rounding: f32) -> Rect {
 impl Rect {
 
     #[inline(always)]
+    pub fn from_center_size(
+        center: Vec2,
+        size: Vec2,
+        rounding: f32,
+    ) -> Rect
+    {
+        let half_size = size * 0.5;
+        rect(
+            center - half_size,
+            center + half_size,
+            rounding,
+        )
+    }
+
+    #[inline(always)]
+    pub fn position(&self) -> Vec2 {
+        self.min + (self.max - self.min) * 0.5
+    }
+
+    #[inline(always)]
+    pub fn size(&self) -> Vec2 {
+        self.max - self.min
+    }
+
+    #[inline(always)]
     pub fn scale(mut self, scalar: f32) -> Self {
         let half_size = (self.max - self.min) * 0.5;
         let center = self.min + half_size;
@@ -67,11 +92,6 @@ impl Rect {
             max: self.max.lerp(other.max, t),
             rounding: (1.0 - t) * self.rounding + t * other.rounding,
         }
-    }
-
-    #[inline(always)]
-    pub fn position(&self) -> Vec2 {
-        self.min + (self.max - self.min) * 0.5
     }
 
     #[inline]

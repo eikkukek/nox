@@ -52,6 +52,7 @@ pub struct Nox<'a, I>
     input_text: Option<SmolStr>,
     delta_counter: time::Instant,
     delta_time: time::Duration,
+    window_size: (u32, u32),
 }
 
 impl<'a, I: Interface> Nox<'a, I>
@@ -72,6 +73,7 @@ impl<'a, I: Interface> Nox<'a, I>
             input_text: None,
             delta_counter: time::Instant::now(),
             delta_time: time::Duration::ZERO,
+            window_size: Default::default(),
         }
     }
 
@@ -89,22 +91,49 @@ impl<'a, I: Interface> Nox<'a, I>
             .device_name().clone()
     }
 
+    #[inline(always)]
     pub fn delta_time(&self) -> time::Duration {
         self.delta_time
     }
 
+    #[inline(always)]
+    pub fn aspect_ratio(&self) -> f64 {
+        self.window_size.0 as f64 /
+        self.window_size.0 as f64
+    }
+
+    #[inline(always)]
     pub fn cursor_position(&self) -> (f64, f64) {
         self.cursor_pos
     }
 
-    pub fn mouse_cursor_delta(&self) -> (f64, f64) {
+    #[inline(always)]
+    pub fn normalized_cursor_position(&self) -> (f64, f64) {
+        (
+            self.cursor_pos.0 / self.window_size.0 as f64,
+            self.cursor_pos.1 / self.window_size.0 as f64,
+        )
+    }
+
+    #[inline(always)]
+    pub fn normalized_cursor_position_f32(&self) -> (f32, f32) {
+        (
+            self.cursor_pos.0 as f32 / self.window_size.0 as f32,
+            self.cursor_pos.1 as f32 / self.window_size.0 as f32,
+        )
+    }
+
+    #[inline(always)]
+    pub fn mouse_scroll_delta(&self) -> (f64, f64) {
         self.mouse_scroll_delta
     }
 
-    pub fn mouse_cursor_delta_lines(&self) -> (f32, f32) {
+    #[inline(always)]
+    pub fn mouse_scroll_delta_lines(&self) -> (f32, f32) {
         self.mouse_scroll_delta_lines
     }
 
+    #[inline(always)]
     pub fn is_key_pressed(&self, key: KeyCode) -> bool {
         self.physical_keys
             .get(&PhysicalKey::Code(key))
@@ -113,6 +142,7 @@ impl<'a, I: Interface> Nox<'a, I>
             .pressed
     }
 
+    #[inline(always)]
     pub fn is_key_released(&self, key: KeyCode) -> bool {
         self.physical_keys
             .get(&PhysicalKey::Code(key))
@@ -121,6 +151,7 @@ impl<'a, I: Interface> Nox<'a, I>
             .released
     }
 
+    #[inline(always)]
     pub fn is_key_held(&self, key: KeyCode) -> bool {
         self.physical_keys
             .get(&PhysicalKey::Code(key))
@@ -129,6 +160,7 @@ impl<'a, I: Interface> Nox<'a, I>
             .held
     }
 
+    #[inline(always)]
     pub fn key_value(&self, key: KeyCode) -> f32 {
         if self.physical_keys
             .get(&PhysicalKey::Code(key))
@@ -138,6 +170,7 @@ impl<'a, I: Interface> Nox<'a, I>
         else { 0.0 }
     }
 
+    #[inline(always)]
     fn reset_input(&mut self) {
         self.mouse_scroll_delta = Default::default();
         self.mouse_scroll_delta_lines = Default::default();
@@ -206,6 +239,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
             },
             WindowEvent::CloseRequested => event_loop.exit(), // terminate app,
             WindowEvent::Resized(size) => {
+                self.window_size = (size.width, size.height);
                 if let Some(renderer) = &mut self.renderer {
                     renderer.request_resize(size);
                 }
@@ -276,6 +310,8 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     return
                 },
             };
+            let inner_size = window.inner_size();
+            self.window_size = (inner_size.width, inner_size.height);
             println!("Nox message: created window {}", init_settings.app_name);
             event_loop.set_control_flow(ControlFlow::Poll);
             let renderer_allocators = self.memory.renderer_allocators();

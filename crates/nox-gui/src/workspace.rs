@@ -18,6 +18,7 @@ use nox_font::{VertexTextRenderer, Face};
 use nox_geom::{
     earcut::earcut,
     Vec2,
+    BoundingRect,
 };
 
 use crate::{ColorRGBA, Widget};
@@ -42,6 +43,23 @@ impl From<[f32; 2]> for Vertex {
 pub(crate) struct VertexUv {
     pos: [f32; 2],
     uv: [f32; 2],
+}
+
+#[repr(C)]
+pub(crate) struct VertexPushConstant {
+    pub vert_off: Vec2,
+    pub inv_aspect_ratio: f32,
+}
+
+pub(crate) fn vertex_push_constant(
+    vert_off: Vec2,
+    inv_aspect_ratio: f32
+) -> VertexPushConstant
+{
+    VertexPushConstant {
+        vert_off,
+        inv_aspect_ratio,
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -119,10 +137,14 @@ const BASE_VERTEX_SHADER: &'static str = "
 
     layout(push_constant) uniform PushConstant {
         vec2 vert_off;
+        float inv_aspect_ratio;
     } pc;
 
     void main() {
-        gl_Position = vec4(in_pos + pc.vert_off, 0.0, 1.0);
+        vec2 pos = in_pos;
+        pos.x *= pc.inv_aspect_ratio;
+        pos += pc.vert_off;
+        gl_Position = vec4(pos, 0.0, 1.0);
     }
 ";
 
@@ -132,7 +154,7 @@ const BASE_FRAGMENT_SHADER: &'static str = "
     layout(location = 0) out vec4 out_color;
 
     layout(push_constant) uniform PushConstant {
-        layout(offset = 16) vec4 color;
+        layout(offset = 32) vec4 color;
     } pc;
 
     void main() {
@@ -159,6 +181,7 @@ pub struct Workspace<'a, FontHash>
     index_buffer: Option<RingBuf>,
     pipelines: Pipelines,
     ring_buffer_size: usize,
+    inv_aspect_ratio: f32,
 }
 
 impl<'a, FontHash> Workspace<'a, FontHash>
@@ -178,6 +201,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
             index_buffer: None,
             pipelines: Default::default(),
             ring_buffer_size: 1 << 23,
+            inv_aspect_ratio: 1.0,
         }
     }
 
@@ -233,6 +257,53 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         )
     }
 
+    pub fn update<I: Interface>(
+        &mut self,
+        nox: &Nox<'_, I>,
+    )
+    {
+        self.inv_aspect_ratio = 1.0 / nox.aspect_ratio() as f32;
+        let mouse_pos: Vec2 = nox.normalized_cursor_position_f32().into();
+        for widget in &self.widgets {
+            if widget.bounding_rect().point_inside(mouse_pos) {
+            }
+        }
+    }
+
+    pub fn render_commands(
+        &mut self,
+        render_commands: &mut RenderCommands,
+    ) -> Result<(), Error>
+    {
+        if self.vertex_buffer.is_none() {
+            self.init_buffers(render_commands)?;
+        } 
+        let Some(base_pipeline) = self.pipelines.base_pipeline else {
+            return Err(Error::UserError(
+                "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
+            ))
+        };
+        let inv_aspect_ratio = self.inv_aspect_ratio;
+        render_commands.bind_pipeline(base_pipeline)?;
+        let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
+        let index_buffer = self.index_buffer.as_mut().unwrap();
+        for widget in &self.widgets {
+            widget.render_commands(
+                render_commands,
+                inv_aspect_ratio,
+                vertex_buffer.buffer,
+                index_buffer.buffer,
+                |render_commands, count|
+                    vertex_buffer.allocate(render_commands, count, self.ring_buffer_size),
+                |render_commands, count|
+                    index_buffer.allocate(render_commands, count, self.ring_buffer_size),
+            )?;
+        }
+        vertex_buffer.finish_frame();
+        index_buffer.finish_frame();
+        Ok(())
+    }
+
     fn init_buffers(&mut self, render_commands: &mut RenderCommands) -> Result<(), Error> {
         let buffered_frames = render_commands.buffered_frames() as usize;
         render_commands.edit_resources(|r| {
@@ -272,38 +343,6 @@ impl<'a, FontHash> Workspace<'a, FontHash>
             });
             Ok(())
         })?;
-        Ok(())
-    }
-
-    pub fn render(
-        &mut self,
-        render_commands: &mut RenderCommands,
-    ) -> Result<(), Error>
-    {
-        if self.vertex_buffer.is_none() {
-            self.init_buffers(render_commands)?;
-        } 
-        let Some(base_pipeline) = self.pipelines.base_pipeline else {
-            return Err(Error::UserError(
-                "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
-            ))
-        };
-        render_commands.bind_pipeline(base_pipeline)?;
-        let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
-        let index_buffer = self.index_buffer.as_mut().unwrap();
-        for widget in &self.widgets {
-            widget.render(
-                render_commands,
-                vertex_buffer.buffer,
-                index_buffer.buffer,
-                |render_commands, count|
-                    vertex_buffer.allocate(render_commands, count, self.ring_buffer_size),
-                |render_commands, count|
-                    index_buffer.allocate(render_commands, count, self.ring_buffer_size),
-            )?;
-        }
-        vertex_buffer.finish_frame();
-        index_buffer.finish_frame();
         Ok(())
     }
 

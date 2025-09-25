@@ -4,6 +4,7 @@ use nox_gui::Workspace;
 struct Example<'a> {
     workspace: Workspace<'a, &'static str>,
     output_format: ColorFormat,
+    aspect_ratio: f32,
 }
 
 impl<'a> Example<'a> {
@@ -12,6 +13,7 @@ impl<'a> Example<'a> {
         Self {
             workspace,
             output_format: Default::default(),
+            aspect_ratio: 1.0,
         }
     }
 }
@@ -42,7 +44,7 @@ impl<'a> Interface for Example<'a> {
         })?;
         self.workspace
             .create_graphics_pipelines(renderer, MSAA::X1, self.output_format, None, &GLOBAL_ALLOC)?;
-        self.workspace.add_widget([0.25, 0.25], [0.0, 0.0]);
+        self.workspace.add_widget([0.25, 0.25], [0.0, -1.0]);
         Ok(())
     }
 
@@ -53,6 +55,7 @@ impl<'a> Interface for Example<'a> {
     ) -> Result<(), Error> {
         let frame_graph = frame_graph.init(1)?;
         let frame_buffer_size = frame_graph.frame_buffer_size();
+        self.aspect_ratio = frame_buffer_size.width as f32 / frame_buffer_size.height as f32;
         let output = frame_graph.add_transient_image(&mut |builder| {
             builder
                 .with_dimensions(frame_buffer_size)
@@ -82,7 +85,9 @@ impl<'a> Interface for Example<'a> {
         _pass_id: frame_graph::PassId,
         commands:&mut RenderCommands,
     ) -> Result<(), Error> {
-        self.workspace.render(commands)?;
+        self.workspace.render_commands(
+            commands,
+        )?;
         Ok(())
     }
 }

@@ -163,6 +163,25 @@ impl From<Vec2> for [f32; 2] {
     }
 }
 
+impl From<(f32, f32)> for Vec2 {
+
+    #[inline(always)]
+    fn from(value: (f32, f32)) -> Self {
+        Self {
+            x: value.0,
+            y: value.1,
+        }
+    }
+}
+
+impl From<Vec2> for (f32, f32) {
+
+    #[inline(always)]
+    fn from(value: Vec2) -> Self {
+        (value.x, value.y)
+    }
+}
+
 impl Display for Vec2 {
 
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

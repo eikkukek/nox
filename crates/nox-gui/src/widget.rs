@@ -12,7 +12,7 @@ pub use nox_geom::{
 };
 
 use crate::{
-    workspace::{Workspace, RingBufMem, Vertex},
+    workspace::{vertex_push_constant, RingBufMem, Vertex},
     ColorRGBA,
 };
 
@@ -60,7 +60,11 @@ impl Widget {
         }
     }
 
-    pub(crate) fn update(
+    pub fn bounding_rect(&self) -> BoundingRect {
+        BoundingRect::from_center_size(self.position, self.main_rect.size())
+    }
+
+    pub fn update(
         &mut self,
         main_rect: Rect,
         position: Vec2,
@@ -87,9 +91,10 @@ impl Widget {
         self.color = color;
     }
 
-    pub(crate) fn render<F1, F2>(
+    pub fn render_commands<F1, F2>(
         &self,
         render_commands: &mut RenderCommands,
+        inv_aspect_ratio: f32,
         vertex_buf_id: BufferId,
         index_buf_id: BufferId,
         mut allocate_vertices: F1,
@@ -116,10 +121,11 @@ impl Widget {
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
         }
+        let vert_pc = vertex_push_constant(self.position, inv_aspect_ratio);
         render_commands.push_constants(|p| {
             if p.offset == 0 {
                 return unsafe {
-                    value_as_bytes(&self.position).unwrap()
+                    value_as_bytes(&vert_pc).unwrap()
                 }
             }
             unsafe {
@@ -139,8 +145,8 @@ impl Widget {
             ],
             DrawBufferInfo {
                 id: index_buf_id,
-                offset: idx_mem.offset
-            }
+                offset: idx_mem.offset,
+            },
         )?;
         Ok(())
     }
