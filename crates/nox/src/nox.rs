@@ -99,7 +99,7 @@ impl<'a, I: Interface> Nox<'a, I>
     #[inline(always)]
     pub fn aspect_ratio(&self) -> f64 {
         self.window_size.0 as f64 /
-        self.window_size.0 as f64
+        self.window_size.1 as f64
     }
 
     #[inline(always)]
@@ -111,7 +111,7 @@ impl<'a, I: Interface> Nox<'a, I>
     pub fn normalized_cursor_position(&self) -> (f64, f64) {
         (
             self.cursor_pos.0 / self.window_size.0 as f64,
-            self.cursor_pos.1 / self.window_size.0 as f64,
+            self.cursor_pos.1 / self.window_size.1 as f64,
         )
     }
 
@@ -119,7 +119,7 @@ impl<'a, I: Interface> Nox<'a, I>
     pub fn normalized_cursor_position_f32(&self) -> (f32, f32) {
         (
             self.cursor_pos.0 as f32 / self.window_size.0 as f32,
-            self.cursor_pos.1 as f32 / self.window_size.0 as f32,
+            self.cursor_pos.1 as f32 / self.window_size.1 as f32,
         )
     }
 
@@ -211,7 +211,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 self.cursor_pos = (position.x, position.y);
             },
             WindowEvent::MouseWheel { device_id: _, delta, phase: _ } => {
-                match delta {
+               match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
                         self.mouse_scroll_delta_lines = (x, y);
                     },

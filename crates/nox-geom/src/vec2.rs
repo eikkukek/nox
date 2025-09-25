@@ -1,5 +1,5 @@
 use core::{
-    ops::{Add, Sub, Mul, MulAssign, Neg},
+    ops::{Add, AddAssign, Sub, SubAssign, Mul, MulAssign, Neg},
     fmt::Display,
 };
 
@@ -91,6 +91,14 @@ impl Add for Vec2 {
     }
 }
 
+impl AddAssign for Vec2 {
+
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
+}
+
 impl Sub for Vec2 {
 
     type Output = Vec2;
@@ -100,6 +108,14 @@ impl Sub for Vec2 {
             x: self.x - rhs.x,
             y: self.y - rhs.y,
         }
+    }
+}
+
+impl SubAssign for Vec2 {
+
+    fn sub_assign(&mut self, rhs: Self) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;
     }
 }
 

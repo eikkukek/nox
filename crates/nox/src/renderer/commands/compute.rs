@@ -112,33 +112,24 @@ impl<'a> ComputeCommands<'a> {
     }
 
     #[inline(always)]
-    pub fn push_constants<'b, F>(
-        &'b self,
-        f: F,
+    pub fn push_constants(
+        &self,
+        bytes: &[u8],
     ) -> Result<(), Error>
-        where
-            F: FnMut(PushConstant) -> &'b [u8]
     {
-        let guard = ArenaGuard::new(&*self.tmp_alloc);
         let g = self.global_resources.read().unwrap();
         let pipeline = g.get_compute_pipeline(
-            self.current_pipeline.expect("attempting to bind shader resources with no pipeline attached")
+            self.current_pipeline.expect("attempting to push constants with no pipeline attached")
         )?;
-        let (layout, pcs) = g.pipeline_get_push_constants(
-            pipeline.layout_id,
-            f,
-            &guard,
-        )?;
+        let (layout, stages) = g.pipeline_get_push_constant_stages(pipeline.layout_id)?;
         unsafe {
-            for pc in &pcs {
-                self.device.cmd_push_constants(
-                    self.command_buffer,
-                    layout,
-                    pc.0.stage_flags,
-                    pc.0.offset,
-                    pc.1
-                );
-            }
+            self.device.cmd_push_constants(
+                self.command_buffer,
+                layout,
+                stages,
+                0,
+                bytes,
+            );
         }
         Ok(())
     }

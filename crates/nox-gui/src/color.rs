@@ -8,6 +8,10 @@ pub struct ColorRGBA {
 
 impl ColorRGBA {
 
+    pub fn from_rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a, }
+    }
+
     pub fn white() -> Self {
         Self {
             r: 1.0,

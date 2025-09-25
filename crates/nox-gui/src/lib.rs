@@ -1,7 +1,9 @@
+mod color;
+mod style;
 mod widget;
 mod workspace;
-mod color;
 
+pub use color::*;
+pub use style::*;
 pub use widget::*;
 pub use workspace::Workspace;
-pub use color::*;

@@ -44,7 +44,16 @@ impl<'a> Interface for Example<'a> {
         })?;
         self.workspace
             .create_graphics_pipelines(renderer, MSAA::X1, self.output_format, None, &GLOBAL_ALLOC)?;
-        self.workspace.add_widget([0.25, 0.25], [0.0, -1.0]);
+        self.workspace.add_widget([0.25, 0.25], [0.0, 0.0]);
+        Ok(())
+    }
+
+    fn update(
+        &mut self,
+        nox: &mut Nox<Self>,
+        _renderer: &mut RendererContext,
+    ) -> Result<(), Error> {
+        self.workspace.update(nox);
         Ok(())
     }
 

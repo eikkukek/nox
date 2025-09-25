@@ -17,6 +17,7 @@ use nox_font::{VertexTextRenderer, Face};
 
 use nox_geom::{
     earcut::earcut,
+    vec2,
     Vec2,
     BoundingRect,
 };
@@ -46,19 +47,24 @@ pub(crate) struct VertexUv {
 }
 
 #[repr(C)]
-pub(crate) struct VertexPushConstant {
+pub(crate) struct PushConstants {
     pub vert_off: Vec2,
     pub inv_aspect_ratio: f32,
+    _pad: [u8; 4],
+    pub color: ColorRGBA,
 }
 
-pub(crate) fn vertex_push_constant(
+pub(crate) fn push_constants(
     vert_off: Vec2,
-    inv_aspect_ratio: f32
-) -> VertexPushConstant
+    inv_aspect_ratio: f32,
+    color: ColorRGBA,
+) ->PushConstants 
 {
-    VertexPushConstant {
+    PushConstants {
         vert_off,
         inv_aspect_ratio,
+        _pad: Default::default(),
+        color,
     }
 }
 
@@ -154,11 +160,11 @@ const BASE_FRAGMENT_SHADER: &'static str = "
     layout(location = 0) out vec4 out_color;
 
     layout(push_constant) uniform PushConstant {
-        layout(offset = 32) vec4 color;
+        layout(offset = 16) vec4 color;
     } pc;
 
     void main() {
-        out_color = vec4(1.0);
+        out_color = pc.color;
     }
 ";
 
@@ -252,7 +258,6 @@ impl<'a, FontHash> Workspace<'a, FontHash>
             Widget::new(
                 size,
                 position,
-                ColorRGBA::white(),
             ))
         )
     }
@@ -263,10 +268,11 @@ impl<'a, FontHash> Workspace<'a, FontHash>
     )
     {
         self.inv_aspect_ratio = 1.0 / nox.aspect_ratio() as f32;
-        let mouse_pos: Vec2 = nox.normalized_cursor_position_f32().into();
-        for widget in &self.widgets {
-            if widget.bounding_rect().point_inside(mouse_pos) {
-            }
+        let mut mouse_pos: Vec2 = nox.normalized_cursor_position_f32().into();
+        mouse_pos *= 2.0;
+        mouse_pos -= vec2(1.0, 1.0);
+        for widget in &mut self.widgets {
+            widget.update(mouse_pos, &Default::default());
         }
     }
 

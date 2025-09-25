@@ -672,24 +672,17 @@ impl GlobalResources {
         Ok((layout.handle(), res))
     }
 
-    pub(crate) fn pipeline_get_push_constants<'a, 'b, F, Alloc>(
+    pub(crate) fn pipeline_get_push_constant_stages(
         &self,
         layout_id: PipelineLayoutId,
-        mut f: F,
-        alloc: &'a Alloc,
-    ) -> Result<(vk::PipelineLayout, FixedVec<'a, (vk::PushConstantRange, &'b [u8]), Alloc>), Error>
-        where
-            F: FnMut(PushConstant) -> &'b [u8],
-            Alloc: Allocator,
+    ) -> Result<(vk::PipelineLayout, vk::ShaderStageFlags), Error>
     {
         let layout = self.pipeline_layouts.get(layout_id.0)?;
-        let push_constants = layout.push_constant_ranges();
-        let mut res = FixedVec::with_capacity(push_constants.len(), alloc)?;
-        for pc in push_constants.iter().map(|v| *v) {
-            let bytes = f(pc.into());
-            res.push((pc, bytes)).unwrap();
+        let mut stages = vk::ShaderStageFlags::empty();
+        for &pc in layout.push_constant_ranges() {
+            stages |= pc.stage_flags;
         }
-        Ok((layout.handle(), res))
+        Ok((layout.handle(), stages))
     }
 
     #[inline(always)]

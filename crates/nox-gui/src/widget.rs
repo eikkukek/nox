@@ -12,8 +12,8 @@ pub use nox_geom::{
 };
 
 use crate::{
-    workspace::{vertex_push_constant, RingBufMem, Vertex},
-    ColorRGBA,
+    workspace::*,
+    ColorRGBA, Style,
 };
 
 pub(crate) struct Widget {
@@ -32,7 +32,6 @@ impl Widget {
     pub fn new(
         size: [f32; 2],
         position: [f32; 2],
-        color: ColorRGBA,
     ) -> Self
     {
         let half_size = vec2(size[0] * 0.5, size[1] * 0.5);
@@ -51,7 +50,7 @@ impl Widget {
         Self {
             main_rect,
             position: position.into(),
-            color,
+            color: Default::default(),
             vertices,
             indices,
             points,
@@ -66,11 +65,11 @@ impl Widget {
 
     pub fn update(
         &mut self,
-        main_rect: Rect,
-        position: Vec2,
-        color: ColorRGBA,
+        mouse_position: Vec2,
+        style: &Style,
     )
     {
+        /*
         if !main_rect.eq_epsilon(&self.main_rect, 1.0e-6) {
             self.vertices.clear();
             self.indices.clear();
@@ -88,7 +87,12 @@ impl Widget {
             self.main_rect = main_rect;
         }
         self.position = position;
-        self.color = color;
+        */
+        if self.bounding_rect().point_inside(mouse_position) {
+            self.color = style.widget_bg_hl;
+        } else {
+            self.color = style.widget_bg;
+        }
     }
 
     pub fn render_commands<F1, F2>(
@@ -121,17 +125,10 @@ impl Widget {
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
         }
-        let vert_pc = vertex_push_constant(self.position, inv_aspect_ratio);
-        render_commands.push_constants(|p| {
-            if p.offset == 0 {
-                return unsafe {
-                    value_as_bytes(&vert_pc).unwrap()
-                }
-            }
-            unsafe {
-                value_as_bytes(&self.color).unwrap()
-            }
-        })?;
+        let push_constants = push_constants(self.position, inv_aspect_ratio, self.color);
+        render_commands.push_constants(unsafe {
+            value_as_bytes(&push_constants).unwrap()
+        });
         render_commands.draw_indexed(
             DrawInfo {
                 index_count: idx_count as u32,
