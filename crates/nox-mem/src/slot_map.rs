@@ -41,7 +41,7 @@ use std::u32;
 use crate::{
     capacity_policy::CapacityPolicy,
     conditional::{Conditional, False, True},
-    global_alloc::{GlobalAlloc, GLOBAL_ALLOC},
+    global_alloc::{GlobalAlloc},
     vec_types::Pointer,
     Allocator,
     CapacityError,
@@ -180,7 +180,7 @@ impl<T> core::hash::Hash for SlotIndex<T> {
     }
 }
 
-pub struct AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal>
+pub struct AllocSlotMap<T, Alloc, CapacityPol, IsGlobal>
     where
         T: Sized,
         Alloc: Allocator,
@@ -191,7 +191,7 @@ pub struct AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal>
     capacity: u32,
     len: u32,
     free_head: Option<u32>,
-    alloc: OptionAlloc<'alloc, Alloc>,
+    alloc: Alloc,
     _marker: PhantomData<(IsGlobal, CapacityPol)>,
 }
 
@@ -226,7 +226,7 @@ pub struct AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal>
 /// let mut map = DynSlotMap::new(&allocator);
 /// let key = map.insert("value").unwrap();
 /// map.remove(key);
-pub type DynSlotMap<'alloc, T, Alloc> = AllocSlotMap<'alloc, T, Alloc, Dyn, False>;
+pub type DynSlotMap<'alloc, T, Alloc> = AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Dyn, False>;
 
 /// A fixed-capacity slot map storing values of type `T`, backed by allocator `Alloc`.
 ///
@@ -261,7 +261,7 @@ pub type DynSlotMap<'alloc, T, Alloc> = AllocSlotMap<'alloc, T, Alloc, Dyn, Fals
 /// let key = map.insert("value").unwrap();
 /// map.remove(key);
 /// ```
-pub type FixedSlotMap<'alloc, T, Alloc> = AllocSlotMap<'alloc, T, Alloc, Fixed, False>;
+pub type FixedSlotMap<'alloc, T, Alloc> = AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Fixed, False>;
 
 /// A dynamic slot map storing values of type `T`, backed by [`GlobalAlloc`].
 ///
@@ -282,9 +282,9 @@ pub type FixedSlotMap<'alloc, T, Alloc> = AllocSlotMap<'alloc, T, Alloc, Fixed, 
 /// assert_eq!(map.get(key1).ok(), None);
 /// assert_eq!(map.get(key2).ok(), Some(&"world"));
 /// ```
-pub type GlobalSlotMap<T> = AllocSlotMap<'static, T, GlobalAlloc, Dyn, True>;
+pub type GlobalSlotMap<T> = AllocSlotMap<T, GlobalAlloc, Dyn, True>;
 
-impl<'alloc, T, Alloc> AllocSlotMap<'alloc, T, Alloc, Dyn, False> 
+impl<'alloc, T, Alloc> AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Dyn, False> 
     where
         T: Sized,
         Alloc: Allocator,
@@ -335,7 +335,7 @@ impl<'alloc, T, Alloc> AllocSlotMap<'alloc, T, Alloc, Dyn, False>
     }
 }
 
-impl<'alloc, T, Alloc> AllocSlotMap<'alloc, T, Alloc, Fixed, False> 
+impl<'alloc, T, Alloc> AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Fixed, False> 
     where
         T: Sized,
         Alloc: Allocator,
@@ -375,7 +375,7 @@ impl<'alloc, T, Alloc> AllocSlotMap<'alloc, T, Alloc, Fixed, False>
 }
 
 
-impl<'alloc, T, Alloc, CapacityPol> AllocSlotMap<'alloc, T, Alloc, CapacityPol, False>
+impl<'alloc, T, Alloc, CapacityPol> AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, CapacityPol, False>
     where
         T: Sized,
         Alloc: Allocator,
@@ -412,7 +412,7 @@ impl<T> GlobalSlotMap<T>
             capacity: 0,
             len: 0,
             free_head: None,
-            alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
+            alloc: GlobalAlloc,
             _marker: PhantomData,
         }
     }
@@ -421,7 +421,7 @@ impl<T> GlobalSlotMap<T>
         if capacity == 0 {
             return Self::new()
         }
-        let data: Pointer<Slot<T>> = unsafe { GLOBAL_ALLOC
+        let data: Pointer<Slot<T>> = unsafe { GlobalAlloc
             .allocate_uninit(capacity as usize)
             .ok_or(
                 if size_of!(T) == 0 {
@@ -444,7 +444,7 @@ impl<T> GlobalSlotMap<T>
             capacity,
             len: 0,
             free_head: Some(0),
-            alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
+            alloc: GlobalAlloc,
             _marker: PhantomData,
         }
     }
@@ -455,7 +455,7 @@ impl<T> GlobalSlotMap<T>
     }
 }
 
-impl<'alloc, T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal>
+impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlobal>
     where
         T: Sized,
         Alloc: Allocator,
@@ -743,7 +743,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 }
 
 impl_traits!(
-    for AllocSlotMap<'alloc, T: Sized, Alloc: Allocator, CapacityPol: CapacityPolicy, IsGlobal: Conditional>
+    for AllocSlotMap<T: Sized, Alloc: Allocator, CapacityPol: CapacityPolicy, IsGlobal: Conditional>
     Index<SlotIndex<T>> =>
 
         type Output = T;
@@ -822,7 +822,7 @@ impl_traits!(
 );
 
 impl<'alloc, T: Sized, Alloc: Allocator, CapacityPol: CapacityPolicy> Default
-    for AllocSlotMap<'alloc, T, Alloc, CapacityPol, False>
+    for AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, CapacityPol, False>
 {
 
     fn default() -> Self {
@@ -831,12 +831,11 @@ impl<'alloc, T: Sized, Alloc: Allocator, CapacityPol: CapacityPolicy> Default
 }
 
 unsafe impl<
-    'alloc,
     T: Sized + Send,
     Alloc: Allocator + Send,
     CapacityPol: CapacityPolicy,
     IsGlobal: Conditional,
-> Send for AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal> {}
+> Send for AllocSlotMap<T, Alloc, CapacityPol, IsGlobal> {}
 
 unsafe impl<
     'alloc,
@@ -844,4 +843,4 @@ unsafe impl<
     Alloc: Allocator + Sync,
     CapacityPol: CapacityPolicy,
     IsGlobal: Conditional,
-> Sync for AllocSlotMap<'alloc, T, Alloc, CapacityPol, IsGlobal> {}
+> Sync for AllocSlotMap<T, Alloc, CapacityPol, IsGlobal> {}

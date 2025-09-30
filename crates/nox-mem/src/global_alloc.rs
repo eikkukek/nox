@@ -4,7 +4,7 @@ use core::ptr::NonNull;
 
 use crate::Allocator;
 
-pub struct GlobalAlloc {}
+pub struct GlobalAlloc;
 
 impl Allocator for GlobalAlloc {
 
@@ -25,5 +25,3 @@ impl Allocator for GlobalAlloc {
         unsafe { dealloc(ptr.as_ptr(), layout) }
     }
 }
-
-pub const GLOBAL_ALLOC: GlobalAlloc = GlobalAlloc {};

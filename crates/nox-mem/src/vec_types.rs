@@ -8,4 +8,4 @@ pub use pointer::Pointer;
 pub use alloc_vec::{DynVec, FixedVec, GlobalVec};
 pub use array_vec::ArrayVec;
 
-pub type AllocVec<'alloc, T, Alloc, CapacityPol> = alloc_vec::AllocVecImpl<'alloc, T, Alloc, CapacityPol>;
+pub type AllocVec<T, Alloc, CapacityPol> = alloc_vec::AllocVecImpl<T, Alloc, CapacityPol>;

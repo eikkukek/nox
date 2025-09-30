@@ -1,13 +1,12 @@
 use core::{
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
-    ptr::{self, NonNull},
+    ptr::{self},
     fmt::{Debug, Display},
     slice
 };
 
 use crate::{
-    capacity_policy::Fixed,
     errors::CapacityError,
     impl_traits,
 };
@@ -53,8 +52,6 @@ impl<T, const N: usize> ArrayVec<T, N>
 
 impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
 {
-    type CapacityPol = Fixed;
-
     type Iter<'a> = slice::Iter<'a, T>
         where T: 'a, Self: 'a;
 
@@ -79,13 +76,6 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     #[inline(always)]
     fn as_mut_ptr(&mut self) -> *mut T {
         self.data.as_mut_ptr() as _
-    }
-
-    #[inline(always)]
-    fn as_non_null(&self) -> NonNull<T> {
-        unsafe {
-            NonNull::new_unchecked(self.data.as_ptr() as _)
-        }
     }
 
     #[inline(always)]
@@ -134,7 +124,9 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
             F: FnMut() -> T
     {
         if len > N { return Err(CapacityError::FixedCapacity { capacity: N }) }
-        let ptr = Pointer::from(self.as_non_null());
+        let ptr = unsafe {
+            Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
+        };
         if len > self.len {
             for i in self.len..len {
                 unsafe { (*ptr.add(i)).write(f()) };
@@ -163,7 +155,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
                 ::new(slice.as_ptr() as _)
                 .unwrap()
                 .clone_elements(
-                    Pointer::from(self.as_non_null()).add(self.len),
+                    Pointer::new(self.as_mut_ptr()).unwrap_unchecked().add(self.len),
                     slice.len()
                 );
         }
@@ -181,7 +173,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
             return Err(CapacityError::FixedCapacity { capacity: N })
         }
         let len = self.len;
-        let ptr = self.as_non_null();
+        let ptr = self.as_mut_ptr();
         for (i, u) in slice.iter().enumerate() {
             unsafe {
                 ptr.add(len + i).write(f(u));
@@ -235,7 +227,8 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         if self.len == N { return Err(CapacityError::FixedCapacity { capacity: N }) }
         unsafe {
             let mut ptr = Pointer
-                ::from(self.as_non_null())
+                ::new(self.as_mut_ptr())
+                .unwrap_unchecked()
                 .insert_element(value, index, self.len);
             self.len += 1;
             Ok(ptr.as_mut())
@@ -268,7 +261,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     #[inline(always)]
     fn clear(&mut self) {
         debug_assert!(self.len <= N);
-        unsafe { Pointer::from(self.as_non_null()).drop_in_place(self.len); }
+        unsafe { Pointer::new(self.as_mut_ptr()).unwrap_unchecked().drop_in_place(self.len); }
         self.len = 0;
     }
 
@@ -279,7 +272,9 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         if N < from.len() {
             return Err(CapacityError::FixedCapacity { capacity: N })
         }
-        let ptr = Pointer::from(self.as_non_null());
+        let ptr = unsafe {
+            Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
+        };
         unsafe { ptr.drop_in_place(self.len); }
         self.len = 0;
         unsafe { Pointer
@@ -298,7 +293,9 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         if N < slice.len() {
             return Err(CapacityError::FixedCapacity { capacity: N })
         }
-        let ptr = Pointer::from(self.as_non_null());
+        let ptr = unsafe {
+            Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
+        };
         unsafe { ptr.drop_in_place(self.len); }
         self.len = 0;
         unsafe { Pointer
@@ -309,19 +306,6 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         self.len = slice.len();
         unsafe { from.set_len(0); }
         Ok(self)
-    }
-
-    fn contains(&self, value: &T) -> bool
-        where
-            T: PartialEq
-    {
-        let ptr = self.as_ptr() as *const T;
-        for i in 0..self.len {
-            if unsafe { *ptr.add(i) == *value } {
-                return true 
-            }
-        }
-        return false
     }
 
     #[inline(always)]
@@ -342,7 +326,7 @@ impl_traits! {
         #[inline(always)]
         fn drop(&mut self) -> () {
             debug_assert!(self.len <= N);
-            unsafe { Pointer::from(self.as_non_null()).drop_in_place(self.len); }
+            unsafe { Pointer::new(self.as_mut_ptr()).unwrap_unchecked().drop_in_place(self.len); }
             self.len = 0;
         }
     ,

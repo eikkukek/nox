@@ -1,8 +1,8 @@
 use nox_mem::{
     GlobalAlloc,
-    GLOBAL_ALLOC,
     vec_types::{Vector, AllocVec},
     slot_map,
+    OptionAlloc,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -16,14 +16,14 @@ impl Default for CommandRequestId {
 }
 
 pub struct TransferRequests {
-    pub(crate) transfer_requests: AllocVec<'static, u64, GlobalAlloc, slot_map::Dyn>,
+    pub(crate) transfer_requests: AllocVec<u64, OptionAlloc<'static, GlobalAlloc>, slot_map::Dyn>,
 }
 
 impl TransferRequests {
 
     pub(crate) fn new() -> Self {
         TransferRequests {
-            transfer_requests: AllocVec::new(&GLOBAL_ALLOC).unwrap(),
+            transfer_requests: AllocVec::new(&GlobalAlloc).unwrap(),
         }
     }
 

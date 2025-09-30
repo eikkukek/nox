@@ -1,10 +1,8 @@
 use core::{
     ops::{Deref, DerefMut},
-    ptr::NonNull,
     hash::{Hash, Hasher},
 };
 
-use crate::capacity_policy::CapacityPolicy;
 use crate::errors::CapacityError;
 
 pub trait Vector<T>:
@@ -13,8 +11,6 @@ pub trait Vector<T>:
     Deref<Target = [T]> +
     DerefMut
 {
-
-    type CapacityPol: CapacityPolicy;
 
     type Iter<'a>: Iterator<Item = &'a T>
         where T: 'a, Self: 'a;
@@ -30,23 +26,23 @@ pub trait Vector<T>:
 
     fn as_mut_ptr(&mut self) -> *mut T;
 
-    fn as_non_null(&self) -> NonNull<T>;
-
     fn as_slice(&self) -> &[T];
 
     fn as_mut_slice(&mut self) -> &mut [T];
 
-    unsafe fn set_len(&mut self, len: usize);
+    unsafe fn set_len(&mut self, new_len: usize);
 
     fn reserve(&mut self, size: usize) -> Result<(), CapacityError>;
 
-    fn resize(&mut self, len: usize, value: T) -> Result<(), CapacityError>
+    fn resize(&mut self, new_len: usize, value: T) -> Result<(), CapacityError>
         where
             T: Clone;
 
-    fn resize_with<F>(&mut self, len: usize, f: F) -> Result<(), CapacityError>
+    fn resize_with<F>(&mut self, new_len: usize, f: F) -> Result<(), CapacityError>
         where
             F: FnMut() -> T;
+
+    fn push(&mut self, value: T) -> Result<&mut T, CapacityError>;
 
     fn append(&mut self, slice: &[T]) -> Result<(), CapacityError>
         where
@@ -55,8 +51,6 @@ pub trait Vector<T>:
     fn append_map<U, F>(&mut self, slice: &[U], f: F) -> Result<(), CapacityError>
         where
             F: FnMut(&U) -> T;
-
-    fn push(&mut self, value: T) -> Result<&mut T, CapacityError>;
 
     fn pop(&mut self) -> Option<T>;
 
@@ -91,25 +85,6 @@ pub trait Vector<T>:
     #[inline(always)]
     fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    fn contains(&self, value: &T) -> bool
-        where
-            T: PartialEq;
-
-    fn push_if_unique(&mut self,value: T) -> Result<Option<&mut T>, CapacityError>
-        where
-            T: PartialEq
-    {
-        if self.contains(&value) {
-            Ok(None)
-        }
-        else {
-            let val = self.push(value)?;
-            Ok(Some(
-                val
-            ))
-        }
     }
 
     fn iter(&self) -> Self::Iter<'_>;

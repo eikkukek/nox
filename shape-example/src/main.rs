@@ -67,8 +67,10 @@ impl Interface for Example {
         self.rects[0].to_points_cw(&mut |p| { self.hole.push(p.into()); });
         self.points = GlobalVec::with_capacity(self.hole.len());
         outline_points(&self.hole, 0.075, true, &mut |p| { self.points.push(p.into()); });
-        let (vertices, indices) = earcut(&self.points, &[earcut_hole(&self.hole, true)], false).unwrap();
-        self.vertices = vertices;
+        let mut indices = GlobalVec::new();
+        if !earcut(&self.points, &[earcut_hole(&self.hole, true)], false, &mut self.vertices, &mut indices).unwrap() {
+            return Err(Error::UserError("earcutting failed".into()))
+        }
         self.indices.append_map(&indices, |&i| i as u32);
         renderer
             .transfer_requests()
@@ -137,7 +139,7 @@ impl Interface for Example {
                 .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
                 .with_color_output(self.output_format, Default::default(), None)
                 .with_sample_shading(SampleShadingInfo::new(MSAA::X4, 0.2, false, false));
-            r.create_graphics_pipelines(&[pipeline_info], None, &GLOBAL_ALLOC, |_, p| self.pipeline = p)?;
+            r.create_graphics_pipelines(&[pipeline_info], None, &GlobalAlloc, |_, p| self.pipeline = p)?;
             Ok(())
         })?;
         Ok(())
@@ -205,8 +207,10 @@ impl Interface for Example {
             self.current_rect.to_points_cw(&mut |p| { self.hole.push(p.into()); });
             self.points = GlobalVec::with_capacity(self.hole.len());
             outline_points(&self.hole, 0.075, true, &mut |p| { self.points.push(p.into()); });
-            let (vertices, indices) = earcut(&self.points, &[earcut_hole(&self.hole, true)], false).unwrap();
-            self.vertices = vertices;
+            let mut indices = GlobalVec::new();
+            if !earcut(&self.points, &[earcut_hole(&self.hole, true)], false, &mut self.vertices, &mut indices).unwrap() {
+                return Err(Error::UserError("earcutting failed".into()))
+            }
             self.indices.append_map(&indices, |&i| i as u32);
 
             if renderer.buffer_size(self.vertex_buffer).unwrap() <
@@ -276,7 +280,7 @@ impl Interface for Example {
     {
         let aspect_ratio = self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32;
         commands.bind_pipeline(self.pipeline)?;
-        commands.push_constants(|_| unsafe { value_as_bytes(&aspect_ratio).unwrap() })?;
+        commands.push_constants(unsafe { value_as_bytes(&aspect_ratio).unwrap() })?;
         commands.draw_indexed(
             DrawInfo {
                 index_count: self.indices.len() as u32,

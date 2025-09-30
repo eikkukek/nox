@@ -133,7 +133,7 @@ impl Interface for App {
             r.create_graphics_pipelines(
                 &[pipeline_info],
                 None,
-                &nox::mem::GLOBAL_ALLOC,
+                &nox::mem::GlobalAlloc,
                 |_, p| { self.pipeline = p }
             )?;
             for text in &self.rendered_text {
@@ -249,9 +249,7 @@ impl Interface for App {
             _text_rows: self.rendered_text.text_rows,
             _aspect_ratio: self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32,
         };
-        commands.push_constants(|_| {
-            unsafe { value_as_bytes(&pc) }.unwrap()
-        })?;
+        commands.push_constants(unsafe { value_as_bytes(&pc).unwrap() })?;
         for (i, text) in self.rendered_text.iter().enumerate() {
             commands.draw_indexed(
                 DrawInfo {

@@ -22,4 +22,4 @@ pub use renderer::*;
 pub use memory::Memory;
 pub use interface::Interface;
 pub use mem::array_string;
-pub use mem::GLOBAL_ALLOC;
+pub use mem::GlobalAlloc;

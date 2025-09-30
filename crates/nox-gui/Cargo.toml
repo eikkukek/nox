@@ -7,3 +7,5 @@ edition = "2024"
 nox = { path = "../nox" }
 nox-font = { path = "../nox-font" }
 nox-geom = { path = "../nox-geom" }
+rustc-hash = { version = "2.1", default-features = false }
+compact_str = { version = "0.9.0" }

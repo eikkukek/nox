@@ -9,7 +9,7 @@ use glam::{f32::*, Vec4Swizzles};
 use memmap2::Mmap;
 
 use nox::{
-    mem::{size_of, slice_as_bytes, vec_types::ArrayVec, GLOBAL_ALLOC},
+    mem::{size_of, slice_as_bytes, vec_types::ArrayVec, GlobalAlloc},
     *,
 };
 
@@ -663,14 +663,14 @@ impl Interface for App {
             r.create_graphics_pipelines(
                 &[graphics_pipeline_info, outline_pipeline_info, fire_effect_pipeline_info],
                 Some(self.pipeline_cache),
-                &GLOBAL_ALLOC,
+                &GlobalAlloc,
                 |i, id| { self.pipelines[i] = id; },
             )?;
             let fire_pipeline_info = ComputePipelineInfo::new(self.pipeline_layouts[2]);
             r.create_compute_pipelines(
                 &[fire_pipeline_info],
                 Some(self.pipeline_cache),
-                &GLOBAL_ALLOC,
+                &GlobalAlloc,
                 |_, id| { self.fire_pipeline = id },
             )?;
             self.vertex_buffer = r.create_buffer(
@@ -724,7 +724,7 @@ impl Interface for App {
                     },
                 ],
                 |i, v| self.shader_resources[i] = v,
-                &GLOBAL_ALLOC,
+                &GlobalAlloc,
             )?;
             r.update_shader_resources(
                 &[
@@ -762,7 +762,7 @@ impl Interface for App {
                     },
                 ],
                 &[],
-                &GLOBAL_ALLOC
+                &GlobalAlloc
             )?;
             Ok(())
         })?;
@@ -849,7 +849,7 @@ impl Interface for App {
                 LightInfo { pos: light_pos }
             );
         }
-        self.rot += PI * nox.delta_time().as_secs_f32();
+        self.rot = (self.rot + PI * nox.delta_time().as_secs_f32()) % (PI * 2.0);
         Ok(())
     }
 
@@ -904,7 +904,7 @@ impl Interface for App {
                 ],
                 &[],
                 &[],
-                &GLOBAL_ALLOC
+                &GlobalAlloc
             )?;
             Ok(())
         })?;
@@ -912,9 +912,7 @@ impl Interface for App {
         commands.prepare_storage_image(self.fire_images[1])?;
         commands.bind_pipeline(self.fire_pipeline)?;
         commands.bind_shader_resources(|_| self.shader_resources[2])?;
-        commands.push_constants(|_|
-            unsafe { slice_as_bytes(params).unwrap() }
-        )?;
+        commands.push_constants(unsafe { slice_as_bytes(params).unwrap() })?;
         commands.dispatch((self.frame_buffer_size.width + 7) / 8, (self.frame_buffer_size.height + 7) / 8, 1);
         self.heat_in = (self.heat_in + 1) % 2;
         Ok(())
@@ -1037,7 +1035,7 @@ impl Interface for App {
     {
         if id == self.fire_transfer_id {
             for image in &self.fire_images {
-                commands.clear_color_image(*image, [0.0, 0.0, 0.0, 0.0].into(), None)?;
+                commands.clear_color_image(*image, [0.0, 0.0, 0.0, 0.0].into(), None, &GlobalAlloc)?;
             }
             return Ok(None)
         }

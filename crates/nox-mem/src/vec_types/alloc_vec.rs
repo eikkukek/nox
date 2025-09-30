@@ -1,6 +1,5 @@
 use core::{
     marker::PhantomData,
-    ptr::NonNull,
     slice::{self, Iter, IterMut},
     ops::{Deref, DerefMut},
     hash::{Hash, Hasher},
@@ -12,7 +11,7 @@ use crate::{
     capacity_policy::{CapacityPolicy, Dyn, Fixed},
     conditional::{Conditional, False, True},
     errors::CapacityError,
-    global_alloc::{GlobalAlloc, GLOBAL_ALLOC},
+    global_alloc::{GlobalAlloc},
     impl_traits,
     option_alloc::OptionAlloc,
 };
@@ -26,7 +25,7 @@ use CapacityError::{FixedCapacity, InvalidReservation, AllocFailed, ZeroSizedEle
 
 type Result<T> = core::result::Result<T, CapacityError>;
 
-pub struct AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal>
+pub struct AllocVec<T, Alloc, CapacityPol, IsGlobal>
     where
         T: Sized,
         Alloc: Allocator,
@@ -36,16 +35,16 @@ pub struct AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal>
     data: Pointer<T>,
     capacity: usize,
     len: usize,
-    alloc: OptionAlloc<'alloc, Alloc>,
+    alloc: Alloc,
     _markers: PhantomData<(CapacityPol, IsGlobal)>,
 }
 
-pub type AllocVecImpl<'alloc, T, Alloc, CapacityPol> = AllocVec<'alloc, T, Alloc, CapacityPol, False>;
-pub type DynVec<'alloc, T, Alloc> = AllocVec<'alloc, T, Alloc, Dyn, False>;
-pub type FixedVec<'alloc, T, Alloc> = AllocVec<'alloc, T, Alloc, Fixed, False>;
-pub type GlobalVec<T> = AllocVec<'static, T, GlobalAlloc, Dyn, True>;
+pub type AllocVecImpl<T, Alloc, CapacityPol> = AllocVec<T, Alloc, CapacityPol, False>;
+pub type DynVec<'alloc, T, Alloc> = AllocVec<T, OptionAlloc<'alloc, Alloc>, Dyn, False>;
+pub type FixedVec<'alloc, T, Alloc> = AllocVec<T, OptionAlloc<'alloc, Alloc>, Fixed, False>;
+pub type GlobalVec<T> = AllocVec<T, GlobalAlloc, Dyn, True>;
 
-impl<'alloc, T, Alloc, CapacityPol> AllocVec<'alloc, T, Alloc, CapacityPol, False>
+impl<'alloc, T, Alloc, CapacityPol> AllocVec<T, OptionAlloc<'alloc, Alloc>, CapacityPol, False>
     where
         T: Sized,
         CapacityPol: CapacityPolicy,
@@ -212,7 +211,7 @@ impl<T> GlobalVec<T> {
             data: Pointer::dangling(),
             capacity: 0,
             len: 0,
-            alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
+            alloc: GlobalAlloc,
             _markers: PhantomData,
         }
     }
@@ -223,14 +222,8 @@ impl<T> GlobalVec<T> {
         if capacity == 0 {
             return Default::default()
         }
-        let true_capacity =
-            if <Self as Vector<T>>::CapacityPol::power_of_two() {
-                capacity.next_power_of_two()
-            }
-            else {
-                capacity
-            };
-        let data = unsafe { GLOBAL_ALLOC
+        let true_capacity = capacity.next_power_of_two();
+        let data = unsafe { GlobalAlloc
             .allocate_uninit(true_capacity)
             .ok_or_else(|| {
                 if size_of::<T>() == 0 {
@@ -245,7 +238,7 @@ impl<T> GlobalVec<T> {
             data,
             capacity: true_capacity,
             len: 0,
-            alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
+            alloc: GlobalAlloc,
             _markers: PhantomData,
         }
     }
@@ -260,14 +253,8 @@ impl<T> GlobalVec<T> {
         if len == 0 {
             return Default::default()
         }
-        let capacity =
-            if <Self as Vector<T>>::CapacityPol::power_of_two() {
-                len.next_power_of_two()
-            }
-            else {
-                len
-            };
-        let data: Pointer<T> = unsafe { GLOBAL_ALLOC
+        let capacity = len.next_power_of_two();
+        let data: Pointer<T> = unsafe { GlobalAlloc 
             .allocate_uninit(capacity)
             .ok_or_else(|| {
                 if size_of::<T>() == 0 {
@@ -285,7 +272,7 @@ impl<T> GlobalVec<T> {
             data,
             capacity,
             len,
-            alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
+            alloc: GlobalAlloc,
             _markers: PhantomData,
         }
     }
@@ -300,14 +287,8 @@ impl<T> GlobalVec<T> {
         if len == 0 {
             return Default::default()
         }
-        let capacity =
-            if <Self as Vector<T>>::CapacityPol::power_of_two() {
-                len.next_power_of_two()
-            }
-            else {
-                len
-            };
-        let data: Pointer<T> = unsafe { GLOBAL_ALLOC
+        let capacity = len.next_power_of_two();
+        let data: Pointer<T> = unsafe { GlobalAlloc
             .allocate_uninit(capacity)
             .ok_or_else(|| {
                 if size_of::<T>() == 0 {
@@ -325,7 +306,7 @@ impl<T> GlobalVec<T> {
             data,
             capacity,
             len,
-            alloc: OptionAlloc::Some(&GLOBAL_ALLOC),
+            alloc: GlobalAlloc,
             _markers: PhantomData,
         }
     }
@@ -338,14 +319,6 @@ impl<T> GlobalVec<T> {
     #[inline(always)]
     pub fn push(&mut self, value: T) -> &mut T {
         <Self as Vector<T>>::push(self, value).unwrap()
-    }
-
-    #[inline(always)]
-    pub fn push_if_unique(&mut self, value: T) -> Option<&mut T>
-        where 
-            T: PartialEq
-    {
-        <Self as Vector<T>>::push_if_unique(self, value).unwrap()
     }
 
     #[inline(always)]
@@ -378,7 +351,7 @@ impl<T> GlobalVec<T> {
     }
 }
 
-impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal>
+impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityPol, IsGlobal>
     where
         Alloc: Allocator,
         CapacityPol: CapacityPolicy,
@@ -392,8 +365,6 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
     type IterMut<'a> = slice::IterMut<'a, T>
         where
             T: 'a, Self: 'a;
-
-    type CapacityPol = CapacityPol;
 
     #[inline(always)]
     fn len(&self) -> usize {
@@ -413,11 +384,6 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
     #[inline(always)]
     fn as_mut_ptr(&mut self) -> *mut T {
         self.data.as_ptr()
-    }
-
-    #[inline(always)]
-    fn as_non_null(&self) -> NonNull<T> {
-        *self.data
     }
 
     #[inline(always)]
@@ -652,17 +618,8 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         where
             T: Clone
     {
-        if self.capacity < from.len() {
-            if !CapacityPol::can_grow() {
-                return Err(FixedCapacity { capacity: self.capacity })
-            }
-            self.clear();
-            self.reserve(from.len())?
-        }
-        else {
-            unsafe { self.data.drop_in_place(self.len); }
-            self.len = 0;
-        }
+        self.clear();
+        self.reserve(from.len())?;
         unsafe {
             Pointer
                 ::new(from.as_ptr() as _)
@@ -677,36 +634,18 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
         where
             V: Vector<T>
     {
-        if self.capacity < from.len() {
-            self.clear();
-            self.reserve(from.len())?
-        }
-        else {
-            unsafe { self.data.drop_in_place(self.len); }
-            self.len = 0;
-        }
-        let slice = from.as_mut_slice();
+        self.clear();
+        self.reserve(from.len())?;
+        let len = from.len();
         unsafe {
             Pointer
-                ::new(slice.as_mut_ptr())
+                ::new(from.as_mut_ptr())
                 .unwrap()
-                .move_elements(self.data, slice.len());
+                .move_elements(self.data, len);
         }
-        self.len = slice.len();
+        self.len = len;
         unsafe { from.set_len(0); }
         Ok(self)
-    }
-
-    fn contains(&self, value: &T) -> bool
-        where
-            T: PartialEq
-    {
-        for i in 0..self.len {
-            if unsafe { self.data.add(i).as_ref() == value } {
-                return true 
-            }
-        }
-        return false
     }
 
     #[inline(always)]
@@ -721,7 +660,7 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<'alloc, T, 
 }
 
 impl_traits!{
-    for AllocVec<'alloc, T, Alloc: Allocator, CapacityPol: CapacityPolicy, IsGlobal: Conditional>
+    for AllocVec<T, Alloc: Allocator, CapacityPol: CapacityPolicy, IsGlobal: Conditional>
     Drop =>
 
         #[inline(always)]
@@ -836,7 +775,7 @@ impl_traits!{
     ,
 }
 
-impl<'alloc, T, Alloc, CapacityPol, IsGlobal> From<&AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal>> for Vec<T>
+impl<T, Alloc, CapacityPol, IsGlobal> From<&AllocVec<T, Alloc, CapacityPol, IsGlobal>> for Vec<T>
     where
         T: Clone,
         Alloc: Allocator,
@@ -845,18 +784,20 @@ impl<'alloc, T, Alloc, CapacityPol, IsGlobal> From<&AllocVec<'alloc, T, Alloc, C
 {
 
     #[inline(always)]
-    fn from(value: &AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal>) -> Self {
+    fn from(value: &AllocVec<T, Alloc, CapacityPol, IsGlobal>) -> Self {
         value.to_vec()
     }
 }
 
-impl_traits!{
-    for AllocVecImpl<'alloc, T, Alloc: Allocator, CapacityPol: CapacityPolicy>
-    Default =>
-        fn default() -> Self {
-            Self::with_no_alloc()
-        }
-    ,
+impl<'alloc, T, Alloc, CapacityPol> Default for AllocVec<T, OptionAlloc<'alloc, Alloc>, CapacityPol, False>
+    where 
+        Alloc: Allocator,
+        CapacityPol: CapacityPolicy,
+{
+
+    fn default() -> Self {
+        Self::with_no_alloc()
+    }
 }
 
 impl_traits!{
@@ -898,17 +839,15 @@ impl_traits!{
 }
 
 unsafe impl<
-    'alloc,
     Alloc: Allocator + Send,
     T: Send,
     CapacityPol: CapacityPolicy,
     IsGlobal: Conditional
-> Send for AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal> {}
+> Send for AllocVec<T, Alloc, CapacityPol, IsGlobal> {}
 
 unsafe impl<
-    'alloc,
     Alloc: Allocator + Sync,
     T: Sync,
     CapacityPol: CapacityPolicy,
     IsGlobal: Conditional
-> Sync for AllocVec<'alloc, T, Alloc, CapacityPol, IsGlobal> {}
+> Sync for AllocVec<T, Alloc, CapacityPol, IsGlobal> {}

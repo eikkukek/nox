@@ -3,10 +3,11 @@ use core::{
     ptr::NonNull,
 };
 
+use rustc_hash::FxHashMap;
+
 use nox::{
     mem::{
         align_of, align_up, size_of,
-        slot_map::{GlobalSlotMap, SlotIndex},
         vec_types::{ArrayVec, GlobalVec, Vector},
         Allocator,
     },
@@ -16,10 +17,7 @@ use nox::{
 use nox_font::{VertexTextRenderer, Face};
 
 use nox_geom::{
-    earcut::earcut,
-    vec2,
     Vec2,
-    BoundingRect,
 };
 
 use crate::{ColorRGBA, Widget};
@@ -175,18 +173,18 @@ struct Pipelines {
     base_shaders: Option<[ShaderId; 2]>,
 }
 
-pub struct WidgetId(SlotIndex<Widget>);
-
 pub struct Workspace<'a, FontHash>
     where
         FontHash: Clone + PartialEq + Eq + Hash
 {
     text_renderer: VertexTextRenderer<'a, FontHash>,
-    widgets: GlobalSlotMap<Widget>,
+    widgets: FxHashMap<u32, Widget>,
+    active_widgets: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
     pipelines: Pipelines,
     ring_buffer_size: usize,
+    mouse_pos: Vec2,
     inv_aspect_ratio: f32,
 }
 
@@ -203,10 +201,12 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         Self {
             text_renderer: VertexTextRenderer::new(fonts, font_curve_tolerance),
             widgets: Default::default(),
+            active_widgets: Default::default(),
             vertex_buffer: None,
             index_buffer: None,
             pipelines: Default::default(),
             ring_buffer_size: 1 << 23,
+            mouse_pos: Default::default(),
             inv_aspect_ratio: 1.0,
         }
     }
@@ -248,19 +248,6 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         })
     }
 
-    pub fn add_widget(
-        &mut self,
-        size: [f32; 2],
-        position: [f32; 2],
-    ) -> WidgetId
-    {
-        WidgetId(self.widgets.insert(
-            Widget::new(
-                size,
-                position,
-            ))
-        )
-    }
 
     pub fn update<I: Interface>(
         &mut self,
@@ -268,12 +255,24 @@ impl<'a, FontHash> Workspace<'a, FontHash>
     )
     {
         self.inv_aspect_ratio = 1.0 / nox.aspect_ratio() as f32;
-        let mut mouse_pos: Vec2 = nox.normalized_cursor_position_f32().into();
-        mouse_pos *= 2.0;
-        mouse_pos -= vec2(1.0, 1.0);
-        for widget in &mut self.widgets {
-            widget.update(mouse_pos, &Default::default());
-        }
+        self.mouse_pos = nox.normalized_cursor_position_f32().into();
+    }
+
+    pub fn update_widget<F>(
+        &mut self,
+        id: u32,
+        mut f: F,
+        initial_size: [f32; 2],
+        initial_position: [f32; 2],
+    ) -> Result<(), Error>
+        where
+            F: FnMut(&mut Widget) -> Result<(), Error>
+    {
+        let widget = self.widgets.entry(id).or_insert(Widget::new(initial_size, initial_position));
+        f(widget)?;
+        widget.update(&Default::default());
+        self.active_widgets.push(id);
+        Ok(())
     }
 
     pub fn render_commands(
@@ -293,8 +292,8 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         render_commands.bind_pipeline(base_pipeline)?;
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
-        for widget in &self.widgets {
-            widget.render_commands(
+        for id in &self.active_widgets {
+            self.widgets.get(id).unwrap().render_commands(
                 render_commands,
                 inv_aspect_ratio,
                 vertex_buffer.buffer,
@@ -307,6 +306,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         }
         vertex_buffer.finish_frame();
         index_buffer.finish_frame();
+        self.active_widgets.clear();
         Ok(())
     }
 

@@ -6,7 +6,7 @@ use core::ptr;
 
 use ash::vk;
 
-use nox_mem::{vec_types::{FixedVec, GlobalVec, Vector}, GLOBAL_ALLOC};
+use nox_mem::{Allocator, vec_types::{FixedVec, GlobalVec, Vector}};
 
 use super::*;
 
@@ -95,12 +95,15 @@ impl TransferCommands {
     }
 
     #[inline(always)]
-    pub fn clear_color_image(
+    pub fn clear_color_image<Alloc>(
         &mut self,
         image_id: ImageId,
         clear_value: ClearColorValue,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
+        alloc: &Alloc
     ) -> Result<(), Error>
+        where
+            Alloc: Allocator,
     {
         let g = self.global_resources.read().unwrap();
         let image = g.get_image(image_id)?;
@@ -128,7 +131,7 @@ impl TransferCommands {
         )?;
         let mut ranges = FixedVec::with_capacity(
             subresources.map(|v| v.len()).unwrap_or(1),
-            &GLOBAL_ALLOC
+            alloc
         )?;
         if let Some(infos) = subresources {
             for info in infos.iter().map(|v| *v) {
@@ -158,13 +161,16 @@ impl TransferCommands {
     }
 
     #[inline(always)]
-    pub fn clear_depth_stencil_image(
+    pub fn clear_depth_stencil_image<Alloc>(
         &mut self,
         image_id: ImageId,
         depth: f32,
         stencil: u32,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
+        alloc: &Alloc,
     ) -> Result<(), Error>
+        where 
+            Alloc: Allocator,
     {
         let g = self.global_resources.read().unwrap();
         let image = g.get_image(image_id)?;
@@ -187,7 +193,7 @@ impl TransferCommands {
         )?;
         let mut ranges = FixedVec::with_capacity(
             subresources.map(|v| v.len()).unwrap_or(1),
-            &GLOBAL_ALLOC,
+            alloc,
         )?;
         if let Some(infos) = subresources {
             for info in infos.iter().map(|v| *v) {

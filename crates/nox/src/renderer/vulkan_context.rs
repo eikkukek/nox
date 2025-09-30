@@ -162,15 +162,13 @@ impl<'mem> VulkanContext<'mem> {
             })?;
         let mut unique_device_queues = ArrayVec::<u32, 3>::new();
         let queue_family_indices = physical_device_info.queue_family_indices();
-        unique_device_queues
-            .push(queue_family_indices.graphics_index())
-            .map_err(|e| format!("failed to push to 'unque device queues' ( {:?} )", e))?;
-        unique_device_queues
-            .push_if_unique(queue_family_indices.transfer_index())
-            .map_err(|e| format!("failed to push to 'unique device queues' ( {:?} )", e))?;
-        unique_device_queues
-            .push_if_unique(queue_family_indices.compute_index())
-            .map_err(|e| format!("failed to push to 'unique device queues' ( {:?} )", e))?;
+        unique_device_queues.push(queue_family_indices.graphics_index()).ok();
+        if !unique_device_queues.contains(&queue_family_indices.transfer_index()) {
+            unique_device_queues.push(queue_family_indices.transfer_index()).unwrap();
+        }
+        if !unique_device_queues.contains(&queue_family_indices.compute_index()) {
+            unique_device_queues.push(queue_family_indices.compute_index()).unwrap();
+        }
         let mut device_queue_create_infos = ArrayVec::<vk::DeviceQueueCreateInfo, 3>::new();
         let queue_priority = 1.0;
         for queue_family_index in &unique_device_queues {

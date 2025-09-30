@@ -1,10 +1,11 @@
 use nox::{
     mem::{
-        vec_types::{GlobalVec, Vector},
-        value_as_bytes,
+        value_as_bytes, vec_types::{GlobalVec, Vector}
     },
     *,
 };
+
+use rustc_hash::FxHashMap;
 
 pub use nox_geom::{
     *,
@@ -13,23 +14,25 @@ pub use nox_geom::{
 
 use crate::{
     workspace::*,
-    ColorRGBA, Style,
+    *
 };
 
-pub(crate) struct Widget {
-    pub main_rect: Rect,
-    pub position: Vec2,
-    pub color: ColorRGBA,
+pub struct Widget {
+    main_rect: Rect,
+    position: Vec2,
+    color: ColorRGBA,
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
     points: GlobalVec<[f32; 2]>,
     indices_usize: GlobalVec<usize>,
+    sliders: FxHashMap<u32, Slider>,
+    active_sliders: GlobalVec<u32>,
     renderable: bool,
 }
 
 impl Widget {
 
-    pub fn new(
+    pub(crate) fn new(
         size: [f32; 2],
         position: [f32; 2],
     ) -> Self
@@ -55,47 +58,13 @@ impl Widget {
             indices,
             points,
             indices_usize,
+            sliders: FxHashMap::default(),
+            active_sliders: Default::default(),
             renderable,
         }
     }
 
-    pub fn bounding_rect(&self) -> BoundingRect {
-        BoundingRect::from_center_size(self.position, self.main_rect.size())
-    }
-
-    pub fn update(
-        &mut self,
-        mouse_position: Vec2,
-        style: &Style,
-    )
-    {
-        /*
-        if !main_rect.eq_epsilon(&self.main_rect, 1.0e-6) {
-            self.vertices.clear();
-            self.indices.clear();
-            self.points.clear();
-            self.indices_usize.clear();
-            self.main_rect.to_points(
-                &mut |p| {
-                    self.points.push(p.into());
-                }
-            );
-            if !earcut::earcut(&self.points, &[], false, &mut self.vertices, &mut self.indices_usize).unwrap() {
-                self.renderable = false;
-            }
-            self.indices.append_map(&self.indices_usize, |&v| v as u32);
-            self.main_rect = main_rect;
-        }
-        self.position = position;
-        */
-        if self.bounding_rect().point_inside(mouse_position) {
-            self.color = style.widget_bg_hl;
-        } else {
-            self.color = style.widget_bg;
-        }
-    }
-
-    pub fn render_commands<F1, F2>(
+    pub(crate) fn render_commands<F1, F2>(
         &self,
         render_commands: &mut RenderCommands,
         inv_aspect_ratio: f32,
@@ -128,7 +97,7 @@ impl Widget {
         let push_constants = push_constants(self.position, inv_aspect_ratio, self.color);
         render_commands.push_constants(unsafe {
             value_as_bytes(&push_constants).unwrap()
-        });
+        })?;
         render_commands.draw_indexed(
             DrawInfo {
                 index_count: idx_count as u32,
@@ -146,5 +115,28 @@ impl Widget {
             },
         )?;
         Ok(())
+    }
+
+    pub fn update_slider<T: Sliderable>(
+        &mut self,
+        id: u32,
+        title: &str,
+        value: &mut T,
+        min: T,
+        max: T,
+    ) -> &mut Self
+    {
+        let slider = self.sliders.entry(id).or_insert(Slider::new(value.calc_t(min, max), title.into()));
+        if slider.clicked {
+            value.slide(min, max, slider.t);
+        } else {
+            slider.t = value.calc_t(min, max);
+        }
+        self.active_sliders.push(id);
+        self
+    }
+
+    pub(crate) fn update(&mut self, style: &Style) {
+        self.color = style.widget_bg;
     }
 }

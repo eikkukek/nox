@@ -19,7 +19,7 @@ mod slice_cast;
 
 pub use errors::CapacityError;
 pub use allocator::Allocator;
-pub use global_alloc::{GlobalAlloc, GLOBAL_ALLOC};
+pub use global_alloc::GlobalAlloc;
 pub use option_alloc::OptionAlloc;
 pub use capacity_policy::CapacityPolicy;
 pub use as_raw::AsRaw;
