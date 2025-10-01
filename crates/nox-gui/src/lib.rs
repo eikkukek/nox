@@ -1,11 +1,11 @@
 mod color;
 mod style;
 mod slider;
-mod widget;
+mod window;
 mod workspace;
 
 pub use color::*;
 pub use style::*;
 pub use slider::*;
-pub use widget::*;
+pub use window::*;
 pub use workspace::Workspace;

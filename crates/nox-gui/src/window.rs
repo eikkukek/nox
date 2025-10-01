@@ -1,3 +1,5 @@
+use core::ops::{Deref, DerefMut};
+
 use nox::{
     mem::{
         value_as_bytes, vec_types::{GlobalVec, Vector}
@@ -17,7 +19,7 @@ use crate::{
     *
 };
 
-pub struct Widget {
+pub(crate) struct Window {
     main_rect: Rect,
     position: Vec2,
     color: ColorRGBA,
@@ -30,7 +32,7 @@ pub struct Widget {
     flags: u8,
 }
 
-impl Widget {
+impl Window {
 
     const RENDERABLE: u8 = 1;
     const REQUIRES_TRIANGULATION: u8 = 2;
@@ -52,18 +54,19 @@ impl Widget {
             indices_usize: Default::default(),
             sliders: FxHashMap::default(),
             active_sliders: Default::default(),
+            widget_y: 0.0,
             flags: Self::REQUIRES_TRIANGULATION,
         }
     }
 
     #[inline(always)]
     fn renderable(&self) -> bool {
-        self.flags & Self::RENDERABLE != 0
+        self.flags & Self::RENDERABLE == Self::RENDERABLE
     }
 
     #[inline(always)]
     fn requires_triangulation(&self) -> bool {
-        self.flags & Self::REQUIRES_TRIANGULATION != 0
+        self.flags & Self::REQUIRES_TRIANGULATION == Self::REQUIRES_TRIANGULATION
     }
 
     pub(crate) fn render_commands<F1, F2>(
@@ -123,28 +126,6 @@ impl Widget {
         BoundingRect::from_position_size(self.position, self.main_rect.size())
     }
 
-    pub fn update_slider<T: Sliderable>(
-        &mut self,
-        id: u32,
-        title: &str,
-        value: &mut T,
-        min: T,
-        max: T,
-    ) -> &mut Self
-    {
-        let slider = self.sliders.entry(id).or_insert(Slider::new(value.calc_t(min, max), title.into()));
-        if slider.held {
-            value.slide(min, max, slider.t);
-        } else {
-            slider.t = value.calc_t(min, max);
-        }
-        self.active_sliders.push(id);
-        if slider.update(self.position, vec2(0.1, 0.1), 0.0) {
-            self.flags |= Self::REQUIRES_TRIANGULATION;
-        }
-        self
-    }
-
     pub(crate) fn update<I: Interface>(
         &mut self,
         nox: &Nox<I>,
@@ -152,14 +133,12 @@ impl Widget {
         style: &Style,
     ) -> bool
     {
+        self.color = style.window_bg;
         let bounding_rect = self.bounding_rect();
         if !bounding_rect.is_point_inside(cursor_pos) {
             return false
         }
-        if nox.is_mouse_button_held(MouseButton::Left) {
-            self.color = style.widget_bg_hl;
-        } else {
-            self.color = style.widget_bg;
+        for slider in &self.sliders {
         }
         true
     }
@@ -180,5 +159,61 @@ impl Widget {
             self.indices.append_map(&self.indices_usize, |&i| i as u32);
             self.flags &= !Self::REQUIRES_TRIANGULATION;
         }
+    }
+}
+
+pub struct WindowContext<'a> {
+    style: &'a Style,
+    window: &'a mut Window,
+    widget_y: f32,
+}
+
+impl<'a> WindowContext<'a> {
+
+    pub fn new(window: &'a mut Window, style: &'a Style) -> Self {
+        Self {
+            window,
+            style,
+            widget_y: style.item_pad_outer.y,
+        }
+    }
+
+    pub fn update_slider<T: Sliderable>(
+        &mut self,
+        id: u32,
+        title: &str,
+        value: &mut T,
+        min: T,
+        max: T,
+    ) -> &mut Self
+    {
+        self.active_sliders.push(id);
+        let widget_y = self.widget_y;
+        let item_pad_outer = self.style.item_pad_outer;
+        let slider = self.sliders.entry(id).or_insert(Slider::new(value.calc_t(min, max), title.into()));
+        if slider.held {
+            value.slide(min, max, slider.t);
+        } else {
+            slider.t = value.calc_t(min, max);
+        }
+        slider.set_position(vec2(item_pad_outer.x, widget_y));
+        self.widget_y += self.style.calc_item_height() + self.style.item_pad_outer.y;
+        self
+    }
+}
+
+impl<'a> Deref for WindowContext<'a> {
+
+    type Target = Window;
+
+    fn deref(&self) -> &Self::Target {
+        self.window
+    }
+}
+
+impl<'a> DerefMut for WindowContext<'a> {
+
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.window
     }
 }

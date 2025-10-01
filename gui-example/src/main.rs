@@ -52,7 +52,7 @@ impl<'a> Interface for Example<'a> {
         nox: &mut Nox<Self>,
         _renderer: &mut RendererContext,
     ) -> Result<(), Error> {
-        self.workspace.update_widget(0, |_| Ok(()), [0.25, 0.25], [0.0, 0.0])?;
+        self.workspace.update_window(0, |_| Ok(()), [0.25, 0.25], [0.0, 0.0])?;
         self.workspace.end(nox);
         Ok(())
     }

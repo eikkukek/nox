@@ -21,7 +21,7 @@ use nox_geom::{
     vec2,
 };
 
-use crate::{ColorRGBA, Widget};
+use crate::{ColorRGBA, Window, WindowContext};
 
 #[repr(C)]
 #[derive(VertexInput)]
@@ -87,6 +87,16 @@ pub(crate) struct RingBuf {
 pub(crate) struct RingBufMem<T> {
     pub ptr: NonNull<T>,
     pub offset: u64,
+}
+
+impl<T> Default for RingBufMem<T> {
+
+    fn default() -> Self {
+        Self {
+            ptr: NonNull::dangling(),
+            offset: 0,
+        }
+    }
 }
 
 impl RingBuf {
@@ -179,8 +189,8 @@ pub struct Workspace<'a, FontHash>
         FontHash: Clone + PartialEq + Eq + Hash
 {
     text_renderer: VertexTextRenderer<'a, FontHash>,
-    widgets: FxHashMap<u32, Widget>,
-    active_widgets: GlobalVec<u32>,
+    windows: FxHashMap<u32, Window>,
+    active_windows: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
     pipelines: Pipelines,
@@ -200,8 +210,8 @@ impl<'a, FontHash> Workspace<'a, FontHash>
     {
         Self {
             text_renderer: VertexTextRenderer::new(fonts, font_curve_tolerance),
-            widgets: Default::default(),
-            active_widgets: Default::default(),
+            windows: Default::default(),
+            active_windows: Default::default(),
             vertex_buffer: None,
             index_buffer: None,
             pipelines: Default::default(),
@@ -247,7 +257,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         })
     }
 
-    pub fn update_widget<F>(
+    pub fn update_window<F>(
         &mut self,
         id: u32,
         mut f: F,
@@ -255,11 +265,11 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         initial_position: [f32; 2],
     ) -> Result<(), Error>
         where
-            F: FnMut(&mut Widget) -> Result<(), Error>
+            F: FnMut(WindowContext) -> Result<(), Error>
     {
-        let widget = self.widgets.entry(id).or_insert(Widget::new(initial_size, initial_position));
-        f(widget)?;
-        self.active_widgets.push(id);
+        let window = self.windows.entry(id).or_insert(Window::new(initial_size, initial_position));
+        f(WindowContext::new(window, &Default::default()))?;
+        self.active_windows.push(id);
         Ok(())
     }
 
@@ -273,10 +283,10 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         cursor_pos *= 2.0;
         cursor_pos -= vec2(1.0, 1.0);
         let style = Default::default();
-        for id in &self.active_widgets {
-            let widget = self.widgets.get_mut(id).unwrap();
-            widget.update(nox, cursor_pos, &style);
-            widget.triangulate();
+        for id in &self.active_windows {
+            let window = self.windows.get_mut(id).unwrap();
+            window.update(nox, cursor_pos, &style);
+            window.triangulate();
         }
     }
 
@@ -297,8 +307,8 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         render_commands.bind_pipeline(base_pipeline)?;
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
-        for id in &self.active_widgets {
-            self.widgets.get(id).unwrap().render_commands(
+        for id in &self.active_windows {
+            self.windows.get(id).unwrap().render_commands(
                 render_commands,
                 inv_aspect_ratio,
                 vertex_buffer.buffer,
@@ -311,7 +321,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         }
         vertex_buffer.finish_frame();
         index_buffer.finish_frame();
-        self.active_widgets.clear();
+        self.active_windows.clear();
         Ok(())
     }
 

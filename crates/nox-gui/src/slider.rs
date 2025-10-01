@@ -1,6 +1,13 @@
-use core::fmt::Display;
+use core::{
+    fmt::Display,
+    hash::Hash,
+};
 
 use compact_str::CompactString;
+
+use nox::mem::vec_types::GlobalVec;
+
+use nox_font::*;
 
 use nox_geom::{
     shapes::Rect,
@@ -9,6 +16,8 @@ use nox_geom::{
     vec2,
 };
 
+use crate::{workspace::RingBufMem, *};
+
 pub trait Sliderable: Copy + Display {
 
     fn slide(&mut self, min: Self, max: Self, t: f32);
@@ -16,7 +25,6 @@ pub trait Sliderable: Copy + Display {
     fn calc_t(&self, min: Self, max: Self) -> f32;
 }
 
-#[derive(Clone)]
 pub(crate) struct Slider
 {
     pub title: CompactString,
@@ -24,6 +32,7 @@ pub(crate) struct Slider
     pub position: Vec2,
     pub t: f32,
     pub held: bool,
+    pub title_text: Option<RenderedText>,
 }
 
 impl Slider
@@ -40,6 +49,7 @@ impl Slider
             position: Default::default(),
             t,
             held: false,
+            title_text: Default::default(),
         }
     }
 
@@ -47,20 +57,47 @@ impl Slider
         value.slide(min, max, self.t);
     }
 
-    pub fn update(
+    #[inline(always)]
+    pub fn set_position(
         &mut self,
         position: Vec2,
-        size: Vec2,
-        rounding: f32,
-    ) -> bool
+    )
     {
-        let main_rect = Rect::from_position_size(vec2(0.0, 0.0), size, rounding);
+        self.position = position;
+    }
+
+    #[inline(always)]
+    pub fn update<FontHash, F1, F2>(
+        &mut self,
+        style: &Style,
+        vertex_text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        font: FontHash,
+    ) -> bool
+        where 
+            FontHash: Clone + Eq + Hash,
+    {
+        if self.title_text.is_none() {
+            self.title_text = Some(vertex_text_renderer
+                .render(&[text_segment(self.title.as_str(), font)], false, 1.0)
+                .unwrap());
+        }
+        let title_text = self.title_text.as_ref().unwrap();
+        let main_rect = Rect::from_position_size(
+            vec2(0.0, 0.0),
+            vec2(title_text.text_width * style.font_scale, style.calc_item_height()),
+            0.0,
+        );
         if main_rect != self.main_rect {
             self.main_rect = main_rect;
             return true
         }
-        self.position = position;
         false
+    }
+
+    #[inline(always)]
+    pub fn triangulate<Tri>(&mut self, triangulate: Tri)
+        where
+    {
     }
 }
 
