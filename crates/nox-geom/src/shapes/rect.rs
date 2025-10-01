@@ -18,16 +18,15 @@ pub fn rect<P: Into<Vec2>>(min: P, max: P, rounding: f32) -> Rect {
 impl Rect {
 
     #[inline(always)]
-    pub fn from_center_size(
-        center: Vec2,
+    pub fn from_position_size(
+        position: Vec2,
         size: Vec2,
         rounding: f32,
     ) -> Rect
     {
-        let half_size = size * 0.5;
         rect(
-            center - half_size,
-            center + half_size,
+            position,
+            position + size,
             rounding,
         )
     }

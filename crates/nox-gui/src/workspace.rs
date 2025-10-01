@@ -18,6 +18,7 @@ use nox_font::{VertexTextRenderer, Face};
 
 use nox_geom::{
     Vec2,
+    vec2,
 };
 
 use crate::{ColorRGBA, Widget};
@@ -184,7 +185,6 @@ pub struct Workspace<'a, FontHash>
     index_buffer: Option<RingBuf>,
     pipelines: Pipelines,
     ring_buffer_size: usize,
-    mouse_pos: Vec2,
     inv_aspect_ratio: f32,
 }
 
@@ -206,7 +206,6 @@ impl<'a, FontHash> Workspace<'a, FontHash>
             index_buffer: None,
             pipelines: Default::default(),
             ring_buffer_size: 1 << 23,
-            mouse_pos: Default::default(),
             inv_aspect_ratio: 1.0,
         }
     }
@@ -248,16 +247,6 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         })
     }
 
-
-    pub fn update<I: Interface>(
-        &mut self,
-        nox: &Nox<'_, I>,
-    )
-    {
-        self.inv_aspect_ratio = 1.0 / nox.aspect_ratio() as f32;
-        self.mouse_pos = nox.normalized_cursor_position_f32().into();
-    }
-
     pub fn update_widget<F>(
         &mut self,
         id: u32,
@@ -270,9 +259,25 @@ impl<'a, FontHash> Workspace<'a, FontHash>
     {
         let widget = self.widgets.entry(id).or_insert(Widget::new(initial_size, initial_position));
         f(widget)?;
-        widget.update(&Default::default());
         self.active_widgets.push(id);
         Ok(())
+    }
+
+    pub fn end<I: Interface>(
+        &mut self,
+        nox: &Nox<'_, I>,
+    )
+    {
+        self.inv_aspect_ratio = 1.0 / nox.aspect_ratio() as f32;
+        let mut cursor_pos: Vec2 = nox.normalized_cursor_position_f32().into();
+        cursor_pos *= 2.0;
+        cursor_pos -= vec2(1.0, 1.0);
+        let style = Default::default();
+        for id in &self.active_widgets {
+            let widget = self.widgets.get_mut(id).unwrap();
+            widget.update(nox, cursor_pos, &style);
+            widget.triangulate();
+        }
     }
 
     pub fn render_commands(

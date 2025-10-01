@@ -1,5 +1,14 @@
 use core::fmt::Display;
 
+use compact_str::CompactString;
+
+use nox_geom::{
+    shapes::Rect,
+    BoundingRect,
+    Vec2,
+    vec2,
+};
+
 pub trait Sliderable: Copy + Display {
 
     fn slide(&mut self, min: Self, max: Self, t: f32);
@@ -10,9 +19,11 @@ pub trait Sliderable: Copy + Display {
 #[derive(Clone)]
 pub(crate) struct Slider
 {
+    pub title: CompactString,
+    pub main_rect: Rect,
+    pub position: Vec2,
     pub t: f32,
-    pub clicked: bool,
-    pub title: String,
+    pub held: bool,
 }
 
 impl Slider
@@ -20,18 +31,36 @@ impl Slider
 
     pub fn new(
         t: f32,
-        title: String,
+        title: &str,
     ) -> Self
     {
         Self {
+            title: CompactString::new(title),
+            main_rect: Default::default(),
+            position: Default::default(),
             t,
-            clicked: false,
-            title,
+            held: false,
         }
     }
 
     pub fn slide<T: Sliderable>(&self, value: &mut T, min: T, max: T) {
         value.slide(min, max, self.t);
+    }
+
+    pub fn update(
+        &mut self,
+        position: Vec2,
+        size: Vec2,
+        rounding: f32,
+    ) -> bool
+    {
+        let main_rect = Rect::from_position_size(vec2(0.0, 0.0), size, rounding);
+        if main_rect != self.main_rect {
+            self.main_rect = main_rect;
+            return true
+        }
+        self.position = position;
+        false
     }
 }
 

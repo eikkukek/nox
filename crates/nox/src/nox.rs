@@ -16,6 +16,7 @@ use winit::{
 use nox_mem::string_types::ArrayString;
 
 pub use winit::keyboard::KeyCode;
+pub use winit::event::MouseButton;
 
 pub use crate::renderer;
 
@@ -49,6 +50,7 @@ pub struct Nox<'a, I>
     mouse_scroll_delta_lines: (f32, f32),
     physical_keys: FxHashMap<PhysicalKey, InputState>,
     logical_keys: FxHashMap<Key, InputState>,
+    mouse_buttons: FxHashMap<MouseButton, InputState>,
     input_text: Option<SmolStr>,
     delta_counter: time::Instant,
     delta_time: time::Duration,
@@ -70,6 +72,7 @@ impl<'a, I: Interface> Nox<'a, I>
             mouse_scroll_delta_lines: Default::default(),
             physical_keys: Default::default(),
             logical_keys: Default::default(),
+            mouse_buttons: Default::default(),
             input_text: None,
             delta_counter: time::Instant::now(),
             delta_time: time::Duration::ZERO,
@@ -146,7 +149,7 @@ impl<'a, I: Interface> Nox<'a, I>
     pub fn is_key_released(&self, key: KeyCode) -> bool {
         self.physical_keys
             .get(&PhysicalKey::Code(key))
-            .map(|&v| v)
+            .copied()
             .unwrap_or_default()
             .released
     }
@@ -155,19 +158,54 @@ impl<'a, I: Interface> Nox<'a, I>
     pub fn is_key_held(&self, key: KeyCode) -> bool {
         self.physical_keys
             .get(&PhysicalKey::Code(key))
-            .map(|&v| v)
+            .copied()
             .unwrap_or_default()
             .held
     }
 
     #[inline(always)]
     pub fn key_value(&self, key: KeyCode) -> f32 {
-        if self.physical_keys
+        self.physical_keys
             .get(&PhysicalKey::Code(key))
-            .map(|&v| v)
+            .copied()
             .unwrap_or_default()
-            .held { 1.0 }
-        else { 0.0 }
+            .held as u32 as f32
+    }
+
+    #[inline(always)]
+    pub fn is_mouse_button_pressed(&self, button: MouseButton) -> bool {
+        self.mouse_buttons
+            .get(&button)
+            .copied()
+            .unwrap_or_default()
+            .pressed
+    }
+
+    #[inline(always)]
+    pub fn is_mouse_button_released(&self, button: MouseButton) -> bool {
+        self.mouse_buttons
+            .get(&button)
+            .copied()
+            .unwrap_or_default()
+            .released
+    }
+
+    #[inline(always)]
+    pub fn is_mouse_button_held(&self, button: MouseButton) -> bool {
+        self.mouse_buttons
+            .get(&button)
+            .copied()
+            .unwrap_or_default()
+            .held
+    }
+
+    #[inline(always)]
+    pub fn mouse_button_value(&self, button: MouseButton) -> f32 {
+        self.mouse_buttons
+            .get(&button)
+            .copied()
+            .unwrap_or_default()
+            .held as u32 as f32
     }
 
     #[inline(always)]
@@ -180,6 +218,11 @@ impl<'a, I: Interface> Nox<'a, I>
             v.held
         });
         self.logical_keys.retain(|_, v| {
+            v.pressed = false;
+            v.released = false;
+            v.held
+        });
+        self.mouse_buttons.retain(|_, v| {
             v.pressed = false;
             v.released = false;
             v.held
@@ -236,6 +279,12 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         self.input_text = text;
                     },
                 };
+            },
+            WindowEvent::MouseInput { device_id: _, state, button } => {
+                let button = self.mouse_buttons.entry(button).or_default();
+                button.pressed = state == ElementState::Pressed;
+                button.released = state == ElementState::Released;
+                button.held = state != ElementState::Released;
             },
             WindowEvent::CloseRequested => event_loop.exit(), // terminate app,
             WindowEvent::Resized(size) => {

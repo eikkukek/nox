@@ -17,16 +17,15 @@ impl BoundingRect {
     }
 
     #[inline(always)]
-    pub fn from_center_size(center: Vec2, size: Vec2) -> Self {
-        let half_size = size * 0.5;
+    pub fn from_position_size(position: Vec2, size: Vec2) -> Self {
         Self {
-            min: center - half_size,
-            max: center + half_size,
+            min: position,
+            max: position + size,
         }
     }
 
     #[inline(always)]
-    pub fn point_inside(
+    pub fn is_point_inside(
         &self,
         point: Vec2,
     ) -> bool
