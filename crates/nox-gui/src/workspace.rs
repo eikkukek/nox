@@ -21,7 +21,7 @@ use nox_geom::{
     vec2,
 };
 
-use crate::{ColorRGBA, Window, WindowContext};
+use crate::{ColorRGBA, Style, Window, WindowContext};
 
 #[repr(C)]
 #[derive(VertexInput)]
@@ -46,24 +46,33 @@ pub(crate) struct VertexUv {
 }
 
 #[repr(C)]
-pub(crate) struct PushConstants {
+pub(crate) struct PushConstantsVertex {
     pub vert_off: Vec2,
     pub inv_aspect_ratio: f32,
-    _pad: [u8; 4],
+}
+
+pub(crate) fn push_constants_vertex(
+    vert_off: Vec2,
+    inv_aspect_ratio: f32,
+) ->PushConstantsVertex 
+{
+    PushConstantsVertex {
+        vert_off,
+        inv_aspect_ratio,
+    }
+}
+
+#[repr(C)]
+pub(crate) struct PushConstantsFragment {
     pub color: ColorRGBA,
 }
 
-pub(crate) fn push_constants(
-    vert_off: Vec2,
-    inv_aspect_ratio: f32,
-    color: ColorRGBA,
-) ->PushConstants 
+pub(crate) fn push_constants_fragment(
+    color: ColorRGBA
+) -> PushConstantsFragment
 {
-    PushConstants {
-        vert_off,
-        inv_aspect_ratio,
-        _pad: Default::default(),
-        color,
+    PushConstantsFragment {
+        color
     }
 }
 
@@ -189,6 +198,7 @@ pub struct Workspace<'a, FontHash>
         FontHash: Clone + PartialEq + Eq + Hash
 {
     text_renderer: VertexTextRenderer<'a, FontHash>,
+    style: Style<FontHash>,
     windows: FxHashMap<u32, Window>,
     active_windows: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
@@ -205,11 +215,13 @@ impl<'a, FontHash> Workspace<'a, FontHash>
 
     pub fn new(
         fonts: impl IntoIterator<Item = (FontHash, Face<'a>)>,
+        font_regular: FontHash,
         font_curve_tolerance: f32,
     ) -> Self
     {
         Self {
             text_renderer: VertexTextRenderer::new(fonts, font_curve_tolerance),
+            style: Style::new(font_regular),
             windows: Default::default(),
             active_windows: Default::default(),
             vertex_buffer: None,
@@ -260,15 +272,15 @@ impl<'a, FontHash> Workspace<'a, FontHash>
     pub fn update_window<F>(
         &mut self,
         id: u32,
-        mut f: F,
         initial_size: [f32; 2],
         initial_position: [f32; 2],
+        mut f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(WindowContext) -> Result<(), Error>
+            F: FnMut(WindowContext<FontHash>) -> Result<(), Error>
     {
         let window = self.windows.entry(id).or_insert(Window::new(initial_size, initial_position));
-        f(WindowContext::new(window, &Default::default()))?;
+        f(WindowContext::new(window, &self.style))?;
         self.active_windows.push(id);
         Ok(())
     }
@@ -282,10 +294,10 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         let mut cursor_pos: Vec2 = nox.normalized_cursor_position_f32().into();
         cursor_pos *= 2.0;
         cursor_pos -= vec2(1.0, 1.0);
-        let style = Default::default();
+        let mut cursor_in_window = false;
         for id in &self.active_windows {
             let window = self.windows.get_mut(id).unwrap();
-            window.update(nox, cursor_pos, &style);
+            cursor_in_window |= window.update(nox, cursor_pos, &self.style, &mut self.text_renderer, cursor_in_window);
             window.triangulate();
         }
     }
@@ -310,6 +322,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         for id in &self.active_windows {
             self.windows.get(id).unwrap().render_commands(
                 render_commands,
+                &self.style,
                 inv_aspect_ratio,
                 vertex_buffer.buffer,
                 index_buffer.buffer,

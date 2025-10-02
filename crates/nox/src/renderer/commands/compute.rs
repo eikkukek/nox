@@ -90,15 +90,15 @@ impl<'a> ComputeCommands<'a> {
         where
             F: FnMut(u32) -> ShaderResourceId,
     {
-        let guard = ArenaGuard::new(&*self.tmp_alloc);
+        let guard = ArenaGuard::new(self.tmp_alloc);
         let g = self.global_resources.read().unwrap();
         let pipeline = g.get_compute_pipeline(
             self.current_pipeline.expect("attempting to bind shader resources with no pipeline attached")
         )?;
         let (layout, sets) = g.pipeline_get_shader_resource(
             pipeline.layout_id,
-            f,
             &guard,
+            f,
         )?;
         unsafe {
             self.device.cmd_bind_descriptor_sets(
@@ -112,24 +112,33 @@ impl<'a> ComputeCommands<'a> {
     }
 
     #[inline(always)]
-    pub fn push_constants(
+    pub fn push_constants<'b, F>(
         &self,
-        bytes: &[u8],
+        f: F,
     ) -> Result<(), Error>
+        where
+            F: FnMut(PushConstant) -> &'a [u8]
     {
+        let guard = ArenaGuard::new(self.tmp_alloc);
         let g = self.global_resources.read().unwrap();
         let pipeline = g.get_compute_pipeline(
             self.current_pipeline.expect("attempting to push constants with no pipeline attached")
         )?;
-        let (layout, stages) = g.pipeline_get_push_constant_stages(pipeline.layout_id)?;
-        unsafe {
-            self.device.cmd_push_constants(
-                self.command_buffer,
-                layout,
-                stages,
-                0,
-                bytes,
-            );
+        let (layout, push_constants) = g.pipeline_get_push_constants(
+            pipeline.layout_id,
+            &guard,
+            f,
+        )?;
+        for (pc, bytes) in &push_constants {
+            unsafe {
+                self.device.cmd_push_constants(
+                    self.command_buffer, 
+                    layout,
+                    pc.stage.into(),
+                    pc.offset,
+                    bytes
+                );
+            }
         }
         Ok(())
     }

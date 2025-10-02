@@ -33,7 +33,7 @@ impl PipelineLayout {
             shaders.push(global_resources.get_shader(id)?).unwrap();
         }
         for shader in &shaders {
-            for uniform in shader.uniforms().iter().map(|v| *v) {
+            for uniform in shader.uniforms() {
                 if uniform.set >= set_infos.len() as u32 {
                     set_infos.resize(uniform.set as usize + 1, GlobalVec::new());
                 }
@@ -52,9 +52,9 @@ impl PipelineLayout {
                         }
                     ).unwrap();
                 }
-                bindings[uniform.binding as usize] = uniform.into();
+                bindings[uniform.binding as usize] = uniform.to_vk(&[]);
             }
-            for push_constant in shader.push_constant().iter().map(|v| *v) {
+            for &push_constant in shader.push_constants() {
                 push_constants.push(push_constant.into());
             }
         }

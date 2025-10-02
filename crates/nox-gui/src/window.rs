@@ -1,4 +1,6 @@
-use core::ops::{Deref, DerefMut};
+use core::{
+    hash::Hash,
+};
 
 use nox::{
     mem::{
@@ -6,6 +8,8 @@ use nox::{
     },
     *,
 };
+
+use nox_font::VertexTextRenderer;
 
 use rustc_hash::FxHashMap;
 
@@ -22,13 +26,11 @@ use crate::{
 pub(crate) struct Window {
     main_rect: Rect,
     position: Vec2,
-    color: ColorRGBA,
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
-    points: GlobalVec<[f32; 2]>,
-    indices_usize: GlobalVec<usize>,
     sliders: FxHashMap<u32, Slider>,
     active_sliders: GlobalVec<u32>,
+    main_rect_draw_info: DrawInfo,
     flags: u8,
 }
 
@@ -47,14 +49,11 @@ impl Window {
         Self {
             main_rect,
             position: position.into(),
-            color: Default::default(),
             vertices: Default::default(),
             indices: Default::default(),
-            points: Default::default(),
-            indices_usize: Default::default(),
             sliders: FxHashMap::default(),
             active_sliders: Default::default(),
-            widget_y: 0.0,
+            main_rect_draw_info: Default::default(),
             flags: Self::REQUIRES_TRIANGULATION,
         }
     }
@@ -69,9 +68,77 @@ impl Window {
         self.flags & Self::REQUIRES_TRIANGULATION == Self::REQUIRES_TRIANGULATION
     }
 
-    pub(crate) fn render_commands<F1, F2>(
+    pub(crate) fn bounding_rect(&self) -> BoundingRect {
+        BoundingRect::from_position_size(self.position, self.main_rect.size())
+    }
+
+    pub(crate) fn update<I, FontHash>(
+        &mut self,
+        _nox: &Nox<I>,
+        cursor_pos: Vec2,
+        style: &Style<FontHash>,
+        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        cursor_in_other_window: bool,
+    ) -> bool
+        where 
+            I: Interface,
+            FontHash: Clone + Eq + Hash,
+    {
+        let cursor_in_this_window =
+            !cursor_in_other_window &&
+            self.bounding_rect().is_point_inside(cursor_pos);
+        for id in &self.active_sliders {
+            let slider = self.sliders.get_mut(id).unwrap();
+            if slider.update(style, text_renderer, style.font_regular.clone(), cursor_in_this_window) {
+                self.flags &= !Self::REQUIRES_TRIANGULATION;
+            }
+        }
+        cursor_in_this_window
+    }
+
+    #[inline(always)]
+    pub(crate) fn triangulate(&mut self) {
+        if self.requires_triangulation() {
+            self.flags |= Self::RENDERABLE;
+            self.vertices.clear();
+            self.indices.clear();
+            let mut points = GlobalVec::new();
+            let mut indices_usize = GlobalVec::new();
+            self.main_rect.to_points(&mut |p| { points.push(p.into()); });
+            if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+                self.flags &= !Self::RENDERABLE;
+            }
+            self.main_rect_draw_info = DrawInfo {
+                first_index: 0,
+                index_count: self.indices.len() as u32,
+                vertex_offset: 0,
+                ..Default::default()
+            };
+            self.flags &= !Self::REQUIRES_TRIANGULATION;
+            for id in &self.active_sliders {
+                let slider = self.sliders.get_mut(id).unwrap();
+                slider.triangulate(&mut points,
+                    |points| {
+                        let mut draw_info = DrawInfo {
+                            first_index: indices_usize.len() as u32,
+                            ..Default::default()
+                        };
+                        if !earcut::earcut(points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+                            self.flags &= !Self::RENDERABLE;
+                        }
+                        draw_info.index_count = indices_usize.len() as u32 - draw_info.first_index;
+                        draw_info
+                    },
+                );
+            }
+            self.indices.append_map(&indices_usize, |&i| i as u32);
+        }
+    }
+
+    pub(crate) fn render_commands<F1, F2, FontHash>(
         &self,
         render_commands: &mut RenderCommands,
+        style: &Style<FontHash>,
         inv_aspect_ratio: f32,
         vertex_buf_id: BufferId,
         index_buf_id: BufferId,
@@ -85,29 +152,34 @@ impl Window {
         if !self.renderable() {
             return Ok(())
         }
-        let vert_count = self.vertices.len();
-        let vert_mem = allocate_vertices(render_commands, vert_count)?;
+        let vert_total = self.vertices.len();
+        let vert_mem = allocate_vertices(render_commands, vert_total)?;
         unsafe {
             self.vertices
                 .as_ptr()
-                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count);
+                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_total);
         }
-        let idx_count = self.indices.len();
-        let idx_mem = allocate_indices(render_commands, idx_count)?;
+        let idx_total = self.indices.len();
+        let idx_mem = allocate_indices(render_commands, idx_total)?;
         unsafe {
             self.indices
                 .as_ptr()
-                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
+                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total);
         }
-        let push_constants = push_constants(self.position + self.main_rect.size() * 0.5, inv_aspect_ratio, self.color);
-        render_commands.push_constants(unsafe {
-            value_as_bytes(&push_constants).unwrap()
+        let push_constants_vertex = push_constants_vertex(
+            self.position + self.main_rect.size() * 0.5,
+            inv_aspect_ratio,
+        );
+        let push_constants_fragment = push_constants_fragment(style.window_bg_col);
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                value_as_bytes(&push_constants_vertex).unwrap()
+            } else {
+                value_as_bytes(&push_constants_fragment).unwrap()
+            }
         })?;
         render_commands.draw_indexed(
-            DrawInfo {
-                index_count: idx_count as u32,
-                ..Default::default()
-            },
+            self.main_rect_draw_info,
             [
                 DrawBufferInfo {
                     id: vertex_buf_id,
@@ -119,58 +191,33 @@ impl Window {
                 offset: idx_mem.offset,
             },
         )?;
+        for id in &self.active_sliders {
+            let slider = self.sliders.get(id).unwrap();
+            slider.render_commands(
+                render_commands,
+                style,
+                inv_aspect_ratio,
+                vertex_buf_id,
+                index_buf_id,
+                vert_mem.offset,
+                idx_mem.offset,
+                &mut allocate_vertices,
+                &mut allocate_indices
+            )?;
+        }
         Ok(())
-    }
-
-    pub(crate) fn bounding_rect(&self) -> BoundingRect {
-        BoundingRect::from_position_size(self.position, self.main_rect.size())
-    }
-
-    pub(crate) fn update<I: Interface>(
-        &mut self,
-        nox: &Nox<I>,
-        cursor_pos: Vec2,
-        style: &Style,
-    ) -> bool
-    {
-        self.color = style.window_bg;
-        let bounding_rect = self.bounding_rect();
-        if !bounding_rect.is_point_inside(cursor_pos) {
-            return false
-        }
-        for slider in &self.sliders {
-        }
-        true
-    }
-
-    #[inline(always)]
-    pub(crate) fn triangulate(&mut self) {
-        if self.requires_triangulation() {
-            self.points.clear();
-            self.vertices.clear();
-            self.indices.clear();
-            self.indices_usize.clear();
-            self.main_rect.to_points(&mut |p| { self.points.push(p.into()); });
-            if !earcut::earcut(&self.points, &[], false, &mut self.vertices, &mut self.indices_usize).unwrap() {
-                self.flags &= !Self::RENDERABLE;
-            } else {
-                self.flags |= Self::RENDERABLE;
-            }
-            self.indices.append_map(&self.indices_usize, |&i| i as u32);
-            self.flags &= !Self::REQUIRES_TRIANGULATION;
-        }
     }
 }
 
-pub struct WindowContext<'a> {
-    style: &'a Style,
+pub struct WindowContext<'a, FontHash> {
+    style: &'a Style<FontHash>,
     window: &'a mut Window,
     widget_y: f32,
 }
 
-impl<'a> WindowContext<'a> {
+impl<'a, FontHash> WindowContext<'a, FontHash> {
 
-    pub fn new(window: &'a mut Window, style: &'a Style) -> Self {
+    pub(crate) fn new(window: &'a mut Window, style: &'a Style<FontHash>) -> Self {
         Self {
             window,
             style,
@@ -187,33 +234,15 @@ impl<'a> WindowContext<'a> {
         max: T,
     ) -> &mut Self
     {
-        self.active_sliders.push(id);
-        let widget_y = self.widget_y;
-        let item_pad_outer = self.style.item_pad_outer;
-        let slider = self.sliders.entry(id).or_insert(Slider::new(value.calc_t(min, max), title.into()));
+        self.window.active_sliders.push(id);
+        let slider = self.window.sliders.entry(id).or_insert(Slider::new(value.calc_t(min, max), title.into()));
         if slider.held {
             value.slide(min, max, slider.t);
         } else {
             slider.t = value.calc_t(min, max);
         }
-        slider.set_position(vec2(item_pad_outer.x, widget_y));
+        slider.set_position(vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += self.style.calc_item_height() + self.style.item_pad_outer.y;
         self
-    }
-}
-
-impl<'a> Deref for WindowContext<'a> {
-
-    type Target = Window;
-
-    fn deref(&self) -> &Self::Target {
-        self.window
-    }
-}
-
-impl<'a> DerefMut for WindowContext<'a> {
-
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.window
     }
 }

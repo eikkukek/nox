@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use rspirv_reflect::Reflection;
+use spirv_cross2::{
+    reflect::{self, DecorationValue, ResolveSize, ResourceType, TypeInner}, spirv::{self}, targets, Compiler, Module
+};
 
 use nox_mem::{
     vec_types::GlobalVec,
     AsRaw,
-    slice_as_bytes,
 };
 
 use super::{
@@ -62,22 +63,44 @@ impl From<ShaderStage> for shaderc::ShaderKind {
 }
 
 #[derive(Clone, Copy)]
+pub struct SpecializationConstant<T> {
+    pub value: T,
+    pub id: u32,
+}
+
+#[derive(Clone)]
 pub struct Uniform {
     pub stage: ShaderStage,
     pub set: u32,
     pub binding: u32,
     pub count: u32,
+    pub count_specialization: GlobalVec<SpecializationConstant<u32>>,
     pub ty: vk::DescriptorType,
 }
 
-impl From<Uniform> for vk::DescriptorSetLayoutBinding<'static> {
+impl Uniform {
 
-    fn from(value: Uniform) -> Self {
-        Self {
-            stage_flags: value.stage.into(),
-            binding: value.binding,
-            descriptor_type: value.ty,
-            descriptor_count: value.count,
+    pub fn to_vk(
+        &self,
+        count_specialization: &[SpecializationConstant<u32>]
+    ) -> vk::DescriptorSetLayoutBinding<'static> {
+        let mut count = self.count;
+        for spec in &self.count_specialization {
+            if let Some(value) = count_specialization
+                .iter()
+                .find(|v| v.id == spec.id)
+            {
+                count *= value.value;
+            }
+            else {
+                count *= spec.value;
+            }
+        }
+        vk::DescriptorSetLayoutBinding {
+            stage_flags: self.stage.into(),
+            binding: self.binding,
+            descriptor_type: self.ty,
+            descriptor_count: count,
             ..Default::default()
         }
     }
@@ -117,7 +140,7 @@ pub(crate) struct Shader {
     device: Arc<ash::Device>,
     module: vk::ShaderModule,
     uniforms: GlobalVec<Uniform>,
-    push_constant: Option<PushConstant>,
+    push_constants: GlobalVec<PushConstant>,
     stage: ShaderStage,
 }
 
@@ -129,40 +152,94 @@ impl Shader {
         stage: ShaderStage,
     ) -> Result<Self, Error>
     {
-        let reflect = Reflection::new_from_spirv(unsafe { slice_as_bytes(spirv).unwrap() })?;
-        let sets = reflect.get_descriptor_sets()?;
-        let mut uniforms = GlobalVec::with_capacity(sets.len());
-        for (set, info) in sets {
-            for (binding, info) in info {
-                let count = match info.binding_count {
-                    rspirv_reflect::BindingCount::One => 1,
-                    rspirv_reflect::BindingCount::StaticSized(v) => v as u32,
-                    rspirv_reflect::BindingCount::Unbounded => 1,
+        let compiler = Compiler::<targets::None>::new(Module::from_words(spirv))?;
+        let mut uniforms = GlobalVec::new();
+        let mut push_constants = GlobalVec::new();
+        let resources = compiler.shader_resources()?;
+        let mut parse_uniform = |mut ty: vk::DescriptorType, resource_ty: ResourceType| -> Result<(), Error> {
+            for resource in resources.resources_for_type(resource_ty)? {
+                let mut set = 0;
+                if let Some(DecorationValue::Literal(dec)) = compiler.decoration(resource.id, spirv::Decoration::DescriptorSet)? {
+                    set = dec;
+                }
+                let mut binding = 0;
+                if let Some(DecorationValue::Literal(dec)) = compiler.decoration(resource.id, spirv::Decoration::Binding)? {
+                    binding = dec;
+                }
+                let mut count = 1;
+                let mut count_specialization = GlobalVec::new();
+                let mut desc = compiler.type_description(resource.base_type_id)?;
+                while let TypeInner::Array { base, storage: _, dimensions, stride: _ } = desc.inner {
+                    for dim in dimensions {
+                        match dim {
+                            reflect::ArrayDimension::Literal(n) => count *= n,
+                            reflect::ArrayDimension::Constant(spec) => {
+                                count_specialization.push(SpecializationConstant {
+                                    value: compiler.specialization_constant_value(spec)?,
+                                    id: spec.id(),
+                                });
+                            },
+                        }
+                    }
+                    desc = compiler.type_description(base)?;
+                }
+                if let TypeInner::Image(img) = &desc.inner {
+                    match img.class {
+                        reflect::ImageClass::Sampled { depth: _, multisampled: _, arrayed: _ } => {
+                            ty = vk::DescriptorType::COMBINED_IMAGE_SAMPLER;
+                        },
+                        reflect::ImageClass::Texture { multisampled: _, arrayed: _ } => {
+                            ty = vk::DescriptorType::SAMPLED_IMAGE;
+                        },
+                        reflect::ImageClass::Storage { format: _ } => {
+                            ty = vk::DescriptorType::STORAGE_IMAGE;
+                        },
+                    };
                 };
+                if desc.inner == TypeInner::Sampler {
+                    ty = vk::DescriptorType::SAMPLER;
+                }
                 uniforms.push(Uniform {
                     stage,
                     set,
                     binding,
                     count,
-                    ty: vk::DescriptorType::from_raw(info.ty.0 as i32),
+                    count_specialization,
+                    ty,
                 });
             }
-        }
-        let push_constant = reflect
-            .get_push_constant_range()?
-            .map(|v| {
-                PushConstant {
-                    stage,
-                    offset: v.offset,
-                    size: v.size,
-                }
+            Ok(())
+        };
+        parse_uniform(vk::DescriptorType::UNIFORM_BUFFER, ResourceType::UniformBuffer)?;
+        parse_uniform(vk::DescriptorType::STORAGE_BUFFER, ResourceType::StorageBuffer)?;
+        parse_uniform(vk::DescriptorType::SAMPLED_IMAGE, ResourceType::SampledImage)?;
+        parse_uniform(vk::DescriptorType::STORAGE_IMAGE, ResourceType::StorageImage)?;
+        for resource in resources.resources_for_type(ResourceType::PushConstant)? {
+            let desc = compiler.type_description(resource.base_type_id)?;
+            let size = match desc.size_hint {
+                reflect::TypeSizeHint::Static(hint) => hint as u32,
+                reflect::TypeSizeHint::RuntimeArray(hole) => hole.declared() as u32,
+                reflect::TypeSizeHint::Matrix(hole) => hole.declared() as u32,
+                reflect::TypeSizeHint::UnknownArrayStride(hole) => hole.declared() as u32,
+            };
+            let mut offset = 0;
+            if let Some(DecorationValue::Literal(dec))
+                = compiler.member_decoration_by_handle(resource.base_type_id, 0, spirv::Decoration::Offset)?
+            {
+                offset = dec;
+            }
+            push_constants.push(PushConstant {
+                stage,
+                size,
+                offset,
             });
+        }
         let module = create_shader_module(&device, spirv)?;
         Ok(Self {
             device,
             module,
             uniforms,
-            push_constant,
+            push_constants,
             stage,
         })
     }
@@ -183,8 +260,8 @@ impl Shader {
     }
 
     #[inline(always)]
-    pub fn push_constant(&self) -> Option<PushConstant> {
-        self.push_constant
+    pub fn push_constants(&self) -> &[PushConstant] {
+        &self.push_constants
     }
 }
 

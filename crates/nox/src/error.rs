@@ -54,9 +54,9 @@ impl From<shaderc::Error> for Error {
     }
 }
 
-impl From<rspirv_reflect::ReflectError> for Error {
+impl From<spirv_cross2::SpirvCrossError> for Error {
 
-    fn from(value: rspirv_reflect::ReflectError) -> Self {
+    fn from(value: spirv_cross2::SpirvCrossError) -> Self {
         Self::ShaderError("spirv cross error: ".to_string() + &value.to_string())
     }
 }

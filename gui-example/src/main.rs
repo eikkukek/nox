@@ -25,7 +25,7 @@ impl<'a> Interface for Example<'a> {
             "example",
             Default::default(),
             [540, 540],
-            false,
+            true,
         )
     }
 
@@ -52,7 +52,13 @@ impl<'a> Interface for Example<'a> {
         nox: &mut Nox<Self>,
         _renderer: &mut RendererContext,
     ) -> Result<(), Error> {
-        self.workspace.update_window(0, |_| Ok(()), [0.25, 0.25], [0.0, 0.0])?;
+        self.workspace.update_window(0, [0.25, 0.25], [0.0, 0.0],
+            |mut win| {
+                let mut value = 0.5;
+                win.update_slider(0, "Moi", &mut value, 0.0, 1.0);
+                Ok(())
+            }
+        )?;
         self.workspace.end(nox);
         Ok(())
     }
@@ -102,6 +108,6 @@ impl<'a> Interface for Example<'a> {
 }
 
 fn main() {
-    let example = Example::new(Workspace::new([], 0.01));
+    let example = Example::new(Workspace::new([], "", 0.01));
     Nox::new(example, &mut Default::default()).run();
 }

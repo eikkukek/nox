@@ -5,9 +5,15 @@ use core::{
 
 use compact_str::CompactString;
 
-use nox::mem::vec_types::GlobalVec;
+use nox::{
+    *,
+    mem::{
+        vec_types::{GlobalVec, Vector},
+        value_as_bytes,
+    },
+};
 
-use nox_font::*;
+use nox_font::{VertexTextRenderer, text_segment, RenderedText};
 
 use nox_geom::{
     shapes::Rect,
@@ -16,7 +22,7 @@ use nox_geom::{
     vec2,
 };
 
-use crate::{workspace::RingBufMem, *};
+use crate::{workspace::*, *};
 
 pub trait Sliderable: Copy + Display {
 
@@ -27,12 +33,15 @@ pub trait Sliderable: Copy + Display {
 
 pub(crate) struct Slider
 {
-    pub title: CompactString,
-    pub main_rect: Rect,
-    pub position: Vec2,
+    title: CompactString,
+    main_rect: Rect,
+    position: Vec2,
     pub t: f32,
+    title_text: Option<RenderedText>,
+    main_rect_draw_info: DrawInfo,
+    index_off: u32,
+    vertex_off: u32,
     pub held: bool,
-    pub title_text: Option<RenderedText>,
 }
 
 impl Slider
@@ -48,13 +57,12 @@ impl Slider
             main_rect: Default::default(),
             position: Default::default(),
             t,
-            held: false,
             title_text: Default::default(),
+            main_rect_draw_info: Default::default(),
+            index_off: 0,
+            vertex_off: 0,
+            held: false,
         }
-    }
-
-    pub fn slide<T: Sliderable>(&self, value: &mut T, min: T, max: T) {
-        value.slide(min, max, self.t);
     }
 
     #[inline(always)]
@@ -67,19 +75,20 @@ impl Slider
     }
 
     #[inline(always)]
-    pub fn update<FontHash, F1, F2>(
+    pub fn update<FontHash>(
         &mut self,
-        style: &Style,
-        vertex_text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        style: &Style<FontHash>,
+        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         font: FontHash,
+        _cursor_in_this_window: bool,
     ) -> bool
         where 
             FontHash: Clone + Eq + Hash,
     {
         if self.title_text.is_none() {
-            self.title_text = Some(vertex_text_renderer
+            self.title_text = Some(text_renderer
                 .render(&[text_segment(self.title.as_str(), font)], false, 1.0)
-                .unwrap());
+                .unwrap_or(Default::default()));
         }
         let title_text = self.title_text.as_ref().unwrap();
         let main_rect = Rect::from_position_size(
@@ -95,9 +104,59 @@ impl Slider
     }
 
     #[inline(always)]
-    pub fn triangulate<Tri>(&mut self, triangulate: Tri)
+    pub fn triangulate<F>(
+        &mut self,
+        points: &mut GlobalVec<[f32; 2]>,
+        mut tri: F,
+    )
         where
+            F: FnMut(&[[f32; 2]]) -> DrawInfo
     {
+        points.clear();
+        self.main_rect.to_points(&mut |p| { points.push(p.into()); });
+        self.main_rect_draw_info = tri(&points);
+    }
+
+    #[inline(always)]
+    pub fn render_commands<FontHash, F1, F2>(
+        &self,
+        render_commands: &mut RenderCommands,
+        style: &Style<FontHash>,
+        inv_aspect_ratio: f32,
+        vertex_buf_id: BufferId,
+        index_buf_id: BufferId,
+        main_vert_mem_offset: u64,
+        main_idx_mem_offset: u64,
+        _allocate_vertices: &mut F1,
+        _allocate_indices: &mut F2,
+    ) -> Result<(), Error>
+        where
+            F1: FnMut(&mut RenderCommands, usize) -> Result<RingBufMem<Vertex>, Error>,
+            F2: FnMut(&mut RenderCommands, usize) -> Result<RingBufMem<u32>, Error>,
+    {
+        let push_constants_vertex = push_constants_vertex(self.position + self.main_rect.size() * 0.5, inv_aspect_ratio);
+        let push_constants_fragment = push_constants_fragment(style.widget_bg_col);
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                value_as_bytes(&push_constants_vertex).unwrap()
+            } else {
+                value_as_bytes(&push_constants_fragment).unwrap()
+            }
+        })?;
+        render_commands.draw_indexed(
+            self.main_rect_draw_info,
+            [
+                DrawBufferInfo {
+                    id: vertex_buf_id,
+                    offset: main_vert_mem_offset,
+                },
+            ],
+            DrawBufferInfo {
+                id: index_buf_id,
+                offset: main_idx_mem_offset,
+            },
+        )?;
+        Ok(())
     }
 }
 

@@ -912,7 +912,7 @@ impl Interface for App {
         commands.prepare_storage_image(self.fire_images[1])?;
         commands.bind_pipeline(self.fire_pipeline)?;
         commands.bind_shader_resources(|_| self.shader_resources[2])?;
-        commands.push_constants(unsafe { slice_as_bytes(params).unwrap() })?;
+        commands.push_constants(|_| unsafe { slice_as_bytes(params).unwrap() })?;
         commands.dispatch((self.frame_buffer_size.width + 7) / 8, (self.frame_buffer_size.height + 7) / 8, 1);
         self.heat_in = (self.heat_in + 1) % 2;
         Ok(())
