@@ -39,16 +39,17 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         &mut self,
         text: &[TextSegment<H>],
         line_center: bool,
-        normalized_width: f32,
+        max_normalized_width: f32,
     ) -> Option<RenderedText>
     {
         let faces = &mut self.faces;
         let curve_depth = self.curve_tolerance;
-        let width_div_2 = normalized_width / 2.0;
+        let width_div_2 = max_normalized_width / 2.0;
         let mut pen_x = 0.0;
         let mut shapes = GlobalVec::<(Option<f32>, &str, H, harfbuzz_rs::GlyphBuffer)>::new();
         let mut line_start = 0;
         let mut height: f32 = 0.0;
+        let mut text_width: f32 = 0.0;
         for segment in text {
             let FaceCache { face, trigs: _, offsets: _ } = faces.get(&segment.font.clone())?;
             let units_per_em = face.units_per_em() as f32;
@@ -64,10 +65,10 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                 for position in positions {
                     word_width += position.x_advance as f32 / units_per_em;
                 }
-                if word_width > normalized_width {
+                if word_width > max_normalized_width {
                     continue
                 }
-                if pen_x + word_width > normalized_width {
+                if pen_x + word_width > max_normalized_width {
                     if word == " " {
                         continue
                     }
@@ -80,6 +81,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                         } else {
                             Some(0.0)
                         };
+                    text_width = text_width.max(pen_x);
                     pen_x = 0.0;
                     line_start = shapes.len();
                 }
@@ -87,6 +89,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                 pen_x += word_width;
             }
         }
+        text_width = text_width.max(pen_x);
         if shapes.len() == 0 {
             return None
         }
@@ -126,7 +129,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
             }
         }
         for TextSegment { text: _, font } in text {
-            let FaceCache { face: _, trigs, offsets } = faces.get_mut(&font.clone()).unwrap();
+            let FaceCache { face: _, trigs, offsets } = faces.get_mut(font).unwrap();
             for (c, off) in &mut *offsets {
                 result.push(InstancedText {
                     trigs: trigs[c].clone().unwrap(),
@@ -137,7 +140,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         }
         Some(RenderedText {
             text: result,
-            text_width: normalized_width,
+            text_width,
             font_height: height,
             text_rows: rows,
         })

@@ -8,6 +8,7 @@ pub struct Style<FontHash> {
     pub item_pad_outer: Vec2,
     pub item_pad_inner: Vec2,
     pub font_scale: f32,
+    pub rounding: f32,
 }
 
 impl<FontHash> Style<FontHash> {
@@ -20,11 +21,16 @@ impl<FontHash> Style<FontHash> {
             font_regular,
             item_pad_outer: vec2(0.05, 0.05),
             item_pad_inner: vec2(0.01, 0.01),
-            font_scale: 0.1,
+            font_scale: 0.03,
+            rounding: 0.01,
         }
     }
 
-    pub fn calc_item_height(&self) -> f32 {
-        self.item_pad_inner.y * 2.0 + self.font_scale
+    pub fn calc_item_height(&self, text_height: f32) -> f32 {
+        self.item_pad_inner.y * 2.0 + text_height * self.font_scale
+    }
+
+    pub fn calc_text_box_width(&self, text_width: f32) -> f32 {
+        self.item_pad_inner.x * 2.0 + text_width * self.font_scale
     }
 }

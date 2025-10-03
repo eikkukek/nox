@@ -3,7 +3,7 @@ use ash::vk;
 use nox_mem::AsRaw;
 
 #[repr(i32)]
-#[derive(Default, Clone, Copy, AsRaw)]
+#[derive(Default, Clone, Copy, AsRaw, Debug)]
 pub enum IndexType {
     U16 = vk::IndexType::UINT16.as_raw(),
     #[default]

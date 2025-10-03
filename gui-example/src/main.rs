@@ -1,5 +1,7 @@
 use nox::*;
-use nox_gui::Workspace;
+use nox_gui::{
+    *
+};
 
 struct Example<'a> {
     workspace: Workspace<'a, &'static str>,
@@ -43,7 +45,7 @@ impl<'a> Interface for Example<'a> {
             Ok(())
         })?;
         self.workspace
-            .create_graphics_pipelines(renderer, MSAA::X1, self.output_format, None, &GlobalAlloc)?;
+            .create_graphics_pipelines(renderer, MSAA::X8, self.output_format, None, &GlobalAlloc)?;
         Ok(())
     }
 
@@ -75,23 +77,35 @@ impl<'a> Interface for Example<'a> {
             builder
                 .with_dimensions(frame_buffer_size)
                 .with_format(self.output_format, false)
+                .with_samples(MSAA::X8)
+                .with_usage(ImageUsage::ColorAttachment);
+        })?;
+        let output_resolve = frame_graph.add_transient_image(&mut |builder| {
+            builder
+                .with_dimensions(frame_buffer_size)
+                .with_format(self.output_format, false)
                 .with_usage(ImageUsage::ColorAttachment)
                 .with_usage(ImageUsage::Sampled);
         })?;
         frame_graph.add_pass(
             PassInfo {
-                max_color_writes: 1, ..Default::default()
+                max_color_writes: 1,
+                msaa_samples: MSAA::X8,
+                ..Default::default()
             },
             &mut |builder| {
                 builder
                     .with_write(WriteInfo::new(
-                        output, None, None, None,
+                        output,
+                        None,
+                        Some((output_resolve, ResolveMode::Average)),
+                        None,
                         AttachmentLoadOp::Clear,
                         AttachmentStoreOp::Store,
                         Default::default()
                     ));
             })?;
-        frame_graph.set_render_image(output, None)?;
+        frame_graph.set_render_image(output_resolve, None)?;
         Ok(())
     }
 
@@ -108,6 +122,13 @@ impl<'a> Interface for Example<'a> {
 }
 
 fn main() {
-    let example = Example::new(Workspace::new([], "", 0.01));
+    let font = unsafe {
+        memmap2::
+            Mmap::map(
+                &std::fs::File::open("HackNerdFontMono-Regular.ttf").unwrap()
+            )
+            .unwrap()
+    };
+    let example = Example::new(Workspace::new([("regular", font::Face::parse(&font, 0).unwrap())], "regular", 0.01));
     Nox::new(example, &mut Default::default()).run();
 }

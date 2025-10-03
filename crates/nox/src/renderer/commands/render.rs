@@ -8,7 +8,7 @@ use nox_alloc::arena_alloc::*;
 
 use crate::{renderer::*, has_not_bits};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct DrawInfo {
     pub first_index: u32,
     pub index_count: u32,
@@ -19,7 +19,7 @@ pub struct DrawInfo {
     pub first_binding: u32,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct DrawBufferInfo {
     pub id: BufferId,
     pub offset: u64,

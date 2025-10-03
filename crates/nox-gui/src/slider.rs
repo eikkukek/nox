@@ -75,26 +75,36 @@ impl Slider
     }
 
     #[inline(always)]
+    pub fn calc_text_size<FontHash>(
+        &mut self,
+        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        font: &FontHash,
+    ) -> Vec2
+        where
+            FontHash: Clone + Eq + Hash, 
+    {
+        let title_text = self.title_text.get_or_insert(text_renderer
+            .render(&[text_segment(self.title.as_str(), font)], false, 5.0).unwrap_or_default());
+        vec2(title_text.text_width, title_text.font_height)
+    }
+
+    #[inline(always)]
     pub fn update<FontHash>(
         &mut self,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        font: FontHash,
+        font: &FontHash,
         _cursor_in_this_window: bool,
     ) -> bool
         where 
             FontHash: Clone + Eq + Hash,
     {
-        if self.title_text.is_none() {
-            self.title_text = Some(text_renderer
-                .render(&[text_segment(self.title.as_str(), font)], false, 1.0)
-                .unwrap_or(Default::default()));
-        }
-        let title_text = self.title_text.as_ref().unwrap();
+        let title_text = self.title_text.get_or_insert(text_renderer
+            .render(&[text_segment(self.title.as_str(), font)], false, 5.0).unwrap_or_default());
         let main_rect = Rect::from_position_size(
             vec2(0.0, 0.0),
-            vec2(title_text.text_width * style.font_scale, style.calc_item_height()),
-            0.0,
+            vec2(style.calc_text_box_width(title_text.text_width), style.calc_item_height(title_text.font_height)),
+            style.rounding,
         );
         if main_rect != self.main_rect {
             self.main_rect = main_rect;
@@ -118,44 +128,98 @@ impl Slider
     }
 
     #[inline(always)]
-    pub fn render_commands<FontHash, F1, F2>(
+    pub fn render_commands<FontHash>(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
         inv_aspect_ratio: f32,
-        vertex_buf_id: BufferId,
-        index_buf_id: BufferId,
-        main_vert_mem_offset: u64,
-        main_idx_mem_offset: u64,
-        _allocate_vertices: &mut F1,
-        _allocate_indices: &mut F2,
+        vertex_buffer: &mut RingBuf,
+        index_buffer: &mut RingBuf,
+        window_vertex_offset: u64,
+        window_index_offset: u64,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
     ) -> Result<(), Error>
-        where
-            F1: FnMut(&mut RenderCommands, usize) -> Result<RingBufMem<Vertex>, Error>,
-            F2: FnMut(&mut RenderCommands, usize) -> Result<RingBufMem<u32>, Error>,
     {
-        let push_constants_vertex = push_constants_vertex(self.position + self.main_rect.size() * 0.5, inv_aspect_ratio);
-        let push_constants_fragment = push_constants_fragment(style.widget_bg_col);
+        let vertex_buffer_id = vertex_buffer.id();
+        let index_buffer_id = index_buffer.id();
+        let pc_vertex = push_constants_vertex(self.position, inv_aspect_ratio);
+        let pc_fragment = push_constants_fragment(style.widget_bg_col);
+        render_commands.bind_pipeline(base_pipeline)?;
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
-                value_as_bytes(&push_constants_vertex).unwrap()
+                value_as_bytes(&pc_vertex).unwrap()
             } else {
-                value_as_bytes(&push_constants_fragment).unwrap()
+                value_as_bytes(&pc_fragment).unwrap()
             }
         })?;
         render_commands.draw_indexed(
             self.main_rect_draw_info,
             [
                 DrawBufferInfo {
-                    id: vertex_buf_id,
-                    offset: main_vert_mem_offset,
+                    id: vertex_buffer_id,
+                    offset: window_vertex_offset,
                 },
             ],
             DrawBufferInfo {
-                id: index_buf_id,
-                offset: main_idx_mem_offset,
+                id: index_buffer_id,
+                offset: window_index_offset,
             },
         )?;
+        let title_text = self.title_text.as_ref().unwrap();
+        let text_pc_vertex = text_push_constants_vertex(self.position + style.item_pad_inner, inv_aspect_ratio, style.font_scale);
+        let text_pc_fragment = push_constants_fragment(style.text_col);
+        render_commands.bind_pipeline(text_pipeline)?;
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                value_as_bytes(&text_pc_vertex).unwrap()
+            } else {
+                value_as_bytes(&text_pc_fragment).unwrap()
+            }
+        })?;
+        for text in &title_text.text {
+            let vert_mem = unsafe {
+                vertex_buffer.allocate(render_commands, text.trigs.vertices.len())?
+            };
+            let vert_off_mem = unsafe {
+                vertex_buffer.allocate(render_commands, text.offsets.len())?
+            };
+            let idx_mem = unsafe {
+                index_buffer.allocate(render_commands, text.trigs.indices.len())?
+            }; 
+            unsafe {
+                text.trigs.vertices
+                    .as_ptr()
+                    .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), text.trigs.vertices.len());
+                text.offsets
+                    .as_ptr()
+                    .copy_to_nonoverlapping(vert_off_mem.ptr.as_ptr(), text.offsets.len());
+                text.trigs.indices
+                    .as_ptr()
+                    .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), text.trigs.indices.len());
+            }
+            render_commands.draw_indexed(
+                DrawInfo {
+                    index_count: text.trigs.indices.len() as u32,
+                    instance_count: text.offsets.len() as u32,
+                    ..Default::default()
+                },
+                [
+                    DrawBufferInfo {
+                        id: vertex_buffer_id,
+                        offset: vert_mem.offset,
+                    },
+                    DrawBufferInfo {
+                        id: vertex_buffer_id,
+                        offset: vert_off_mem.offset,
+                    },
+                ],
+                DrawBufferInfo {
+                    id: index_buffer_id,
+                    offset: idx_mem.offset,
+                }
+            )?;
+        }
         Ok(())
     }
 }

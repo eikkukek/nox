@@ -2,10 +2,10 @@ use super::*;
 
 pub struct TextSegment<'a, H> {
     pub text: &'a str,
-    pub font: H,
+    pub font: &'a H,
 }
 
-pub fn text_segment<'a, H>(text: &'a str, font: H) -> TextSegment<'a, H> {
+pub fn text_segment<'a, H>(text: &'a str, font: &'a H) -> TextSegment<'a, H> {
     TextSegment { text, font }
 }
 

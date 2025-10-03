@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 nox = { path = "../crates/nox" }
 nox-gui = { path = "../crates/nox-gui" }
+memmap2 = "0.9.8"

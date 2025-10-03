@@ -42,10 +42,10 @@ impl Window {
     pub(crate) fn new(
         size: [f32; 2],
         position: [f32; 2],
+        rounding: f32,
     ) -> Self
     {
-        let half_size = vec2(size[0] * 0.5, size[1] * 0.5);
-        let main_rect = rect(-half_size, half_size, 0.0); 
+        let main_rect = rect(vec2(0.0, 0.0), size.into(), rounding); 
         Self {
             main_rect,
             position: position.into(),
@@ -89,8 +89,8 @@ impl Window {
             self.bounding_rect().is_point_inside(cursor_pos);
         for id in &self.active_sliders {
             let slider = self.sliders.get_mut(id).unwrap();
-            if slider.update(style, text_renderer, style.font_regular.clone(), cursor_in_this_window) {
-                self.flags &= !Self::REQUIRES_TRIANGULATION;
+            if slider.update(style, text_renderer, &style.font_regular, cursor_in_this_window) {
+                self.flags |= Self::REQUIRES_TRIANGULATION;
             }
         }
         cursor_in_this_window
@@ -110,7 +110,7 @@ impl Window {
             }
             self.main_rect_draw_info = DrawInfo {
                 first_index: 0,
-                index_count: self.indices.len() as u32,
+                index_count: indices_usize.len() as u32,
                 vertex_offset: 0,
                 ..Default::default()
             };
@@ -135,41 +135,43 @@ impl Window {
         }
     }
 
-    pub(crate) fn render_commands<F1, F2, FontHash>(
-        &self,
+    pub(crate) fn render_commands<FontHash>(
+        &mut self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
         inv_aspect_ratio: f32,
-        vertex_buf_id: BufferId,
-        index_buf_id: BufferId,
-        mut allocate_vertices: F1,
-        mut allocate_indices: F2,
+        vertex_buffer: &mut RingBuf,
+        index_buffer: &mut RingBuf,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
     ) -> Result<(), Error>
-        where
-            F1: FnMut(&mut RenderCommands, usize) -> Result<RingBufMem<Vertex>, Error>,
-            F2: FnMut(&mut RenderCommands, usize) -> Result<RingBufMem<u32>, Error>,
     {
         if !self.renderable() {
             return Ok(())
         }
         let vert_total = self.vertices.len();
-        let vert_mem = allocate_vertices(render_commands, vert_total)?;
+        let vert_mem = unsafe {
+            vertex_buffer.allocate(render_commands, vert_total)?
+        };
         unsafe {
             self.vertices
                 .as_ptr()
                 .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_total);
         }
         let idx_total = self.indices.len();
-        let idx_mem = allocate_indices(render_commands, idx_total)?;
+        let idx_mem = unsafe {
+            index_buffer.allocate(render_commands, idx_total)?
+        };
         unsafe {
             self.indices
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total);
         }
         let push_constants_vertex = push_constants_vertex(
-            self.position + self.main_rect.size() * 0.5,
+            self.position,
             inv_aspect_ratio,
         );
+        render_commands.bind_pipeline(base_pipeline)?;
         let push_constants_fragment = push_constants_fragment(style.window_bg_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -182,12 +184,12 @@ impl Window {
             self.main_rect_draw_info,
             [
                 DrawBufferInfo {
-                    id: vertex_buf_id,
+                    id: vertex_buffer.id(),
                     offset: vert_mem.offset,
                 },
             ],
             DrawBufferInfo {
-                id: index_buf_id,
+                id: index_buffer.id(),
                 offset: idx_mem.offset,
             },
         )?;
@@ -197,31 +199,44 @@ impl Window {
                 render_commands,
                 style,
                 inv_aspect_ratio,
-                vertex_buf_id,
-                index_buf_id,
+                vertex_buffer,
+                index_buffer,
                 vert_mem.offset,
                 idx_mem.offset,
-                &mut allocate_vertices,
-                &mut allocate_indices
+                base_pipeline,
+                text_pipeline,
             )?;
         }
+        self.active_sliders.clear();
         Ok(())
     }
 }
 
-pub struct WindowContext<'a, FontHash> {
+pub struct WindowContext<'a, 'b, FontHash>
+    where
+        FontHash: Clone + Eq + Hash, 
+{
     style: &'a Style<FontHash>,
     window: &'a mut Window,
+    text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
     widget_y: f32,
 }
 
-impl<'a, FontHash> WindowContext<'a, FontHash> {
+impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
+    where
+        FontHash: Clone + Eq + Hash,
+{
 
-    pub(crate) fn new(window: &'a mut Window, style: &'a Style<FontHash>) -> Self {
+    pub(crate) fn new(
+        window: &'a mut Window,
+        style: &'a Style<FontHash>,
+        text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
+    ) -> Self {
         Self {
             window,
             style,
             widget_y: style.item_pad_outer.y,
+            text_renderer,
         }
     }
 
@@ -241,8 +256,9 @@ impl<'a, FontHash> WindowContext<'a, FontHash> {
         } else {
             slider.t = value.calc_t(min, max);
         }
-        slider.set_position(vec2(self.style.item_pad_outer.x, self.widget_y));
-        self.widget_y += self.style.calc_item_height() + self.style.item_pad_outer.y;
+        let text_size = slider.calc_text_size(self.text_renderer, &self.style.font_regular);
+        slider.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
+        self.widget_y += self.style.calc_item_height(text_size.y) + self.style.item_pad_outer.y;
         self
     }
 }
