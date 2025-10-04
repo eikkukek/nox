@@ -2,6 +2,8 @@ use nox::*;
 
 use crate::*;
 
+use nox_geom::*;
+
 #[repr(C)]
 #[derive(VertexInput)]
 pub struct Vertex {

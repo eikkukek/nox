@@ -39,9 +39,12 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         &mut self,
         text: &[TextSegment<H>],
         line_center: bool,
-        max_normalized_width: f32,
+        mut max_normalized_width: f32,
     ) -> Option<RenderedText>
     {
+        if max_normalized_width == 0.0 {
+            max_normalized_width = f32::MAX;
+        }
         let faces = &mut self.faces;
         let curve_depth = self.curve_tolerance;
         let width_div_2 = max_normalized_width / 2.0;

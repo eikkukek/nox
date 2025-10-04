@@ -56,9 +56,10 @@ impl<'a> Interface for Example<'a> {
         nox: &mut Nox<Self>,
         _renderer: &mut RendererContext,
     ) -> Result<(), Error> {
-        self.workspace.update_window(0, [0.25, 0.25], [0.0, 0.0],
+        self.workspace.update_window(0, "Widgets", [0.5, 0.5], [0.0, 0.0],
             |mut win| {
-                win.update_slider(0, "Moi", &mut self.slider_value, 0.0, 100.0);
+                win.update_slider(0, "Slider 1", &mut self.slider_value, 0.0, 100.0);
+                win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0);
                 Ok(())
             }
         )?;

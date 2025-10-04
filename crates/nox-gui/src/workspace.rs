@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 
 use nox::{
     mem::{
-        vec_types::{ArrayVec, GlobalVec, Vector},
+        vec_types::{GlobalVec, Vector},
         Allocator,
     },
     *
@@ -130,6 +130,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
     pub fn update_window<F>(
         &mut self,
         id: u32,
+        title: &str,
         initial_size: [f32; 2],
         initial_position: [f32; 2],
         mut f: F,
@@ -138,6 +139,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
             F: FnMut(WindowContext<FontHash>) -> Result<(), Error>
     {
         let window = self.windows.entry(id).or_insert(Window::new(
+            title,
             initial_size,
             initial_position,
             self.style.rounding,
@@ -180,10 +182,8 @@ impl<'a, FontHash> Workspace<'a, FontHash>
             ))
         };
         let inv_aspect_ratio = self.inv_aspect_ratio;
-        render_commands.bind_pipeline(base_pipeline)?;
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
-        let base_pipeline = self.pipelines.base_pipeline.unwrap();
         let text_pipeline = self.pipelines.text_pipeline.unwrap();
         for id in &self.active_windows {
             self.windows.get_mut(id).unwrap().render_commands(

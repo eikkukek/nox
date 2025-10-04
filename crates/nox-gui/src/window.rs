@@ -9,23 +9,24 @@ use nox::{
     *,
 };
 
-use nox_font::VertexTextRenderer;
-
 use rustc_hash::FxHashMap;
 
-pub use nox_geom::{
+use compact_str::CompactString;
+
+use nox_font::{VertexTextRenderer, text_segment, RenderedText};
+
+use nox_geom::{
     *,
     shapes::*,
 };
 
-use crate::{
-    workspace::*,
-    *
-};
+use crate::*;
 
 pub(crate) struct Window {
     main_rect: Rect,
     position: Vec2,
+    title: CompactString,
+    title_text: Option<RenderedText>,
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
     sliders: FxHashMap<u32, Slider>,
@@ -40,6 +41,7 @@ impl Window {
     const REQUIRES_TRIANGULATION: u8 = 2;
 
     pub(crate) fn new(
+        title: &str,
         size: [f32; 2],
         position: [f32; 2],
         rounding: f32,
@@ -49,6 +51,8 @@ impl Window {
         Self {
             main_rect,
             position: position.into(),
+            title: title.into(),
+            title_text: None,
             vertices: Default::default(),
             indices: Default::default(),
             sliders: FxHashMap::default(),
@@ -87,6 +91,11 @@ impl Window {
         let cursor_in_this_window =
             !cursor_in_other_window &&
             self.bounding_rect().is_point_inside(cursor_pos);
+        let title_text = self.title_text.as_ref().unwrap();
+        let min_width = style.calc_text_width_header(title_text.text_width) + style.item_pad_outer.x * 2.0;
+        if self.main_rect.max.x < min_width {
+            self.main_rect.max.x = min_width;
+        }
         for id in &self.active_sliders {
             let slider = self.sliders.get_mut(id).unwrap();
             let (requires_triangulation, width) = slider.update(
@@ -94,7 +103,7 @@ impl Window {
                 style,
                 text_renderer,
                 &style.font_regular,
-                self.main_rect.size().x,
+                self.main_rect.max.x,
                 cursor_in_this_window,
                 cursor_pos,
             );
@@ -177,17 +186,18 @@ impl Window {
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total);
         }
-        let push_constants_vertex = push_constants_vertex(
+        render_commands.bind_pipeline(base_pipeline)?;
+        let pc_vertex = push_constants_vertex(
             self.position,
             inv_aspect_ratio,
         );
         render_commands.bind_pipeline(base_pipeline)?;
-        let push_constants_fragment = push_constants_fragment(style.window_bg_col);
+        let pc_fragment = push_constants_fragment(style.window_bg_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
-                value_as_bytes(&push_constants_vertex).unwrap()
+                value_as_bytes(&pc_vertex).unwrap()
             } else {
-                value_as_bytes(&push_constants_fragment).unwrap()
+                value_as_bytes(&pc_fragment).unwrap()
             }
         })?;
         render_commands.draw_indexed(
@@ -203,6 +213,21 @@ impl Window {
                 offset: idx_mem.offset,
             },
         )?;
+        render_commands.bind_pipeline(text_pipeline)?;
+        let pc_vertex = text_push_constants_vertex(
+            self.position + style.item_pad_outer,
+            inv_aspect_ratio,
+            style.font_scale_header,
+        );
+        let pc_fragment = push_constants_fragment(style.text_col);
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                value_as_bytes(&pc_vertex).unwrap()
+            } else {
+                value_as_bytes(&pc_fragment).unwrap()
+            }
+        })?;
+        render_text(self.title_text.as_ref().unwrap(), render_commands, vertex_buffer, index_buffer)?;
         for id in &self.active_sliders {
             let slider = self.sliders.get(id).unwrap();
             slider.render_commands(
@@ -242,10 +267,15 @@ impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
         style: &'a Style<FontHash>,
         text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
     ) -> Self {
+        let title_text = window.title_text.get_or_insert(text_renderer.render(
+            &[text_segment(window.title.as_str(), &style.font_regular)],
+            false,
+            0.0,
+        ).unwrap_or_default());
         Self {
+            widget_y: style.calc_text_height_header(title_text.font_height) + style.item_pad_outer.y,
             window,
             style,
-            widget_y: style.item_pad_outer.y,
             text_renderer,
         }
     }
@@ -258,7 +288,7 @@ impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
         min: T,
         max: T,
     ) -> &mut Self
-    {
+    { 
         self.window.active_sliders.push(id);
         let slider = self.window.sliders.entry(id).or_insert(Slider::new(value.calc_t(min, max), title.into()));
         if slider.held {
@@ -266,9 +296,8 @@ impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
         } else {
             slider.t = value.calc_t(min, max);
         }
-        let text_size = slider.calc_text_size(self.text_renderer, &self.style.font_regular);
         slider.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
-        self.widget_y += self.style.calc_item_height(text_size.y) + self.style.item_pad_outer.y;
+        self.widget_y += slider.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
         self
     }
 }

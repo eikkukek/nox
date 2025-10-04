@@ -16,9 +16,8 @@ use nox::{
 use nox_font::{VertexTextRenderer, text_segment, RenderedText};
 
 use nox_geom::{
-    shapes::Rect,
-    Vec2,
-    vec2,
+    *,
+    shapes::*,
 };
 
 use crate::*;
@@ -78,12 +77,12 @@ impl Slider
         &self,
         style: &Style<FontHash>,
         text_width: f32,
-        item_height: f32,
+        text_box_height: f32,
     ) -> Vec2
     {
         let mut pos = self.position;
         pos.x += text_width + style.item_pad_outer.x;
-        pos.y += item_height / 2.0 - item_height / 4.0;
+        pos.y += text_box_height / 2.0 - text_box_height / 4.0;
         pos
     }
 
@@ -112,17 +111,17 @@ impl Slider
     }
 
     #[inline(always)]
-    pub fn calc_text_size<FontHash>(
+    pub fn calc_size<FontHash>(
         &mut self,
+        style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        font: &FontHash,
     ) -> Vec2
         where
             FontHash: Clone + Eq + Hash, 
     {
         let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(self.title.as_str(), font)], false, 5.0).unwrap_or_default());
-        vec2(title_text.text_width, title_text.font_height)
+            .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
+        style.calc_text_size_regular(vec2(title_text.text_width, title_text.font_height))
     }
 
     #[inline(always)]
@@ -141,9 +140,9 @@ impl Slider
             FontHash: Clone + Eq + Hash,
     {
         let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(self.title.as_str(), font)], false, 5.0).unwrap_or_default());
-        let text_width = style.calc_text_width(title_text.text_width);
-        let item_height = style.calc_item_height(title_text.font_height);
+            .render(&[text_segment(self.title.as_str(), font)], false, 0.0).unwrap_or_default());
+        let text_width = style.calc_text_width_regular(title_text.text_width);
+        let text_box_height = style.calc_text_box_height(title_text.font_height);
         let mut width = text_width + style.item_pad_outer.x * 3.0;
         let mut min_window_width = window_width;
         if window_width < width + style.slider_min_width {
@@ -156,7 +155,7 @@ impl Slider
             Default::default(),
             vec2(
                 width,
-                item_height / 2.0,
+                text_box_height / 2.0,
             ),
             style.rounding,
         );
@@ -177,17 +176,17 @@ impl Slider
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.held = false;
             } else {
-                self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, item_height));
+                self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, text_box_height));
             }
         } else if cursor_in_this_window {
             let bounding_rect = BoundingRect::from_position_size(
-                self.slider_pos(style, text_width, item_height),
+                self.slider_pos(style, text_width, text_box_height),
                 self.slider_rect.size(),
             );
             if bounding_rect.is_point_inside(cursor_pos) {
                 if nox.is_mouse_button_pressed(MouseButton::Left) {
                     self.held = true;
-                    self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, item_height));
+                    self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, text_box_height));
                 }
             }
         }
@@ -228,9 +227,9 @@ impl Slider
         let vertex_buffer_id = vertex_buffer.id();
         let index_buffer_id = index_buffer.id();
         let title_text = self.title_text.as_ref().unwrap();
-        let text_width = style.calc_text_width(title_text.text_width);
-        let item_height = style.calc_item_height(title_text.font_height);
-        let slider_pos = self.slider_pos(style, text_width, item_height);
+        let text_width = style.calc_text_width_regular(title_text.text_width);
+        let text_box_height = style.calc_text_box_height(title_text.font_height);
+        let slider_pos = self.slider_pos(style, text_width, text_box_height);
         let mut pc_vertex = push_constants_vertex(slider_pos, inv_aspect_ratio);
         let mut pc_fragment = push_constants_fragment(style.widget_bg_col);
         render_commands.bind_pipeline(base_pipeline)?;
@@ -277,9 +276,9 @@ impl Slider
             },
         )?;
         let text_pc_vertex = text_push_constants_vertex(
-            vec2(self.position.x, self.position.y + (item_height - title_text.font_height * style.font_scale) / 2.0),
+            vec2(self.position.x, self.position.y + (text_box_height - title_text.font_height * style.font_scale_regular) / 2.0),
             inv_aspect_ratio,
-            style.font_scale,
+            style.font_scale_regular,
         );
         let text_pc_fragment = push_constants_fragment(style.text_col);
         render_commands.bind_pipeline(text_pipeline)?;
@@ -290,49 +289,7 @@ impl Slider
                 value_as_bytes(&text_pc_fragment).unwrap()
             }
         })?;
-        for text in &title_text.text {
-            let vert_mem = unsafe {
-                vertex_buffer.allocate(render_commands, text.trigs.vertices.len())?
-            };
-            let vert_off_mem = unsafe {
-                vertex_buffer.allocate(render_commands, text.offsets.len())?
-            };
-            let idx_mem = unsafe {
-                index_buffer.allocate(render_commands, text.trigs.indices.len())?
-            }; 
-            unsafe {
-                text.trigs.vertices
-                    .as_ptr()
-                    .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), text.trigs.vertices.len());
-                text.offsets
-                    .as_ptr()
-                    .copy_to_nonoverlapping(vert_off_mem.ptr.as_ptr(), text.offsets.len());
-                text.trigs.indices
-                    .as_ptr()
-                    .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), text.trigs.indices.len());
-            }
-            render_commands.draw_indexed(
-                DrawInfo {
-                    index_count: text.trigs.indices.len() as u32,
-                    instance_count: text.offsets.len() as u32,
-                    ..Default::default()
-                },
-                [
-                    DrawBufferInfo {
-                        id: vertex_buffer_id,
-                        offset: vert_mem.offset,
-                    },
-                    DrawBufferInfo {
-                        id: vertex_buffer_id,
-                        offset: vert_off_mem.offset,
-                    },
-                ],
-                DrawBufferInfo {
-                    id: index_buffer_id,
-                    offset: idx_mem.offset,
-                }
-            )?;
-        }
+        render_text(self.title_text.as_ref().unwrap(), render_commands, vertex_buffer, index_buffer)?;
         Ok(())
     }
 }
