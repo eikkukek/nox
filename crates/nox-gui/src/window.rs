@@ -74,7 +74,7 @@ impl Window {
 
     pub(crate) fn update<I, FontHash>(
         &mut self,
-        _nox: &Nox<I>,
+        nox: &Nox<I>,
         cursor_pos: Vec2,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
@@ -89,7 +89,17 @@ impl Window {
             self.bounding_rect().is_point_inside(cursor_pos);
         for id in &self.active_sliders {
             let slider = self.sliders.get_mut(id).unwrap();
-            if slider.update(style, text_renderer, &style.font_regular, cursor_in_this_window) {
+            let (requires_triangulation, width) = slider.update(
+                nox,
+                style,
+                text_renderer,
+                &style.font_regular,
+                self.main_rect.size().x,
+                cursor_in_this_window,
+                cursor_pos,
+            );
+            if requires_triangulation || self.main_rect.max.x != width {
+                self.main_rect.max.x = width;
                 self.flags |= Self::REQUIRES_TRIANGULATION;
             }
         }

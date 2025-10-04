@@ -9,6 +9,7 @@ pub struct Style<FontHash> {
     pub item_pad_inner: Vec2,
     pub font_scale: f32,
     pub rounding: f32,
+    pub slider_min_width: f32,
 }
 
 impl<FontHash> Style<FontHash> {
@@ -19,18 +20,26 @@ impl<FontHash> Style<FontHash> {
             widget_bg_col: ColorRGBA::from_rgba(0.43, 0.43, 0.43, 1.0),
             text_col: ColorRGBA::white(),
             font_regular,
-            item_pad_outer: vec2(0.05, 0.05),
+            item_pad_outer: vec2(0.03, 0.03),
             item_pad_inner: vec2(0.01, 0.01),
             font_scale: 0.03,
             rounding: 0.01,
+            slider_min_width: 0.05,
         }
     }
 
+    #[inline(always)]
     pub fn calc_item_height(&self, text_height: f32) -> f32 {
         self.item_pad_inner.y * 2.0 + text_height * self.font_scale
     }
 
+    #[inline(always)]
     pub fn calc_text_box_width(&self, text_width: f32) -> f32 {
         self.item_pad_inner.x * 2.0 + text_width * self.font_scale
+    }
+    
+    #[inline(always)]
+    pub fn calc_text_width(&self, text_width: f32) -> f32 {
+        text_width * self.font_scale
     }
 }

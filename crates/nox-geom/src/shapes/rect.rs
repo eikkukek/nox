@@ -32,7 +32,7 @@ impl Rect {
     }
 
     #[inline(always)]
-    pub fn position(&self) -> Vec2 {
+    pub fn center(&self) -> Vec2 {
         self.min + (self.max - self.min) * 0.5
     }
 

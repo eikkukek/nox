@@ -152,10 +152,12 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         nox: &Nox<'_, I>,
     )
     {
-        self.inv_aspect_ratio = 1.0 / nox.aspect_ratio() as f32;
+        let aspect_ratio = nox.aspect_ratio() as f32;
+        self.inv_aspect_ratio = 1.0 / aspect_ratio;
         let mut cursor_pos: Vec2 = nox.normalized_cursor_position_f32().into();
         cursor_pos *= 2.0;
         cursor_pos -= vec2(1.0, 1.0);
+        cursor_pos.x *= aspect_ratio;
         let mut cursor_in_window = false;
         for id in &self.active_windows {
             let window = self.windows.get_mut(id).unwrap();

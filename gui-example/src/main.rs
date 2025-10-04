@@ -7,6 +7,7 @@ struct Example<'a> {
     workspace: Workspace<'a, &'static str>,
     output_format: ColorFormat,
     aspect_ratio: f32,
+    slider_value: f32,
 }
 
 impl<'a> Example<'a> {
@@ -16,6 +17,7 @@ impl<'a> Example<'a> {
             workspace,
             output_format: Default::default(),
             aspect_ratio: 1.0,
+            slider_value: 0.0,
         }
     }
 }
@@ -56,8 +58,7 @@ impl<'a> Interface for Example<'a> {
     ) -> Result<(), Error> {
         self.workspace.update_window(0, [0.25, 0.25], [0.0, 0.0],
             |mut win| {
-                let mut value = 0.5;
-                win.update_slider(0, "Moi", &mut value, 0.0, 1.0);
+                win.update_slider(0, "Moi", &mut self.slider_value, 0.0, 100.0);
                 Ok(())
             }
         )?;

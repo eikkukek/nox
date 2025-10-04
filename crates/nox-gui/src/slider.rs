@@ -17,12 +17,11 @@ use nox_font::{VertexTextRenderer, text_segment, RenderedText};
 
 use nox_geom::{
     shapes::Rect,
-    BoundingRect,
     Vec2,
     vec2,
 };
 
-use crate::{workspace::*, *};
+use crate::*;
 
 pub trait Sliderable: Copy + Display {
 
@@ -34,13 +33,13 @@ pub trait Sliderable: Copy + Display {
 pub(crate) struct Slider
 {
     title: CompactString,
-    main_rect: Rect,
+    slider_rect: Rect,
+    handle_rect: Rect,
     position: Vec2,
     pub t: f32,
     title_text: Option<RenderedText>,
-    main_rect_draw_info: DrawInfo,
-    index_off: u32,
-    vertex_off: u32,
+    slider_rect_draw_info: DrawInfo,
+    handle_rect_draw_info: DrawInfo,
     pub held: bool,
 }
 
@@ -54,13 +53,13 @@ impl Slider
     {
         Self {
             title: CompactString::new(title),
-            main_rect: Default::default(),
+            slider_rect: Default::default(),
+            handle_rect: Default::default(),
             position: Default::default(),
             t,
             title_text: Default::default(),
-            main_rect_draw_info: Default::default(),
-            index_off: 0,
-            vertex_off: 0,
+            slider_rect_draw_info: Default::default(),
+            handle_rect_draw_info: Default::default(),
             held: false,
         }
     }
@@ -72,6 +71,44 @@ impl Slider
     )
     {
         self.position = position;
+    }
+
+    #[inline(always)]
+    fn slider_pos<FontHash>(
+        &self,
+        style: &Style<FontHash>,
+        text_width: f32,
+        item_height: f32,
+    ) -> Vec2
+    {
+        let mut pos = self.position;
+        pos.x += text_width + style.item_pad_outer.x;
+        pos.y += item_height / 2.0 - item_height / 4.0;
+        pos
+    }
+
+    #[inline(always)]
+    fn handle_pos(
+        &self,
+        slider_pos: Vec2,
+    ) -> Vec2
+    {
+        let mut pos = slider_pos;
+        pos.x += (self.slider_rect.max.x - self.handle_rect.max.x) * self.t;
+        pos
+    }
+
+    #[inline(always)]
+    fn calc_t(
+        &self,
+        mut cursor_position: Vec2,
+        slider_pos: Vec2,
+    ) -> f32
+    {
+        cursor_position.x -= self.handle_rect.max.x * 0.5;
+        // handle_pos solved for t
+        let t = (cursor_position.x - slider_pos.x) / (self.slider_rect.max.x - self.handle_rect.max.x);
+        t.clamp(0.0, 1.0)
     }
 
     #[inline(always)]
@@ -89,28 +126,72 @@ impl Slider
     }
 
     #[inline(always)]
-    pub fn update<FontHash>(
+    pub fn update<I, FontHash>(
         &mut self,
+        nox: &Nox<I>,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         font: &FontHash,
-        _cursor_in_this_window: bool,
-    ) -> bool
+        window_width: f32,
+        cursor_in_this_window: bool,
+        cursor_pos: Vec2,
+    ) -> (bool, f32)
         where 
+            I: Interface,
             FontHash: Clone + Eq + Hash,
     {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(self.title.as_str(), font)], false, 5.0).unwrap_or_default());
-        let main_rect = Rect::from_position_size(
-            vec2(0.0, 0.0),
-            vec2(style.calc_text_box_width(title_text.text_width), style.calc_item_height(title_text.font_height)),
+        let text_width = style.calc_text_width(title_text.text_width);
+        let item_height = style.calc_item_height(title_text.font_height);
+        let mut width = text_width + style.item_pad_outer.x * 3.0;
+        let mut min_window_width = window_width;
+        if window_width < width + style.slider_min_width {
+            min_window_width = width + style.slider_min_width;
+            width = style.slider_min_width;
+        } else {
+            width = window_width - width;
+        }
+        let slider_rect = rect(
+            Default::default(),
+            vec2(
+                width,
+                item_height / 2.0,
+            ),
             style.rounding,
         );
-        if main_rect != self.main_rect {
-            self.main_rect = main_rect;
-            return true
+        let handle_rect = rect(
+            Default::default(),
+            vec2(
+                style.item_pad_inner.x * 2.0,
+                slider_rect.max.y,
+            ),
+            style.rounding,
+        );
+        if slider_rect != self.slider_rect || handle_rect != self.handle_rect {
+            self.slider_rect = slider_rect;
+            self.handle_rect = handle_rect;
+            return (true, min_window_width)
         }
-        false
+        if self.held {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.held = false;
+            } else {
+                self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, item_height));
+            }
+        } else if cursor_in_this_window {
+            let bounding_rect = BoundingRect::from_position_size(
+                self.slider_pos(style, text_width, item_height),
+                self.slider_rect.size(),
+            );
+            if bounding_rect.is_point_inside(cursor_pos) {
+                if nox.is_mouse_button_pressed(MouseButton::Left) {
+                    self.held = true;
+                    self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, item_height));
+                }
+            }
+        }
+        (false, min_window_width)
     }
 
     #[inline(always)]
@@ -123,8 +204,11 @@ impl Slider
             F: FnMut(&[[f32; 2]]) -> DrawInfo
     {
         points.clear();
-        self.main_rect.to_points(&mut |p| { points.push(p.into()); });
-        self.main_rect_draw_info = tri(&points);
+        self.slider_rect.to_points(&mut |p| { points.push(p.into()); });
+        self.slider_rect_draw_info = tri(&points);
+        points.clear();
+        self.handle_rect.to_points(&mut |p| { points.push(p.into()); });
+        self.handle_rect_draw_info = tri(&points);
     }
 
     #[inline(always)]
@@ -143,8 +227,12 @@ impl Slider
     {
         let vertex_buffer_id = vertex_buffer.id();
         let index_buffer_id = index_buffer.id();
-        let pc_vertex = push_constants_vertex(self.position, inv_aspect_ratio);
-        let pc_fragment = push_constants_fragment(style.widget_bg_col);
+        let title_text = self.title_text.as_ref().unwrap();
+        let text_width = style.calc_text_width(title_text.text_width);
+        let item_height = style.calc_item_height(title_text.font_height);
+        let slider_pos = self.slider_pos(style, text_width, item_height);
+        let mut pc_vertex = push_constants_vertex(slider_pos, inv_aspect_ratio);
+        let mut pc_fragment = push_constants_fragment(style.widget_bg_col);
         render_commands.bind_pipeline(base_pipeline)?;
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -154,7 +242,7 @@ impl Slider
             }
         })?;
         render_commands.draw_indexed(
-            self.main_rect_draw_info,
+            self.slider_rect_draw_info,
             [
                 DrawBufferInfo {
                     id: vertex_buffer_id,
@@ -166,8 +254,33 @@ impl Slider
                 offset: window_index_offset,
             },
         )?;
-        let title_text = self.title_text.as_ref().unwrap();
-        let text_pc_vertex = text_push_constants_vertex(self.position + style.item_pad_inner, inv_aspect_ratio, style.font_scale);
+        pc_fragment.color = style.text_col;
+        pc_vertex.vert_off = self.handle_pos(slider_pos);
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                value_as_bytes(&pc_vertex).unwrap()
+            } else {
+                value_as_bytes(&pc_fragment).unwrap()
+            }
+        })?;
+        render_commands.draw_indexed(
+            self.handle_rect_draw_info,
+            [
+                DrawBufferInfo {
+                    id: vertex_buffer_id,
+                    offset: window_vertex_offset,
+                },
+            ],
+            DrawBufferInfo {
+                id: index_buffer_id,
+                offset: window_index_offset,
+            },
+        )?;
+        let text_pc_vertex = text_push_constants_vertex(
+            vec2(self.position.x, self.position.y + (item_height - title_text.font_height * style.font_scale) / 2.0),
+            inv_aspect_ratio,
+            style.font_scale,
+        );
         let text_pc_fragment = push_constants_fragment(style.text_col);
         render_commands.bind_pipeline(text_pipeline)?;
         render_commands.push_constants(|pc| unsafe {
@@ -237,7 +350,7 @@ macro_rules! impl_sliderable {
                     if *self >= max { return 1.0 }
                     if *self <= min { return 0.0 }
                     let d0 = max - min;
-                    let d1 = max - self;
+                    let d1 = self - min;
                     d1 as f32 / d0 as f32
                 }
             }

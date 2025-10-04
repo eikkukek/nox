@@ -157,8 +157,6 @@ impl Cubic {
             let (left, right) = current.split(t);
             if let Some(quad) = left.to_quad() {
                 quad.flatten(tolerance, collect);
-            } else {
-                println!("here");
             }
             current = right;
         }
