@@ -39,6 +39,7 @@ impl Window {
 
     const RENDERABLE: u8 = 1;
     const REQUIRES_TRIANGULATION: u8 = 2;
+    const CURSOR_IN_WINDOW: u8 = 4;
 
     pub(crate) fn new(
         title: &str,
@@ -72,6 +73,11 @@ impl Window {
         self.flags & Self::REQUIRES_TRIANGULATION == Self::REQUIRES_TRIANGULATION
     }
 
+    #[inline(always)]
+    fn cursor_in_window(&self) -> bool {
+        self.flags & Self::CURSOR_IN_WINDOW == Self::CURSOR_IN_WINDOW
+    }
+
     pub(crate) fn bounding_rect(&self) -> BoundingRect {
         BoundingRect::from_position_size(self.position, self.main_rect.size())
     }
@@ -91,6 +97,8 @@ impl Window {
         let cursor_in_this_window =
             !cursor_in_other_window &&
             self.bounding_rect().is_point_inside(cursor_pos);
+        self.flags &= !Self::CURSOR_IN_WINDOW;
+        self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u8;
         let title_text = self.title_text.as_ref().unwrap();
         let min_width = style.calc_text_width_header(title_text.text_width) + style.item_pad_outer.x * 2.0;
         if self.main_rect.max.x < min_width {
@@ -162,7 +170,7 @@ impl Window {
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         base_pipeline: GraphicsPipelineId,
-        text_pipeline: GraphicsPipelineId,
+        no_offset: DrawBufferInfo,
     ) -> Result<(), Error>
     {
         if !self.renderable() {
@@ -187,11 +195,40 @@ impl Window {
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total);
         }
         render_commands.bind_pipeline(base_pipeline)?;
+        if self.cursor_in_window() {
+            let pc_vertex = style.calc_outline_push_constant(
+                self.position,
+                self.main_rect.max,
+                inv_aspect_ratio
+            );
+            let pc_fragment = push_constants_fragment(style.text_col);
+            render_commands.push_constants(|pc| unsafe {
+                if pc.stage == ShaderStage::Vertex {
+                    value_as_bytes(&pc_vertex).unwrap()
+                } else {
+                    value_as_bytes(&pc_fragment).unwrap()
+                }
+            })?;
+            render_commands.draw_indexed(
+                self.main_rect_draw_info,
+                [
+                    DrawBufferInfo {
+                        id: vertex_buffer.id(),
+                        offset: vert_mem.offset,
+                    },
+                    no_offset,
+                ],
+                DrawBufferInfo {
+                    id: index_buffer.id(),
+                    offset: idx_mem.offset,
+                },
+            )?;
+        }
         let pc_vertex = push_constants_vertex(
             self.position,
+            vec2(1.0, 1.0),
             inv_aspect_ratio,
         );
-        render_commands.bind_pipeline(base_pipeline)?;
         let pc_fragment = push_constants_fragment(style.window_bg_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -207,17 +244,17 @@ impl Window {
                     id: vertex_buffer.id(),
                     offset: vert_mem.offset,
                 },
+                no_offset,
             ],
             DrawBufferInfo {
                 id: index_buffer.id(),
                 offset: idx_mem.offset,
             },
         )?;
-        render_commands.bind_pipeline(text_pipeline)?;
-        let pc_vertex = text_push_constants_vertex(
+        let pc_vertex = push_constants_vertex(
             self.position + style.item_pad_outer,
+            vec2(style.font_scale_header, style.font_scale_header),
             inv_aspect_ratio,
-            style.font_scale_header,
         );
         let pc_fragment = push_constants_fragment(style.text_col);
         render_commands.push_constants(|pc| unsafe {
@@ -238,8 +275,7 @@ impl Window {
                 index_buffer,
                 vert_mem.offset,
                 idx_mem.offset,
-                base_pipeline,
-                text_pipeline,
+                no_offset,
             )?;
         }
         self.active_sliders.clear();
@@ -291,7 +327,7 @@ impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
     { 
         self.window.active_sliders.push(id);
         let slider = self.window.sliders.entry(id).or_insert(Slider::new(value.calc_t(min, max), title.into()));
-        if slider.held {
+        if slider.held() {
             value.slide(min, max, slider.t);
         } else {
             slider.t = value.calc_t(min, max);

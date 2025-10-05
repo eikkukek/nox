@@ -11,7 +11,7 @@ pub use nox::renderer::VertexInput;
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug, VertexInput)]
 pub struct Vertex {
-    pos: [f32; 2],
+    pub pos: [f32; 2],
 }
 
 impl From<[f32; 2]> for Vertex {
@@ -24,5 +24,5 @@ impl From<[f32; 2]> for Vertex {
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug, VertexInput)]
 pub struct VertexOffset {
-    offset: [f32; 2],
+    pub offset: [f32; 2],
 }

@@ -29,16 +29,19 @@ pub struct VertexUv {
 #[repr(C)]
 pub struct PushConstantsVertex {
     pub vert_off: Vec2,
+    pub scale: Vec2,
     pub inv_aspect_ratio: f32,
 }
 
 pub fn push_constants_vertex(
     vert_off: Vec2,
+    scale: Vec2,
     inv_aspect_ratio: f32,
-) ->PushConstantsVertex 
+) -> PushConstantsVertex 
 {
     PushConstantsVertex {
         vert_off,
+        scale,
         inv_aspect_ratio,
     }
 }
@@ -57,60 +60,23 @@ pub fn push_constants_fragment(
     }
 }
 
-#[repr(C)]
-pub(crate) struct TextPushConstantsVertex {
-    pub vert_off: Vec2,
-    pub inv_aspect_ratio: f32,
-    pub font_scale: f32,
-}
-
-pub(crate) fn text_push_constants_vertex(
-    vert_off: Vec2,
-    inv_aspect_ratio: f32,
-    font_scale: f32,
-) -> TextPushConstantsVertex
-{
-    TextPushConstantsVertex {
-        vert_off,
-        inv_aspect_ratio,
-        font_scale,
-    }
-}
-
 pub const BASE_VERTEX_SHADER: &'static str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
 
+    layout(location = 1) in vec2 in_offset;
+
     layout(push_constant) uniform PushConstant {
         vec2 vert_off;
+        vec2 scale;
         float inv_aspect_ratio;
     } pc;
 
     void main() {
-        vec2 pos = in_pos;
-        pos += pc.vert_off;
-        pos.x *= pc.inv_aspect_ratio;
-        gl_Position = vec4(pos, 0.0, 1.0);
-    }
-";
-
-pub const TEXT_VERTEX_SHADER: &'static str = "
-    #version 450
-
-    layout(location = 0) in vec2 in_pos;
-
-    layout(location = 1) in vec2 in_off;
-
-    layout(push_constant) uniform PushConstant {
-        vec2 vert_off;
-        float inv_aspect_ratio;
-        float font_scale;
-    } pc;
-
-    void main() {
-        vec2 pos = in_pos + in_off;
-        pos *= pc.font_scale;
+        vec2 pos = in_pos + in_offset;
+        pos.x *= pc.scale.x;
+        pos.y *= pc.scale.y;
         pos += pc.vert_off;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
@@ -123,7 +89,7 @@ pub const BASE_FRAGMENT_SHADER: &'static str = "
     layout(location = 0) out vec4 out_color;
 
     layout(push_constant) uniform PushConstant {
-        layout(offset = 16) vec4 color;
+        layout(offset = 32) vec4 color;
     } pc;
 
     void main() {

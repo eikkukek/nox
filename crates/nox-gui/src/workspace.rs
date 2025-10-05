@@ -24,9 +24,6 @@ struct Pipelines {
     base_pipeline_layout: Option<PipelineLayoutId>,
     base_pipeline: Option<GraphicsPipelineId>,
     base_shaders: Option<[ShaderId; 2]>,
-    text_pipeline_layout: Option<PipelineLayoutId>,
-    text_pipeline: Option<GraphicsPipelineId>,
-    text_shaders: Option<[ShaderId; 2]>,
 }
 
 pub struct Workspace<'a, FontHash>
@@ -91,36 +88,18 @@ impl<'a, FontHash> Workspace<'a, FontHash>
             let &mut base_layout = self.pipelines.base_pipeline_layout.get_or_insert(
                 v.create_pipeline_layout(base_shaders)?
             );
-            let &mut text_shaders = self.pipelines.text_shaders
-                .get_or_insert([
-                    v.create_shader(TEXT_VERTEX_SHADER, "nox_gui text vertex shader", ShaderStage::Vertex)?,
-                    base_shaders[1],
-                ]
-            );
-            let &mut text_layout = self.pipelines.text_pipeline_layout.get_or_insert(
-                v.create_pipeline_layout(text_shaders)?
-            );
             let mut base_info = GraphicsPipelineInfo::new(base_layout);
             base_info
                 .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
-                .with_sample_shading(SampleShadingInfo::new(samples, 0.2, false, false))
-                .with_color_output(output_format, WriteMask::all(), None);
-            let mut text_info = GraphicsPipelineInfo::new(text_layout);
-            text_info
-                .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
-                .with_vertex_input_binding(VertexInputBinding::new::<1, nox_font::VertexOffset>(1, VertexInputRate::Instance))
+                .with_vertex_input_binding(VertexInputBinding::new::<1, font::VertexOffset>(1, VertexInputRate::Instance))
                 .with_sample_shading(SampleShadingInfo::new(samples, 0.2, false, false))
                 .with_color_output(output_format, WriteMask::all(), None);
             v.create_graphics_pipelines(
-                &[base_info, text_info],
+                &[base_info],
                 cache_id,
                 alloc,
-                |i, p| {
-                    if i == 0 {
-                        self.pipelines.base_pipeline = Some(p)
-                    } else {
-                        self.pipelines.text_pipeline = Some(p)
-                    }
+                |_, p| {
+                    self.pipelines.base_pipeline = Some(p)
                 }
             )?;
             Ok(())
@@ -184,7 +163,16 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         let inv_aspect_ratio = self.inv_aspect_ratio;
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
-        let text_pipeline = self.pipelines.text_pipeline.unwrap();
+        let no_offset = unsafe {
+            vertex_buffer.allocate::<font::VertexOffset>(render_commands, 1)?
+        };
+        unsafe {
+            let tmp = font::VertexOffset {
+                offset: [0.0, 0.0],
+            };
+            (&tmp as *const font::VertexOffset)
+                .copy_to_nonoverlapping(no_offset.ptr.as_ptr(), 1);
+        }
         for id in &self.active_windows {
             self.windows.get_mut(id).unwrap().render_commands(
                 render_commands,
@@ -193,7 +181,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
                 vertex_buffer,
                 index_buffer,
                 base_pipeline,
-                text_pipeline,
+                DrawBufferInfo { id: vertex_buffer.id(), offset: no_offset.offset }
             )?;
         }
         vertex_buffer.finish_frame();

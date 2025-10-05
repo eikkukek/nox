@@ -29,7 +29,7 @@ impl<'a> Interface for Example<'a> {
             "example",
             Default::default(),
             [540, 540],
-            true,
+            false,
         )
     }
 

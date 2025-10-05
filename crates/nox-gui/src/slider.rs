@@ -39,11 +39,14 @@ pub(crate) struct Slider
     title_text: Option<RenderedText>,
     slider_rect_draw_info: DrawInfo,
     handle_rect_draw_info: DrawInfo,
-    pub held: bool,
+    pub falgs: u8,
 }
 
 impl Slider
 {
+
+    const HELD: u8 = 1;
+    const CURSOR_IN_SLIDER: u8 = 2;
 
     pub fn new(
         t: f32,
@@ -59,7 +62,7 @@ impl Slider
             title_text: Default::default(),
             slider_rect_draw_info: Default::default(),
             handle_rect_draw_info: Default::default(),
-            held: false,
+            falgs: 0,
         }
     }
 
@@ -108,6 +111,16 @@ impl Slider
         // handle_pos solved for t
         let t = (cursor_position.x - slider_pos.x) / (self.slider_rect.max.x - self.handle_rect.max.x);
         t.clamp(0.0, 1.0)
+    }
+
+    #[inline(always)]
+    pub fn held(&self) -> bool {
+        self.falgs & Self::HELD == Self::HELD
+    }
+
+    #[inline(always)]
+    pub fn cursor_in_slider(&self) -> bool {
+        self.falgs & Self::CURSOR_IN_SLIDER == Self::CURSOR_IN_SLIDER
     }
 
     #[inline(always)]
@@ -172,9 +185,10 @@ impl Slider
             self.handle_rect = handle_rect;
             return (true, min_window_width)
         }
-        if self.held {
+        self.falgs &= !Self::CURSOR_IN_SLIDER;
+        if self.held() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.held = false;
+                self.falgs &= !Self::HELD;
             } else {
                 self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, text_box_height));
             }
@@ -183,9 +197,11 @@ impl Slider
                 self.slider_pos(style, text_width, text_box_height),
                 self.slider_rect.size(),
             );
-            if bounding_rect.is_point_inside(cursor_pos) {
+            let cursor_in_slider = bounding_rect.is_point_inside(cursor_pos);
+            self.falgs |= Self::CURSOR_IN_SLIDER * cursor_in_slider as u8;
+            if cursor_in_slider {
                 if nox.is_mouse_button_pressed(MouseButton::Left) {
-                    self.held = true;
+                    self.falgs |= Self::HELD;
                     self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, text_box_height));
                 }
             }
@@ -220,8 +236,7 @@ impl Slider
         index_buffer: &mut RingBuf,
         window_vertex_offset: u64,
         window_index_offset: u64,
-        base_pipeline: GraphicsPipelineId,
-        text_pipeline: GraphicsPipelineId,
+        no_offset: DrawBufferInfo,
     ) -> Result<(), Error>
     {
         let vertex_buffer_id = vertex_buffer.id();
@@ -230,9 +245,39 @@ impl Slider
         let text_width = style.calc_text_width_regular(title_text.text_width);
         let text_box_height = style.calc_text_box_height(title_text.font_height);
         let slider_pos = self.slider_pos(style, text_width, text_box_height);
-        let mut pc_vertex = push_constants_vertex(slider_pos, inv_aspect_ratio);
+        if self.cursor_in_slider() || self.held() {
+            let pc_vertex = style.calc_outline_push_constant(slider_pos, self.slider_rect.max, inv_aspect_ratio);
+            let pc_fragment = push_constants_fragment(
+                if self.held() {
+                    style.widget_outline_col_hl
+                } else {
+                    style.widget_outline_col
+                }
+            );
+            render_commands.push_constants(|pc| unsafe {
+                if pc.stage == ShaderStage::Vertex {
+                    value_as_bytes(&pc_vertex).unwrap()
+                } else {
+                    value_as_bytes(&pc_fragment).unwrap()
+                }
+            })?;
+            render_commands.draw_indexed(
+                self.slider_rect_draw_info,
+                [
+                    DrawBufferInfo {
+                        id: vertex_buffer_id,
+                        offset: window_vertex_offset,
+                    },
+                    no_offset,
+                ],
+                DrawBufferInfo {
+                    id: index_buffer_id,
+                    offset: window_index_offset,
+                },
+            )?;
+        }
+        let mut pc_vertex = push_constants_vertex(slider_pos, vec2(1.0, 1.0), inv_aspect_ratio);
         let mut pc_fragment = push_constants_fragment(style.widget_bg_col);
-        render_commands.bind_pipeline(base_pipeline)?;
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
                 value_as_bytes(&pc_vertex).unwrap()
@@ -247,13 +292,14 @@ impl Slider
                     id: vertex_buffer_id,
                     offset: window_vertex_offset,
                 },
+                no_offset,
             ],
             DrawBufferInfo {
                 id: index_buffer_id,
                 offset: window_index_offset,
             },
         )?;
-        pc_fragment.color = style.text_col;
+        pc_fragment.color = style.slider_handle_col;
         pc_vertex.vert_off = self.handle_pos(slider_pos);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -269,24 +315,24 @@ impl Slider
                     id: vertex_buffer_id,
                     offset: window_vertex_offset,
                 },
+                no_offset,
             ],
             DrawBufferInfo {
                 id: index_buffer_id,
                 offset: window_index_offset,
             },
         )?;
-        let text_pc_vertex = text_push_constants_vertex(
+        let pc_vertex = push_constants_vertex(
             vec2(self.position.x, self.position.y + (text_box_height - title_text.font_height * style.font_scale_regular) / 2.0),
+            vec2(style.font_scale_regular, style.font_scale_regular),
             inv_aspect_ratio,
-            style.font_scale_regular,
         );
-        let text_pc_fragment = push_constants_fragment(style.text_col);
-        render_commands.bind_pipeline(text_pipeline)?;
+        let pc_fragment = push_constants_fragment(style.text_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
-                value_as_bytes(&text_pc_vertex).unwrap()
+                value_as_bytes(&pc_vertex).unwrap()
             } else {
-                value_as_bytes(&text_pc_fragment).unwrap()
+                value_as_bytes(&pc_fragment).unwrap()
             }
         })?;
         render_text(self.title_text.as_ref().unwrap(), render_commands, vertex_buffer, index_buffer)?;
