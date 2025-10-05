@@ -32,7 +32,9 @@ pub(crate) struct Window {
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
     sliders: FxHashMap<u32, Slider>,
+    buttons: FxHashMap<u32, Button>,
     active_sliders: GlobalVec<u32>,
+    active_buttons: GlobalVec<u32>,
     min_height: f32,
     flags: u32,
 }
@@ -68,7 +70,9 @@ impl Window {
             vertices: Default::default(),
             indices: Default::default(),
             sliders: FxHashMap::default(),
+            buttons: FxHashMap::default(),
             active_sliders: Default::default(),
+            active_buttons: Default::default(),
             min_height: 0.0,
             flags: Self::REQUIRES_TRIANGULATION,
         }
@@ -156,7 +160,6 @@ impl Window {
                 nox,
                 style,
                 text_renderer,
-                &style.font_regular,
                 self.main_rect.max.x,
                 cursor_pos,
                 cursor_in_this_window,
@@ -166,6 +169,22 @@ impl Window {
                 self.flags |= Self::REQUIRES_TRIANGULATION;
             }
             cursor_in_item |= cursor_in_slider;
+        }
+        for id in &self.active_buttons {
+            let button = self.buttons.get_mut(id).unwrap();
+            let (requires_triangulation, cursor_in_button, min_win_width) = button.update(
+                nox,
+                style,
+                text_renderer,
+                self.main_rect.max.x,
+                cursor_pos,
+                cursor_in_this_window,
+            );
+            min_width = min_width.max(min_win_width);
+            if requires_triangulation {
+                self.flags |= Self::REQUIRES_TRIANGULATION;
+            }
+            cursor_in_item |= cursor_in_button;
         }
         if self.main_rect.max.x < min_width {
             self.main_rect.max.x = min_width;
@@ -342,21 +361,24 @@ impl Window {
             }
             title_bar_rect_draw_info.index_count = indices_usize.len() as u32 - title_bar_rect_draw_info.first_index;
             self.title_bar_rect_draw_info = title_bar_rect_draw_info;
+            let mut tri = |points: &[[f32; 2]]| {
+                let mut draw_info = DrawInfo {
+                    first_index: indices_usize.len() as u32,
+                    ..Default::default()
+                };
+                if !earcut::earcut(points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+                    self.flags &= !Self::RENDERABLE;
+                }
+                draw_info.index_count = indices_usize.len() as u32 - draw_info.first_index;
+                draw_info
+            };
             for id in &self.active_sliders {
                 let slider = self.sliders.get_mut(id).unwrap();
-                slider.triangulate(&mut points,
-                    |points| {
-                        let mut draw_info = DrawInfo {
-                            first_index: indices_usize.len() as u32,
-                            ..Default::default()
-                        };
-                        if !earcut::earcut(points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
-                            self.flags &= !Self::RENDERABLE;
-                        }
-                        draw_info.index_count = indices_usize.len() as u32 - draw_info.first_index;
-                        draw_info
-                    },
-                );
+                slider.triangulate(&mut points, &mut tri);
+            }
+            for id in &self.active_buttons {
+                let button = self.buttons.get_mut(id).unwrap();
+                button.triangulate(&mut points, &mut tri);
             }
             self.indices.append_map(&indices_usize, |&i| i as u32);
             self.flags &= !Self::REQUIRES_TRIANGULATION;
@@ -508,7 +530,21 @@ impl Window {
                 no_offset,
             )?;
         }
+        for id in &self.active_buttons {
+            let button = self.buttons.get(id).unwrap();
+            button.render_commands(
+                render_commands,
+                style,
+                inv_aspect_ratio,
+                vertex_buffer,
+                index_buffer,
+                vert_mem.offset,
+                idx_mem.offset,
+                no_offset
+            )?;
+        }
         self.active_sliders.clear();
+        self.active_buttons.clear();
         Ok(())
     }
 }
@@ -553,10 +589,12 @@ impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
         value: &mut T,
         min: T,
         max: T,
-    ) -> &mut Self
+    )
     { 
         self.window.active_sliders.push(id);
-        let slider = self.window.sliders.entry(id).or_insert(Slider::new(value.calc_t(min, max), title.into()));
+        let slider = self.window.sliders
+            .entry(id)
+            .or_insert(Slider::new(value.calc_t(min, max), title.into()));
         if slider.held() {
             value.slide(min, max, slider.t);
         } else {
@@ -564,7 +602,21 @@ impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
         }
         slider.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += slider.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
-        self
+    }
+
+    pub fn update_button(
+        &mut self,
+        id: u32,
+        title: &str,
+    ) -> bool
+    {
+        self.window.active_buttons.push(id);
+        let button = self.window.buttons
+            .entry(id)
+            .or_insert(Button::new(title));
+        button.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
+        self.widget_y += button.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
+        button.pressed()
     }
 }
 

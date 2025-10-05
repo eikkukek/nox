@@ -32,22 +32,23 @@ pub trait Sliderable: Copy + Display {
 pub(crate) struct Slider
 {
     title: CompactString,
+    title_text: Option<RenderedText>,
     slider_rect: Rect,
     handle_rect: Rect,
     position: Vec2,
     pub t: f32,
-    title_text: Option<RenderedText>,
     slider_rect_draw_info: DrawInfo,
     handle_rect_draw_info: DrawInfo,
-    pub falgs: u8,
+    falgs: u32,
 }
 
 impl Slider
 {
 
-    const HELD: u8 = 1;
-    const CURSOR_IN_SLIDER: u8 = 2;
+    const HELD: u32 = 0x1;
+    const CURSOR_IN_SLIDER: u32 = 0x2;
 
+    #[inline(always)]
     pub fn new(
         t: f32,
         title: &str,
@@ -55,11 +56,11 @@ impl Slider
     {
         Self {
             title: CompactString::new(title),
+            title_text: Default::default(),
             slider_rect: Default::default(),
             handle_rect: Default::default(),
             position: Default::default(),
             t,
-            title_text: Default::default(),
             slider_rect_draw_info: Default::default(),
             handle_rect_draw_info: Default::default(),
             falgs: 0,
@@ -143,7 +144,6 @@ impl Slider
         nox: &Nox<I>,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        font: &FontHash,
         window_width: f32,
         cursor_pos: Vec2,
         cursor_in_this_window: bool,
@@ -153,7 +153,7 @@ impl Slider
             FontHash: Clone + Eq + Hash,
     {
         let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(self.title.as_str(), font)], false, 0.0).unwrap_or_default());
+            .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
         let text_width = style.calc_text_width(title_text.text_width);
         let text_box_height = style.calc_text_box_height(title_text.font_height);
         let mut width = text_width + style.item_pad_outer.x * 3.0;
@@ -196,11 +196,11 @@ impl Slider
         } else if cursor_in_this_window {
             let bounding_rect = BoundingRect::from_position_size(
                 self.slider_pos(style, text_width, text_box_height),
-                self.slider_rect.size(),
+                self.slider_rect.max,
             );
             cursor_in_slider = bounding_rect.is_point_inside(cursor_pos);
-            self.falgs |= Self::CURSOR_IN_SLIDER * cursor_in_slider as u8;
             if cursor_in_slider {
+                self.falgs |= Self::CURSOR_IN_SLIDER;
                 if nox.was_mouse_button_pressed(MouseButton::Left) {
                     self.falgs |= Self::HELD;
                     self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, text_box_height));
@@ -214,7 +214,7 @@ impl Slider
     pub fn triangulate<F>(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
-        mut tri: F,
+        tri: &mut F,
     )
         where
             F: FnMut(&[[f32; 2]]) -> DrawInfo
@@ -336,7 +336,7 @@ impl Slider
                 value_as_bytes(&pc_fragment).unwrap()
             }
         })?;
-        render_text(self.title_text.as_ref().unwrap(), render_commands, vertex_buffer, index_buffer)?;
+        render_text(title_text, render_commands, vertex_buffer, index_buffer)?;
         Ok(())
     }
 }

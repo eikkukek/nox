@@ -60,6 +60,9 @@ impl<'a> Interface for Example<'a> {
             |mut win| {
                 win.update_slider(0, "Slider 1", &mut self.slider_value, 0.0, 100.0);
                 win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0);
+                if win.update_button(0, "Button") {
+                    println!("hello");
+                }
                 Ok(())
             }
         )?;

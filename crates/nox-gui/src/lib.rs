@@ -4,6 +4,7 @@ mod color;
 mod style;
 mod helpers;
 mod slider;
+mod button;
 mod window;
 mod workspace;
 
@@ -18,4 +19,5 @@ pub use workspace::Workspace;
 
 pub use nox_font as font;
 
+use button::*;
 use helpers::*;
