@@ -38,6 +38,7 @@ pub struct Workspace<'a, FontHash>
     index_buffer: Option<RingBuf>,
     pipelines: Pipelines,
     ring_buffer_size: usize,
+    prev_cursor_position: Vec2,
     inv_aspect_ratio: f32,
 }
 
@@ -61,6 +62,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
             index_buffer: None,
             pipelines: Default::default(),
             ring_buffer_size: 1 << 23,
+            prev_cursor_position: Default::default(),
             inv_aspect_ratio: 1.0,
         }
     }
@@ -139,11 +141,23 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         cursor_pos *= 2.0;
         cursor_pos -= vec2(1.0, 1.0);
         cursor_pos.x *= aspect_ratio;
+        let delta_cursor_pos = cursor_pos - self.prev_cursor_position;
+        self.prev_cursor_position = cursor_pos;
         let mut cursor_in_window = false;
         for id in &self.active_windows {
             let window = self.windows.get_mut(id).unwrap();
-            cursor_in_window |= window.update(nox, cursor_pos, &self.style, &mut self.text_renderer, cursor_in_window);
+            cursor_in_window |= window.update(
+                nox,
+                &self.style,
+                &mut self.text_renderer,
+                cursor_pos,
+                delta_cursor_pos,
+                cursor_in_window
+            );
             window.triangulate();
+        }
+        if !cursor_in_window && self.style.override_cursor {
+            nox.set_cursor(CursorIcon::Default);
         }
     }
 

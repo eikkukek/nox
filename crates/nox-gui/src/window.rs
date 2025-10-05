@@ -16,14 +16,16 @@ use compact_str::CompactString;
 use nox_font::{VertexTextRenderer, text_segment, RenderedText};
 
 use nox_geom::{
-    *,
-    shapes::*,
+    shapes::*, *
 };
 
 use crate::*;
 
 pub(crate) struct Window {
     main_rect: Rect,
+    main_rect_draw_info: DrawInfo,
+    title_bar_rect: Rect,
+    title_bar_rect_draw_info: DrawInfo,
     position: Vec2,
     title: CompactString,
     title_text: Option<RenderedText>,
@@ -31,15 +33,22 @@ pub(crate) struct Window {
     indices: GlobalVec<u32>,
     sliders: FxHashMap<u32, Slider>,
     active_sliders: GlobalVec<u32>,
-    main_rect_draw_info: DrawInfo,
-    flags: u8,
+    min_height: f32,
+    flags: u32,
 }
 
 impl Window {
 
-    const RENDERABLE: u8 = 1;
-    const REQUIRES_TRIANGULATION: u8 = 2;
-    const CURSOR_IN_WINDOW: u8 = 4;
+    const RENDERABLE: u32 = 0x1;
+    const REQUIRES_TRIANGULATION: u32 = 0x2;
+    const CURSOR_IN_WINDOW: u32 = 0x4;
+    const HELD: u32 = 0x8;
+    const RESIZE_LEFT: u32 = 0x10;
+    const RESIZE_RIGHT: u32 = 0x20;
+    const RESIZE_TOP: u32 = 0x40;
+    const RESIZE_BOTTOM: u32 = 0x80;
+
+    const CURSOR_ERROR_MARGIN: f32 = 0.01;
 
     pub(crate) fn new(
         title: &str,
@@ -48,9 +57,11 @@ impl Window {
         rounding: f32,
     ) -> Self
     {
-        let main_rect = rect(vec2(0.0, 0.0), size.into(), rounding); 
         Self {
-            main_rect,
+            main_rect: rect(Default::default(), size, rounding),
+            main_rect_draw_info: Default::default(),
+            title_bar_rect: rect::<Vec2>(Default::default(), Default::default(), rounding),
+            title_bar_rect_draw_info: Default::default(),
             position: position.into(),
             title: title.into(),
             title_text: None,
@@ -58,7 +69,7 @@ impl Window {
             indices: Default::default(),
             sliders: FxHashMap::default(),
             active_sliders: Default::default(),
-            main_rect_draw_info: Default::default(),
+            min_height: 0.0,
             flags: Self::REQUIRES_TRIANGULATION,
         }
     }
@@ -78,16 +89,50 @@ impl Window {
         self.flags & Self::CURSOR_IN_WINDOW == Self::CURSOR_IN_WINDOW
     }
 
-    pub(crate) fn bounding_rect(&self) -> BoundingRect {
-        BoundingRect::from_position_size(self.position, self.main_rect.size())
+    #[inline(always)]
+    fn held(&self) -> bool {
+        self.flags & Self::HELD == Self::HELD
+    }
+
+    #[inline(always)]
+    fn resize_left(&self) -> bool {
+        self.flags & Self::RESIZE_LEFT == Self::RESIZE_LEFT
+    }
+
+    #[inline(always)]
+    fn resize_right(&self) -> bool {
+        self.flags & Self::RESIZE_RIGHT == Self::RESIZE_RIGHT
+    }
+
+    #[inline(always)]
+    fn resize_top(&self) -> bool {
+        self.flags & Self::RESIZE_TOP == Self::RESIZE_TOP
+    }
+
+    #[inline(always)]
+    fn resize_bottom(&self) -> bool {
+        self.flags & Self::RESIZE_BOTTOM == Self::RESIZE_BOTTOM
+    }
+
+    #[inline(always)]
+    fn any_resize(&self) -> bool {
+        self.resize_left() ||
+        self.resize_right() ||
+        self.resize_top() ||
+        self.resize_bottom()
+    }
+
+    pub(crate) fn bounding_rect(&self, error_margin: f32) -> BoundingRect {
+        BoundingRect::from_position_size(self.position - vec2(error_margin, error_margin), self.main_rect.size() + vec2(error_margin, error_margin))
     }
 
     pub(crate) fn update<I, FontHash>(
         &mut self,
         nox: &Nox<I>,
-        cursor_pos: Vec2,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        cursor_pos: Vec2,
+        delta_cursor_pos: Vec2,
         cursor_in_other_window: bool,
     ) -> bool
         where 
@@ -96,29 +141,173 @@ impl Window {
     {
         let cursor_in_this_window =
             !cursor_in_other_window &&
-            self.bounding_rect().is_point_inside(cursor_pos);
+            self.bounding_rect(Self::CURSOR_ERROR_MARGIN).is_point_inside(cursor_pos);
         self.flags &= !Self::CURSOR_IN_WINDOW;
-        self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u8;
+        self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
         let title_text = self.title_text.as_ref().unwrap();
-        let min_width = style.calc_text_width_header(title_text.text_width) + style.item_pad_outer.x * 2.0;
+        let mut min_width = style.calc_text_width(title_text.text_width) + style.item_pad_outer.x * 2.0;
         if self.main_rect.max.x < min_width {
             self.main_rect.max.x = min_width;
         }
+        let mut cursor_in_item = false;
         for id in &self.active_sliders {
             let slider = self.sliders.get_mut(id).unwrap();
-            let (requires_triangulation, width) = slider.update(
+            let (requires_triangulation, cursor_in_slider, min_win_width) = slider.update(
                 nox,
                 style,
                 text_renderer,
                 &style.font_regular,
                 self.main_rect.max.x,
-                cursor_in_this_window,
                 cursor_pos,
+                cursor_in_this_window,
             );
-            if requires_triangulation || self.main_rect.max.x != width {
-                self.main_rect.max.x = width;
+            min_width = min_width.max(min_win_width);
+            if requires_triangulation {
                 self.flags |= Self::REQUIRES_TRIANGULATION;
             }
+            cursor_in_item |= cursor_in_slider;
+        }
+        if self.main_rect.max.x < min_width {
+            self.main_rect.max.x = min_width;
+        }
+        let mut main_rect_max = self.main_rect.max;
+        let override_cursor = style.override_cursor;
+        if self.held() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::HELD;
+            } else {
+                self.position += delta_cursor_pos;
+            }
+        }
+        else if self.resize_left() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::RESIZE_LEFT;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            } else {
+                main_rect_max.x -= delta_cursor_pos.x;
+                if main_rect_max.x < min_width {
+                    main_rect_max.x = min_width;
+                    self.flags &= !Self::RESIZE_LEFT;
+                    if override_cursor {
+                        nox.set_cursor(CursorIcon::Default);
+                    }
+                } else {
+                    self.position.x += delta_cursor_pos.x;
+                }
+            }
+        }
+        else if self.resize_right() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::RESIZE_RIGHT;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            } else {
+                main_rect_max.x += delta_cursor_pos.x;
+                if main_rect_max.x < min_width {
+                    main_rect_max.x = min_width;
+                    self.flags &= !Self::RESIZE_RIGHT;
+                    if override_cursor {
+                        nox.set_cursor(CursorIcon::Default);
+                    }
+                }
+            }
+        }
+        else if self.resize_top() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::RESIZE_TOP;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            } else {
+                main_rect_max.y -= delta_cursor_pos.y;
+                if main_rect_max.y < self.min_height {
+                    main_rect_max.y = self.min_height;
+                    self.flags &= !Self::RESIZE_TOP;
+                    if override_cursor {
+                        nox.set_cursor(CursorIcon::Default);
+                    }
+                } else {
+                    self.position.y += delta_cursor_pos.y;
+                }
+            }
+        }
+        else if self.resize_bottom() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::RESIZE_BOTTOM;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            } else {
+                main_rect_max.y += delta_cursor_pos.y;
+                if main_rect_max.y < self.min_height {
+                    main_rect_max.y = self.min_height;
+                    self.flags &= !Self::RESIZE_BOTTOM;
+                    if override_cursor {
+                        nox.set_cursor(CursorIcon::Default);
+                    }
+                }
+            }
+        }
+        else if cursor_in_this_window && !cursor_in_item {
+            let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left) as u32;
+            if cursor_pos.x >= self.position.x - Self::CURSOR_ERROR_MARGIN &&
+                cursor_pos.x <= self.position.x + Self::CURSOR_ERROR_MARGIN 
+            {
+                self.flags |= Self::RESIZE_LEFT * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::ColResize);
+                }
+            }
+            else if cursor_pos.x >= self.position.x + self.main_rect.max.x - Self::CURSOR_ERROR_MARGIN &&
+                cursor_pos.x <= self.position.x + self.main_rect.max.x + Self::CURSOR_ERROR_MARGIN
+            {
+                self.flags |= Self::RESIZE_RIGHT * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::ColResize);
+                }
+            }
+            else if cursor_pos.y >= self.position.y - Self::CURSOR_ERROR_MARGIN &&
+                cursor_pos.y <= self.position.y + Self::CURSOR_ERROR_MARGIN
+            {
+                self.flags |= Self::RESIZE_TOP * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::RowResize);
+                }
+            }
+            else if cursor_pos.y >= self.position.y + self.main_rect.max.y - Self::CURSOR_ERROR_MARGIN &&
+                cursor_pos.y <= self.position.y + self.main_rect.max.y + Self::CURSOR_ERROR_MARGIN
+            {
+                self.flags |= Self::RESIZE_BOTTOM * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::RowResize);
+                }
+            }
+            else if BoundingRect
+                    ::from_position_size(self.position, self.title_bar_rect.max)
+                    .is_point_inside(cursor_pos)
+            {
+                self.flags |= Self::HELD * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            }
+            else if override_cursor {
+                nox.set_cursor(CursorIcon::Default);
+            }
+        }
+        if main_rect_max != self.main_rect.max {
+            self.main_rect.max = main_rect_max;
+            self.flags |= Self::REQUIRES_TRIANGULATION;
+        }
+        let mut title_bar_rect = self.title_bar_rect;
+        title_bar_rect.max.x = self.main_rect.max.x;
+        title_bar_rect.max.y = style.calc_text_box_height(title_text.font_height);
+        if self.title_bar_rect != title_bar_rect {
+            self.title_bar_rect = title_bar_rect;
+            self.flags |= Self::REQUIRES_TRIANGULATION;
         }
         cursor_in_this_window
     }
@@ -138,10 +327,21 @@ impl Window {
             self.main_rect_draw_info = DrawInfo {
                 first_index: 0,
                 index_count: indices_usize.len() as u32,
-                vertex_offset: 0,
                 ..Default::default()
             };
-            self.flags &= !Self::REQUIRES_TRIANGULATION;
+            points.clear();
+            let mut title_bar_rect_draw_info = DrawInfo {
+                first_index: indices_usize.len() as u32,
+                ..Default::default()
+            };
+            self.title_bar_rect.to_points_partial_round(true, true, false, false,
+                &mut |p| { points.push(p.into()); }
+            );
+            if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+                self.flags &= !Self::RENDERABLE;
+            }
+            title_bar_rect_draw_info.index_count = indices_usize.len() as u32 - title_bar_rect_draw_info.first_index;
+            self.title_bar_rect_draw_info = title_bar_rect_draw_info;
             for id in &self.active_sliders {
                 let slider = self.sliders.get_mut(id).unwrap();
                 slider.triangulate(&mut points,
@@ -159,6 +359,7 @@ impl Window {
                 );
             }
             self.indices.append_map(&indices_usize, |&i| i as u32);
+            self.flags &= !Self::REQUIRES_TRIANGULATION;
         }
     }
 
@@ -195,13 +396,20 @@ impl Window {
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total);
         }
         render_commands.bind_pipeline(base_pipeline)?;
-        if self.cursor_in_window() {
+        let any_resize = self.any_resize();
+        if self.cursor_in_window() || any_resize {
             let pc_vertex = style.calc_outline_push_constant(
                 self.position,
                 self.main_rect.max,
                 inv_aspect_ratio
             );
-            let pc_fragment = push_constants_fragment(style.text_col);
+            let pc_fragment = push_constants_fragment(
+                if self.held() || any_resize {
+                    style.outline_col_hl
+                } else {
+                    style.outline_col
+                }
+            );
             render_commands.push_constants(|pc| unsafe {
                 if pc.stage == ShaderStage::Vertex {
                     value_as_bytes(&pc_vertex).unwrap()
@@ -251,9 +459,31 @@ impl Window {
                 offset: idx_mem.offset,
             },
         )?;
+        let pc_fragment = push_constants_fragment(style.window_title_bar_col);
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                value_as_bytes(&pc_vertex).unwrap()
+            } else {
+                value_as_bytes(&pc_fragment).unwrap()
+            }
+        })?;
+        render_commands.draw_indexed(
+            self.title_bar_rect_draw_info,
+            [
+                DrawBufferInfo {
+                    id: vertex_buffer.id(),
+                    offset: vert_mem.offset,
+                },
+                no_offset,
+            ],
+            DrawBufferInfo {
+                id: index_buffer.id(),
+                offset: idx_mem.offset,
+            },
+        )?;
         let pc_vertex = push_constants_vertex(
-            self.position + style.item_pad_outer,
-            vec2(style.font_scale_header, style.font_scale_header),
+            self.position + vec2(style.item_pad_outer.x, style.item_pad_inner.y),
+            vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio,
         );
         let pc_fragment = push_constants_fragment(style.text_col);
@@ -309,7 +539,7 @@ impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
             0.0,
         ).unwrap_or_default());
         Self {
-            widget_y: style.calc_text_height_header(title_text.font_height) + style.item_pad_outer.y,
+            widget_y: style.calc_text_box_height(title_text.font_height) + style.item_pad_inner.y,
             window,
             style,
             text_renderer,
@@ -335,5 +565,14 @@ impl<'a, 'b, FontHash> WindowContext<'a, 'b, FontHash>
         slider.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += slider.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
         self
+    }
+}
+
+impl<'a, 'b, FontHash> Drop for WindowContext<'a, 'b, FontHash>
+    where 
+        FontHash: Clone + Eq + Hash,
+{
+    fn drop(&mut self) {
+        self.window.min_height = self.widget_y + self.style.item_pad_outer.y
     }
 }

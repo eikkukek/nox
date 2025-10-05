@@ -137,6 +137,69 @@ impl Rect {
     }
 
     #[inline]
+    pub fn to_points_partial_round(
+        self,
+        round_min: bool,
+        round_max_x_min_y: bool,
+        round_max: bool,
+        round_min_x_max_y: bool,
+        collect: &mut impl FnMut(Vec2),
+    )
+    {
+        let (min, max) = (self.min, self.max);
+        let radius = self.rounding;
+        if radius.abs() < f32::EPSILON {
+            collect(min);
+            collect(vec2(max.x, min.y));
+            collect(max);
+            collect(vec2(min.x, max.y));
+            return
+        }
+        let magic = RECT_ROUND_MAGIC * radius;
+        let tolerance = radius * 0.001;
+
+        if round_min {
+            let a = vec2(min.x, min.y + radius);
+            let b = vec2(min.x + radius, min.y);
+            let p = a - vec2(0.0, magic);
+            let q = b - vec2(magic, 0.0);
+            cubic(a, p, q, b).flatten(tolerance, collect);
+        } else {
+            collect(min);
+        }
+        
+        if round_max_x_min_y {
+            let a = vec2(max.x - radius, min.y);
+            let b = vec2(max.x, min.y + radius);
+            let p = a + vec2(magic, 0.0);
+            let q = b - vec2(0.0, magic);
+            cubic(a, p, q, b).flatten(tolerance, collect); 
+        } else {
+            collect(vec2(max.x, min.y));
+        }
+
+        if round_max {
+            let a = vec2(max.x, max.y - radius);
+            let b = vec2(max.x - radius, max.y);
+            let p = a + vec2(0.0, magic);
+            let q = b + vec2(magic, 0.0);
+            cubic(a, p, q, b).flatten(tolerance, collect);
+        } else {
+            collect(max);
+        }
+
+        if round_min_x_max_y {
+            let a = vec2(min.x + radius, max.y);
+            let b = vec2(min.x, max.y - radius);
+            let p = a - vec2(magic, 0.0);
+            let q = b + vec2(0.0, magic);
+            cubic(a, p, q, b).flatten(tolerance, collect);
+        } else {
+            collect(vec2(min.x, max.y));
+        }
+    }
+
+    #[inline]
     pub fn to_points_cw(
         self,
         collect: &mut impl FnMut(Vec2),

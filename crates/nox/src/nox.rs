@@ -17,6 +17,7 @@ use nox_mem::string_types::ArrayString;
 
 pub use winit::keyboard::KeyCode;
 pub use winit::event::MouseButton;
+pub use winit::window::CursorIcon;
 
 pub use crate::renderer;
 
@@ -86,12 +87,20 @@ impl<'a, I: Interface> Nox<'a, I>
         event_loop.run_app(&mut self).expect("failed to run event loop");
     }
 
+    #[inline(always)]
     pub fn gpu_name(&mut self) -> renderer::DeviceName {
         self.renderer
             .as_ref()
             .unwrap()
             .device_info()
             .device_name().clone()
+    }
+
+    #[inline(always)]
+    pub fn set_cursor(&self, cursor: CursorIcon) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_cursor(cursor);
+        }
     }
 
     #[inline(always)]
@@ -137,7 +146,7 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn is_key_pressed(&self, key: KeyCode) -> bool {
+    pub fn was_key_pressed(&self, key: KeyCode) -> bool {
         self.physical_keys
             .get(&PhysicalKey::Code(key))
             .map(|&v| v)
@@ -146,7 +155,7 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn is_key_released(&self, key: KeyCode) -> bool {
+    pub fn was_key_released(&self, key: KeyCode) -> bool {
         self.physical_keys
             .get(&PhysicalKey::Code(key))
             .copied()
@@ -173,7 +182,7 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn is_mouse_button_pressed(&self, button: MouseButton) -> bool {
+    pub fn was_mouse_button_pressed(&self, button: MouseButton) -> bool {
         self.mouse_buttons
             .get(&button)
             .copied()
@@ -182,7 +191,7 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn is_mouse_button_released(&self, button: MouseButton) -> bool {
+    pub fn was_mouse_button_released(&self, button: MouseButton) -> bool {
         self.mouse_buttons
             .get(&button)
             .copied()

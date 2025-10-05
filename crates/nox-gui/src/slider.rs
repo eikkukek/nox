@@ -134,7 +134,7 @@ impl Slider
     {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
-        style.calc_text_size_regular(vec2(title_text.text_width, title_text.font_height))
+        style.calc_text_size(vec2(title_text.text_width, title_text.font_height))
     }
 
     #[inline(always)]
@@ -145,21 +145,20 @@ impl Slider
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         font: &FontHash,
         window_width: f32,
-        cursor_in_this_window: bool,
         cursor_pos: Vec2,
-    ) -> (bool, f32)
+        cursor_in_this_window: bool,
+    ) -> (bool, bool, f32)
         where 
             I: Interface,
             FontHash: Clone + Eq + Hash,
     {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(self.title.as_str(), font)], false, 0.0).unwrap_or_default());
-        let text_width = style.calc_text_width_regular(title_text.text_width);
+        let text_width = style.calc_text_width(title_text.text_width);
         let text_box_height = style.calc_text_box_height(title_text.font_height);
         let mut width = text_width + style.item_pad_outer.x * 3.0;
-        let mut min_window_width = window_width;
-        if window_width < width + style.slider_min_width {
-            min_window_width = width + style.slider_min_width;
+        let min_window_width = width + style.slider_min_width;
+        if window_width < min_window_width {
             width = style.slider_min_width;
         } else {
             width = window_width - width;
@@ -180,13 +179,15 @@ impl Slider
             ),
             style.rounding,
         );
-        if slider_rect != self.slider_rect || handle_rect != self.handle_rect {
+        let requires_triangulation = slider_rect != self.slider_rect || handle_rect != self.handle_rect;
+        if requires_triangulation {
             self.slider_rect = slider_rect;
             self.handle_rect = handle_rect;
-            return (true, min_window_width)
         }
+        let mut cursor_in_slider = false;
         self.falgs &= !Self::CURSOR_IN_SLIDER;
         if self.held() {
+            cursor_in_slider = true;
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.falgs &= !Self::HELD;
             } else {
@@ -197,16 +198,16 @@ impl Slider
                 self.slider_pos(style, text_width, text_box_height),
                 self.slider_rect.size(),
             );
-            let cursor_in_slider = bounding_rect.is_point_inside(cursor_pos);
+            cursor_in_slider = bounding_rect.is_point_inside(cursor_pos);
             self.falgs |= Self::CURSOR_IN_SLIDER * cursor_in_slider as u8;
             if cursor_in_slider {
-                if nox.is_mouse_button_pressed(MouseButton::Left) {
+                if nox.was_mouse_button_pressed(MouseButton::Left) {
                     self.falgs |= Self::HELD;
                     self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, text_box_height));
                 }
             }
         }
-        (false, min_window_width)
+        (requires_triangulation, cursor_in_slider, min_window_width)
     }
 
     #[inline(always)]
@@ -242,16 +243,16 @@ impl Slider
         let vertex_buffer_id = vertex_buffer.id();
         let index_buffer_id = index_buffer.id();
         let title_text = self.title_text.as_ref().unwrap();
-        let text_width = style.calc_text_width_regular(title_text.text_width);
+        let text_width = style.calc_text_width(title_text.text_width);
         let text_box_height = style.calc_text_box_height(title_text.font_height);
         let slider_pos = self.slider_pos(style, text_width, text_box_height);
         if self.cursor_in_slider() || self.held() {
             let pc_vertex = style.calc_outline_push_constant(slider_pos, self.slider_rect.max, inv_aspect_ratio);
             let pc_fragment = push_constants_fragment(
                 if self.held() {
-                    style.widget_outline_col_hl
+                    style.outline_col_hl
                 } else {
-                    style.widget_outline_col
+                    style.outline_col
                 }
             );
             render_commands.push_constants(|pc| unsafe {
@@ -299,7 +300,7 @@ impl Slider
                 offset: window_index_offset,
             },
         )?;
-        pc_fragment.color = style.slider_handle_col;
+        pc_fragment.color = style.handle_col;
         pc_vertex.vert_off = self.handle_pos(slider_pos);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -323,8 +324,8 @@ impl Slider
             },
         )?;
         let pc_vertex = push_constants_vertex(
-            vec2(self.position.x, self.position.y + (text_box_height - title_text.font_height * style.font_scale_regular) / 2.0),
-            vec2(style.font_scale_regular, style.font_scale_regular),
+            vec2(self.position.x, self.position.y + (text_box_height - title_text.font_height * style.font_scale) / 2.0),
+            vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio,
         );
         let pc_fragment = push_constants_fragment(style.text_col);

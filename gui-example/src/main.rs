@@ -104,7 +104,7 @@ impl<'a> Interface for Example<'a> {
                         None,
                         AttachmentLoadOp::Clear,
                         AttachmentStoreOp::Store,
-                        Default::default()
+                        ClearValue::Color([0.05, 0.01, 0.01, 1.0].into()),
                     ));
             })?;
         frame_graph.set_render_image(output_resolve, None)?;
