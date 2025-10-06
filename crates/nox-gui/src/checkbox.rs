@@ -19,33 +19,38 @@ use nox_geom::{
     *,
 };
 
-pub(crate) struct Button<I, FontHash> {
+pub(crate) struct Checkbox<I, FontHash> {
     title: CompactString,
     title_text: Option<RenderedText>,
+    checkbox_text: Option<RenderedText>,
     rect: Rect,
     position: Vec2,
     rect_draw_info: DrawInfo,
     flags: u32,
-    _marker: PhantomData<(I, FontHash)>,
+    _marker: PhantomData<(I, FontHash)>
 }
 
-impl<I, FontHash> Button<I, FontHash> {
+impl<I, FontHash> Checkbox<I, FontHash> {
 
     const HELD: u32 = 0x1;
     const PRESSED: u32 = 0x2;
-    const CURSOR_IN_BUTTON: u32 = 0x4;
+    const CURSOR_IN_CHECKBOX: u32 = 0x4;
+    const CHECKED: u32 = 0x8;
 
+    #[inline(always)]
     pub fn new(
-        title: &str
+        title: &str,
+        checked: bool,
     ) -> Self
     {
         Self {
             title: title.into(),
             title_text: Default::default(),
+            checkbox_text: Default::default(),
             rect: Default::default(),
             position: Default::default(),
             rect_draw_info: Default::default(),
-            flags: 0,
+            flags: Self::CHECKED * checked as u32,
             _marker: PhantomData,
         }
     }
@@ -61,15 +66,26 @@ impl<I, FontHash> Button<I, FontHash> {
     }
 
     #[inline(always)]
-    pub fn cursor_in_button(&self) -> bool {
-        self.flags & Self::CURSOR_IN_BUTTON == Self::CURSOR_IN_BUTTON
+    pub fn cursor_in_checkbox(&self) -> bool {
+        self.flags & Self::CURSOR_IN_CHECKBOX == Self::CURSOR_IN_CHECKBOX
+    }
+
+    #[inline(always)]
+    pub fn checked(&self) -> bool {
+        self.flags & Self::CHECKED == Self::CHECKED
+    }
+
+    #[inline(always)]
+    pub fn set_checked(&mut self, value: bool) {
+        self.flags &= !Self::CHECKED;
+        self.flags |= Self::CHECKED * value as u32;
     }
 }
 
-impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
-    where 
+impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
+    where
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: Clone + Eq + Hash
 {
 
     #[inline(always)]
@@ -80,17 +96,23 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
     {
         self.position = position;
     }
-    
+
     #[inline(always)]
     fn calc_size(
         &mut self,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-    ) -> Vec2 {
+    ) -> Vec2
+    {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        style.calc_text_size(vec2(title_text.text_width, title_text.font_height))
+        let checkbox_text = self.checkbox_text.get_or_insert(text_renderer
+            .render(&[text_segment(&style.checkbox_symbol.to_string(), &style.font_regular)], false, 0.0).unwrap_or_default()
+        );
+        let title_size = style.calc_text_size(vec2(title_text.text_width, title_text.font_height));
+        let checkbox_size = style.calc_text_box_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
+        vec2(title_size.x + checkbox_size.x + style.item_pad_outer.x, checkbox_size.y)
     }
 
     fn update(
@@ -105,38 +127,44 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
     {
         self.flags &= !Self::PRESSED;
         let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
+            .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        let rect_size = style.calc_text_box_size(vec2(title_text.text_width, title_text.font_height));
+        let checkbox_text = self.checkbox_text.get_or_insert(text_renderer
+            .render(&[text_segment(&style.checkbox_symbol.to_string(), &style.font_regular)], false, 0.0).unwrap_or_default()
+        );
+        let rect_size = style.calc_text_box_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
+        let max = rect_size.x.max(rect_size.y);
+        let rect_size = vec2(max, max);
         let rect = rect(Default::default(), rect_size, style.rounding);
         let requires_triangulation = self.rect != rect;
         self.rect = rect;
         let mut cursor_in_widget = false;
-        self.flags &= !Self::CURSOR_IN_BUTTON;
+        self.flags &= !Self::CURSOR_IN_CHECKBOX;
+        let pos = self.position + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
         if self.held() {
             cursor_in_widget = true;
             if nox.was_mouse_button_released(MouseButton::Left) {
-                let bounding_rect = BoundingRect::from_position_size(self.position, self.rect.max);
+                let bounding_rect = BoundingRect::from_position_size(pos, self.rect.max);
                 self.flags |= Self::PRESSED * bounding_rect.is_point_inside(cursor_pos) as u32;
                 self.flags &= !Self::HELD;
             }
         } else if cursor_in_this_window {
             let bounding_rect = BoundingRect::from_position_size(
-                self.position,
-                self.rect.max
+                pos,
+                self.rect.max,
             );
             cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
             if cursor_in_widget {
-                self.flags |= Self::CURSOR_IN_BUTTON;
+                self.flags |= Self::CURSOR_IN_CHECKBOX;
                 if nox.was_mouse_button_pressed(MouseButton::Left) {
                     self.flags |= Self::HELD;
                 }
             }
         }
         UpdateResult {
-            min_widget_width: rect_size.x,
+            min_widget_width: self.calc_size(style, text_renderer).x,
             requires_triangulation,
-            cursor_in_widget,
+            cursor_in_widget
         }
     }
 
@@ -167,9 +195,14 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         let vertex_buffer_id = vertex_buffer.id();
         let index_buffer_id = index_buffer.id();
         let title_text = self.title_text.as_ref().unwrap();
-        let pos = self.position;
-        if self.cursor_in_button() || self.held() {
-            let pc_vertex = style.calc_outline_push_constant(pos, self.rect.max, inv_aspect_ratio);
+        let checkbox_text = self.checkbox_text.as_ref().unwrap();
+        let checkbox_pos = self.position + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
+        if self.cursor_in_checkbox() || self.held() {
+            let pc_vertex = style.calc_outline_push_constant(
+                checkbox_pos,
+                self.rect.max,
+                inv_aspect_ratio
+            );
             let pc_fragment = push_constants_fragment(
                 if self.held() {
                     style.outline_col_hl
@@ -193,7 +226,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
                 DrawBufferInfo::new(index_buffer_id, window_index_offset),
             )?;
         }
-        let pc_vertex = push_constants_vertex(pos, vec2(1.0, 1.0), inv_aspect_ratio);
+        let pc_vertex = push_constants_vertex(checkbox_pos, vec2(1.0, 1.0), inv_aspect_ratio);
         let pc_fragment = push_constants_fragment(style.widget_bg_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -206,12 +239,12 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
             self.rect_draw_info,
             [
                 DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
-                no_offset,
+                no_offset
             ],
             DrawBufferInfo::new(index_buffer_id, window_index_offset),
         )?;
         let pc_vertex = push_constants_vertex(
-            pos + style.item_pad_inner,
+            self.position + vec2(0.0, style.item_pad_inner.y),
             vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio
         );
@@ -224,6 +257,22 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
             }
         })?;
         render_text(title_text, render_commands, vertex_buffer, index_buffer)?;
+        if self.checked() {
+            let size = style.calc_text_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
+            let pc_vertex = push_constants_vertex(
+                checkbox_pos + self.rect.max * 0.5 - size * 0.5,
+                vec2(style.font_scale, style.font_scale),
+                inv_aspect_ratio,
+            );
+            render_commands.push_constants(|pc| unsafe {
+                if pc.stage == ShaderStage::Vertex {
+                    pc_vertex.as_bytes()
+                } else {
+                    pc_fragment.as_bytes()
+                }
+            })?;
+            render_text(checkbox_text, render_commands, vertex_buffer, index_buffer)?;
+        }
         Ok(())
     }
 }

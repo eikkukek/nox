@@ -1,16 +1,14 @@
 use core::{
     fmt::Display,
     hash::Hash,
+    marker::PhantomData,
 };
 
 use compact_str::CompactString;
 
 use nox::{
+    mem::vec_types::{GlobalVec, Vector},
     *,
-    mem::{
-        vec_types::{GlobalVec, Vector},
-        value_as_bytes,
-    },
 };
 
 use nox_font::{VertexTextRenderer, text_segment, RenderedText};
@@ -29,7 +27,7 @@ pub trait Sliderable: Copy + Display {
     fn calc_t(&self, min: Self, max: Self) -> f32;
 }
 
-pub(crate) struct Slider
+pub(crate) struct Slider<I, FontHash>
 {
     title: CompactString,
     title_text: Option<RenderedText>,
@@ -40,9 +38,10 @@ pub(crate) struct Slider
     slider_rect_draw_info: DrawInfo,
     handle_rect_draw_info: DrawInfo,
     falgs: u32,
+    _marker: PhantomData<(I, FontHash)>,
 }
 
-impl Slider
+impl<I, FontHash> Slider<I, FontHash>
 {
 
     const HELD: u32 = 0x1;
@@ -64,20 +63,12 @@ impl Slider
             slider_rect_draw_info: Default::default(),
             handle_rect_draw_info: Default::default(),
             falgs: 0,
+            _marker: PhantomData,
         }
     }
 
     #[inline(always)]
-    pub fn set_position(
-        &mut self,
-        position: Vec2,
-    )
-    {
-        self.position = position;
-    }
-
-    #[inline(always)]
-    fn slider_pos<FontHash>(
+    fn slider_pos(
         &self,
         style: &Style<FontHash>,
         text_width: f32,
@@ -122,24 +113,36 @@ impl Slider
     #[inline(always)]
     pub fn cursor_in_slider(&self) -> bool {
         self.falgs & Self::CURSOR_IN_SLIDER == Self::CURSOR_IN_SLIDER
-    }
+    }  
+}
+
+impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
+    where 
+        I: Interface,
+        FontHash: Clone + Eq + Hash,
+{
 
     #[inline(always)]
-    pub fn calc_size<FontHash>(
+    fn set_position(
+        &mut self,
+        position: Vec2,
+    )
+    {
+        self.position = position;
+    }
+
+    fn calc_size(
         &mut self,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
     ) -> Vec2
-        where
-            FontHash: Clone + Eq + Hash, 
     {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
         style.calc_text_size(vec2(title_text.text_width, title_text.font_height))
     }
 
-    #[inline(always)]
-    pub fn update<I, FontHash>(
+    fn update(
         &mut self,
         nox: &Nox<I>,
         style: &Style<FontHash>,
@@ -147,16 +150,16 @@ impl Slider
         window_width: f32,
         cursor_pos: Vec2,
         cursor_in_this_window: bool,
-    ) -> (bool, bool, f32)
-        where 
+    ) -> UpdateResult
+        where
             I: Interface,
-            FontHash: Clone + Eq + Hash,
+            FontHash: Clone + Eq + Hash
     {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
         let text_width = style.calc_text_width(title_text.text_width);
         let text_box_height = style.calc_text_box_height(title_text.font_height);
-        let mut width = text_width + style.item_pad_outer.x * 3.0;
+        let mut width = text_width + style.item_pad_outer.x + style.item_pad_outer.x + style.item_pad_outer.x;
         let min_window_width = width + style.slider_min_width;
         if window_width < min_window_width {
             width = style.slider_min_width;
@@ -184,10 +187,10 @@ impl Slider
             self.slider_rect = slider_rect;
             self.handle_rect = handle_rect;
         }
-        let mut cursor_in_slider = false;
+        let mut cursor_in_widget = false;
         self.falgs &= !Self::CURSOR_IN_SLIDER;
         if self.held() {
-            cursor_in_slider = true;
+            cursor_in_widget = true;
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.falgs &= !Self::HELD;
             } else {
@@ -198,8 +201,8 @@ impl Slider
                 self.slider_pos(style, text_width, text_box_height),
                 self.slider_rect.max,
             );
-            cursor_in_slider = bounding_rect.is_point_inside(cursor_pos);
-            if cursor_in_slider {
+            cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
+            if cursor_in_widget {
                 self.falgs |= Self::CURSOR_IN_SLIDER;
                 if nox.was_mouse_button_pressed(MouseButton::Left) {
                     self.falgs |= Self::HELD;
@@ -207,17 +210,18 @@ impl Slider
                 }
             }
         }
-        (requires_triangulation, cursor_in_slider, min_window_width)
+        UpdateResult {
+            requires_triangulation,
+            cursor_in_widget,
+            min_widget_width: min_window_width - style.item_pad_outer.x - style.item_pad_outer.x,
+        }
     }
 
-    #[inline(always)]
-    pub fn triangulate<F>(
+    fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut F,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> DrawInfo,
     )
-        where
-            F: FnMut(&[[f32; 2]]) -> DrawInfo
     {
         points.clear();
         self.slider_rect.to_points(&mut |p| { points.push(p.into()); });
@@ -227,8 +231,8 @@ impl Slider
         self.handle_rect_draw_info = tri(&points);
     }
 
-    #[inline(always)]
-    pub fn render_commands<FontHash>(
+
+    fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
@@ -257,42 +261,33 @@ impl Slider
             );
             render_commands.push_constants(|pc| unsafe {
                 if pc.stage == ShaderStage::Vertex {
-                    value_as_bytes(&pc_vertex).unwrap()
+                    pc_vertex.as_bytes()
                 } else {
-                    value_as_bytes(&pc_fragment).unwrap()
+                    pc_fragment.as_bytes()
                 }
             })?;
             render_commands.draw_indexed(
                 self.slider_rect_draw_info,
                 [
-                    DrawBufferInfo {
-                        id: vertex_buffer_id,
-                        offset: window_vertex_offset,
-                    },
+                    DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
                     no_offset,
                 ],
-                DrawBufferInfo {
-                    id: index_buffer_id,
-                    offset: window_index_offset,
-                },
+                DrawBufferInfo::new(index_buffer_id, window_index_offset),
             )?;
         }
         let mut pc_vertex = push_constants_vertex(slider_pos, vec2(1.0, 1.0), inv_aspect_ratio);
         let mut pc_fragment = push_constants_fragment(style.widget_bg_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
-                value_as_bytes(&pc_vertex).unwrap()
+                pc_vertex.as_bytes()
             } else {
-                value_as_bytes(&pc_fragment).unwrap()
+                pc_fragment.as_bytes()
             }
         })?;
         render_commands.draw_indexed(
             self.slider_rect_draw_info,
             [
-                DrawBufferInfo {
-                    id: vertex_buffer_id,
-                    offset: window_vertex_offset,
-                },
+                DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
                 no_offset,
             ],
             DrawBufferInfo {
@@ -304,24 +299,18 @@ impl Slider
         pc_vertex.vert_off = self.handle_pos(slider_pos);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
-                value_as_bytes(&pc_vertex).unwrap()
+                pc_vertex.as_bytes()
             } else {
-                value_as_bytes(&pc_fragment).unwrap()
+                pc_fragment.as_bytes()
             }
         })?;
         render_commands.draw_indexed(
             self.handle_rect_draw_info,
             [
-                DrawBufferInfo {
-                    id: vertex_buffer_id,
-                    offset: window_vertex_offset,
-                },
+                DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
                 no_offset,
             ],
-            DrawBufferInfo {
-                id: index_buffer_id,
-                offset: window_index_offset,
-            },
+            DrawBufferInfo::new(index_buffer_id, window_index_offset),
         )?;
         let pc_vertex = push_constants_vertex(
             vec2(self.position.x, self.position.y + (text_box_height - title_text.font_height * style.font_scale) / 2.0),
@@ -331,9 +320,9 @@ impl Slider
         let pc_fragment = push_constants_fragment(style.text_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
-                value_as_bytes(&pc_vertex).unwrap()
+                pc_vertex.as_bytes()
             } else {
-                value_as_bytes(&pc_fragment).unwrap()
+                pc_fragment.as_bytes()
             }
         })?;
         render_text(title_text, render_commands, vertex_buffer, index_buffer)?;

@@ -26,13 +26,14 @@ struct Pipelines {
     base_shaders: Option<[ShaderId; 2]>,
 }
 
-pub struct Workspace<'a, FontHash>
+pub struct Workspace<'a, I, FontHash>
     where
-        FontHash: Clone + PartialEq + Eq + Hash
+        I: Interface,
+        FontHash: Clone + PartialEq + Eq + Hash,
 {
     text_renderer: VertexTextRenderer<'a, FontHash>,
     style: Style<FontHash>,
-    windows: FxHashMap<u32, Window>,
+    windows: FxHashMap<u32, Window<I, FontHash>>,
     active_windows: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
@@ -42,8 +43,9 @@ pub struct Workspace<'a, FontHash>
     inv_aspect_ratio: f32,
 }
 
-impl<'a, FontHash> Workspace<'a, FontHash>
+impl<'a, I, FontHash> Workspace<'a, I, FontHash>
     where
+        I: Interface,
         FontHash: Clone + PartialEq + Eq + Hash
 {
 
@@ -117,7 +119,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         mut f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(WindowContext<FontHash>) -> Result<(), Error>
+            F: FnMut(WindowContext<I, FontHash>) -> Result<(), Error>
     {
         let window = self.windows.entry(id).or_insert(Window::new(
             title,
@@ -130,7 +132,7 @@ impl<'a, FontHash> Workspace<'a, FontHash>
         Ok(())
     }
 
-    pub fn end<I: Interface>(
+    pub fn end(
         &mut self,
         nox: &Nox<'_, I>,
     )

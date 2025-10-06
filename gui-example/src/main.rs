@@ -4,20 +4,24 @@ use nox_gui::{
 };
 
 struct Example<'a> {
-    workspace: Workspace<'a, &'static str>,
+    workspace: Workspace<'a, Self, &'static str>,
     output_format: ColorFormat,
     aspect_ratio: f32,
     slider_value: f32,
+    slider_value_int: u32,
+    checkbox_checked: bool,
 }
 
 impl<'a> Example<'a> {
 
-    pub fn new(workspace: Workspace<'a, &'static str>) -> Self {
+    pub fn new(workspace: Workspace<'a, Self, &'static str>) -> Self {
         Self {
             workspace,
             output_format: Default::default(),
             aspect_ratio: 1.0,
             slider_value: 0.0,
+            slider_value_int: 0,
+            checkbox_checked: false,
         }
     }
 }
@@ -58,8 +62,11 @@ impl<'a> Interface for Example<'a> {
     ) -> Result<(), Error> {
         self.workspace.update_window(0, "Widgets", [0.5, 0.5], [0.0, 0.0],
             |mut win| {
-                win.update_slider(0, "Slider 1", &mut self.slider_value, 0.0, 100.0);
-                win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0);
+                if win.update_checkbox(0, "Show sliders", &mut self.checkbox_checked) {
+                    win.update_slider(0, "Slider 1", &mut self.slider_value, 0.0, 100.0);
+                    win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0);
+                    win.update_slider(2, "Slider 3", &mut self.slider_value_int, 0, 10);
+                }
                 if win.update_button(0, "Button") {
                     println!("hello");
                 }

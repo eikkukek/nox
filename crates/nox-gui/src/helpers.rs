@@ -41,19 +41,10 @@ pub fn render_text(
                 ..Default::default()
             },
             [
-                DrawBufferInfo {
-                    id: vertex_buffer_id,
-                    offset: vert_mem.offset,
-                },
-                DrawBufferInfo {
-                    id: vertex_buffer_id,
-                    offset: vert_off_mem.offset,
-                },
+                DrawBufferInfo::new(vertex_buffer_id, vert_mem.offset),
+                DrawBufferInfo::new(vertex_buffer_id, vert_off_mem.offset),
             ],
-            DrawBufferInfo {
-                id: index_buffer_id,
-                offset: idx_mem.offset,
-            }
+            DrawBufferInfo::new(index_buffer_id, idx_mem.offset),
         )?;
     }
     Ok(())

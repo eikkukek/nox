@@ -1,4 +1,7 @@
-use nox::*;
+use nox::{
+    mem::value_as_bytes,
+    *,
+};
 
 use crate::*;
 
@@ -46,6 +49,15 @@ pub fn push_constants_vertex(
     }
 }
 
+impl PushConstantsVertex {
+
+    pub unsafe fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            value_as_bytes(self).unwrap()
+        }
+    }
+}
+
 #[repr(C)]
 pub struct PushConstantsFragment {
     pub color: ColorRGBA,
@@ -57,6 +69,15 @@ pub fn push_constants_fragment(
 {
     PushConstantsFragment {
         color,
+    }
+}
+
+impl PushConstantsFragment {
+
+    pub unsafe fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            value_as_bytes(self).unwrap()
+        }
     }
 }
 
