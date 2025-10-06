@@ -112,7 +112,9 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
         );
         let title_size = style.calc_text_size(vec2(title_text.text_width, title_text.font_height));
         let checkbox_size = style.calc_text_box_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
-        vec2(title_size.x + checkbox_size.x + style.item_pad_outer.x, checkbox_size.y)
+        let max = checkbox_size.x.max(checkbox_size.y);
+        let checkbox_size = vec2(max, max);
+        checkbox_size + vec2(title_size.x + style.item_pad_outer.x, 0.0)
     }
 
     fn update(
@@ -133,8 +135,8 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
             .render(&[text_segment(&style.checkbox_symbol.to_string(), &style.font_regular)], false, 0.0).unwrap_or_default()
         );
         let rect_size = style.calc_text_box_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
-        let max = rect_size.x.max(rect_size.y);
-        let rect_size = vec2(max, max);
+        let rect_max_size = rect_size.x.max(rect_size.y);
+        let rect_size = vec2(rect_max_size, rect_max_size);
         let rect = rect(Default::default(), rect_size, style.rounding);
         let requires_triangulation = self.rect != rect;
         self.rect = rect;

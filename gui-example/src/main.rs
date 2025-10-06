@@ -67,7 +67,7 @@ impl<'a> Interface for Example<'a> {
                     win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0);
                     win.update_slider(2, "Slider 3", &mut self.slider_value_int, 0, 10);
                 }
-                if win.update_button(0, "Button") {
+                if win.update_button(0, "Print \"hello\"") {
                     println!("hello");
                 }
                 Ok(())

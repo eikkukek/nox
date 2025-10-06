@@ -37,10 +37,11 @@ pub(crate) struct Window<I, FontHash>
     title_text: Option<RenderedText>,
     vertices: Option<GlobalVec<Vertex>>,
     indices: GlobalVec<u32>,
-    buttons: FxHashMap<u32, Button<I, FontHash>>,
-    sliders: FxHashMap<u32, Slider<I, FontHash>>,
-    checkboxs: FxHashMap<u32, Checkbox<I, FontHash>>,
+    buttons: FxHashMap<u32, (u64, Button<I, FontHash>)>,
+    sliders: FxHashMap<u32, (u64, Slider<I, FontHash>)>,
+    checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
+    last_triangulation: u64,
     min_height: f32,
     flags: u32,
 }
@@ -83,6 +84,7 @@ impl<I, FontHash> Window<I, FontHash>
             sliders: FxHashMap::default(),
             checkboxs: FxHashMap::default(),
             active_widgets: Some(Default::default()),
+            last_triangulation: 0,
             min_height: 0.0,
             flags: Self::REQUIRES_TRIANGULATION,
         }
@@ -137,20 +139,20 @@ impl<I, FontHash> Window<I, FontHash>
     }
 
     #[inline(always)]
-    fn get_widget(&self, widget: ActiveWidget) -> &dyn Widget<I, FontHash> {
+    fn get_widget(&self, widget: ActiveWidget) -> (u64, &dyn Widget<I, FontHash>) {
         match widget {
-            ActiveWidget::Slider(id) => self.sliders.get(&id).unwrap(),
-            ActiveWidget::Button(id) => self.buttons.get(&id).unwrap(),
-            ActiveWidget::Checkbox(id) => self.checkboxs.get(&id).unwrap(),
+            ActiveWidget::Slider(id) => self.sliders.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
+            ActiveWidget::Button(id) => self.buttons.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
+            ActiveWidget::Checkbox(id) => self.checkboxs.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
         }
     }
 
     #[inline(always)]
-    fn get_widget_mut(&mut self, widget: ActiveWidget) -> &mut dyn Widget<I, FontHash> {
+    fn get_widget_mut(&mut self, widget: ActiveWidget) -> (&mut u64, &mut dyn Widget<I, FontHash>) {
         match widget {
-            ActiveWidget::Slider(id) => self.sliders.get_mut(&id).unwrap(),
-            ActiveWidget::Button(id) => self.buttons.get_mut(&id).unwrap(),
-            ActiveWidget::Checkbox(id) => self.checkboxs.get_mut(&id).unwrap(),
+            ActiveWidget::Slider(id) => self.sliders.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
+            ActiveWidget::Button(id) => self.buttons.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
+            ActiveWidget::Checkbox(id) => self.checkboxs.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
         }
     }
 
@@ -181,7 +183,7 @@ impl<I, FontHash> Window<I, FontHash>
         let window_width = self.main_rect.max.x;
         let active_widgets = self.active_widgets.take().unwrap();
         for &widget in &active_widgets {
-            let widget = self.get_widget_mut(widget);
+            let (_, widget) = self.get_widget_mut(widget);
             let UpdateResult {
                 min_widget_width,
                 requires_triangulation,
@@ -334,6 +336,9 @@ impl<I, FontHash> Window<I, FontHash>
                 nox.set_cursor(CursorIcon::Default);
             }
         }
+        if main_rect_max.y < self.min_height {
+            main_rect_max.y = self.min_height;
+        }
         if main_rect_max != self.main_rect.max {
             self.main_rect.max = main_rect_max;
             self.flags |= Self::REQUIRES_TRIANGULATION;
@@ -351,6 +356,7 @@ impl<I, FontHash> Window<I, FontHash>
     #[inline(always)]
     pub(crate) fn triangulate(&mut self) {
         if self.requires_triangulation() {
+            let new_triangulation = self.last_triangulation + 1;
             self.flags |= Self::RENDERABLE;
             let mut vertices = self.vertices.take().unwrap();
             vertices.clear();
@@ -382,7 +388,8 @@ impl<I, FontHash> Window<I, FontHash>
             let active_widgets = self.active_widgets.take().unwrap();
             let mut flags = self.flags;
             for &widget in &active_widgets  {
-                let widget = self.get_widget_mut(widget);
+                let (last_triangulation, widget) = self.get_widget_mut(widget);
+                *last_triangulation = new_triangulation;
                 widget.triangulate(&mut points, &mut |points: &[[f32; 2]]| {
                     let mut draw_info = DrawInfo {
                         first_index: indices_usize.len() as u32,
@@ -400,6 +407,7 @@ impl<I, FontHash> Window<I, FontHash>
             self.flags = flags;
             self.indices.append_map(&indices_usize, |&i| i as u32);
             self.flags &= !Self::REQUIRES_TRIANGULATION;
+            self.last_triangulation = new_triangulation;
         }
     }
 
@@ -530,8 +538,8 @@ impl<I, FontHash> Window<I, FontHash>
         })?;
         render_text(self.title_text.as_ref().unwrap(), render_commands, vertex_buffer, index_buffer)?;
         for &widget in unsafe { self.active_widgets.as_ref().unwrap_unchecked() } {
-            let slider = self.get_widget(widget);
-            slider.render_commands(
+            let (_, widget) = self.get_widget(widget);
+            widget.render_commands(
                 render_commands,
                 style,
                 inv_aspect_ratio,
@@ -599,9 +607,12 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
                 .unwrap_unchecked()
                 .push(ActiveWidget::Button(id));
         }
-        let button = self.window.buttons
+        let (last_triangulation, button) = self.window.buttons
             .entry(id)
-            .or_insert(Button::new(title));
+            .or_insert((0, Button::new(title)));
+        if *last_triangulation != self.window.last_triangulation {
+            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+        }
         button.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += button.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
         button.pressed()
@@ -622,9 +633,12 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
                 .unwrap_unchecked()
                 .push(ActiveWidget::Slider(id));
         }
-        let slider = self.window.sliders
+        let (last_triangulation, slider) = self.window.sliders
             .entry(id)
-            .or_insert(Slider::new(value.calc_t(min, max), title.into()));
+            .or_insert((0, Slider::new(value.calc_t(min, max), title.into())));
+        if *last_triangulation != self.window.last_triangulation {
+            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+        }
         if slider.held() {
             value.slide(min, max, slider.t);
         } else {
@@ -647,15 +661,18 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
                 .unwrap_unchecked()
                 .push(ActiveWidget::Checkbox(id));
         }
-        let checkbox = self.window.checkboxs
+        let (last_triangulation, checkbox) = self.window.checkboxs
             .entry(id)
-            .or_insert(Checkbox::new(title, *value));
+            .or_insert((0, Checkbox::new(title, *value)));
+        if *last_triangulation != self.window.last_triangulation {
+            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+        }
         if checkbox.pressed() {
             *value = !*value;
         }
         checkbox.set_checked(*value);
         checkbox.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
-        self.widget_y += checkbox.calc_size(&self.style, self.text_renderer).y;
+        self.widget_y += checkbox.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
         *value
     }
 }

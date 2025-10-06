@@ -72,12 +72,11 @@ impl<I, FontHash> Slider<I, FontHash>
         &self,
         style: &Style<FontHash>,
         text_width: f32,
-        text_box_height: f32,
     ) -> Vec2
     {
         let mut pos = self.position;
         pos.x += text_width + style.item_pad_outer.x;
-        pos.y += text_box_height / 2.0 - text_box_height / 4.0;
+        //pos.y += text_box_height / 2.0 - text_box_height / 4.0;
         pos
     }
 
@@ -194,11 +193,11 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.falgs &= !Self::HELD;
             } else {
-                self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, text_box_height));
+                self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width));
             }
         } else if cursor_in_this_window {
             let bounding_rect = BoundingRect::from_position_size(
-                self.slider_pos(style, text_width, text_box_height),
+                self.slider_pos(style, text_width),
                 self.slider_rect.max,
             );
             cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
@@ -206,7 +205,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
                 self.falgs |= Self::CURSOR_IN_SLIDER;
                 if nox.was_mouse_button_pressed(MouseButton::Left) {
                     self.falgs |= Self::HELD;
-                    self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width, text_box_height));
+                    self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width));
                 }
             }
         }
@@ -248,8 +247,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         let index_buffer_id = index_buffer.id();
         let title_text = self.title_text.as_ref().unwrap();
         let text_width = style.calc_text_width(title_text.text_width);
-        let text_box_height = style.calc_text_box_height(title_text.font_height);
-        let slider_pos = self.slider_pos(style, text_width, text_box_height);
+        let slider_pos = self.slider_pos(style, text_width);
         if self.cursor_in_slider() || self.held() {
             let pc_vertex = style.calc_outline_push_constant(slider_pos, self.slider_rect.max, inv_aspect_ratio);
             let pc_fragment = push_constants_fragment(
@@ -290,10 +288,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
                 DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
                 no_offset,
             ],
-            DrawBufferInfo {
-                id: index_buffer_id,
-                offset: window_index_offset,
-            },
+            DrawBufferInfo::new(index_buffer_id, window_index_offset),
         )?;
         pc_fragment.color = style.handle_col;
         pc_vertex.vert_off = self.handle_pos(slider_pos);
@@ -313,7 +308,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
             DrawBufferInfo::new(index_buffer_id, window_index_offset),
         )?;
         let pc_vertex = push_constants_vertex(
-            vec2(self.position.x, self.position.y + (text_box_height - title_text.font_height * style.font_scale) / 2.0),
+            vec2(self.position.x, self.position.y + (self.slider_rect.max.y - style.calc_text_height(title_text.font_height)) / 2.0),
             vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio,
         );

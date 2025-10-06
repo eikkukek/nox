@@ -90,7 +90,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        style.calc_text_size(vec2(title_text.text_width, title_text.font_height))
+        style.calc_text_box_size(vec2(title_text.text_width, title_text.font_height))
     }
 
     fn update(
