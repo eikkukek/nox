@@ -428,12 +428,12 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let delta_width = cursor_pos.x - self.position.x;
-                    main_rect_max.x -= delta_width;
-                    if main_rect_max.x < min_width {
-                        main_rect_max.x = min_width;
+                    let new_width = main_rect_max.x - delta_width;
+                    if new_width < min_width {
                         self.flags |= Self::RESIZE_BLOCKED_COL;
                     } else {
-                        self.position.x = cursor_pos.x;
+                        main_rect_max.x = new_width;
+                        self.position.x += delta_width;
                     }
                 }
             }
@@ -451,10 +451,10 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let new_width = cursor_pos.x - self.position.x;
-                    main_rect_max.x = new_width;
-                    if main_rect_max.x < min_width {
-                        main_rect_max.x = min_width;
+                    if new_width < min_width {
                         self.flags |= Self::RESIZE_BLOCKED_COL;
+                    } else {
+                        main_rect_max.x = new_width;
                     }
                 }
             }
@@ -473,11 +473,11 @@ impl<I, FontHash> Window<I, FontHash>
                 }
                 else {
                     let delta_height = cursor_pos.y - self.position.y;
-                    main_rect_max.y -= delta_height;
-                    if main_rect_max.y < self.min_height {
-                        main_rect_max.y = self.min_height;
+                    let new_height = main_rect_max.y - delta_height;
+                    if new_height < self.min_height {
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
                     } else {
+                        main_rect_max.y = new_height;
                         self.position.y = cursor_pos.y;
                     }
                 } 
@@ -496,10 +496,10 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let new_height = cursor_pos.y - self.position.y;
-                    main_rect_max.y = new_height;
-                    if main_rect_max.y < self.min_height {
-                        main_rect_max.y = self.min_height;
+                    if new_height < self.min_height {
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
+                    } else {
+                        main_rect_max.y = new_height;
                     }
                 }
             }
@@ -517,11 +517,11 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let delta_width = cursor_pos.x - self.position.x;
-                    main_rect_max.x -= delta_width;
-                    if main_rect_max.x < min_width {
-                        main_rect_max.x = min_width;
+                    let new_width = main_rect_max.x - delta_width;
+                    if new_width < min_width {
                         self.flags |= Self::RESIZE_BLOCKED_COL;
                     } else {
+                        main_rect_max.x = new_width;
                         self.position.x = cursor_pos.x;
                     }
                 }
@@ -531,11 +531,11 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let delta_height = cursor_pos.y - self.position.y;
-                    main_rect_max.y -= delta_height;
-                    if main_rect_max.y < self.min_height {
-                        main_rect_max.y = self.min_height;
+                    let new_height = main_rect_max.y - delta_height;
+                    if new_height < self.min_height {
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
                     } else {
+                        main_rect_max.y = new_height;
                         self.position.y = cursor_pos.y;
                     }
                 }
@@ -554,10 +554,10 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let new_width = cursor_pos.x - self.position.x;
-                    main_rect_max.x = new_width;
-                    if main_rect_max.x < min_width {
-                        main_rect_max.x = min_width;
+                    if new_width < min_width {
                         self.flags |= Self::RESIZE_BLOCKED_COL;
+                    } else {
+                        main_rect_max.x = new_width;
                     }
                 }
                 if self.resize_blocked_row() {
@@ -566,11 +566,11 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let delta_height = cursor_pos.y - self.position.y;
-                    main_rect_max.y -= delta_height;
-                    if main_rect_max.y < self.min_height {
-                        main_rect_max.y = self.min_height;
+                    let new_height = main_rect_max.y - delta_height;
+                    if new_height < self.min_height {
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
                     } else {
+                        main_rect_max.y = new_height;
                         self.position.y = cursor_pos.y;
                     }
                 }
@@ -589,11 +589,11 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let delta_width = cursor_pos.x - self.position.x;
-                    main_rect_max.x -= delta_width;
-                    if main_rect_max.x < min_width {
-                        main_rect_max.x = min_width;
+                    let new_width = main_rect_max.x - delta_width;
+                    if new_width < min_width {
                         self.flags |= Self::RESIZE_BLOCKED_COL;
                     } else {
+                        main_rect_max.x = new_width;
                         self.position.x = cursor_pos.x;
                     }
                 }
@@ -603,10 +603,10 @@ impl<I, FontHash> Window<I, FontHash>
                     }
                 } else {
                     let new_height = cursor_pos.y - self.position.y;
-                    main_rect_max.y = new_height;
-                    if main_rect_max.y < self.min_height {
-                        main_rect_max.y = self.min_height;
+                    if new_height < self.min_height {
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
+                    } else {
+                        main_rect_max.y = new_height;
                     }
                 }
             }
@@ -618,18 +618,6 @@ impl<I, FontHash> Window<I, FontHash>
                     nox.set_cursor(CursorIcon::Default);
                 }
             } else {
-                if self.resize_blocked_row() {
-                    if cursor_pos.y - self.position.y >= self.min_height {
-                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
-                    }
-                } else {
-                    let new_height = cursor_pos.y - self.position.y;
-                    main_rect_max.y = new_height;
-                    if main_rect_max.y < self.min_height {
-                        main_rect_max.y = self.min_height;
-                        self.flags |= Self::RESIZE_BLOCKED_ROW;
-                    }
-                }
                 if self.resize_blocked_col() {
                     if cursor_pos.x - self.position.x >= min_width {
                         self.flags &= !Self::RESIZE_BLOCKED_COL;
@@ -640,6 +628,18 @@ impl<I, FontHash> Window<I, FontHash>
                     if main_rect_max.x < min_width {
                         main_rect_max.x = min_width;
                         self.flags |= Self::RESIZE_BLOCKED_COL;
+                    }
+                }
+                if self.resize_blocked_row() {
+                    if cursor_pos.y - self.position.y >= self.min_height {
+                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
+                    }
+                } else {
+                    let new_height = cursor_pos.y - self.position.y;
+                    main_rect_max.y = new_height;
+                    if main_rect_max.y < self.min_height {
+                        main_rect_max.y = self.min_height;
+                        self.flags |= Self::RESIZE_BLOCKED_ROW;
                     }
                 }
             }
