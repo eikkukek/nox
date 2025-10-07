@@ -26,6 +26,133 @@ enum ActiveWidget {
     Checkbox(u32),
 }
 
+struct HoverWindow {
+    text: CompactString,
+    rendered_text: RenderedText,
+    rect: Rect,
+    vertices: GlobalVec<Vertex>,
+    indices: GlobalVec<u32>,
+    position: Vec2,
+}
+
+impl HoverWindow {
+
+    fn new() -> Self {
+        Self {
+            text: Default::default(),
+            rendered_text: Default::default(),
+            rect: Default::default(),
+            vertices: Default::default(),
+            indices: Default::default(),
+            position: Default::default(),
+        }
+    }
+
+    fn update<FontHash>(
+        &mut self,
+        style: &Style<FontHash>,
+        text_renderer: &mut VertexTextRenderer<FontHash>,
+        position: Vec2,
+        text: &str,
+    ) -> bool
+        where
+            FontHash: Clone + Eq + Hash,
+    {
+        self.position = position;
+        if text != self.text {
+            self.rendered_text = text_renderer.render(
+                &[text_segment(text, &style.font_regular)], false, 0.0
+            ).unwrap_or_default();
+        }
+        let rect = rect(
+            Default::default(),
+            style.calc_text_box_size(vec2(self.rendered_text.text_width, self.rendered_text.font_height)),
+            style.rounding,
+        );
+        if rect != self.rect {
+            self.rect = rect;
+            return self.triangulate();
+        }
+        return false
+    }
+
+    fn triangulate(&mut self) -> bool {
+        self.vertices.clear();
+        self.indices.clear();
+        let mut points = GlobalVec::new();
+        let mut indices_usize = GlobalVec::new();
+        self.rect.to_points(&mut |p| { points.push(p.into()); });
+        if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+            return false
+        }
+        self.indices.append_map(&indices_usize, |&v| v as u32);
+        true
+    }
+
+    fn render_commands<FontHash>(
+        &self,
+        render_commands: &mut RenderCommands,
+        style: &Style<FontHash>,
+        vertex_buffer: &mut RingBuf,
+        index_buffer: &mut RingBuf,
+        inv_aspect_ratio: f32,
+        no_offset: DrawBufferInfo,
+    ) -> Result<(), Error>
+    {
+        let vert_count = self.vertices.len();
+        let vert_mem = unsafe {
+            vertex_buffer.allocate(render_commands, vert_count)?
+        };
+        let idx_count = self.indices.len();
+        let idx_mem = unsafe {
+            index_buffer.allocate(render_commands, idx_count)?
+        };
+        unsafe {
+            self.vertices
+                .as_ptr()
+                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count);
+            self.indices
+                .as_ptr()
+                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
+        }
+        let pc_vertex = push_constants_vertex(self.position, vec2(1.0, 1.0), inv_aspect_ratio);
+        let pc_fragment = push_constants_fragment(style.hover_window_bg_col);
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
+        })?;
+        render_commands.draw_indexed(
+            DrawInfo {
+                index_count: self.indices.len() as u32,
+                ..Default::default()
+            },
+            [
+                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
+                no_offset,
+            ],
+            DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
+        )?;
+        let pc_vertex = push_constants_vertex(
+            self.position + style.item_pad_inner,
+            vec2(style.font_scale, style.font_scale),
+            inv_aspect_ratio
+        );
+        let pc_fragment = push_constants_fragment(style.text_col);
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
+        })?;
+        render_text(&self.rendered_text, render_commands, vertex_buffer, index_buffer)?;
+        Ok(())
+    }
+}
+
 pub(crate) struct Window<I, FontHash>
 {
     main_rect: Rect,
@@ -41,7 +168,9 @@ pub(crate) struct Window<I, FontHash>
     sliders: FxHashMap<u32, (u64, Slider<I, FontHash>)>,
     checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
+    hover_window: Option<HoverWindow>,
     last_triangulation: u64,
+    last_frame: u64,
     min_height: f32,
     flags: u32,
 }
@@ -60,13 +189,14 @@ impl<I, FontHash> Window<I, FontHash>
     const RESIZE_RIGHT: u32 = 0x20;
     const RESIZE_TOP: u32 = 0x40;
     const RESIZE_BOTTOM: u32 = 0x80;
+    const HOVER_WINDOW_ACTIVE: u32 = 0x100;
 
     const CURSOR_ERROR_MARGIN: f32 = 0.01;
 
     pub(crate) fn new(
         title: &str,
-        size: [f32; 2],
         position: [f32; 2],
+        size: [f32; 2],
         rounding: f32,
     ) -> Self
     {
@@ -84,7 +214,9 @@ impl<I, FontHash> Window<I, FontHash>
             sliders: FxHashMap::default(),
             checkboxs: FxHashMap::default(),
             active_widgets: Some(Default::default()),
+            hover_window: Some(HoverWindow::new()),
             last_triangulation: 0,
+            last_frame: 0,
             min_height: 0.0,
             flags: Self::REQUIRES_TRIANGULATION,
         }
@@ -139,6 +271,11 @@ impl<I, FontHash> Window<I, FontHash>
     }
 
     #[inline(always)]
+    fn hover_window_active(&self) -> bool {
+        self.flags & Self::HOVER_WINDOW_ACTIVE == Self::HOVER_WINDOW_ACTIVE
+    }
+
+    #[inline(always)]
     fn get_widget(&self, widget: ActiveWidget) -> (u64, &dyn Widget<I, FontHash>) {
         match widget {
             ActiveWidget::Slider(id) => self.sliders.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
@@ -156,11 +293,22 @@ impl<I, FontHash> Window<I, FontHash>
         }
     }
 
-    pub(crate) fn bounding_rect(&self, error_margin: f32) -> BoundingRect {
+    #[inline(always)]
+    pub fn set_last_frame(&mut self, frame: u64) {
+        self.last_frame = frame;
+    }
+
+    #[inline(always)]
+    pub fn last_frame(&self) -> u64 {
+        self.last_frame
+    }
+
+    #[inline(always)]
+    pub fn bounding_rect(&self, error_margin: f32) -> BoundingRect {
         BoundingRect::from_position_size(self.position - vec2(error_margin, error_margin), self.main_rect.size() + vec2(error_margin, error_margin))
     }
 
-    pub(crate) fn update(
+    pub fn update(
         &mut self,
         nox: &Nox<I>,
         style: &Style<FontHash>,
@@ -176,12 +324,13 @@ impl<I, FontHash> Window<I, FontHash>
         let cursor_in_this_window =
             !cursor_in_other_window &&
             self.bounding_rect(Self::CURSOR_ERROR_MARGIN).is_point_inside(cursor_pos);
-        self.flags &= !Self::CURSOR_IN_WINDOW;
+        self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
         let mut min_width: f32 = 0.0;
-        let mut cursor_in_item = false;
+        let mut cursor_in_some_widget = false;
         let window_width = self.main_rect.max.x;
         let active_widgets = self.active_widgets.take().unwrap();
+        let mut hover_window = self.hover_window.take().unwrap();
         for &widget in &active_widgets {
             let (_, widget) = self.get_widget_mut(widget);
             let UpdateResult {
@@ -197,12 +346,17 @@ impl<I, FontHash> Window<I, FontHash>
                 cursor_in_this_window,
             );
             min_width = min_width.max(min_widget_width + style.item_pad_outer.x + style.item_pad_outer.x);
+            if cursor_in_widget && let Some(hover_text) = widget.hover_text() {
+                hover_window.update(style, text_renderer, cursor_pos, hover_text);
+                self.flags |= Self::HOVER_WINDOW_ACTIVE;
+            }
             if requires_triangulation {
                 self.flags |= Self::REQUIRES_TRIANGULATION;
             }
-            cursor_in_item |= cursor_in_widget;
+            cursor_in_some_widget |= cursor_in_widget;
         }
         self.active_widgets = Some(active_widgets);
+        self.hover_window = Some(hover_window);
         let title_text = self.title_text.as_ref().unwrap();
         min_width = min_width.max(style.calc_text_box_width(title_text.text_width) + style.item_pad_outer.x);
         if self.main_rect.max.x < min_width {
@@ -289,7 +443,7 @@ impl<I, FontHash> Window<I, FontHash>
                 }
             }
         }
-        else if cursor_in_this_window && !cursor_in_item {
+        else if cursor_in_this_window && !cursor_in_some_widget {
             let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left) as u32;
             if cursor_pos.x >= self.position.x - Self::CURSOR_ERROR_MARGIN &&
                 cursor_pos.x <= self.position.x + Self::CURSOR_ERROR_MARGIN 
@@ -354,7 +508,7 @@ impl<I, FontHash> Window<I, FontHash>
     }
 
     #[inline(always)]
-    pub(crate) fn triangulate(&mut self) {
+    pub fn triangulate(&mut self) {
         if self.requires_triangulation() {
             let new_triangulation = self.last_triangulation + 1;
             self.flags |= Self::RENDERABLE;
@@ -411,7 +565,7 @@ impl<I, FontHash> Window<I, FontHash>
         }
     }
 
-    pub(crate) fn render_commands(
+    pub fn render_commands(
         &mut self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
@@ -542,13 +696,21 @@ impl<I, FontHash> Window<I, FontHash>
             widget.render_commands(
                 render_commands,
                 style,
-                inv_aspect_ratio,
                 vertex_buffer,
                 index_buffer,
+                inv_aspect_ratio,
                 vert_mem.offset,
                 idx_mem.offset,
                 no_offset,
             )?;
+        }
+        if self.hover_window_active() {
+            unsafe {
+                self.hover_window
+                    .as_ref()
+                    .unwrap_unchecked()
+                    .render_commands(render_commands, style, vertex_buffer, index_buffer, inv_aspect_ratio, no_offset)?;
+            }
         }
         unsafe {
             self.active_widgets
@@ -625,7 +787,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
         value: &mut T,
         min: T,
         max: T,
-    )
+    ) -> Result<(), Error>
     { 
         unsafe {
             self.window.active_widgets
@@ -640,12 +802,20 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
         }
         if slider.held() {
-            value.slide(min, max, slider.t);
+            slider.quantized_t = value.slide_and_quantize_t(min, max, slider.t);
         } else {
             slider.t = value.calc_t(min, max);
+            slider.quantized_t = slider.t;
         }
+        slider.hover_text.clear();
+        value
+            .display(self.style, &mut slider.hover_text)
+            .map_err(|e| {
+                Error::UserError(format!("nox_gui: failed to format slider value: {}", e))
+            })?;
         slider.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += slider.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
+        Ok(())
     }
 
     pub fn update_checkbox(

@@ -1,5 +1,5 @@
 use core::{
-    fmt::Display,
+    fmt::Write,
     hash::Hash,
     marker::PhantomData,
 };
@@ -20,11 +20,13 @@ use nox_geom::{
 
 use crate::*;
 
-pub trait Sliderable: Copy + Display {
+pub trait Sliderable: Copy {
 
-    fn slide(&mut self, min: Self, max: Self, t: f32);
+    fn slide_and_quantize_t(&mut self, min: Self, max: Self, t: f32) -> f32;
 
     fn calc_t(&self, min: Self, max: Self) -> f32;
+
+    fn display<FontHash>(&self, style: &Style<FontHash>, to: &mut CompactString) -> core::fmt::Result;
 }
 
 pub(crate) struct Slider<I, FontHash>
@@ -35,6 +37,8 @@ pub(crate) struct Slider<I, FontHash>
     handle_rect: Rect,
     position: Vec2,
     pub t: f32,
+    pub quantized_t: f32,
+    pub hover_text: CompactString,
     slider_rect_draw_info: DrawInfo,
     handle_rect_draw_info: DrawInfo,
     falgs: u32,
@@ -60,6 +64,8 @@ impl<I, FontHash> Slider<I, FontHash>
             handle_rect: Default::default(),
             position: Default::default(),
             t,
+            quantized_t: t,
+            hover_text: Default::default(),
             slider_rect_draw_info: Default::default(),
             handle_rect_draw_info: Default::default(),
             falgs: 0,
@@ -87,7 +93,7 @@ impl<I, FontHash> Slider<I, FontHash>
     ) -> Vec2
     {
         let mut pos = slider_pos;
-        pos.x += (self.slider_rect.max.x - self.handle_rect.max.x) * self.t;
+        pos.x += (self.slider_rect.max.x - self.handle_rect.max.x) * self.quantized_t;
         pos
     }
 
@@ -120,6 +126,11 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         I: Interface,
         FontHash: Clone + Eq + Hash,
 {
+
+    #[inline(always)]
+    fn hover_text(&self) -> Option<&str> {
+        Some(self.hover_text.as_str())
+    }
 
     #[inline(always)]
     fn set_position(
@@ -235,9 +246,9 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
-        inv_aspect_ratio: f32,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
+        inv_aspect_ratio: f32,
         window_vertex_offset: u64,
         window_index_offset: u64,
         no_offset: DrawBufferInfo,
@@ -325,15 +336,83 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
     }
 }
 
-macro_rules! impl_sliderable {
+impl Sliderable for f32 {
+
+    #[inline(always)]
+    fn slide_and_quantize_t(&mut self, min: Self, max: Self, t: f32) -> f32 {
+        *self = (1.0 - t) * min + t * max;
+        t
+    }
+
+    #[inline(always)]
+    fn calc_t(&self, min: Self, max: Self) -> f32 {
+        if *self >= max { return 1.0 }
+        if *self <= min { return 0.0 }
+        let d0 = max - min;
+        let d1 = self - min;
+        d1 / d0
+    }
+
+    #[inline(always)]
+    fn display<FontHash>(
+        &self,
+        style: &Style<FontHash>,
+        to: &mut CompactString,
+    ) -> core::fmt::Result
+    {
+        (style.f32_format)(*self, to)
+    }
+}
+
+
+impl Sliderable for f64 {
+
+    #[inline(always)]
+    fn slide_and_quantize_t(&mut self, min: Self, max: Self, t: f32) -> f32 {
+        *self = ((1.0 - t as f64) * min + t as f64 * max) as f64;
+        t
+    }
+
+    #[inline(always)]
+    fn calc_t(&self, min: Self, max: Self) -> f32 {
+        if *self >= max { return 1.0 }
+        if *self <= min { return 0.0 }
+        let d0 = max - min;
+        let d1 = self - min;
+        (d1 / d0) as f32
+    }
+
+    #[inline(always)]
+    fn display<FontHash>(
+        &self,
+        style: &Style<FontHash>,
+        to: &mut CompactString,
+    ) -> core::fmt::Result
+    {
+        (style.f64_format)(*self, to)
+    }
+}
+
+macro_rules! impl_sliderable_int {
     ($($t:ty),+ $(,)?) => {
         $(
             impl Sliderable for $t {
 
-                fn slide(&mut self, min: Self, max: Self, t: f32) {
-                    *self = ((1.0 - t) * min as f32 + t * max as f32) as $t
+                #[inline(always)]
+                fn slide_and_quantize_t(&mut self, min: Self, max: Self, t: f32) -> f32 {
+                    let mut as_float = 0.0;
+                    as_float.slide_and_quantize_t(min as f32, max as f32, t);
+                    let fract = as_float.fract();
+                    *self = 
+                        if fract >= 0.5 {
+                            as_float.ceil() as $t
+                        } else {
+                            as_float.floor() as $t
+                        };
+                    self.calc_t(min, max)
                 }
 
+                #[inline(always)]
                 fn calc_t(&self, min: Self, max: Self) -> f32 {
                     if *self >= max { return 1.0 }
                     if *self <= min { return 0.0 }
@@ -341,13 +420,22 @@ macro_rules! impl_sliderable {
                     let d1 = self - min;
                     d1 as f32 / d0 as f32
                 }
+
+                #[inline(always)]
+                fn display<FontHash>(
+                    &self,
+                    _style: &Style<FontHash>,
+                    to: &mut CompactString,
+                ) -> core::fmt::Result
+                {
+                    write!(to, "{}", *self)
+                }
             }
         )+
     };
 }
 
-impl_sliderable!(
+impl_sliderable_int!(
     i8, i16, i32, i64, i128,
     u8, u16, u32, u64, u128,
-    f32, f64,
 );

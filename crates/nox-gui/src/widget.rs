@@ -23,6 +23,8 @@ pub trait Widget<I, FontHash>
         FontHash: Clone + Eq + Hash,
 {
 
+    fn hover_text(&self) -> Option<&str>;
+
     fn set_position(
         &mut self,
         position: Vec2,
@@ -54,9 +56,9 @@ pub trait Widget<I, FontHash>
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
-        inv_aspect_ratio: f32,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
+        inv_aspect_ratio: f32,
         window_vertex_offset: u64,
         window_index_offset: u64,
         no_offset: DrawBufferInfo,

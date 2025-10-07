@@ -1,3 +1,5 @@
+use core::fmt::Write;
+
 use crate::*;
 
 use nox_geom::*;
@@ -10,6 +12,7 @@ pub struct Style<FontHash> {
     pub outline_col_hl: ColorRGBA,
     pub handle_col: ColorRGBA,
     pub text_col: ColorRGBA,
+    pub hover_window_bg_col: ColorRGBA,
     pub font_regular: FontHash,
     pub checkbox_symbol: char,
     pub item_pad_outer: Vec2,
@@ -19,6 +22,8 @@ pub struct Style<FontHash> {
     pub slider_min_width: f32,
     pub outline_width: f32,
     pub override_cursor: bool,
+    pub f32_format: fn(f32, &mut CompactString) -> core::fmt::Result,
+    pub f64_format: fn(f64, &mut CompactString) -> core::fmt::Result,
 }
 
 impl<FontHash> Style<FontHash> {
@@ -32,6 +37,7 @@ impl<FontHash> Style<FontHash> {
             outline_col_hl: ColorRGBA::from_rgba(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0),
             handle_col: ColorRGBA::from_rgba(83.0 / 255.0, 118.0 / 255.0, 121.0 / 255.0, 1.0),
             text_col: ColorRGBA::from_rgba(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 1.0),
+            hover_window_bg_col: ColorRGBA::from_rgba(10.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 1.0),
             font_regular,
             checkbox_symbol: '󰄬',
             item_pad_outer: vec2(0.02, 0.02),
@@ -41,6 +47,12 @@ impl<FontHash> Style<FontHash> {
             slider_min_width: 0.05,
             outline_width: 0.005,
             override_cursor: true,
+            f32_format: |value: f32, to: &mut CompactString| -> core::fmt::Result {
+                write!(to, "{:.2}", value)
+            },
+            f64_format: |value: f64, to: &mut CompactString| -> core::fmt::Result {
+                write!(to, "{:.2}", value)
+            },
         }
     }
 

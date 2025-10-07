@@ -10,7 +10,7 @@ use nox::{
     *
 };
 
-use nox_font::{VertexTextRenderer, Face};
+use nox_font::{text_segment, Face, VertexTextRenderer};
 
 use nox_geom::{
     Vec2,
@@ -38,9 +38,11 @@ pub struct Workspace<'a, I, FontHash>
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
     pipelines: Pipelines,
+    frame: u64,
     ring_buffer_size: usize,
     prev_cursor_position: Vec2,
     inv_aspect_ratio: f32,
+    flags: u32,
 }
 
 impl<'a, I, FontHash> Workspace<'a, I, FontHash>
@@ -49,23 +51,29 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         FontHash: Clone + PartialEq + Eq + Hash
 {
 
+    const BEGAN: u32 = 1;
+
     pub fn new(
         fonts: impl IntoIterator<Item = (FontHash, Face<'a>)>,
         font_regular: FontHash,
         font_curve_tolerance: f32,
     ) -> Self
     {
+        let mut text_renderer = VertexTextRenderer::new(fonts, font_curve_tolerance);
+        text_renderer.render(&[text_segment("0123456789", &font_regular)], false, 0.0);
         Self {
-            text_renderer: VertexTextRenderer::new(fonts, font_curve_tolerance),
+            text_renderer,
             style: Style::new(font_regular),
             windows: Default::default(),
             active_windows: Default::default(),
             vertex_buffer: None,
             index_buffer: None,
             pipelines: Default::default(),
+            frame: 0,
             ring_buffer_size: 1 << 23,
             prev_cursor_position: Default::default(),
             inv_aspect_ratio: 1.0,
+            flags: 0,
         }
     }
 
@@ -110,33 +118,67 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         })
     }
 
+    #[inline(always)]
+    fn began(&self) -> bool {
+        self.flags & Self::BEGAN == Self::BEGAN
+    }
+
+    pub fn begin(&mut self) -> Result<(), Error>
+    {
+        if self.began() {
+            return Err(Error::UserError(
+                "nox_gui: attempting to call Workspace::begin twice before calling Workspace::end".into()
+            ))
+        }
+        self.frame += 1;
+        self.flags |= Self::BEGAN;
+        Ok(())
+    }
+
     pub fn update_window<F>(
         &mut self,
         id: u32,
         title: &str,
-        initial_size: [f32; 2],
         initial_position: [f32; 2],
+        initial_size: [f32; 2],
         mut f: F,
     ) -> Result<(), Error>
         where
             F: FnMut(WindowContext<I, FontHash>) -> Result<(), Error>
     {
+        if !self.began() {
+            return Err(Error::UserError(
+                "nox_gui: attempting to update window before calling Workspace::begin".into()
+            ));
+        }
         let window = self.windows.entry(id).or_insert(Window::new(
             title,
-            initial_size,
             initial_position,
+            initial_size,
             self.style.rounding,
         ));
+        window.set_last_frame(self.frame);
         f(WindowContext::new(window, &self.style, &mut self.text_renderer))?;
-        self.active_windows.push(id);
+        if !self.active_windows.contains(&id) {
+            self.active_windows.push(id);
+        }
         Ok(())
     }
 
     pub fn end(
         &mut self,
         nox: &Nox<'_, I>,
-    )
+    ) -> Result<(), Error>
     {
+        if !self.began() {
+            return Err(Error::UserError(
+                "nox_gui: attempting to call Workspace::end before calling Workspace::begin".into()
+            ))
+        }
+        self.active_windows.retain(|id| {
+            let win = self.windows.get(id).unwrap();
+            win.last_frame() == self.frame
+        });
         let aspect_ratio = nox.aspect_ratio() as f32;
         self.inv_aspect_ratio = 1.0 / aspect_ratio;
         let mut cursor_pos: Vec2 = nox.normalized_cursor_position_f32().into();
@@ -145,22 +187,33 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         cursor_pos.x *= aspect_ratio;
         let delta_cursor_pos = cursor_pos - self.prev_cursor_position;
         self.prev_cursor_position = cursor_pos;
-        let mut cursor_in_window = false;
-        for id in &self.active_windows {
+        let mut cursor_in_some_window = false;
+        let mut window_pressed = None;
+        for (i, id) in self.active_windows.iter_mut().enumerate().rev() {
             let window = self.windows.get_mut(id).unwrap();
-            cursor_in_window |= window.update(
+            let cursor_in_window = window.update(
                 nox,
                 &self.style,
                 &mut self.text_renderer,
                 cursor_pos,
                 delta_cursor_pos,
-                cursor_in_window
+                cursor_in_some_window,
             );
+            if cursor_in_window && nox.was_mouse_button_pressed(MouseButton::Left) {
+                window_pressed = Some(i);
+            }
+            cursor_in_some_window |= cursor_in_window;
             window.triangulate();
         }
-        if !cursor_in_window && self.style.override_cursor {
+        if let Some(idx) = window_pressed {
+            let id = self.active_windows.remove(idx).unwrap();
+            self.active_windows.push(id);
+        }
+        if !cursor_in_some_window && self.style.override_cursor {
             nox.set_cursor(CursorIcon::Default);
         }
+        self.flags &= !Self::BEGAN;
+        Ok(())
     }
 
     pub fn render_commands(
@@ -202,7 +255,6 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         }
         vertex_buffer.finish_frame();
         index_buffer.finish_frame();
-        self.active_windows.clear();
         Ok(())
     }
 

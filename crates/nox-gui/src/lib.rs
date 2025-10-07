@@ -22,6 +22,8 @@ pub use workspace::Workspace;
 
 pub use nox_font as font;
 
+pub use compact_str::CompactString;
+
 use button::*;
 use checkbox::*;
 use helpers::*;

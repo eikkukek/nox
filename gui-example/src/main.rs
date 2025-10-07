@@ -10,6 +10,7 @@ struct Example<'a> {
     slider_value: f32,
     slider_value_int: u32,
     checkbox_checked: bool,
+    show_other_window: bool,
 }
 
 impl<'a> Example<'a> {
@@ -22,6 +23,7 @@ impl<'a> Example<'a> {
             slider_value: 0.0,
             slider_value_int: 0,
             checkbox_checked: false,
+            show_other_window: false,
         }
     }
 }
@@ -60,20 +62,28 @@ impl<'a> Interface for Example<'a> {
         nox: &mut Nox<Self>,
         _renderer: &mut RendererContext,
     ) -> Result<(), Error> {
-        self.workspace.update_window(0, "Widgets", [0.5, 0.5], [0.0, 0.0],
+        self.workspace.begin()?;
+        self.workspace.update_window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
             |mut win| {
                 if win.update_checkbox(0, "Show sliders", &mut self.checkbox_checked) {
-                    win.update_slider(0, "Slider 1", &mut self.slider_value, 0.0, 100.0);
-                    win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0);
-                    win.update_slider(2, "Slider 3", &mut self.slider_value_int, 0, 10);
+                    win.update_slider(0, "Slider 1", &mut self.slider_value, 0.0, 100.0)?;
+                    win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0)?;
+                    win.update_slider(2, "Slider 3", &mut self.slider_value_int, 0, 10)?;
                 }
                 if win.update_button(0, "Print \"hello\"") {
                     println!("hello");
                 }
+                win.update_checkbox(1, "Show other window", &mut self.show_other_window);
                 Ok(())
             }
         )?;
-        self.workspace.end(nox);
+        if self.show_other_window {
+            self.workspace.update_window(1, "Other window", [0.25, 0.25], [0.0, 0.0], 
+                |mut _win| {
+                    Ok(())
+            })?;
+        }
+        self.workspace.end(nox)?;
         Ok(())
     }
 

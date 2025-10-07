@@ -89,6 +89,11 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
 {
 
     #[inline(always)]
+    fn hover_text(&self) -> Option<&str> {
+        None
+    }
+
+    #[inline(always)]
     fn set_position(
         &mut self,
         position: Vec2,
@@ -186,9 +191,9 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
-        inv_aspect_ratio: f32,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
+        inv_aspect_ratio: f32,
         window_vertex_offset: u64,
         window_index_offset: u64,
         no_offset: DrawBufferInfo,
