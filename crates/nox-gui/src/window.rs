@@ -52,13 +52,12 @@ impl HoverWindow {
         &mut self,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<FontHash>,
-        position: Vec2,
+        cursor_pos: Vec2,
         text: &str,
     ) -> bool
         where
             FontHash: Clone + Eq + Hash,
     {
-        self.position = position;
         if text != self.text {
             self.rendered_text = text_renderer.render(
                 &[text_segment(text, &style.font_regular)], false, 0.0
@@ -73,6 +72,7 @@ impl HoverWindow {
             self.rect = rect;
             return self.triangulate();
         }
+        self.position = cursor_pos - vec2(self.rect.max.x, 0.0);
         return false
     }
 
@@ -159,6 +159,8 @@ pub(crate) struct Window<I, FontHash>
     main_rect_draw_info: DrawInfo,
     title_bar_rect: Rect,
     title_bar_rect_draw_info: DrawInfo,
+    separator_rect: Rect,
+    separator_rect_draw_info: DrawInfo,
     position: Vec2,
     title: CompactString,
     title_text: Option<RenderedText>,
@@ -190,6 +192,12 @@ impl<I, FontHash> Window<I, FontHash>
     const RESIZE_TOP: u32 = 0x40;
     const RESIZE_BOTTOM: u32 = 0x80;
     const HOVER_WINDOW_ACTIVE: u32 = 0x100;
+    const RESIZE_NW: u32 = 0x200;
+    const RESIZE_NE: u32 = 0x400;
+    const RESIZE_SW: u32 = 0x800;
+    const RESIZE_SE: u32 = 0x1000;
+    const RESIZE_BLOCKED_COL: u32 = 0x2000;
+    const RESIZE_BLOCKED_ROW: u32 = 0x4000;
 
     const CURSOR_ERROR_MARGIN: f32 = 0.01;
 
@@ -201,10 +209,12 @@ impl<I, FontHash> Window<I, FontHash>
     ) -> Self
     {
         Self {
-            main_rect: rect(Default::default(), size, rounding),
+            main_rect: rect(Default::default(), size, 0.0),
             main_rect_draw_info: Default::default(),
             title_bar_rect: rect::<Vec2>(Default::default(), Default::default(), rounding),
             title_bar_rect_draw_info: Default::default(),
+            separator_rect: Default::default(),
+            separator_rect_draw_info: Default::default(),
             position: position.into(),
             title: title.into(),
             title_text: None,
@@ -263,11 +273,45 @@ impl<I, FontHash> Window<I, FontHash>
     }
 
     #[inline(always)]
+    fn resize_nw(&self) -> bool {
+        self.flags & Self::RESIZE_NW == Self::RESIZE_NW
+    }
+
+    #[inline(always)]
+    fn resize_ne(&self) -> bool {
+        self.flags & Self::RESIZE_NE == Self::RESIZE_NE
+    }
+
+    #[inline(always)]
+    fn resize_sw(&self) -> bool {
+        self.flags & Self::RESIZE_SW == Self::RESIZE_SW
+    }
+
+    #[inline(always)]
+    fn resize_se(&self) -> bool {
+        self.flags & Self::RESIZE_SE == Self::RESIZE_SE
+    }
+
+    #[inline(always)]
+    fn resize_blocked_col(&self) -> bool {
+        self.flags & Self::RESIZE_BLOCKED_COL == Self::RESIZE_BLOCKED_COL
+    }
+
+    #[inline(always)]
+    fn resize_blocked_row(&self) -> bool {
+        self.flags & Self::RESIZE_BLOCKED_ROW == Self::RESIZE_BLOCKED_ROW
+    }
+
+    #[inline(always)]
     fn any_resize(&self) -> bool {
         self.resize_left() ||
         self.resize_right() ||
         self.resize_top() ||
-        self.resize_bottom()
+        self.resize_bottom() ||
+        self.resize_nw() ||
+        self.resize_ne() || 
+        self.resize_sw() ||
+        self.resize_se()
     }
 
     #[inline(always)]
@@ -305,7 +349,7 @@ impl<I, FontHash> Window<I, FontHash>
 
     #[inline(always)]
     pub fn bounding_rect(&self, error_margin: f32) -> BoundingRect {
-        BoundingRect::from_position_size(self.position - vec2(error_margin, error_margin), self.main_rect.size() + vec2(error_margin, error_margin))
+        BoundingRect::from_position_size(self.position - vec2(error_margin, error_margin) * 0.5, self.main_rect.size() + vec2(error_margin, error_margin))
     }
 
     pub fn update(
@@ -378,15 +422,19 @@ impl<I, FontHash> Window<I, FontHash>
                     nox.set_cursor(CursorIcon::Default);
                 }
             } else {
-                main_rect_max.x -= delta_cursor_pos.x;
-                if main_rect_max.x < min_width {
-                    main_rect_max.x = min_width;
-                    self.flags &= !Self::RESIZE_LEFT;
-                    if override_cursor {
-                        nox.set_cursor(CursorIcon::Default);
+                if self.resize_blocked_col() {
+                    if cursor_pos.x <= self.position.x {
+                        self.flags &= !Self::RESIZE_BLOCKED_COL;
                     }
                 } else {
-                    self.position.x += delta_cursor_pos.x;
+                    let delta_width = cursor_pos.x - self.position.x;
+                    main_rect_max.x -= delta_width;
+                    if main_rect_max.x < min_width {
+                        main_rect_max.x = min_width;
+                        self.flags |= Self::RESIZE_BLOCKED_COL;
+                    } else {
+                        self.position.x = cursor_pos.x;
+                    }
                 }
             }
         }
@@ -397,12 +445,16 @@ impl<I, FontHash> Window<I, FontHash>
                     nox.set_cursor(CursorIcon::Default);
                 }
             } else {
-                main_rect_max.x += delta_cursor_pos.x;
-                if main_rect_max.x < min_width {
-                    main_rect_max.x = min_width;
-                    self.flags &= !Self::RESIZE_RIGHT;
-                    if override_cursor {
-                        nox.set_cursor(CursorIcon::Default);
+                if self.resize_blocked_col() {
+                    if cursor_pos.x - self.position.x >= min_width {
+                        self.flags &= !Self::RESIZE_BLOCKED_COL;
+                    }
+                } else {
+                    let new_width = cursor_pos.x - self.position.x;
+                    main_rect_max.x = new_width;
+                    if main_rect_max.x < min_width {
+                        main_rect_max.x = min_width;
+                        self.flags |= Self::RESIZE_BLOCKED_COL;
                     }
                 }
             }
@@ -414,16 +466,21 @@ impl<I, FontHash> Window<I, FontHash>
                     nox.set_cursor(CursorIcon::Default);
                 }
             } else {
-                main_rect_max.y -= delta_cursor_pos.y;
-                if main_rect_max.y < self.min_height {
-                    main_rect_max.y = self.min_height;
-                    self.flags &= !Self::RESIZE_TOP;
-                    if override_cursor {
-                        nox.set_cursor(CursorIcon::Default);
+                if self.resize_blocked_row() {
+                    if cursor_pos.y <= self.position.y {
+                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
                     }
-                } else {
-                    self.position.y += delta_cursor_pos.y;
                 }
+                else {
+                    let delta_height = cursor_pos.y - self.position.y;
+                    main_rect_max.y -= delta_height;
+                    if main_rect_max.y < self.min_height {
+                        main_rect_max.y = self.min_height;
+                        self.flags |= Self::RESIZE_BLOCKED_ROW;
+                    } else {
+                        self.position.y = cursor_pos.y;
+                    }
+                } 
             }
         }
         else if self.resize_bottom() {
@@ -433,19 +490,189 @@ impl<I, FontHash> Window<I, FontHash>
                     nox.set_cursor(CursorIcon::Default);
                 }
             } else {
-                main_rect_max.y += delta_cursor_pos.y;
-                if main_rect_max.y < self.min_height {
-                    main_rect_max.y = self.min_height;
-                    self.flags &= !Self::RESIZE_BOTTOM;
-                    if override_cursor {
-                        nox.set_cursor(CursorIcon::Default);
+                if self.resize_blocked_row() {
+                    if cursor_pos.y - self.position.y >= self.min_height {
+                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
+                    }
+                } else {
+                    let new_height = cursor_pos.y - self.position.y;
+                    main_rect_max.y = new_height;
+                    if main_rect_max.y < self.min_height {
+                        main_rect_max.y = self.min_height;
+                        self.flags |= Self::RESIZE_BLOCKED_ROW;
+                    }
+                }
+            }
+        }
+        else if self.resize_nw() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::RESIZE_NW;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            } else {
+                if self.resize_blocked_col() {
+                    if cursor_pos.x <= self.position.x {
+                        self.flags &= !Self::RESIZE_BLOCKED_COL;
+                    }
+                } else {
+                    let delta_width = cursor_pos.x - self.position.x;
+                    main_rect_max.x -= delta_width;
+                    if main_rect_max.x < min_width {
+                        main_rect_max.x = min_width;
+                        self.flags |= Self::RESIZE_BLOCKED_COL;
+                    } else {
+                        self.position.x = cursor_pos.x;
+                    }
+                }
+                if self.resize_blocked_row() {
+                    if cursor_pos.y <= self.position.y {
+                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
+                    }
+                } else {
+                    let delta_height = cursor_pos.y - self.position.y;
+                    main_rect_max.y -= delta_height;
+                    if main_rect_max.y < self.min_height {
+                        main_rect_max.y = self.min_height;
+                        self.flags |= Self::RESIZE_BLOCKED_ROW;
+                    } else {
+                        self.position.y = cursor_pos.y;
+                    }
+                }
+            }
+        }
+        else if self.resize_ne() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::RESIZE_NE;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            } else {
+                if self.resize_blocked_col() {
+                    if cursor_pos.x - self.position.x >= min_width {
+                        self.flags &= !Self::RESIZE_BLOCKED_COL;
+                    }
+                } else {
+                    let new_width = cursor_pos.x - self.position.x;
+                    main_rect_max.x = new_width;
+                    if main_rect_max.x < min_width {
+                        main_rect_max.x = min_width;
+                        self.flags |= Self::RESIZE_BLOCKED_COL;
+                    }
+                }
+                if self.resize_blocked_row() {
+                    if cursor_pos.y <= self.position.y {
+                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
+                    }
+                } else {
+                    let delta_height = cursor_pos.y - self.position.y;
+                    main_rect_max.y -= delta_height;
+                    if main_rect_max.y < self.min_height {
+                        main_rect_max.y = self.min_height;
+                        self.flags |= Self::RESIZE_BLOCKED_ROW;
+                    } else {
+                        self.position.y = cursor_pos.y;
+                    }
+                }
+            }
+        }
+        else if self.resize_sw() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::RESIZE_SW;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            } else {
+                if self.resize_blocked_col() {
+                    if cursor_pos.x <= self.position.x {
+                        self.flags &= !Self::RESIZE_BLOCKED_COL;
+                    }
+                } else {
+                    let delta_width = cursor_pos.x - self.position.x;
+                    main_rect_max.x -= delta_width;
+                    if main_rect_max.x < min_width {
+                        main_rect_max.x = min_width;
+                        self.flags |= Self::RESIZE_BLOCKED_COL;
+                    } else {
+                        self.position.x = cursor_pos.x;
+                    }
+                }
+                if self.resize_blocked_row() {
+                    if cursor_pos.y - self.position.y >= self.min_height {
+                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
+                    }
+                } else {
+                    let new_height = cursor_pos.y - self.position.y;
+                    main_rect_max.y = new_height;
+                    if main_rect_max.y < self.min_height {
+                        main_rect_max.y = self.min_height;
+                        self.flags |= Self::RESIZE_BLOCKED_ROW;
+                    }
+                }
+            }
+        }
+        else if self.resize_se() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::RESIZE_SE;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::Default);
+                }
+            } else {
+                if self.resize_blocked_row() {
+                    if cursor_pos.y - self.position.y >= self.min_height {
+                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
+                    }
+                } else {
+                    let new_height = cursor_pos.y - self.position.y;
+                    main_rect_max.y = new_height;
+                    if main_rect_max.y < self.min_height {
+                        main_rect_max.y = self.min_height;
+                        self.flags |= Self::RESIZE_BLOCKED_ROW;
+                    }
+                }
+                if self.resize_blocked_col() {
+                    if cursor_pos.x - self.position.x >= min_width {
+                        self.flags &= !Self::RESIZE_BLOCKED_COL;
+                    }
+                } else {
+                    let new_width = cursor_pos.x - self.position.x;
+                    main_rect_max.x = new_width;
+                    if main_rect_max.x < min_width {
+                        main_rect_max.x = min_width;
+                        self.flags |= Self::RESIZE_BLOCKED_COL;
                     }
                 }
             }
         }
         else if cursor_in_this_window && !cursor_in_some_widget {
+            self.flags &= !Self::RESIZE_BLOCKED_COL;
+            self.flags &= !Self::RESIZE_BLOCKED_ROW;
             let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left) as u32;
-            if cursor_pos.x >= self.position.x - Self::CURSOR_ERROR_MARGIN &&
+            if cursor_pos.mag_to(self.position) <= Self::CURSOR_ERROR_MARGIN {
+                self.flags |= Self::RESIZE_NW * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::NwResize);
+                }
+            }
+            else if cursor_pos.mag_to(self.position + vec2(self.main_rect.max.x, 0.0)) <= Self::CURSOR_ERROR_MARGIN {
+                self.flags |= Self::RESIZE_NE * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::NeResize);
+                }
+            }
+            else if cursor_pos.mag_to(self.position + vec2(0.0, self.main_rect.max.y)) <= Self::CURSOR_ERROR_MARGIN {
+                self.flags |= Self::RESIZE_SW * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::SwResize);
+                }
+            }
+            else if cursor_pos.mag_to(self.position + self.main_rect.max) <= Self::CURSOR_ERROR_MARGIN {
+                self.flags |= Self::RESIZE_SE * mouse_pressed;
+                if override_cursor {
+                    nox.set_cursor(CursorIcon::SeResize);
+                }
+            }
+            else if cursor_pos.x >= self.position.x - Self::CURSOR_ERROR_MARGIN &&
                 cursor_pos.x <= self.position.x + Self::CURSOR_ERROR_MARGIN 
             {
                 self.flags |= Self::RESIZE_LEFT * mouse_pressed;
@@ -504,7 +731,18 @@ impl<I, FontHash> Window<I, FontHash>
             self.title_bar_rect = title_bar_rect;
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
-        cursor_in_this_window
+        let mut separator_rect = self.separator_rect;
+        separator_rect.max.x = self.main_rect.max.x;
+        separator_rect.max.y = style.separator_height;
+        if self.separator_rect != separator_rect {
+            self.separator_rect = separator_rect;
+            self.flags |= Self::REQUIRES_TRIANGULATION;
+        }
+        if style.rounding != self.main_rect.rounding {
+            self.flags |= Self::REQUIRES_TRIANGULATION;
+            self.main_rect.rounding = style.rounding;
+        }
+        cursor_in_this_window || self.any_resize()
     }
 
     #[inline(always)]
@@ -539,6 +777,19 @@ impl<I, FontHash> Window<I, FontHash>
             }
             title_bar_rect_draw_info.index_count = indices_usize.len() as u32 - title_bar_rect_draw_info.first_index;
             self.title_bar_rect_draw_info = title_bar_rect_draw_info;
+            points.clear();
+            let mut separator_rect_draw_info = DrawInfo {
+                first_index: indices_usize.len() as u32,
+                ..Default::default()
+            };
+            self.separator_rect.to_points_no_round(
+                &mut |p| { points.push(p.into()); }
+            );
+            if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+                self.flags &= !Self::RENDERABLE;
+            }
+            separator_rect_draw_info.index_count = indices_usize.len() as u32 - separator_rect_draw_info.first_index;
+            self.separator_rect_draw_info = separator_rect_draw_info;
             let active_widgets = self.active_widgets.take().unwrap();
             let mut flags = self.flags;
             for &widget in &active_widgets  {
@@ -633,6 +884,28 @@ impl<I, FontHash> Window<I, FontHash>
                 ],
                 DrawBufferInfo::new(index_buffer.id(), idx_mem.offset),
             )?;
+        } else {
+            let pc_vertex = style.calc_outline_thin_push_constant(
+                self.position,
+                self.main_rect.max,
+                inv_aspect_ratio,
+            );
+            let pc_fragment = push_constants_fragment(style.outline_thin_col);
+            render_commands.push_constants(|pc| unsafe {
+                if pc.stage == ShaderStage::Vertex {
+                    pc_vertex.as_bytes()
+                } else {
+                    pc_fragment.as_bytes()
+                }
+            })?;
+            render_commands.draw_indexed(
+                self.main_rect_draw_info,
+                [
+                    DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
+                    no_offset,
+                ],
+                DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
+            )?;
         }
         let pc_vertex = push_constants_vertex(
             self.position,
@@ -668,6 +941,30 @@ impl<I, FontHash> Window<I, FontHash>
         })?;
         render_commands.draw_indexed(
             self.title_bar_rect_draw_info,
+            [
+                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
+                no_offset,
+            ],
+            DrawBufferInfo {
+                id: index_buffer.id(),
+                offset: idx_mem.offset,
+            },
+        )?;
+        let pc_vertex = push_constants_vertex(
+            self.position + vec2(0.0, self.title_bar_rect.max.y - self.separator_rect.max.y * 0.5),
+            vec2(1.0, 1.0),
+            inv_aspect_ratio
+        );
+        let pc_fragment = push_constants_fragment(style.separator_col);
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
+        })?;
+        render_commands.draw_indexed(
+            self.separator_rect_draw_info,
             [
                 DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
                 no_offset,

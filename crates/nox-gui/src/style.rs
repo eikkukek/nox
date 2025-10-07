@@ -10,6 +10,8 @@ pub struct Style<FontHash> {
     pub widget_bg_col: ColorRGBA,
     pub outline_col: ColorRGBA,
     pub outline_col_hl: ColorRGBA,
+    pub outline_thin_col: ColorRGBA,
+    pub separator_col: ColorRGBA,
     pub handle_col: ColorRGBA,
     pub text_col: ColorRGBA,
     pub hover_window_bg_col: ColorRGBA,
@@ -21,6 +23,8 @@ pub struct Style<FontHash> {
     pub rounding: f32,
     pub slider_min_width: f32,
     pub outline_width: f32,
+    pub outline_thin_width: f32,
+    pub separator_height: f32,
     pub override_cursor: bool,
     pub f32_format: fn(f32, &mut CompactString) -> core::fmt::Result,
     pub f64_format: fn(f64, &mut CompactString) -> core::fmt::Result,
@@ -35,6 +39,8 @@ impl<FontHash> Style<FontHash> {
             widget_bg_col: ColorRGBA::from_rgba(52.0 / 255.0, 74.0 / 255.0, 76.0 / 255.0, 1.0),
             outline_col: ColorRGBA::from_rgba(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0),
             outline_col_hl: ColorRGBA::from_rgba(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0),
+            outline_thin_col: ColorRGBA::from_rgba(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0),
+            separator_col: ColorRGBA::from_rgba(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0),
             handle_col: ColorRGBA::from_rgba(83.0 / 255.0, 118.0 / 255.0, 121.0 / 255.0, 1.0),
             text_col: ColorRGBA::from_rgba(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 1.0),
             hover_window_bg_col: ColorRGBA::from_rgba(10.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 1.0),
@@ -43,9 +49,11 @@ impl<FontHash> Style<FontHash> {
             item_pad_outer: vec2(0.02, 0.02),
             item_pad_inner: vec2(0.01, 0.01),
             font_scale: 0.02,
-            rounding: 0.01,
+            rounding: 0.005,
             slider_min_width: 0.05,
             outline_width: 0.005,
+            outline_thin_width: 0.003,
+            separator_height: 0.0015,
             override_cursor: true,
             f32_format: |value: f32, to: &mut CompactString| -> core::fmt::Result {
                 write!(to, "{:.2}", value)
@@ -74,6 +82,26 @@ impl<FontHash> Style<FontHash> {
     {
         let width_half = self.outline_width * 0.5;
         push_constants_vertex(position - vec2(width_half, width_half), self.calc_outline_scale(rect_size), inv_aspect_ratio)
+    }
+
+    #[inline(always)]
+    pub(crate) fn calc_outline_thin_scale(&self, rect_size: Vec2) -> Vec2 {
+        vec2(
+            (rect_size.x + self.outline_thin_width) / rect_size.x,
+            (rect_size.y + self.outline_thin_width) / rect_size.y,
+        )
+    }
+
+    #[inline(always)]
+    pub(crate) fn calc_outline_thin_push_constant(
+        &self,
+        position: Vec2,
+        rect_size: Vec2,
+        inv_aspect_ratio: f32
+    ) -> PushConstantsVertex
+    {
+        let width_half = self.outline_thin_width * 0.5;
+        push_constants_vertex(position - vec2(width_half, width_half), self.calc_outline_thin_scale(rect_size), inv_aspect_ratio)
     }
 
     #[inline(always)]

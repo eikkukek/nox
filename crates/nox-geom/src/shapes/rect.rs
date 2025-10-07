@@ -137,6 +137,19 @@ impl Rect {
     }
 
     #[inline]
+    pub fn to_points_no_round(
+        self,
+        collect: &mut impl FnMut(Vec2),
+    )
+    {
+        let (min, max) = (self.min, self.max);
+        collect(min);
+        collect(vec2(max.x, min.y));
+        collect(max);
+        collect(vec2(min.x, max.y));
+    }
+
+    #[inline]
     pub fn to_points_partial_round(
         self,
         round_min: bool,
