@@ -52,7 +52,7 @@ pub fn nox_vertex_input(item: TokenStream) -> TokenStream {
                 _ if str.ends_with("Vec2") => quote!(VkFormat::R32G32_SFLOAT),
                 _ if str.ends_with("Vec3") => quote!(VkFormat::R32G32B32_SFLOAT),
                 _ if str.ends_with("Vec4") => quote!(VkFormat::R32G32B32A32_SFLOAT),
-                _ => quote!(#ty::as_vk_format()),
+                _ => quote!(#ty::VK_FORMAT),
             };
             quote! {
                 VertexInputAttribute {
