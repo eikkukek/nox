@@ -68,6 +68,16 @@ impl Vec2 {
     }
 
     #[inline(always)]
+    pub fn rotated(self, rad: f32) -> Self {
+        let cos = rad.cos();
+        let sin = rad.sin();
+        Self {
+            x: self.x * cos - self.y * sin,
+            y: self.x * sin + self.y * cos,
+        }
+    }
+
+    #[inline(always)]
     pub fn lerp(self, other: Self, t: f32) -> Vec2 {
         (1.0 - t) * self + t * other
     }
