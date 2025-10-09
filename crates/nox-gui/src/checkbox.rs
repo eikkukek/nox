@@ -6,7 +6,7 @@ use core::{
 use compact_str::CompactString;
 
 use nox::{
-    mem::vec_types::{GlobalVec, Vector},
+    mem::vec_types::GlobalVec,
     *,
 };
 
@@ -24,8 +24,10 @@ pub(crate) struct Checkbox<I, FontHash> {
     title_text: Option<RenderedText>,
     checkbox_text: Option<RenderedText>,
     rect: Rect,
-    position: Vec2,
-    rect_draw_info: DrawInfo,
+    offset: Vec2,
+    rect_vertex_range: VertexRange,
+    outline_vertex_range: VertexRange,
+    outline_width: f32,
     flags: u32,
     _marker: PhantomData<(I, FontHash)>
 }
@@ -48,8 +50,10 @@ impl<I, FontHash> Checkbox<I, FontHash> {
             title_text: Default::default(),
             checkbox_text: Default::default(),
             rect: Default::default(),
-            position: Default::default(),
-            rect_draw_info: Default::default(),
+            offset: Default::default(),
+            rect_vertex_range: Default::default(),
+            outline_vertex_range: Default::default(),
+            outline_width: 0.0,
             flags: Self::CHECKED * checked as u32,
             _marker: PhantomData,
         }
@@ -94,12 +98,12 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
     }
 
     #[inline(always)]
-    fn set_position(
+    fn set_offset(
         &mut self,
-        position: Vec2,
+        offset: Vec2,
     )
     {
-        self.position = position;
+        self.offset = offset;
     }
 
     #[inline(always)]
@@ -128,6 +132,7 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         _window_width: f32,
+        window_pos: Vec2,
         cursor_pos: Vec2,
         cursor_in_this_window: bool,
     ) -> UpdateResult
@@ -143,11 +148,12 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
         let rect_max_size = rect_size.x.max(rect_size.y);
         let rect_size = vec2(rect_max_size, rect_max_size);
         let rect = rect(Default::default(), rect_size, style.rounding);
-        let requires_triangulation = self.rect != rect;
+        let requires_triangulation = self.rect != rect || self.outline_width != style.outline_width;
         self.rect = rect;
+        self.outline_width = style.outline_width;
         let mut cursor_in_widget = false;
         self.flags &= !Self::CURSOR_IN_CHECKBOX;
-        let pos = self.position + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
+        let pos = window_pos + self.offset + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
         if self.held() {
             cursor_in_widget = true;
             if nox.was_mouse_button_released(MouseButton::Left) {
@@ -179,83 +185,73 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
     fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> DrawInfo,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     )
     {
-        points.clear();
         self.rect.to_points(&mut |p| { points.push(p.into()); });
-        self.rect_draw_info = tri(&points);
+        let mut outline_points = GlobalVec::new();
+        nox_geom::shapes::outline_points(points, self.outline_width, false, &mut |p| { outline_points.push(p.into()); });
+        self.outline_vertex_range = tri(&outline_points);
+        self.rect_vertex_range = tri(&points);
+    }
+
+    fn set_vertex_params(
+        &mut self,
+        style: &Style<FontHash>,
+        vertices: &mut [Vertex],
+    )
+    {
+        let title_text = self.title_text.as_ref().unwrap();
+        let offset = self.offset + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
+        let vertex_sample = vertices[self.outline_vertex_range.start];
+        if self.cursor_in_checkbox() || self.held() {
+            let target_color = if self.held() {
+                style.outline_col_hl
+            } else {
+                style.outline_col
+            };
+            if vertex_sample.offset != offset || vertex_sample.color != target_color {
+                for vertex in &mut vertices[self.outline_vertex_range.clone()] {
+                    vertex.offset = offset;
+                    vertex.color = target_color;
+                }
+            }
+        }
+        else if vertex_sample.color.a != 0.0 {
+            for vertex in &mut vertices[self.outline_vertex_range.clone()] {
+                vertex.color = ColorRGBA::transparent_black();
+            }
+        }
+        let vertex_sample = vertices[self.rect_vertex_range.start];
+        if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col {
+            let target_color = style.widget_bg_col;
+            for vertex in &mut vertices[self.rect_vertex_range.clone()] {
+                vertex.offset = offset;
+                vertex.color = target_color;
+            }
+        }
     }
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
+        _base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
+        window_pos: Vec2,
         inv_aspect_ratio: f32,
-        window_vertex_offset: u64,
-        window_index_offset: u64,
-        no_offset: DrawBufferInfo,
     ) -> Result<(), Error>
     {
-        let vertex_buffer_id = vertex_buffer.id();
-        let index_buffer_id = index_buffer.id();
         let title_text = self.title_text.as_ref().unwrap();
-        let checkbox_text = self.checkbox_text.as_ref().unwrap();
-        let checkbox_pos = self.position + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
-        if self.cursor_in_checkbox() || self.held() {
-            let pc_vertex = style.calc_outline_push_constant(
-                checkbox_pos,
-                self.rect.max,
-                inv_aspect_ratio
-            );
-            let pc_fragment = push_constants_fragment(
-                if self.held() {
-                    style.outline_col_hl
-                } else {
-                    style.outline_col
-                }
-            );
-            render_commands.push_constants(|pc| unsafe {
-                if pc.stage == ShaderStage::Vertex {
-                    pc_vertex.as_bytes()
-                } else {
-                    pc_fragment.as_bytes()
-                }
-            })?;
-            render_commands.draw_indexed(
-                self.rect_draw_info,
-                [
-                    DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
-                    no_offset,
-                ],
-                DrawBufferInfo::new(index_buffer_id, window_index_offset),
-            )?;
-        }
-        let pc_vertex = push_constants_vertex(checkbox_pos, vec2(1.0, 1.0), inv_aspect_ratio);
-        let pc_fragment = push_constants_fragment(style.widget_bg_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_commands.draw_indexed(
-            self.rect_draw_info,
-            [
-                DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
-                no_offset
-            ],
-            DrawBufferInfo::new(index_buffer_id, window_index_offset),
-        )?;
+        render_commands.bind_pipeline(text_pipeline)?;
         let pc_vertex = push_constants_vertex(
-            self.position + vec2(0.0, style.item_pad_inner.y),
+            window_pos + self.offset + vec2(0.0, style.item_pad_inner.y),
             vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio
         );
-        let pc_fragment = push_constants_fragment(style.text_col);
+        let pc_fragment = text_push_constants_fragment(style.text_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
                 pc_vertex.as_bytes()
@@ -265,6 +261,8 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
         })?;
         render_text(title_text, render_commands, vertex_buffer, index_buffer)?;
         if self.checked() {
+            let checkbox_text = self.checkbox_text.as_ref().unwrap();
+            let checkbox_pos = window_pos + self.offset + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
             let size = style.calc_text_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
             let pc_vertex = push_constants_vertex(
                 checkbox_pos + self.rect.max * 0.5 - size * 0.5,
@@ -281,5 +279,23 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
             render_text(checkbox_text, render_commands, vertex_buffer, index_buffer)?;
         }
         Ok(())
+    }
+
+    fn hide(
+        &self,
+        vertices: &mut [Vertex],
+    ) {
+        let vertex_sample = vertices[self.rect_vertex_range.start];
+        if vertex_sample.color.a != 0.0 {
+            for vertex in &mut vertices[self.rect_vertex_range.clone()] {
+                vertex.color = ColorRGBA::transparent_black();
+            }
+        }
+        let vertex_sample = vertices[self.outline_vertex_range.start];
+        if vertex_sample.color.a != 0.0 {
+            for vertex in &mut vertices[self.outline_vertex_range.clone()] {
+                vertex.color = ColorRGBA::transparent_black();
+            }
+        }
     }
 }

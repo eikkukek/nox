@@ -19,7 +19,7 @@ use nox_geom::{
 
 use crate::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum ActiveWidget {
     Slider(u32),
     Button(u32),
@@ -89,14 +89,28 @@ impl HoverWindow {
         true
     }
 
+    fn set_vertex_params<FontHash>(
+        &mut self,
+        style: &Style<FontHash>,
+    ) {
+        let vertex_sample = self.vertices[0];
+        if vertex_sample.color != style.hover_window_bg_col {
+            let target_color = style.hover_window_bg_col;
+            for vertex in &mut self.vertices {
+                vertex.color = target_color;
+            }
+        }
+    }
+
     fn render_commands<FontHash>(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
+        base_pipeline_id: GraphicsPipelineId,
+        text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
-        no_offset: DrawBufferInfo,
     ) -> Result<(), Error>
     {
         let vert_count = self.vertices.len();
@@ -115,14 +129,10 @@ impl HoverWindow {
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
         }
+        render_commands.bind_pipeline(base_pipeline_id)?;
         let pc_vertex = push_constants_vertex(self.position, vec2(1.0, 1.0), inv_aspect_ratio);
-        let pc_fragment = push_constants_fragment(style.hover_window_bg_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
+        render_commands.push_constants(|_| unsafe {
+            pc_vertex.as_bytes()
         })?;
         render_commands.draw_indexed(
             DrawInfo {
@@ -131,16 +141,16 @@ impl HoverWindow {
             },
             [
                 DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-                no_offset,
             ],
             DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
         )?;
+        render_commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
             self.position + style.item_pad_inner,
             vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio
         );
-        let pc_fragment = push_constants_fragment(style.text_col);
+        let pc_fragment = text_push_constants_fragment(style.text_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
                 pc_vertex.as_bytes()
@@ -156,11 +166,14 @@ impl HoverWindow {
 pub(crate) struct Window<I, FontHash>
 {
     main_rect: Rect,
-    main_rect_draw_info: DrawInfo,
     title_bar_rect: Rect,
-    title_bar_rect_draw_info: DrawInfo,
     separator_rect: Rect,
-    separator_rect_draw_info: DrawInfo,
+    main_rect_vertex_range: VertexRange,
+    title_bar_vertex_range: VertexRange,
+    separator_vertex_range: VertexRange,
+    outline_vertex_range: VertexRange,
+    outline_thin_vertex_range: VertexRange,
+    main_draw_info: DrawInfo,
     position: Vec2,
     title: CompactString,
     title_text: Option<RenderedText>,
@@ -170,10 +183,13 @@ pub(crate) struct Window<I, FontHash>
     sliders: FxHashMap<u32, (u64, Slider<I, FontHash>)>,
     checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
+    prev_active_widgets: Option<GlobalVec<ActiveWidget>>,
     hover_window: Option<HoverWindow>,
     last_triangulation: u64,
     last_frame: u64,
     min_height: f32,
+    outline_width: f32,
+    outline_thin_width: f32,
     flags: u32,
 }
 
@@ -206,11 +222,14 @@ impl<I, FontHash> Window<I, FontHash>
     {
         Self {
             main_rect: rect(Default::default(), size, 0.0),
-            main_rect_draw_info: Default::default(),
             title_bar_rect: rect::<Vec2>(Default::default(), Default::default(), rounding),
-            title_bar_rect_draw_info: Default::default(),
             separator_rect: Default::default(),
-            separator_rect_draw_info: Default::default(),
+            main_rect_vertex_range: Default::default(),
+            title_bar_vertex_range: Default::default(),
+            separator_vertex_range: Default::default(),
+            outline_vertex_range: Default::default(),
+            outline_thin_vertex_range: Default::default(),
+            main_draw_info: Default::default(),
             position: position.into(),
             title: title.into(),
             title_text: None,
@@ -220,10 +239,13 @@ impl<I, FontHash> Window<I, FontHash>
             sliders: FxHashMap::default(),
             checkboxs: FxHashMap::default(),
             active_widgets: Some(Default::default()),
+            prev_active_widgets: Some(Default::default()),
             hover_window: Some(HoverWindow::new()),
             last_triangulation: 0,
             last_frame: 0,
             min_height: 0.0,
+            outline_width: 0.0,
+            outline_thin_width: 0.0,
             flags: Self::REQUIRES_TRIANGULATION,
         }
     }
@@ -366,7 +388,19 @@ impl<I, FontHash> Window<I, FontHash>
         let min_height = self.min_height;
         let mut cursor_in_some_widget = false;
         let window_width = self.main_rect.max.x;
-        let active_widgets = self.active_widgets.take().unwrap();
+        let window_pos = self.position;
+        let (active_widgets, mut prev_active_widgets, mut vertices) = unsafe {(
+            self.active_widgets.take().unwrap_unchecked(),
+            self.prev_active_widgets.take().unwrap_unchecked(),
+            self.vertices.take().unwrap_unchecked(),
+        )};
+        prev_active_widgets.retain(|v| !active_widgets.contains(v));
+        for &widget in &prev_active_widgets {
+            let (_, widget) = self.get_widget_mut(widget);
+            widget.hide(&mut vertices);
+        }
+        self.prev_active_widgets = Some(prev_active_widgets);
+        self.vertices = Some(vertices);
         let mut hover_window = self.hover_window.take().unwrap();
         for &widget in &active_widgets {
             let (_, widget) = self.get_widget_mut(widget);
@@ -379,6 +413,7 @@ impl<I, FontHash> Window<I, FontHash>
                 style,
                 text_renderer,
                 window_width,
+                window_pos,
                 cursor_pos,
                 cursor_in_this_window,
             );
@@ -568,28 +603,27 @@ impl<I, FontHash> Window<I, FontHash>
         if main_rect_max.y < self.min_height {
             main_rect_max.y = self.min_height;
         }
-        if main_rect_max != self.main_rect.max {
-            self.main_rect.max = main_rect_max;
-            self.flags |= Self::REQUIRES_TRIANGULATION;
-        }
         let mut title_bar_rect = self.title_bar_rect;
         title_bar_rect.max.x = self.main_rect.max.x;
         title_bar_rect.max.y = style.calc_text_box_height(title_text.font_height);
-        if self.title_bar_rect != title_bar_rect {
-            self.title_bar_rect = title_bar_rect;
-            self.flags |= Self::REQUIRES_TRIANGULATION;
-        }
         let mut separator_rect = self.separator_rect;
         separator_rect.max.x = self.main_rect.max.x;
         separator_rect.max.y = style.separator_height;
-        if self.separator_rect != separator_rect {
-            self.separator_rect = separator_rect;
-            self.flags |= Self::REQUIRES_TRIANGULATION;
-        }
-        if style.rounding != self.main_rect.rounding {
-            self.flags |= Self::REQUIRES_TRIANGULATION;
-            self.main_rect.rounding = style.rounding;
-        }
+        let requires_triangulation =
+            (style.rounding != self.main_rect.rounding ||
+            self.outline_width != style.outline_width ||
+            self.outline_thin_width != style.outline_thin_width ||
+            main_rect_max != self.main_rect.max ||
+            self.title_bar_rect != title_bar_rect ||
+            self.separator_rect != separator_rect
+        ) as u32;
+        self.flags |= Self::REQUIRES_TRIANGULATION * requires_triangulation;
+        self.main_rect.rounding = style.rounding;
+        self.outline_width = style.outline_width;
+        self.outline_thin_width = style.outline_thin_width;
+        self.main_rect.max = main_rect_max;
+        self.title_bar_rect = title_bar_rect;
+        self.separator_rect = separator_rect;
         cursor_in_this_window || self.any_resize()
     }
 
@@ -604,62 +638,68 @@ impl<I, FontHash> Window<I, FontHash>
             let mut points = GlobalVec::new();
             let mut indices_usize = GlobalVec::new();
             self.main_rect.to_points(&mut |p| { points.push(p.into()); });
-            if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
-                self.flags &= !Self::RENDERABLE
+            let mut outline_points = GlobalVec::new();
+            nox_geom::shapes::outline_points(&points, self.outline_width, false, &mut |p| { outline_points.push(p.into()); });
+            if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+                self.flags &= !Self::RENDERABLE;
             }
-            self.main_rect_draw_info = DrawInfo {
-                first_index: 0,
-                index_count: indices_usize.len() as u32,
-                ..Default::default()
-            };
+            self.outline_vertex_range = 0..vertices.len();
+            outline_points.clear();
+            nox_geom::shapes::outline_points(&points, self.outline_thin_width, false, &mut |p| { outline_points.push(p.into()); });
+            let mut vertex_begin = vertices.len();
+            if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+                self.flags &= !Self::RENDERABLE;
+            }
+            self.outline_thin_vertex_range = vertex_begin..vertices.len();
+            vertex_begin = vertices.len();
+            if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+                self.flags &= !Self::RENDERABLE;
+            }
+            self.main_rect_vertex_range = vertex_begin..vertices.len();
             points.clear();
-            let mut title_bar_rect_draw_info = DrawInfo {
-                first_index: indices_usize.len() as u32,
-                ..Default::default()
-            };
             self.title_bar_rect.to_points_partial_round(true, true, false, false,
                 &mut |p| { points.push(p.into()); }
             );
+            vertex_begin = vertices.len();
             if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            title_bar_rect_draw_info.index_count = indices_usize.len() as u32 - title_bar_rect_draw_info.first_index;
-            self.title_bar_rect_draw_info = title_bar_rect_draw_info;
+            self.title_bar_vertex_range = vertex_begin..vertices.len();
             points.clear();
-            let mut separator_rect_draw_info = DrawInfo {
-                first_index: indices_usize.len() as u32,
-                ..Default::default()
-            };
             self.separator_rect.to_points_no_round(
                 &mut |p| { points.push(p.into()); }
             );
+            vertex_begin = vertices.len();
             if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            separator_rect_draw_info.index_count = indices_usize.len() as u32 - separator_rect_draw_info.first_index;
-            self.separator_rect_draw_info = separator_rect_draw_info;
+            self.separator_vertex_range = vertex_begin..vertices.len();
             let active_widgets = self.active_widgets.take().unwrap();
             let mut flags = self.flags;
             for &widget in &active_widgets  {
                 let (last_triangulation, widget) = self.get_widget_mut(widget);
                 *last_triangulation = new_triangulation;
-                widget.triangulate(&mut points, &mut |points: &[[f32; 2]]| {
-                    let mut draw_info = DrawInfo {
-                        first_index: indices_usize.len() as u32,
-                        ..Default::default()
-                    };
-                    if !earcut::earcut(points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
-                        flags &= !Self::RENDERABLE;
+                points.clear();
+                widget.triangulate(&mut points,
+                    &mut |points: &[[f32; 2]]| {
+                        let vertex_begin = vertices.len();
+                        if !earcut::earcut(points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+                            flags &= !Self::RENDERABLE;
+                        }
+                        vertex_begin..vertices.len()
                     }
-                    draw_info.index_count = indices_usize.len() as u32 - draw_info.first_index;
-                    draw_info
-                });
+                );
             }
+            self.main_draw_info = DrawInfo {
+                first_index: 0,
+                index_count: indices_usize.len() as u32,
+                ..Default::default()
+            };
             self.active_widgets = Some(active_widgets);
             self.vertices = Some(vertices);
             self.flags = flags;
-            self.indices.append_map(&indices_usize, |&i| i as u32);
             self.flags &= !Self::REQUIRES_TRIANGULATION;
+            self.indices.append_map(&indices_usize, |&i| i as u32);
             self.last_triangulation = new_triangulation;
         }
     }
@@ -671,8 +711,8 @@ impl<I, FontHash> Window<I, FontHash>
         inv_aspect_ratio: f32,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
-        base_pipeline: GraphicsPipelineId,
-        no_offset: DrawBufferInfo,
+        base_pipeline_id: GraphicsPipelineId,
+        text_pipeline_id: GraphicsPipelineId,
     ) -> Result<(), Error>
     {
         if !self.renderable() {
@@ -686,148 +726,120 @@ impl<I, FontHash> Window<I, FontHash>
         let vert_mem = unsafe {
             vertex_buffer.allocate(render_commands, vert_total)?
         };
+        let idx_total = self.indices.len();
+        let idx_mem = unsafe {
+            index_buffer.allocate(render_commands, idx_total)?
+        };
+        let active_widgets = unsafe {
+            self.active_widgets.take().unwrap_unchecked()
+        };
+        let mut vertices = unsafe {
+            self.vertices.take().unwrap_unchecked()
+        };
+        for &widget in &active_widgets {
+            let (_, widget) = self.get_widget_mut(widget);
+            widget.set_vertex_params(style, &mut vertices);
+        }
+        self.active_widgets = Some(active_widgets);
+        let vertex_sample = vertices[self.main_rect_vertex_range.start];
+        if vertex_sample.color != style.window_bg_col {
+            let target_color = style.window_bg_col;
+            for vertex in &mut vertices[self.main_rect_vertex_range.clone()] {
+                vertex.color = target_color;
+            }
+        }
+        let vertex_sample = vertices[self.title_bar_vertex_range.start];
+        if vertex_sample.color != style.window_title_bar_col {
+            let target_color = style.window_title_bar_col;
+            for vertex in &mut vertices[self.title_bar_vertex_range.clone()] {
+                vertex.color = target_color;
+            }
+        }
+        let vertex_sample = vertices[self.separator_vertex_range.start];
+        let offset = vec2(0.0, self.title_bar_rect.max.y - self.separator_rect.max.y * 0.5);
+        if vertex_sample.offset != offset || vertex_sample.color != style.separator_col {
+            let target_color = style.separator_col;
+            for vertex in &mut vertices[self.separator_vertex_range.clone()] {
+                vertex.offset = offset;
+                vertex.color = target_color;
+            }
+        }
+        let any_resize = self.any_resize();
+        if self.cursor_in_window() || any_resize {
+            let vertex_sample = vertices[self.outline_vertex_range.start];
+            let offset = vec2(0.0, 0.0);
+            let target_color = if any_resize || self.held() {
+                style.outline_col_hl
+            } else {
+                style.outline_col
+            };
+            if vertex_sample.offset != offset || vertex_sample.color != target_color {
+                for vertex in &mut vertices[self.outline_vertex_range.clone()] {
+                    vertex.offset = offset;
+                    vertex.color = target_color;
+                }
+            }
+            let vertex_sample = vertices[self.outline_thin_vertex_range.start];
+            if vertex_sample.color.a != 0.0 {
+                for vertex in &mut vertices[self.outline_thin_vertex_range.clone()] {
+                    vertex.color = ColorRGBA::transparent_black();
+                }
+            }
+        } else {
+            let vertex_sample = vertices[self.outline_vertex_range.start];
+            let target_color = ColorRGBA::transparent_black();
+            if vertex_sample.color != target_color {
+                for vertex in &mut vertices[self.outline_vertex_range.clone()] {
+                    vertex.color = target_color;
+                }
+            }
+            let vertex_sample = vertices[self.outline_thin_vertex_range.start];
+            let offset = vec2(0.0, 0.0);
+            let target_color = style.outline_thin_col;
+            if vertex_sample.offset != offset || vertex_sample.color != target_color {
+                for vertex in &mut vertices[self.outline_thin_vertex_range.clone()] {
+                    vertex.offset = offset;
+                    vertex.color = target_color;
+                }
+            }
+        }
+        self.vertices = Some(vertices);
         unsafe {
             self.vertices
                 .as_ref()
                 .unwrap_unchecked()
                 .as_ptr()
                 .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_total);
-        }
-        let idx_total = self.indices.len();
-        let idx_mem = unsafe {
-            index_buffer.allocate(render_commands, idx_total)?
-        };
-        unsafe {
             self.indices
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total);
         }
-        render_commands.bind_pipeline(base_pipeline)?;
-        let any_resize = self.any_resize();
-        if self.cursor_in_window() || any_resize {
-            let pc_vertex = style.calc_outline_push_constant(
-                self.position,
-                self.main_rect.max,
-                inv_aspect_ratio
-            );
-            let pc_fragment = push_constants_fragment(
-                if self.held() || any_resize {
-                    style.outline_col_hl
-                } else {
-                    style.outline_col
-                }
-            );
-            render_commands.push_constants(|pc| unsafe {
-                if pc.stage == ShaderStage::Vertex {
-                    pc_vertex.as_bytes()
-                } else {
-                    pc_fragment.as_bytes()
-                }
-            })?;
-            render_commands.draw_indexed(
-                self.main_rect_draw_info,
-                [
-                    DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-                    no_offset,
-                ],
-                DrawBufferInfo::new(index_buffer.id(), idx_mem.offset),
-            )?;
-        } else {
-            let pc_vertex = style.calc_outline_thin_push_constant(
-                self.position,
-                self.main_rect.max,
-                inv_aspect_ratio,
-            );
-            let pc_fragment = push_constants_fragment(style.outline_thin_col);
-            render_commands.push_constants(|pc| unsafe {
-                if pc.stage == ShaderStage::Vertex {
-                    pc_vertex.as_bytes()
-                } else {
-                    pc_fragment.as_bytes()
-                }
-            })?;
-            render_commands.draw_indexed(
-                self.main_rect_draw_info,
-                [
-                    DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-                    no_offset,
-                ],
-                DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
-            )?;
-        }
+        render_commands.bind_pipeline(base_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
             self.position,
             vec2(1.0, 1.0),
             inv_aspect_ratio,
         );
-        let pc_fragment = push_constants_fragment(style.window_bg_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
+        render_commands.push_constants(|_| unsafe {
+            pc_vertex.as_bytes()
         })?;
         render_commands.draw_indexed(
-            self.main_rect_draw_info,
+            self.main_draw_info,
             [
                 DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-                no_offset,
             ],
             DrawBufferInfo {
                 id: index_buffer.id(),
                 offset: idx_mem.offset,
             },
         )?;
-        let pc_fragment = push_constants_fragment(style.window_title_bar_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_commands.draw_indexed(
-            self.title_bar_rect_draw_info,
-            [
-                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-                no_offset,
-            ],
-            DrawBufferInfo {
-                id: index_buffer.id(),
-                offset: idx_mem.offset,
-            },
-        )?;
-        let pc_vertex = push_constants_vertex(
-            self.position + vec2(0.0, self.title_bar_rect.max.y - self.separator_rect.max.y * 0.5),
-            vec2(1.0, 1.0),
-            inv_aspect_ratio
-        );
-        let pc_fragment = push_constants_fragment(style.separator_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_commands.draw_indexed(
-            self.separator_rect_draw_info,
-            [
-                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-                no_offset,
-            ],
-            DrawBufferInfo {
-                id: index_buffer.id(),
-                offset: idx_mem.offset,
-            },
-        )?;
+        render_commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
             self.position + vec2(style.item_pad_outer.x, style.item_pad_inner.y),
             vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio,
         );
-        let pc_fragment = push_constants_fragment(style.text_col);
+        let pc_fragment = text_push_constants_fragment(style.text_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
                 pc_vertex.as_bytes()
@@ -841,27 +853,35 @@ impl<I, FontHash> Window<I, FontHash>
             widget.render_commands(
                 render_commands,
                 style,
+                base_pipeline_id,
+                text_pipeline_id,
                 vertex_buffer,
                 index_buffer,
+                self.position,
                 inv_aspect_ratio,
-                vert_mem.offset,
-                idx_mem.offset,
-                no_offset,
             )?;
         }
         if self.hover_window_active() {
-            unsafe {
-                self.hover_window
-                    .as_ref()
+            let hover_window = unsafe { self.hover_window
+                    .as_mut()
                     .unwrap_unchecked()
-                    .render_commands(render_commands, style, vertex_buffer, index_buffer, inv_aspect_ratio, no_offset)?;
-            }
+            };
+            hover_window.set_vertex_params(style);
+            hover_window.render_commands(
+                render_commands,
+                style,
+                base_pipeline_id,
+                text_pipeline_id,
+                vertex_buffer,
+                index_buffer,
+                inv_aspect_ratio
+            )?;
         }
         unsafe {
-            self.active_widgets
+            self.prev_active_widgets
                 .as_mut()
                 .unwrap_unchecked()
-                .clear();
+                .move_from_vec(self.active_widgets.as_mut().unwrap_unchecked()).unwrap();
         }
         Ok(())
     }
@@ -920,7 +940,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
         if *last_triangulation != self.window.last_triangulation {
             self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
         }
-        button.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
+        button.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += button.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
         button.pressed()
     }
@@ -958,7 +978,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             .map_err(|e| {
                 Error::UserError(format!("nox_gui: failed to format slider value: {}", e))
             })?;
-        slider.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
+        slider.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += slider.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
         Ok(())
     }
@@ -986,7 +1006,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             *value = !*value;
         }
         checkbox.set_checked(*value);
-        checkbox.set_position(self.window.position + vec2(self.style.item_pad_outer.x, self.widget_y));
+        checkbox.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += checkbox.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
         *value
     }

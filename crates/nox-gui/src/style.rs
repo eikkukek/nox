@@ -49,10 +49,10 @@ impl<FontHash> Style<FontHash> {
             item_pad_outer: vec2(0.02, 0.02),
             item_pad_inner: vec2(0.01, 0.01),
             font_scale: 0.02,
-            rounding: 0.005,
+            rounding: 0.000,
             slider_min_width: 0.05,
-            outline_width: 0.005,
-            outline_thin_width: 0.003,
+            outline_width: 0.0035,
+            outline_thin_width: 0.002,
             separator_height: 0.0015,
             override_cursor: true,
             f32_format: |value: f32, to: &mut CompactString| -> core::fmt::Result {
@@ -62,46 +62,6 @@ impl<FontHash> Style<FontHash> {
                 write!(to, "{:.2}", value)
             },
         }
-    }
-
-    #[inline(always)]
-    pub(crate) fn calc_outline_scale(&self, rect_size: Vec2) -> Vec2 {
-        vec2(
-            (rect_size.x + self.outline_width) / rect_size.x,
-            (rect_size.y + self.outline_width) / rect_size.y,
-        )
-    }
-
-    #[inline(always)]
-    pub(crate) fn calc_outline_push_constant(
-        &self,
-        position: Vec2,
-        rect_size: Vec2,
-        inv_aspect_ratio: f32
-    ) -> PushConstantsVertex
-    {
-        let width_half = self.outline_width * 0.5;
-        push_constants_vertex(position - vec2(width_half, width_half), self.calc_outline_scale(rect_size), inv_aspect_ratio)
-    }
-
-    #[inline(always)]
-    pub(crate) fn calc_outline_thin_scale(&self, rect_size: Vec2) -> Vec2 {
-        vec2(
-            (rect_size.x + self.outline_thin_width) / rect_size.x,
-            (rect_size.y + self.outline_thin_width) / rect_size.y,
-        )
-    }
-
-    #[inline(always)]
-    pub(crate) fn calc_outline_thin_push_constant(
-        &self,
-        position: Vec2,
-        rect_size: Vec2,
-        inv_aspect_ratio: f32
-    ) -> PushConstantsVertex
-    {
-        let width_half = self.outline_thin_width * 0.5;
-        push_constants_vertex(position - vec2(width_half, width_half), self.calc_outline_thin_scale(rect_size), inv_aspect_ratio)
     }
 
     #[inline(always)]

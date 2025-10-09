@@ -17,6 +17,8 @@ pub struct UpdateResult {
     pub cursor_in_widget: bool,
 }
 
+pub type VertexRange = core::ops::Range<usize>;
+
 pub trait Widget<I, FontHash>
     where
         I: Interface,
@@ -25,7 +27,7 @@ pub trait Widget<I, FontHash>
 
     fn hover_text(&self) -> Option<&str>;
 
-    fn set_position(
+    fn set_offset(
         &mut self,
         position: Vec2,
     );
@@ -42,6 +44,7 @@ pub trait Widget<I, FontHash>
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_width: f32,
+        window_pos: Vec2,
         cursor_pos: Vec2,
         cursor_in_this_window: bool,
     ) -> UpdateResult;
@@ -49,18 +52,29 @@ pub trait Widget<I, FontHash>
     fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> DrawInfo,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+    );
+
+    fn set_vertex_params(
+        &mut self,
+        style: &Style<FontHash>,
+        vertices: &mut [Vertex],
     );
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
+        base_pipeline_id: GraphicsPipelineId,
+        text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
+        window_pos: Vec2,
         inv_aspect_ratio: f32,
-        window_vertex_offset: u64,
-        window_index_offset: u64,
-        no_offset: DrawBufferInfo,
     ) -> Result<(), Error>;
+
+    fn hide(
+        &self,
+        vertices: &mut [Vertex],
+    );
 }

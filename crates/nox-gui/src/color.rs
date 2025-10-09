@@ -1,3 +1,5 @@
+use nox::VkFormat;
+
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
 pub struct ColorRGBA {
     pub r: f32,
@@ -8,11 +10,15 @@ pub struct ColorRGBA {
 
 impl ColorRGBA {
 
+    pub const VK_FORMAT: VkFormat = VkFormat::R32G32B32A32_SFLOAT;
+
+    #[inline(always)]
     pub fn from_rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a, }
     }
 
-    pub fn white() -> Self {
+    #[inline(always)]
+    pub const fn white() -> Self {
         Self {
             r: 1.0,
             g: 1.0,
@@ -21,12 +27,23 @@ impl ColorRGBA {
         }
     }
 
-    pub fn black() -> Self {
+    #[inline(always)]
+    pub const fn black() -> Self {
         Self {
             r: 0.0,
             g: 0.0,
             b: 0.0,
             a: 1.0,
+        }
+    }
+
+    #[inline(always)]
+    pub const fn transparent_black() -> Self {
+        Self {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.0,
         }
     }
 }

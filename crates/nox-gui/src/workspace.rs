@@ -23,7 +23,10 @@ use crate::*;
 struct Pipelines {
     base_pipeline_layout: Option<PipelineLayoutId>,
     base_pipeline: Option<GraphicsPipelineId>,
+    text_pipeline_layout: Option<PipelineLayoutId>,
+    text_pipeline: Option<GraphicsPipelineId>,
     base_shaders: Option<[ShaderId; 2]>,
+    text_shaders: Option<[ShaderId; 2]>,
 }
 
 pub struct Workspace<'a, I, FontHash>
@@ -87,31 +90,63 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         alloc: &impl Allocator,
     ) -> Result<(), Error>
     {
-        render_context.edit_resources(|v| {
+        render_context.edit_resources(|r| {
             if let Some(pipeline) = self.pipelines.base_pipeline.take() {
-                v.destroy_graphics_pipeline(pipeline);
+                r.destroy_graphics_pipeline(pipeline);
+            }
+            if let Some(pipeline) = self.pipelines.text_pipeline.take() {
+                r.destroy_graphics_pipeline(pipeline);
             }
             let &mut base_shaders = self.pipelines.base_shaders
                 .get_or_insert([
-                    v.create_shader(BASE_VERTEX_SHADER, "nox_gui base vertex shader", ShaderStage::Vertex)?,
-                    v.create_shader(BASE_FRAGMENT_SHADER, "nox_gui base fragment shader", ShaderStage::Fragment)?,
+                    r.create_shader(BASE_VERTEX_SHADER, "nox_gui base vertex shader", ShaderStage::Vertex)?,
+                    r.create_shader(BASE_FRAGMENT_SHADER, "nox_gui base fragment shader", ShaderStage::Fragment)?,
+                ]
+            );
+            let &mut text_shaders = self.pipelines.text_shaders
+                .get_or_insert([
+                    r.create_shader(TEXT_VERTEX_SHADER, "nox_gui text vertex shader", ShaderStage::Vertex)?,
+                    r.create_shader(TEXT_FRAGMENT_SHADER, "nox_gui text fragment shader", ShaderStage::Fragment)?,
                 ]
             );
             let &mut base_layout = self.pipelines.base_pipeline_layout.get_or_insert(
-                v.create_pipeline_layout(base_shaders)?
+                r.create_pipeline_layout(base_shaders)?
+            );
+            let &mut text_layout = self.pipelines.text_pipeline_layout.get_or_insert(
+                r.create_pipeline_layout(text_shaders)?
             );
             let mut base_info = GraphicsPipelineInfo::new(base_layout);
             base_info
                 .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
+                .with_sample_shading(SampleShadingInfo::new(samples, 0.2, false, false))
+                .with_color_output(
+                    output_format,
+                    WriteMask::all(),
+                    Some(ColorOutputBlendState {
+                        src_color_blend_factor: BlendFactor::SrcAlpha,
+                        dst_color_blend_factor: BlendFactor::OneMinusSrcAlpha,
+                        color_blend_op: BlendOp::Add,
+                        src_alpha_blend_factor: BlendFactor::One,
+                        dst_alpha_blend_factor: BlendFactor::OneMinusSrcAlpha,
+                        alpha_blend_op: BlendOp::Add,
+                    })
+                );
+            let mut text_info = GraphicsPipelineInfo::new(text_layout);
+            text_info
+                .with_vertex_input_binding(VertexInputBinding::new::<0, font::Vertex>(0, VertexInputRate::Vertex))
                 .with_vertex_input_binding(VertexInputBinding::new::<1, font::VertexOffset>(1, VertexInputRate::Instance))
                 .with_sample_shading(SampleShadingInfo::new(samples, 0.2, false, false))
                 .with_color_output(output_format, WriteMask::all(), None);
-            v.create_graphics_pipelines(
-                &[base_info],
+            r.create_graphics_pipelines(
+                &[base_info, text_info],
                 cache_id,
                 alloc,
-                |_, p| {
-                    self.pipelines.base_pipeline = Some(p)
+                |i, p| {
+                    if i == 0 {
+                        self.pipelines.base_pipeline = Some(p)
+                    } else {
+                        self.pipelines.text_pipeline = Some(p);
+                    }
                 }
             )?;
             Ok(())
@@ -229,19 +264,14 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
                 "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
             ))
         };
+        let Some(text_pipeline) = self.pipelines.text_pipeline else {
+            return Err(Error::UserError(
+                "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
+            ))
+        };
         let inv_aspect_ratio = self.inv_aspect_ratio;
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
-        let no_offset = unsafe {
-            vertex_buffer.allocate::<font::VertexOffset>(render_commands, 1)?
-        };
-        unsafe {
-            let tmp = font::VertexOffset {
-                offset: [0.0, 0.0],
-            };
-            (&tmp as *const font::VertexOffset)
-                .copy_to_nonoverlapping(no_offset.ptr.as_ptr(), 1);
-        }
         for id in &self.active_windows {
             self.windows.get_mut(id).unwrap().render_commands(
                 render_commands,
@@ -250,7 +280,7 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
                 vertex_buffer,
                 index_buffer,
                 base_pipeline,
-                DrawBufferInfo { id: vertex_buffer.id(), offset: no_offset.offset }
+                text_pipeline,
             )?;
         }
         vertex_buffer.finish_frame();

@@ -34,14 +34,16 @@ pub(crate) struct Slider<I, FontHash>
     title: CompactString,
     title_text: Option<RenderedText>,
     slider_rect: Rect,
+    slider_rect_vertex_range: VertexRange,
     handle_rect: Rect,
-    position: Vec2,
+    handle_rect_vertex_range: VertexRange,
+    outline_rect_vertex_range: VertexRange,
+    offset: Vec2,
     pub t: f32,
     pub quantized_t: f32,
     pub hover_text: CompactString,
-    slider_rect_draw_info: DrawInfo,
-    handle_rect_draw_info: DrawInfo,
     falgs: u32,
+    outline_width: f32,
     _marker: PhantomData<(I, FontHash)>,
 }
 
@@ -61,38 +63,40 @@ impl<I, FontHash> Slider<I, FontHash>
             title: CompactString::new(title),
             title_text: Default::default(),
             slider_rect: Default::default(),
+            slider_rect_vertex_range: Default::default(),
             handle_rect: Default::default(),
-            position: Default::default(),
+            handle_rect_vertex_range: Default::default(),
+            outline_rect_vertex_range: Default::default(),
+            offset: Default::default(),
             t,
             quantized_t: t,
             hover_text: Default::default(),
-            slider_rect_draw_info: Default::default(),
-            handle_rect_draw_info: Default::default(),
             falgs: 0,
+            outline_width: 0.0,
             _marker: PhantomData,
         }
     }
 
     #[inline(always)]
-    fn slider_pos(
+    fn slider_off(
         &self,
         style: &Style<FontHash>,
         text_width: f32,
     ) -> Vec2
     {
-        let mut pos = self.position;
+        let mut pos = self.offset;
         pos.x += text_width + style.item_pad_outer.x;
         //pos.y += text_box_height / 2.0 - text_box_height / 4.0;
         pos
     }
 
     #[inline(always)]
-    fn handle_pos(
+    fn handle_off(
         &self,
-        slider_pos: Vec2,
+        slider_off: Vec2,
     ) -> Vec2
     {
-        let mut pos = slider_pos;
+        let mut pos = slider_off;
         pos.x += (self.slider_rect.max.x - self.handle_rect.max.x) * self.quantized_t;
         pos
     }
@@ -133,12 +137,12 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
     }
 
     #[inline(always)]
-    fn set_position(
+    fn set_offset(
         &mut self,
-        position: Vec2,
+        offset: Vec2,
     )
     {
-        self.position = position;
+        self.offset = offset;
     }
 
     fn calc_size(
@@ -158,6 +162,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_width: f32,
+        window_pos: Vec2,
         cursor_pos: Vec2,
         cursor_in_this_window: bool,
     ) -> UpdateResult
@@ -192,7 +197,8 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
             ),
             style.rounding,
         );
-        let requires_triangulation = slider_rect != self.slider_rect || handle_rect != self.handle_rect;
+        let requires_triangulation = slider_rect != self.slider_rect || handle_rect != self.handle_rect || self.outline_width != style.outline_width;
+        self.outline_width = style.outline_width;
         if requires_triangulation {
             self.slider_rect = slider_rect;
             self.handle_rect = handle_rect;
@@ -204,11 +210,11 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.falgs &= !Self::HELD;
             } else {
-                self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width));
+                self.t = self.calc_t(cursor_pos, window_pos + self.slider_off(style, text_width));
             }
         } else if cursor_in_this_window {
             let bounding_rect = BoundingRect::from_position_size(
-                self.slider_pos(style, text_width),
+                window_pos + self.slider_off(style, text_width),
                 self.slider_rect.max,
             );
             cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
@@ -216,7 +222,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
                 self.falgs |= Self::CURSOR_IN_SLIDER;
                 if nox.was_mouse_button_pressed(MouseButton::Left) {
                     self.falgs |= Self::HELD;
-                    self.t = self.calc_t(cursor_pos, self.slider_pos(style, text_width));
+                    self.t = self.calc_t(cursor_pos, window_pos + self.slider_off(style, text_width));
                 }
             }
         }
@@ -230,100 +236,89 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
     fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> DrawInfo,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     )
     {
-        points.clear();
         self.slider_rect.to_points(&mut |p| { points.push(p.into()); });
-        self.slider_rect_draw_info = tri(&points);
+        let mut outline_points = GlobalVec::<[f32; 2]>::new();
+        nox_geom::shapes::outline_points(points, self.outline_width, false, &mut |p| { outline_points.push(p.into()); });
+        self.outline_rect_vertex_range = tri(&outline_points);
+        self.slider_rect_vertex_range = tri(&points);
         points.clear();
         self.handle_rect.to_points(&mut |p| { points.push(p.into()); });
-        self.handle_rect_draw_info = tri(&points);
+        self.handle_rect_vertex_range = tri(&points);
     }
 
+    fn set_vertex_params(
+        &mut self,
+        style: &Style<FontHash>,
+        vertices: &mut [Vertex],
+    )
+    {
+        let title_text = self.title_text.as_ref().unwrap();
+        let text_width = style.calc_text_width(title_text.text_width);
+        let slider_off = self.slider_off(style, text_width);
+        let vertex_sample = vertices[self.outline_rect_vertex_range.start];
+        if self.cursor_in_slider() || self.held() {
+            let offset = slider_off;
+            let target_color = if self.held() {
+                style.outline_col_hl
+            } else {
+                style.outline_col
+            };
+            if vertex_sample.offset != offset || vertex_sample.color != target_color {
+                for vertex in &mut vertices[self.outline_rect_vertex_range.clone()] {
+                    vertex.offset = offset;
+                    vertex.color = target_color;
+                }
+            }
+        }
+        else if vertex_sample.color.a != 0.0 {
+            for vertex in &mut vertices[self.outline_rect_vertex_range.clone()] {
+                vertex.color = ColorRGBA::transparent_black();
+            }
+        }
+        let vertex_sample = vertices[self.slider_rect_vertex_range.start];
+        if vertex_sample.offset != slider_off || vertex_sample.color != style.widget_bg_col {
+            let target_color = style.widget_bg_col;
+            for vertex in &mut vertices[self.slider_rect_vertex_range.clone()] {
+                vertex.offset = slider_off;
+                vertex.color = target_color;
+            }
+        }
+        let vertex_sample = vertices[self.handle_rect_vertex_range.start];
+        let handle_off = self.handle_off(slider_off);
+        if vertex_sample.offset != handle_off || vertex_sample.color != style.handle_col {
+            let target_color = style.handle_col;
+            for vertex in &mut vertices[self.handle_rect_vertex_range.clone()] {
+                vertex.offset = handle_off;
+                vertex.color = target_color;
+            }
+        }
+    }
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
+        _base_pipeline_id: GraphicsPipelineId,
+        text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
+        window_pos: Vec2,
         inv_aspect_ratio: f32,
-        window_vertex_offset: u64,
-        window_index_offset: u64,
-        no_offset: DrawBufferInfo,
     ) -> Result<(), Error>
     {
-        let vertex_buffer_id = vertex_buffer.id();
-        let index_buffer_id = index_buffer.id();
-        let title_text = self.title_text.as_ref().unwrap();
-        let text_width = style.calc_text_width(title_text.text_width);
-        let slider_pos = self.slider_pos(style, text_width);
-        if self.cursor_in_slider() || self.held() {
-            let pc_vertex = style.calc_outline_push_constant(slider_pos, self.slider_rect.max, inv_aspect_ratio);
-            let pc_fragment = push_constants_fragment(
-                if self.held() {
-                    style.outline_col_hl
-                } else {
-                    style.outline_col
-                }
-            );
-            render_commands.push_constants(|pc| unsafe {
-                if pc.stage == ShaderStage::Vertex {
-                    pc_vertex.as_bytes()
-                } else {
-                    pc_fragment.as_bytes()
-                }
-            })?;
-            render_commands.draw_indexed(
-                self.slider_rect_draw_info,
-                [
-                    DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
-                    no_offset,
-                ],
-                DrawBufferInfo::new(index_buffer_id, window_index_offset),
-            )?;
-        }
-        let mut pc_vertex = push_constants_vertex(slider_pos, vec2(1.0, 1.0), inv_aspect_ratio);
-        let mut pc_fragment = push_constants_fragment(style.widget_bg_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_commands.draw_indexed(
-            self.slider_rect_draw_info,
-            [
-                DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
-                no_offset,
-            ],
-            DrawBufferInfo::new(index_buffer_id, window_index_offset),
-        )?;
-        pc_fragment.color = style.handle_col;
-        pc_vertex.vert_off = self.handle_pos(slider_pos);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_commands.draw_indexed(
-            self.handle_rect_draw_info,
-            [
-                DrawBufferInfo::new(vertex_buffer_id, window_vertex_offset),
-                no_offset,
-            ],
-            DrawBufferInfo::new(index_buffer_id, window_index_offset),
-        )?;
+        let title_text = unsafe {
+            self.title_text.as_ref().unwrap_unchecked()
+        };
+        render_commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
-            vec2(self.position.x, self.position.y + (self.slider_rect.max.y - style.calc_text_height(title_text.font_height)) / 2.0),
+            window_pos + vec2(self.offset.x, self.offset.y + (self.slider_rect.max.y - style.calc_text_height(title_text.font_height)) / 2.0),
             vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio,
         );
-        let pc_fragment = push_constants_fragment(style.text_col);
+        let pc_fragment = text_push_constants_fragment(style.text_col);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
                 pc_vertex.as_bytes()
@@ -333,6 +328,30 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         })?;
         render_text(title_text, render_commands, vertex_buffer, index_buffer)?;
         Ok(())
+    }
+
+    fn hide(
+        &self,
+        vertices: &mut [Vertex],
+    ) {
+        let vertex_sample = vertices[self.slider_rect_vertex_range.start];
+        if vertex_sample.color.a != 0.0 {
+            for vertex in &mut vertices[self.slider_rect_vertex_range.clone()] {
+                vertex.color = ColorRGBA::transparent_black();
+            }
+        }
+        let vertex_sample = vertices[self.handle_rect_vertex_range.start];
+        if vertex_sample.color.a != 0.0 {
+            for vertex in &mut vertices[self.handle_rect_vertex_range.clone()] {
+                vertex.color = ColorRGBA::transparent_black();
+            }
+        }
+        let vertex_sample = vertices[self.outline_rect_vertex_range.start];
+        if vertex_sample.color.a != 0.0 {
+            for vertex in &mut vertices[self.outline_rect_vertex_range.clone()] {
+                vertex.color = ColorRGBA::transparent_black();
+            }
+        }
     }
 }
 
