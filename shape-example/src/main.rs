@@ -57,7 +57,7 @@ impl Interface for Example {
         renderer: &mut RendererContext,
     ) -> Result<(), Error>
     {
-        self.rects[0] = rect([-0.25, -0.25], [0.25, 0.25], 0.1);
+        self.rects[0] = rect([-0.25, -0.25], [0.25, 0.25], 0.01);
         self.rects[1] = self.rects[0].translate(0.0, -0.4).widen(0.125);
         self.rects[2] = self.rects[0].translate(0.0, 0.4).widen(0.125);
         self.rects[3] = self.rects[0].translate(-0.4, 0.0).heighten(0.125);
@@ -183,15 +183,15 @@ impl Interface for Example {
         nox: &mut Nox<Self>,
         renderer: &mut RendererContext,
     ) -> Result<(), Error> {
-        if nox.is_key_pressed(KeyCode::Space) {
+        if nox.was_key_pressed(KeyCode::Space) {
             self.target_rect = 0;
-        } else if nox.is_key_pressed(KeyCode::KeyW) {
+        } else if nox.was_key_pressed(KeyCode::KeyW) {
             self.target_rect = 1
-        } else if nox.is_key_pressed(KeyCode::KeyS) {
+        } else if nox.was_key_pressed(KeyCode::KeyS) {
             self.target_rect = 2;
-        } else if nox.is_key_pressed(KeyCode::KeyA) {
+        } else if nox.was_key_pressed(KeyCode::KeyA) {
             self.target_rect = 3;
-        } else if nox.is_key_pressed(KeyCode::KeyD) {
+        } else if nox.was_key_pressed(KeyCode::KeyD) {
             self.target_rect = 4;
         } 
         let target_rect = self.rects[self.target_rect];
@@ -280,7 +280,7 @@ impl Interface for Example {
     {
         let aspect_ratio = self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32;
         commands.bind_pipeline(self.pipeline)?;
-        commands.push_constants(unsafe { value_as_bytes(&aspect_ratio).unwrap() })?;
+        commands.push_constants(|_| unsafe { value_as_bytes(&aspect_ratio).unwrap() })?;
         commands.draw_indexed(
             DrawInfo {
                 index_count: self.indices.len() as u32,

@@ -39,16 +39,16 @@ pub fn outline_points<F, P>(
         }
     } else {
         const MAGIC_RADIANS: f32 = 3.0 * PI / 4.0; // (360° - 90°) / 2
-        let mut prev_ab: Vec2 = points[0].into() - points[n - 1].into();
+        let mut prev_ab: Vec2 = points[1].into() - points[0].into();
         for i in (0..n).rev() {
             let a: Vec2 = points[i].into();
             let b: Vec2 = points[(i + 1) % n].into();
             let ab = b - a;
             if prev_ab.dot(ab).abs() < f32::EPSILON {
-                collect(a - ab.rotated(MAGIC_RADIANS).normalized() * width);
+                collect(a + ab.rotated(MAGIC_RADIANS).normalized() * width);
             } else {
-                let c = a.right(b).normalized() * width;
-                collect(a - c);
+                let c = b.right(a).normalized() * width;
+                collect(a + c);
             }
             prev_ab = ab;
         }
