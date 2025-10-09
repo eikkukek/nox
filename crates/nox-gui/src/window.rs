@@ -191,13 +191,9 @@ impl<I, FontHash> Window<I, FontHash>
     const RESIZE_RIGHT: u32 = 0x20;
     const RESIZE_TOP: u32 = 0x40;
     const RESIZE_BOTTOM: u32 = 0x80;
-    const HOVER_WINDOW_ACTIVE: u32 = 0x100;
-    const RESIZE_NW: u32 = 0x200;
-    const RESIZE_NE: u32 = 0x400;
-    const RESIZE_SW: u32 = 0x800;
-    const RESIZE_SE: u32 = 0x1000;
-    const RESIZE_BLOCKED_COL: u32 = 0x2000;
-    const RESIZE_BLOCKED_ROW: u32 = 0x4000;
+    const RESIZE_BLOCKED_COL: u32 = 0x100;
+    const RESIZE_BLOCKED_ROW: u32 = 0x200;
+    const HOVER_WINDOW_ACTIVE: u32 = 0x400;
 
     const CURSOR_ERROR_MARGIN: f32 = 0.01;
 
@@ -274,22 +270,22 @@ impl<I, FontHash> Window<I, FontHash>
 
     #[inline(always)]
     fn resize_nw(&self) -> bool {
-        self.flags & Self::RESIZE_NW == Self::RESIZE_NW
+        self.resize_top() && self.resize_left()
     }
 
     #[inline(always)]
     fn resize_ne(&self) -> bool {
-        self.flags & Self::RESIZE_NE == Self::RESIZE_NE
+        self.resize_top() && self.resize_right()
     }
 
     #[inline(always)]
     fn resize_sw(&self) -> bool {
-        self.flags & Self::RESIZE_SW == Self::RESIZE_SW
+        self.resize_bottom() && self.resize_left()
     }
 
     #[inline(always)]
     fn resize_se(&self) -> bool {
-        self.flags & Self::RESIZE_SE == Self::RESIZE_SE
+        self.resize_bottom() && self.resize_right()
     }
 
     #[inline(always)]
@@ -307,11 +303,7 @@ impl<I, FontHash> Window<I, FontHash>
         self.resize_left() ||
         self.resize_right() ||
         self.resize_top() ||
-        self.resize_bottom() ||
-        self.resize_nw() ||
-        self.resize_ne() || 
-        self.resize_sw() ||
-        self.resize_se()
+        self.resize_bottom()
     }
 
     #[inline(always)]
@@ -415,7 +407,7 @@ impl<I, FontHash> Window<I, FontHash>
                 self.position += delta_cursor_pos;
             }
         }
-        else if self.resize_left() {
+        if self.resize_left() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.flags &= !Self::RESIZE_LEFT;
                 if override_cursor {
@@ -438,7 +430,7 @@ impl<I, FontHash> Window<I, FontHash>
                 }
             }
         }
-        else if self.resize_right() {
+        if self.resize_right() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.flags &= !Self::RESIZE_RIGHT;
                 if override_cursor {
@@ -459,7 +451,7 @@ impl<I, FontHash> Window<I, FontHash>
                 }
             }
         }
-        else if self.resize_top() {
+        if self.resize_top() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.flags &= !Self::RESIZE_TOP;
                 if override_cursor {
@@ -483,7 +475,7 @@ impl<I, FontHash> Window<I, FontHash>
                 } 
             }
         }
-        else if self.resize_bottom() {
+        if self.resize_bottom() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.flags &= !Self::RESIZE_BOTTOM;
                 if override_cursor {
@@ -504,218 +496,67 @@ impl<I, FontHash> Window<I, FontHash>
                 }
             }
         }
-        else if self.resize_nw() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.flags &= !Self::RESIZE_NW;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
-                }
-            } else {
-                if self.resize_blocked_col() {
-                    if cursor_pos.x <= self.position.x {
-                        self.flags &= !Self::RESIZE_BLOCKED_COL;
-                    }
-                } else {
-                    let delta_width = cursor_pos.x - self.position.x;
-                    let new_width = main_rect_max.x - delta_width;
-                    if new_width < min_width {
-                        self.flags |= Self::RESIZE_BLOCKED_COL;
-                    } else {
-                        main_rect_max.x = new_width;
-                        self.position.x = cursor_pos.x;
-                    }
-                }
-                if self.resize_blocked_row() {
-                    if cursor_pos.y <= self.position.y {
-                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
-                    }
-                } else {
-                    let delta_height = cursor_pos.y - self.position.y;
-                    let new_height = main_rect_max.y - delta_height;
-                    if new_height < self.min_height {
-                        self.flags |= Self::RESIZE_BLOCKED_ROW;
-                    } else {
-                        main_rect_max.y = new_height;
-                        self.position.y = cursor_pos.y;
-                    }
-                }
-            }
-        }
-        else if self.resize_ne() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.flags &= !Self::RESIZE_NE;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
-                }
-            } else {
-                if self.resize_blocked_col() {
-                    if cursor_pos.x - self.position.x >= min_width {
-                        self.flags &= !Self::RESIZE_BLOCKED_COL;
-                    }
-                } else {
-                    let new_width = cursor_pos.x - self.position.x;
-                    if new_width < min_width {
-                        self.flags |= Self::RESIZE_BLOCKED_COL;
-                    } else {
-                        main_rect_max.x = new_width;
-                    }
-                }
-                if self.resize_blocked_row() {
-                    if cursor_pos.y <= self.position.y {
-                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
-                    }
-                } else {
-                    let delta_height = cursor_pos.y - self.position.y;
-                    let new_height = main_rect_max.y - delta_height;
-                    if new_height < self.min_height {
-                        self.flags |= Self::RESIZE_BLOCKED_ROW;
-                    } else {
-                        main_rect_max.y = new_height;
-                        self.position.y = cursor_pos.y;
-                    }
-                }
-            }
-        }
-        else if self.resize_sw() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.flags &= !Self::RESIZE_SW;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
-                }
-            } else {
-                if self.resize_blocked_col() {
-                    if cursor_pos.x <= self.position.x {
-                        self.flags &= !Self::RESIZE_BLOCKED_COL;
-                    }
-                } else {
-                    let delta_width = cursor_pos.x - self.position.x;
-                    let new_width = main_rect_max.x - delta_width;
-                    if new_width < min_width {
-                        self.flags |= Self::RESIZE_BLOCKED_COL;
-                    } else {
-                        main_rect_max.x = new_width;
-                        self.position.x = cursor_pos.x;
-                    }
-                }
-                if self.resize_blocked_row() {
-                    if cursor_pos.y - self.position.y >= self.min_height {
-                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
-                    }
-                } else {
-                    let new_height = cursor_pos.y - self.position.y;
-                    if new_height < self.min_height {
-                        self.flags |= Self::RESIZE_BLOCKED_ROW;
-                    } else {
-                        main_rect_max.y = new_height;
-                    }
-                }
-            }
-        }
-        else if self.resize_se() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.flags &= !Self::RESIZE_SE;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
-                }
-            } else {
-                if self.resize_blocked_col() {
-                    if cursor_pos.x - self.position.x >= min_width {
-                        self.flags &= !Self::RESIZE_BLOCKED_COL;
-                    }
-                } else {
-                    let new_width = cursor_pos.x - self.position.x;
-                    main_rect_max.x = new_width;
-                    if main_rect_max.x < min_width {
-                        main_rect_max.x = min_width;
-                        self.flags |= Self::RESIZE_BLOCKED_COL;
-                    }
-                }
-                if self.resize_blocked_row() {
-                    if cursor_pos.y - self.position.y >= self.min_height {
-                        self.flags &= !Self::RESIZE_BLOCKED_ROW;
-                    }
-                } else {
-                    let new_height = cursor_pos.y - self.position.y;
-                    main_rect_max.y = new_height;
-                    if main_rect_max.y < self.min_height {
-                        main_rect_max.y = self.min_height;
-                        self.flags |= Self::RESIZE_BLOCKED_ROW;
-                    }
-                }
-            }
-        }
-        else if cursor_in_this_window && !cursor_in_some_widget {
-            self.flags &= !Self::RESIZE_BLOCKED_COL;
-            self.flags &= !Self::RESIZE_BLOCKED_ROW;
-            let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left) as u32;
-            if cursor_pos.mag_to(self.position) <= Self::CURSOR_ERROR_MARGIN {
-                self.flags |= Self::RESIZE_NW * mouse_pressed;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::NwResize);
-                }
-            }
-            else if cursor_pos.mag_to(self.position + vec2(self.main_rect.max.x, 0.0)) <= Self::CURSOR_ERROR_MARGIN {
-                self.flags |= Self::RESIZE_NE * mouse_pressed;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::NeResize);
-                }
-            }
-            else if cursor_pos.mag_to(self.position + vec2(0.0, self.main_rect.max.y)) <= Self::CURSOR_ERROR_MARGIN {
-                self.flags |= Self::RESIZE_SW * mouse_pressed;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::SwResize);
-                }
-            }
-            else if cursor_pos.mag_to(self.position + self.main_rect.max) <= Self::CURSOR_ERROR_MARGIN {
-                self.flags |= Self::RESIZE_SE * mouse_pressed;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::SeResize);
-                }
-            }
-            else if cursor_pos.x >= self.position.x - Self::CURSOR_ERROR_MARGIN &&
+        if !self.held() && !self.any_resize() && cursor_in_this_window && !cursor_in_some_widget {
+            let mut flags = self.flags;
+            flags &= !Self::RESIZE_BLOCKED_COL;
+            flags &= !Self::RESIZE_BLOCKED_ROW;
+            let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
+            if cursor_pos.x >= self.position.x - Self::CURSOR_ERROR_MARGIN &&
                 cursor_pos.x <= self.position.x + Self::CURSOR_ERROR_MARGIN 
             {
-                self.flags |= Self::RESIZE_LEFT * mouse_pressed;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::ColResize);
-                }
+                flags |= Self::RESIZE_LEFT;
             }
-            else if cursor_pos.x >= self.position.x + self.main_rect.max.x - Self::CURSOR_ERROR_MARGIN &&
+            if cursor_pos.x >= self.position.x + self.main_rect.max.x - Self::CURSOR_ERROR_MARGIN &&
                 cursor_pos.x <= self.position.x + self.main_rect.max.x + Self::CURSOR_ERROR_MARGIN
             {
-                self.flags |= Self::RESIZE_RIGHT * mouse_pressed;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::ColResize);
-                }
+                flags |= Self::RESIZE_RIGHT;
             }
-            else if cursor_pos.y >= self.position.y - Self::CURSOR_ERROR_MARGIN &&
+            if cursor_pos.y >= self.position.y - Self::CURSOR_ERROR_MARGIN &&
                 cursor_pos.y <= self.position.y + Self::CURSOR_ERROR_MARGIN
             {
-                self.flags |= Self::RESIZE_TOP * mouse_pressed;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::RowResize);
-                }
+                flags |= Self::RESIZE_TOP;
             }
-            else if cursor_pos.y >= self.position.y + self.main_rect.max.y - Self::CURSOR_ERROR_MARGIN &&
+            if cursor_pos.y >= self.position.y + self.main_rect.max.y - Self::CURSOR_ERROR_MARGIN &&
                 cursor_pos.y <= self.position.y + self.main_rect.max.y + Self::CURSOR_ERROR_MARGIN
             {
-                self.flags |= Self::RESIZE_BOTTOM * mouse_pressed;
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::RowResize);
-                }
+                flags |= Self::RESIZE_BOTTOM;
             }
-            else if BoundingRect
+            self.flags = flags;
+            if !self.any_resize()
+            {
+                if BoundingRect
                     ::from_position_size(self.position, self.title_bar_rect.max)
                     .is_point_inside(cursor_pos)
-            {
-                self.flags |= Self::HELD * mouse_pressed;
+                {
+                    self.flags |= Self::HELD * mouse_pressed as u32;
+                }
                 if override_cursor {
                     nox.set_cursor(CursorIcon::Default);
                 }
             }
             else if override_cursor {
-                nox.set_cursor(CursorIcon::Default);
+                if self.resize_nw() {
+                    nox.set_cursor(CursorIcon::NwResize);
+                }
+                else if self.resize_ne() {
+                    nox.set_cursor(CursorIcon::NeResize);
+                }
+                else if self.resize_sw() {
+                    nox.set_cursor(CursorIcon::SwResize);
+                }
+                else if self.resize_se() {
+                    nox.set_cursor(CursorIcon::SeResize);
+                }
+                else {
+                    if self.resize_left() || self.resize_right() {
+                        nox.set_cursor(CursorIcon::ColResize);
+                    }
+                    if self.resize_top() || self.resize_bottom() {
+                        nox.set_cursor(CursorIcon::RowResize);
+                    }
+                }
             }
+            self.flags &= !((Self::RESIZE_LEFT | Self::RESIZE_RIGHT | Self::RESIZE_TOP | Self::RESIZE_BOTTOM) * !mouse_pressed as u32);
         }
         if main_rect_max.y < self.min_height {
             main_rect_max.y = self.min_height;
