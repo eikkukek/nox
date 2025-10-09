@@ -74,11 +74,11 @@ pub trait Vector<T>:
 
     fn clear(&mut self);
 
-    fn clone_from(self, from: &[T]) -> Result<Self, CapacityError>
+    fn clone_from_slice(&mut self, from: &[T]) -> Result<(), CapacityError>
         where
             T: Clone;
 
-    fn move_from<V>(self, from: &mut V) -> Result<Self, CapacityError>
+    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<(), CapacityError>
         where
             V: Vector<T>;
 

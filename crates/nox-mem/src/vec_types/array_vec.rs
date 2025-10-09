@@ -265,7 +265,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         self.len = 0;
     }
 
-    fn clone_from(mut self, from: &[T]) -> Result<Self, CapacityError>
+    fn clone_from_slice(&mut self, from: &[T]) -> Result<(), CapacityError>
         where
             T: Clone
     {
@@ -282,10 +282,10 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
             .unwrap()
             .clone_elements(ptr, from.len()); }
         self.len = from.len();
-        Ok(self)
+        Ok(())
     }
 
-    fn move_from<V>(mut self, from: &mut V) -> Result<Self, CapacityError>
+    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<(), CapacityError>
         where
             V: Vector<T>
     {
@@ -305,7 +305,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         }
         self.len = slice.len();
         unsafe { from.set_len(0); }
-        Ok(self)
+        Ok(())
     }
 
     #[inline(always)]
@@ -390,7 +390,9 @@ impl_traits! {
     
         #[inline(always)]
         fn clone(&self) -> Self {
-            ArrayVec::new().clone_from(self).unwrap()
+            let mut vec = ArrayVec::new();
+            vec.clone_from_slice(self).unwrap();
+            vec
         }
     ,
     Debug where T: Debug =>

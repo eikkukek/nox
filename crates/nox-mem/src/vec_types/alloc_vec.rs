@@ -614,7 +614,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
         self.len = 0;
     }
 
-    fn clone_from(mut self, from: &[T]) -> Result<Self>
+    fn clone_from_slice(&mut self, from: &[T]) -> Result<()>
         where
             T: Clone
     {
@@ -627,10 +627,10 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
                 .clone_elements(self.data, from.len());
         }
         self.len = from.len();
-        Ok(self)
+        Ok(())
     }
 
-    fn move_from<V>(mut self, from: &mut V) -> Result<Self>
+    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<()>
         where
             V: Vector<T>
     {
@@ -645,7 +645,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
         }
         self.len = len;
         unsafe { from.set_len(0); }
-        Ok(self)
+        Ok(())
     }
 
     #[inline(always)]
