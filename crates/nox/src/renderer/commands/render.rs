@@ -126,6 +126,9 @@ impl<'a> RenderCommands<'a> {
 
     #[inline(always)]
     pub fn bind_pipeline(&mut self, id: GraphicsPipelineId) -> Result<(), Error> {
+        if self.current_pipeline.unwrap_or_default() == id {
+            return Ok(());
+        }
         let g = self.global_resources.read().unwrap();
         let pipeline = g.get_graphics_pipeline(id)?;
         assert!(pipeline.samples == self.current_sample_count,
