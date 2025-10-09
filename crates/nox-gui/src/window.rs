@@ -363,6 +363,7 @@ impl<I, FontHash> Window<I, FontHash>
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
         let mut min_width: f32 = 0.0;
+        let min_height = self.min_height;
         let mut cursor_in_some_widget = false;
         let window_width = self.main_rect.max.x;
         let active_widgets = self.active_widgets.take().unwrap();
@@ -422,6 +423,8 @@ impl<I, FontHash> Window<I, FontHash>
                     let delta_width = cursor_pos.x - self.position.x;
                     let new_width = main_rect_max.x - delta_width;
                     if new_width < min_width {
+                        self.position.x += main_rect_max.x - min_width;
+                        main_rect_max.x = min_width;
                         self.flags |= Self::RESIZE_BLOCKED_COL;
                     } else {
                         main_rect_max.x = new_width;
@@ -444,6 +447,7 @@ impl<I, FontHash> Window<I, FontHash>
                 } else {
                     let new_width = cursor_pos.x - self.position.x;
                     if new_width < min_width {
+                        main_rect_max.x = min_width;
                         self.flags |= Self::RESIZE_BLOCKED_COL;
                     } else {
                         main_rect_max.x = new_width;
@@ -466,7 +470,9 @@ impl<I, FontHash> Window<I, FontHash>
                 else {
                     let delta_height = cursor_pos.y - self.position.y;
                     let new_height = main_rect_max.y - delta_height;
-                    if new_height < self.min_height {
+                    if new_height < min_height {
+                        self.position.y += main_rect_max.y - min_height;
+                        main_rect_max.y = min_height;
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
                     } else {
                         main_rect_max.y = new_height;
@@ -483,12 +489,13 @@ impl<I, FontHash> Window<I, FontHash>
                 }
             } else {
                 if self.resize_blocked_row() {
-                    if cursor_pos.y - self.position.y >= self.min_height {
+                    if cursor_pos.y - self.position.y >= min_height {
                         self.flags &= !Self::RESIZE_BLOCKED_ROW;
                     }
                 } else {
                     let new_height = cursor_pos.y - self.position.y;
                     if new_height < self.min_height {
+                        main_rect_max.y = min_height;
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
                     } else {
                         main_rect_max.y = new_height;
