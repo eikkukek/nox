@@ -49,7 +49,7 @@ impl<FontHash> Style<FontHash> {
             item_pad_outer: vec2(0.02, 0.02),
             item_pad_inner: vec2(0.01, 0.01),
             font_scale: 0.02,
-            rounding: 0.000,
+            rounding: 0.005,
             slider_min_width: 0.05,
             outline_width: 0.0035,
             outline_thin_width: 0.002,
