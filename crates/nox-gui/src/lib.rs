@@ -7,6 +7,7 @@ mod widget;
 mod button;
 mod slider;
 mod checkbox;
+mod color_picker;
 mod window;
 mod workspace;
 
@@ -24,6 +25,7 @@ pub use nox_font as font;
 
 pub use compact_str::CompactString;
 
-use button::*;
-use checkbox::*;
+use button::Button;
+use checkbox::Checkbox;
+use color_picker::ColorPicker;
 use helpers::*;

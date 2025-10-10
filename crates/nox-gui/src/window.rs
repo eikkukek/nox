@@ -24,6 +24,7 @@ enum ActiveWidget {
     Slider(u32),
     Button(u32),
     Checkbox(u32),
+    ColorPicker(u32),
 }
 
 struct HoverWindow {
@@ -65,7 +66,7 @@ impl HoverWindow {
         }
         let rect = rect(
             Default::default(),
-            style.calc_text_box_size(vec2(self.rendered_text.text_width, self.rendered_text.font_height)),
+            style.calc_text_box_size(vec2(self.rendered_text.text_width, self.rendered_text.row_height)),
             style.rounding,
         );
         if rect != self.rect {
@@ -182,6 +183,7 @@ pub(crate) struct Window<I, FontHash>
     buttons: FxHashMap<u32, (u64, Button<I, FontHash>)>,
     sliders: FxHashMap<u32, (u64, Slider<I, FontHash>)>,
     checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash>)>,
+    color_pickers: FxHashMap<u32, (u64, ColorPicker<I, FontHash>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
     prev_active_widgets: Option<GlobalVec<ActiveWidget>>,
     hover_window: Option<HoverWindow>,
@@ -238,6 +240,7 @@ impl<I, FontHash> Window<I, FontHash>
             buttons: FxHashMap::default(),
             sliders: FxHashMap::default(),
             checkboxs: FxHashMap::default(),
+            color_pickers: FxHashMap::default(),
             active_widgets: Some(Default::default()),
             prev_active_widgets: Some(Default::default()),
             hover_window: Some(HoverWindow::new()),
@@ -339,6 +342,7 @@ impl<I, FontHash> Window<I, FontHash>
             ActiveWidget::Slider(id) => self.sliders.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
             ActiveWidget::Button(id) => self.buttons.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
             ActiveWidget::Checkbox(id) => self.checkboxs.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
+            ActiveWidget::ColorPicker(id) => self.color_pickers.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
         }
     }
 
@@ -348,6 +352,7 @@ impl<I, FontHash> Window<I, FontHash>
             ActiveWidget::Slider(id) => self.sliders.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
             ActiveWidget::Button(id) => self.buttons.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
             ActiveWidget::Checkbox(id) => self.checkboxs.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
+            ActiveWidget::ColorPicker(id) => self.color_pickers.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
         }
     }
 
@@ -605,7 +610,7 @@ impl<I, FontHash> Window<I, FontHash>
         }
         let mut title_bar_rect = self.title_bar_rect;
         title_bar_rect.max.x = self.main_rect.max.x;
-        title_bar_rect.max.y = style.calc_text_box_height(title_text.font_height);
+        title_bar_rect.max.y = style.calc_text_box_height(title_text.row_height);
         let mut separator_rect = self.separator_rect;
         separator_rect.max.x = self.main_rect.max.x;
         separator_rect.max.y = style.separator_height;
@@ -915,7 +920,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             0.0,
         ).unwrap_or_default());
         Self {
-            widget_y: style.calc_text_box_height(title_text.font_height) + style.item_pad_inner.y,
+            widget_y: style.calc_text_box_height(title_text.row_height) + style.item_pad_inner.y,
             window,
             style,
             text_renderer,
@@ -962,7 +967,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
         }
         let (last_triangulation, slider) = self.window.sliders
             .entry(id)
-            .or_insert((0, Slider::new(value.calc_t(min, max), title.into())));
+            .or_insert((0, Slider::new(title)));
         if *last_triangulation != self.window.last_triangulation {
             self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
         }
@@ -998,7 +1003,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
         }
         let (last_triangulation, checkbox) = self.window.checkboxs
             .entry(id)
-            .or_insert((0, Checkbox::new(title, *value)));
+            .or_insert((0, Checkbox::new(title)));
         if *last_triangulation != self.window.last_triangulation {
             self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
         }
@@ -1009,6 +1014,29 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
         checkbox.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += checkbox.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
         *value
+    }
+
+    pub fn update_color_picker(
+        &mut self,
+        id: u32,
+        title: &str,
+        _value: &mut ColorRGBA,
+    )
+    {
+        unsafe {
+            self.window.active_widgets
+                .as_mut()
+                .unwrap_unchecked()
+                .push(ActiveWidget::ColorPicker(id));
+        }
+        let (last_triangulation, color_picker) = self.window.color_pickers
+            .entry(id)
+            .or_insert((0, ColorPicker::new(title)));
+        if *last_triangulation != self.window.last_triangulation {
+            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+        }
+        color_picker.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
+        self.widget_y += color_picker.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;
     }
 }
 

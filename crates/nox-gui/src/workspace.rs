@@ -20,13 +20,53 @@ use nox_geom::{
 use crate::*;
 
 #[derive(Default)]
-struct Pipelines {
+struct BasePipelines {
     base_pipeline_layout: Option<PipelineLayoutId>,
     base_pipeline: Option<GraphicsPipelineId>,
     text_pipeline_layout: Option<PipelineLayoutId>,
     text_pipeline: Option<GraphicsPipelineId>,
     base_shaders: Option<[ShaderId; 2]>,
     text_shaders: Option<[ShaderId; 2]>,
+}
+
+pub struct CustomPipelineInfo<'a> {
+    pub vertex_shader: &'a str,
+    pub fragment_shader: &'a str,
+    pub vertex_input_bindings: &'a [VertexInputBinding],
+}
+
+impl<'a> CustomPipelineInfo<'a> {
+
+    pub fn new(
+        vertex_shader: &'a str,
+        fragment_shader: &'a str,
+        vertex_input_bindings: &'a [VertexInputBinding],
+    ) -> Self
+    {
+        Self {
+            vertex_shader,
+            fragment_shader,
+            vertex_input_bindings,
+        }
+    }
+}
+
+struct CustomPipeline {
+    pub vertex_shader: ShaderId,
+    fragment_shader: ShaderId,
+    pipeline_layout: PipelineLayoutId,
+    vertex_input_bindings: GlobalVec<VertexInputBinding>,
+    pipeline: GraphicsPipelineId,
+}
+
+impl CustomPipeline {
+
+    fn clean_up(&self, r: &mut GlobalResources) {
+        r.destroy_shader(self.vertex_shader);
+        r.destroy_shader(self.fragment_shader);
+        r.destroy_pipeline_layout(self.pipeline_layout);
+        r.destroy_graphics_pipeline(self.pipeline);
+    }
 }
 
 pub struct Workspace<'a, I, FontHash>
@@ -40,12 +80,16 @@ pub struct Workspace<'a, I, FontHash>
     active_windows: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
-    pipelines: Pipelines,
+    base_pipelines: BasePipelines,
+    custom_pipelines: FxHashMap<CompactString, CustomPipeline>,
     frame: u64,
     ring_buffer_size: usize,
     prev_cursor_position: Vec2,
     inv_aspect_ratio: f32,
     flags: u32,
+    min_sample_shading: f32,
+    output_samples: MSAA,
+    output_format: ColorFormat,
 }
 
 impl<'a, I, FontHash> Workspace<'a, I, FontHash>
@@ -55,6 +99,15 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
 {
 
     const BEGAN: u32 = 1;
+
+    const BLEND_STATE: ColorOutputBlendState = ColorOutputBlendState {
+        src_color_blend_factor: BlendFactor::SrcAlpha,
+        dst_color_blend_factor: BlendFactor::OneMinusSrcAlpha,
+        color_blend_op: BlendOp::Add,
+        src_alpha_blend_factor: BlendFactor::One,
+        dst_alpha_blend_factor: BlendFactor::OneMinusSrcAlpha,
+        alpha_blend_op: BlendOp::Add,
+    };
 
     pub fn new(
         fonts: impl IntoIterator<Item = (FontHash, Face<'a>)>,
@@ -71,12 +124,16 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
             active_windows: Default::default(),
             vertex_buffer: None,
             index_buffer: None,
-            pipelines: Default::default(),
+            base_pipelines: Default::default(),
+            custom_pipelines: FxHashMap::default(),
             frame: 0,
             ring_buffer_size: 1 << 23,
             prev_cursor_position: Default::default(),
             inv_aspect_ratio: 1.0,
             flags: 0,
+            min_sample_shading: 0.2,
+            output_samples: Default::default(),
+            output_format: Default::default(),
         }
     }
 
@@ -84,68 +141,99 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
     pub fn create_graphics_pipelines(
         &mut self,
         render_context: &mut RendererContext,
-        samples: MSAA,
+        output_samples: MSAA,
         output_format: ColorFormat,
         cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
     ) -> Result<(), Error>
     {
+        if self.output_samples == output_samples && self.output_format != output_format {
+            return Ok(())
+        }
+        self.output_samples = output_samples;
+        self.output_format = output_format;
+        self.create_custom_pipelines(
+            render_context,
+            &[("nox_gui color picker", CustomPipelineInfo::new(
+                COLOR_PICKER_VERTEX_SHADER,
+                COLOR_PICKER_FRAGMENT_SHADER,
+                &[VertexInputBinding::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)],
+            ))],
+            cache_id,
+            alloc
+        )?;
         render_context.edit_resources(|r| {
-            if let Some(pipeline) = self.pipelines.base_pipeline.take() {
+            if let Some(pipeline) = self.base_pipelines.base_pipeline.take() {
                 r.destroy_graphics_pipeline(pipeline);
             }
-            if let Some(pipeline) = self.pipelines.text_pipeline.take() {
+            if let Some(pipeline) = self.base_pipelines.text_pipeline.take() {
                 r.destroy_graphics_pipeline(pipeline);
             }
-            let &mut base_shaders = self.pipelines.base_shaders
+
+            let &mut base_shaders = self.base_pipelines.base_shaders
                 .get_or_insert([
                     r.create_shader(BASE_VERTEX_SHADER, "nox_gui base vertex shader", ShaderStage::Vertex)?,
                     r.create_shader(BASE_FRAGMENT_SHADER, "nox_gui base fragment shader", ShaderStage::Fragment)?,
                 ]
             );
-            let &mut text_shaders = self.pipelines.text_shaders
+            let &mut text_shaders = self.base_pipelines.text_shaders
                 .get_or_insert([
                     r.create_shader(TEXT_VERTEX_SHADER, "nox_gui text vertex shader", ShaderStage::Vertex)?,
                     r.create_shader(TEXT_FRAGMENT_SHADER, "nox_gui text fragment shader", ShaderStage::Fragment)?,
                 ]
             );
-            let &mut base_layout = self.pipelines.base_pipeline_layout.get_or_insert(
+            let &mut base_layout = self.base_pipelines.base_pipeline_layout.get_or_insert(
                 r.create_pipeline_layout(base_shaders)?
             );
-            let &mut text_layout = self.pipelines.text_pipeline_layout.get_or_insert(
+            let &mut text_layout = self.base_pipelines.text_pipeline_layout.get_or_insert(
                 r.create_pipeline_layout(text_shaders)?
             );
             let mut base_info = GraphicsPipelineInfo::new(base_layout);
+            let min_sample_shading = self.min_sample_shading;
             base_info
                 .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
-                .with_sample_shading(SampleShadingInfo::new(samples, 0.2, false, false))
+                .with_sample_shading(SampleShadingInfo::new(output_samples, min_sample_shading, false, false))
                 .with_color_output(
                     output_format,
                     WriteMask::all(),
-                    Some(ColorOutputBlendState {
-                        src_color_blend_factor: BlendFactor::SrcAlpha,
-                        dst_color_blend_factor: BlendFactor::OneMinusSrcAlpha,
-                        color_blend_op: BlendOp::Add,
-                        src_alpha_blend_factor: BlendFactor::One,
-                        dst_alpha_blend_factor: BlendFactor::OneMinusSrcAlpha,
-                        alpha_blend_op: BlendOp::Add,
-                    })
+                    Some(Self::BLEND_STATE)
                 );
             let mut text_info = GraphicsPipelineInfo::new(text_layout);
             text_info
                 .with_vertex_input_binding(VertexInputBinding::new::<0, font::Vertex>(0, VertexInputRate::Vertex))
                 .with_vertex_input_binding(VertexInputBinding::new::<1, font::VertexOffset>(1, VertexInputRate::Instance))
-                .with_sample_shading(SampleShadingInfo::new(samples, 0.2, false, false))
-                .with_color_output(output_format, WriteMask::all(), None);
+                .with_sample_shading(SampleShadingInfo::new(output_samples, min_sample_shading, false, false))
+                .with_color_output(output_format, WriteMask::all(), Some(Self::BLEND_STATE));
+            let mut custom_pipelines = GlobalVec::new();
+            let mut pipeline_infos = GlobalVec::from(mem::slice![base_info, text_info]);
+            for (_, pipeline) in &mut self.custom_pipelines {
+                r.destroy_graphics_pipeline(pipeline.pipeline);
+                let mut pipeline_info = GraphicsPipelineInfo::new(pipeline.pipeline_layout);
+                for &binding in &pipeline.vertex_input_bindings {
+                    pipeline_info
+                        .with_vertex_input_binding(binding);
+                }
+                pipeline_info
+                    .with_sample_shading(SampleShadingInfo::new(output_samples, min_sample_shading, false, false))
+                    .with_color_output(
+                        output_format,
+                        WriteMask::all(),
+                        Some(Self::BLEND_STATE)
+                    );
+                pipeline_infos.push(pipeline_info);
+                custom_pipelines.push(pipeline);
+            }
             r.create_graphics_pipelines(
-                &[base_info, text_info],
+                &pipeline_infos,
                 cache_id,
                 alloc,
                 |i, p| {
                     if i == 0 {
-                        self.pipelines.base_pipeline = Some(p)
+                        self.base_pipelines.base_pipeline = Some(p)
+                    } else if i == 1 {
+                        self.base_pipelines.text_pipeline = Some(p);
                     } else {
-                        self.pipelines.text_pipeline = Some(p);
+                        custom_pipelines[i - 2].pipeline = p;
                     }
                 }
             )?;
@@ -153,11 +241,85 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         })
     }
 
+    pub fn create_custom_pipelines<'b>(
+        &mut self,
+        render_context: &mut RendererContext,
+        infos: &[(&'b str, CustomPipelineInfo<'b>)],
+        cache_id: Option<PipelineCacheId>,
+        alloc: &impl Allocator,
+    ) -> Result<(), Error>
+    {
+        render_context.edit_resources(|r| {
+            let mut pipelines = GlobalVec::new();
+            let mut pipeline_infos = GlobalVec::new();
+            let output_samples = self.output_samples;
+            let output_format = self.output_format;
+            for (hash, info) in infos {
+                let hash = CompactString::new(hash);
+                if self.custom_pipelines.contains_key(&hash) {
+                    continue
+                }
+                let vertex_shader = r 
+                    .create_shader(info.vertex_shader, (CompactString::new(hash.clone()) + " vertex shader").as_str(), ShaderStage::Vertex)?;
+                let fragment_shader = r
+                    .create_shader(info.fragment_shader, (CompactString::new(hash.clone()) + " fragment shader").as_str(), ShaderStage::Fragment)?;
+                let pipeline_layout = r
+                    .create_pipeline_layout([vertex_shader, fragment_shader])?;
+                let mut pipeline_info = GraphicsPipelineInfo::new(pipeline_layout);
+                for &binding in info.vertex_input_bindings {
+                    pipeline_info.with_vertex_input_binding(binding);
+                }
+                pipeline_info
+                    .with_sample_shading(SampleShadingInfo::new(output_samples, self.min_sample_shading, false, false))
+                    .with_color_output(
+                        output_format,
+                        WriteMask::all(),
+                        Some(Self::BLEND_STATE),
+                    );
+                pipeline_infos.push(pipeline_info);
+                pipelines.push((
+                    Some(hash),
+                    (
+                        vertex_shader,
+                        fragment_shader,
+                        pipeline_layout,
+                        info.vertex_input_bindings,
+                    ),
+                ));
+            }
+            r.create_graphics_pipelines(&pipeline_infos, cache_id, alloc,
+                |i, p| {
+                    let (hash, pipeline) = &mut pipelines[i];
+                    self.custom_pipelines
+                        .insert(
+                            hash.take().unwrap(),
+                            CustomPipeline {
+                                vertex_shader: pipeline.0,
+                                fragment_shader: pipeline.1,
+                                pipeline_layout: pipeline.2,
+                                vertex_input_bindings: pipeline.3.into(),
+                                pipeline: p,
+                            }
+                        );
+                }
+            )?;
+            Ok(())
+        })
+    }
+
+    #[inline(always)]
+    pub fn get_custom_pipeline(&self, key: &str) -> Option<GraphicsPipelineId> {
+        self.custom_pipelines
+            .get(key.into())
+            .map(|v| v.pipeline)
+    }
+
     #[inline(always)]
     fn began(&self) -> bool {
         self.flags & Self::BEGAN == Self::BEGAN
     }
 
+    #[inline(always)]
     pub fn begin(&mut self) -> Result<(), Error>
     {
         if self.began() {
@@ -259,12 +421,12 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         if self.vertex_buffer.is_none() {
             self.init_buffers(render_commands)?;
         } 
-        let Some(base_pipeline) = self.pipelines.base_pipeline else {
+        let Some(base_pipeline) = self.base_pipelines.base_pipeline else {
             return Err(Error::UserError(
                 "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
             ))
         };
-        let Some(text_pipeline) = self.pipelines.text_pipeline else {
+        let Some(text_pipeline) = self.base_pipelines.text_pipeline else {
             return Err(Error::UserError(
                 "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
             ))
@@ -332,9 +494,13 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
             if let Some(buf) = self.index_buffer.take() {
                 r.destroy_buffer(buf.id());
             }
-            if let Some(pipeline) = self.pipelines.base_pipeline.take() {
+            if let Some(pipeline) = self.base_pipelines.base_pipeline.take() {
                 r.destroy_graphics_pipeline(pipeline);
             }
+            for pipeline in &self.custom_pipelines {
+                pipeline.1.clean_up(r);
+            }
+            self.custom_pipelines.clear();
             Ok(())
         }).ok();
     }

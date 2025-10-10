@@ -27,6 +27,21 @@ impl From<[f32; 2]> for Vertex {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, VertexInput)]
+pub struct ColorPickerVertex {
+    pub pos: Vec2,
+}
+
+impl From<[f32; 2]> for ColorPickerVertex {
+
+    fn from(value: [f32; 2]) -> Self {
+        Self {
+            pos: value.into(),
+        }
+    }
+}
+
+#[repr(C)]
 pub struct PushConstantsVertex{
     pub vert_off: Vec2,
     pub scale: Vec2,
@@ -147,5 +162,36 @@ pub const TEXT_FRAGMENT_SHADER: &'static str = "
 
     void main() {
         out_color = pc.color;
+    }
+";
+
+pub const COLOR_PICKER_VERTEX_SHADER: &'static str = "
+    #version 450
+
+    layout(location = 0) in vec2 in_pos;
+
+    layout(push_constant) uniform PushConstant {
+        vec2 vert_off;
+        vec2 scale;
+        float inv_aspect_ratio;
+    } pc;
+
+    void main() {
+        vec2 pos = in_pos;
+        pos.x *= pc.scale.x;
+        pos.y *= pc.scale.y;
+        pos += pc.vert_off;
+        pos.x *= pc.inv_aspect_ratio;
+        gl_Position = vec4(pos, 0.0, 1.0);
+    }
+";
+
+pub const COLOR_PICKER_FRAGMENT_SHADER: &'static str = "
+    #version 450
+
+    layout(location = 0) out vec4 out_color;
+
+    void main() {
+        out_color = vec4(1.0);
     }
 ";

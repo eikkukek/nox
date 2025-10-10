@@ -29,7 +29,7 @@ pub trait Widget<I, FontHash>
 
     fn set_offset(
         &mut self,
-        position: Vec2,
+        offset: Vec2,
     );
 
     fn calc_size(

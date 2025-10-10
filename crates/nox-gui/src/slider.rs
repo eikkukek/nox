@@ -55,7 +55,6 @@ impl<I, FontHash> Slider<I, FontHash>
 
     #[inline(always)]
     pub fn new(
-        t: f32,
         title: &str,
     ) -> Self
     {
@@ -68,8 +67,8 @@ impl<I, FontHash> Slider<I, FontHash>
             handle_rect_vertex_range: Default::default(),
             outline_rect_vertex_range: Default::default(),
             offset: Default::default(),
-            t,
-            quantized_t: t,
+            t: 1.0,
+            quantized_t: 1.0,
             hover_text: Default::default(),
             falgs: 0,
             outline_width: 0.0,
@@ -153,7 +152,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
     {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
-        style.calc_text_size(vec2(title_text.text_width, title_text.font_height))
+        style.calc_text_size(vec2(title_text.text_width, title_text.row_height))
     }
 
     fn update(
@@ -173,7 +172,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
         let text_width = style.calc_text_width(title_text.text_width);
-        let text_box_height = style.calc_text_box_height(title_text.font_height);
+        let text_box_height = style.calc_text_box_height(title_text.row_height);
         let mut width = text_width + style.item_pad_outer.x + style.item_pad_outer.x + style.item_pad_outer.x;
         let min_window_width = width + style.slider_min_width;
         if window_width < min_window_width {
@@ -314,7 +313,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         };
         render_commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
-            window_pos + vec2(self.offset.x, self.offset.y + (self.slider_rect.max.y - style.calc_text_height(title_text.font_height)) / 2.0),
+            window_pos + vec2(self.offset.x, self.offset.y + (self.slider_rect.max.y - style.calc_text_height(title_text.row_height)) / 2.0),
             vec2(style.font_scale, style.font_scale),
             inv_aspect_ratio,
         );

@@ -42,7 +42,6 @@ impl<I, FontHash> Checkbox<I, FontHash> {
     #[inline(always)]
     pub fn new(
         title: &str,
-        checked: bool,
     ) -> Self
     {
         Self {
@@ -54,7 +53,7 @@ impl<I, FontHash> Checkbox<I, FontHash> {
             rect_vertex_range: Default::default(),
             outline_vertex_range: Default::default(),
             outline_width: 0.0,
-            flags: Self::CHECKED * checked as u32,
+            flags: 0,
             _marker: PhantomData,
         }
     }
@@ -119,8 +118,8 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
         let checkbox_text = self.checkbox_text.get_or_insert(text_renderer
             .render(&[text_segment(&style.checkbox_symbol.to_string(), &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        let title_size = style.calc_text_size(vec2(title_text.text_width, title_text.font_height));
-        let checkbox_size = style.calc_text_box_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
+        let title_size = style.calc_text_size(vec2(title_text.text_width, title_text.row_height));
+        let checkbox_size = style.calc_text_box_size(vec2(checkbox_text.text_width, checkbox_text.row_height));
         let max = checkbox_size.x.max(checkbox_size.y);
         let checkbox_size = vec2(max, max);
         checkbox_size + vec2(title_size.x + style.item_pad_outer.x, 0.0)
@@ -144,7 +143,7 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
         let checkbox_text = self.checkbox_text.get_or_insert(text_renderer
             .render(&[text_segment(&style.checkbox_symbol.to_string(), &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        let rect_size = style.calc_text_box_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
+        let rect_size = style.calc_text_box_size(vec2(checkbox_text.text_width, checkbox_text.row_height));
         let rect_max_size = rect_size.x.max(rect_size.y);
         let rect_size = vec2(rect_max_size, rect_max_size);
         let rect = rect(Default::default(), rect_size, style.rounding);
@@ -263,7 +262,7 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
         if self.checked() {
             let checkbox_text = self.checkbox_text.as_ref().unwrap();
             let checkbox_pos = window_pos + self.offset + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
-            let size = style.calc_text_size(vec2(checkbox_text.text_width, checkbox_text.font_height));
+            let size = style.calc_text_size(vec2(checkbox_text.text_width, checkbox_text.row_height));
             let pc_vertex = push_constants_vertex(
                 checkbox_pos + self.rect.max * 0.5 - size * 0.5,
                 vec2(style.font_scale, style.font_scale),

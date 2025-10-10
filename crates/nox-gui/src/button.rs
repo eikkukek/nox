@@ -99,7 +99,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        style.calc_text_box_size(vec2(title_text.text_width, title_text.font_height))
+        style.calc_text_box_size(vec2(title_text.text_width, title_text.row_height))
     }
 
     fn update(
@@ -117,7 +117,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        let rect_size = style.calc_text_box_size(vec2(title_text.text_width, title_text.font_height));
+        let rect_size = style.calc_text_box_size(vec2(title_text.text_width, title_text.row_height));
         let rect = rect(Default::default(), rect_size, style.rounding);
         let requires_triangulation = self.rect != rect || self.outline_width != style.outline_width;
         self.rect = rect;
