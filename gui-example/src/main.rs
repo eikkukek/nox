@@ -74,6 +74,8 @@ impl<'a> Interface for Example<'a> {
                     println!("hello");
                 }
                 win.update_checkbox(1, "Show other window", &mut self.show_other_window);
+                let mut color = ColorRGBA::white();
+                win.update_color_picker(0, "Color picker", &mut color);
                 Ok(())
             }
         )?;
