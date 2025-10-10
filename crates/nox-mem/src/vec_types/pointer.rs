@@ -87,7 +87,7 @@ impl<T: Sized> Pointer<T> {
         if needs_drop::<T>() {
             unsafe {
                 for i in 0..len {
-                    to.add(i).write(self.add(i).read().clone());
+                    to.add(i).write(self.add(i).as_ref().clone());
                 }
             }
         }
