@@ -237,6 +237,11 @@ impl GlobalResources {
     }
 
     #[inline(always)]
+    pub fn destroy_pipeline_layout(&mut self, layout_id: PipelineLayoutId) {
+        self.pipeline_layouts.remove(layout_id.0).ok();
+    }
+
+    #[inline(always)]
     pub(crate) fn get_pipeline_layout(&self, id: PipelineLayoutId) -> Result<&PipelineLayout, SlotMapError> {
         self.pipeline_layouts.get(id.0)
     }
