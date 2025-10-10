@@ -35,6 +35,11 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         }
     }
 
+    pub fn font_height(&mut self, font: &H) -> Option<f32> {
+        let FaceCache { face, trigs: _, offsets: _ } = self.faces.get(font)?;
+        Some((face.ascender() - face.descender() + face.line_gap()) as f32 / face.units_per_em() as f32)
+    }
+
     pub fn render(
         &mut self,
         text: &[TextSegment<H>],
@@ -54,7 +59,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         let mut height: f32 = 0.0;
         let mut text_width: f32 = 0.0;
         for segment in text {
-            let FaceCache { face, trigs: _, offsets: _ } = faces.get(&segment.font.clone())?;
+            let FaceCache { face, trigs: _, offsets: _ } = faces.get(&segment.font)?;
             let units_per_em = face.units_per_em() as f32;
             height = height.max((face.ascender() - face.descender() + face.line_gap()) as f32 / units_per_em);
             let space = face.glyph_hor_advance(face.glyph_index(' ')?)? as f32 / units_per_em;
@@ -102,11 +107,10 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
             } else {
                 Some(0.0)
             };
-        let mut pen_y = 0.0;
-        let mut rows = 0;
+        let mut pen_y = 0.0; let mut rows = 0;
         let mut result = GlobalVec::new();
         for (start, word, font, shape) in &shapes {
-            let FaceCache { face, trigs, offsets } = faces.get_mut(&font.clone()).unwrap();
+            let FaceCache { face, trigs, offsets } = faces.get_mut(&font).unwrap();
             let units_per_em = face.units_per_em() as f32;
             if let Some(start) = start {
                 pen_x = *start;
@@ -144,7 +148,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         Some(RenderedText {
             text: result,
             text_width,
-            font_height: height,
+            row_height: height,
             text_rows: rows,
         })
     }

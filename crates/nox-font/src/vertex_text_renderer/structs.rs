@@ -19,7 +19,7 @@ pub struct InstancedText {
 pub struct RenderedText {
     pub text: GlobalVec<InstancedText>,
     pub text_width: f32,
-    pub font_height: f32,
+    pub row_height: f32,
     pub text_rows: u32,
 }
 
