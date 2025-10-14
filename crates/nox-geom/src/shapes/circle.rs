@@ -2,7 +2,7 @@ use core::f32::consts::TAU;
 
 use crate::*;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct Circle {
     pub origin: Vec2,
     pub radius: f32,
@@ -18,7 +18,7 @@ impl Circle {
     pub fn to_points(
         self,
         steps: u32,
-        mut collect: impl FnMut(Vec2),
+        collect: &mut impl FnMut(Vec2),
     ) {
 
         let origin = self.origin;
@@ -38,7 +38,7 @@ impl Circle {
     pub fn to_points_cw(
         self,
         steps: u32,
-        mut collect: impl FnMut(Vec2),
+        collect: &mut impl FnMut(Vec2),
     ) {
 
         let origin = self.origin;

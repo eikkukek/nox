@@ -78,8 +78,16 @@ impl Vec2 {
     }
 
     #[inline(always)]
-    pub fn lerp(self, other: Self, t: f32) -> Vec2 {
+    pub fn lerp(self, other: Self, t: f32) -> Self {
         (1.0 - t) * self + t * other
+    }
+
+    #[inline(always)]
+    pub fn clamp(self, min: Self, max: Self) -> Self {
+        Self {
+            x: self.x.clamp(min.x, max.x),
+            y: self.y.clamp(min.y, max.y),
+        }
     }
 
     #[inline(always)]
