@@ -65,12 +65,24 @@ pub enum ColorFormat {
 
 impl Format for ColorFormat {
 
+    #[inline(always)]
     fn aspects(self) -> &'static [ImageAspect] {
         if self == Self::Undefined {
             &[]
         }
         else {
             &[ImageAspect::Color]
+        }
+    }
+}
+
+impl ColorFormat {
+
+    #[inline(always)]
+    pub fn is_srgb(self) -> bool {
+        match self {
+            Self::SrgbR8 | Self::SrgbRG8 | Self::SrgbRGB8 | Self::SrgbRGBA8 => true,
+            _ => false,
         }
     }
 }
