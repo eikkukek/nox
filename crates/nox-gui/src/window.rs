@@ -213,8 +213,6 @@ impl<I, FontHash> Window<I, FontHash>
     const RESIZE_BLOCKED_ROW: u32 = 0x200;
     const HOVER_WINDOW_ACTIVE: u32 = 0x400;
 
-    const CURSOR_ERROR_MARGIN: f32 = 0.01;
-
     pub(crate) fn new(
         title: &str,
         position: [f32; 2],
@@ -368,7 +366,11 @@ impl<I, FontHash> Window<I, FontHash>
 
     #[inline(always)]
     pub fn bounding_rect(&self, error_margin: f32) -> BoundingRect {
-        BoundingRect::from_position_size(self.position - vec2(error_margin, error_margin) * 0.5, self.main_rect.size() + vec2(error_margin, error_margin))
+        let error_margin_2 = error_margin + error_margin;
+        BoundingRect::from_position_size(
+            self.position - vec2(error_margin, error_margin),
+            self.main_rect.size() + vec2(error_margin_2, error_margin_2),
+        )
     }
 
     pub fn update(
@@ -384,11 +386,9 @@ impl<I, FontHash> Window<I, FontHash>
             I: Interface,
             FontHash: Clone + Eq + Hash,
     {
-        let cursor_in_this_window =
+        let mut cursor_in_this_window =
             !cursor_in_other_window &&
-            self.bounding_rect(Self::CURSOR_ERROR_MARGIN).is_point_inside(cursor_pos);
-        self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
-        self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
+            self.bounding_rect(style.cursor_error_margin).is_point_inside(cursor_pos);
         let mut min_width: f32 = 0.0;
         let min_height = self.min_height;
         let mut cursor_in_some_widget = false;
@@ -404,10 +404,19 @@ impl<I, FontHash> Window<I, FontHash>
             let (_, widget) = self.get_widget_mut(widget);
             widget.hide(&mut vertices);
         }
+        self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.prev_active_widgets = Some(prev_active_widgets);
         self.vertices = Some(vertices);
         let mut hover_window = self.hover_window.take().unwrap();
-        for &widget in &active_widgets {
+        let mut active_widget = None;
+        for (i, &widget) in active_widgets.iter().enumerate() {
+            let (_, widget) = self.get_widget_mut(widget);
+            if widget.is_active(style, window_pos, cursor_pos) {
+                active_widget = Some(i);
+                break
+            }
+        }
+        for (i, &widget) in active_widgets.iter().enumerate() {
             let (_, widget) = self.get_widget_mut(widget);
             let UpdateResult {
                 min_widget_width,
@@ -420,7 +429,13 @@ impl<I, FontHash> Window<I, FontHash>
                 window_width,
                 window_pos,
                 cursor_pos,
+                delta_cursor_pos,
                 cursor_in_this_window,
+                if let Some(w) = active_widget {
+                    w != i
+                } else {
+                    false
+                }
             );
             min_width = min_width.max(min_widget_width + style.item_pad_outer.x + style.item_pad_outer.x);
             if cursor_in_widget && let Some(hover_text) = widget.hover_text() {
@@ -432,6 +447,8 @@ impl<I, FontHash> Window<I, FontHash>
             }
             cursor_in_some_widget |= cursor_in_widget;
         }
+        cursor_in_this_window |= cursor_in_some_widget;
+        self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
         self.active_widgets = Some(active_widgets);
         self.hover_window = Some(hover_window);
         let title_text = self.title_text.as_ref().unwrap();
@@ -548,23 +565,24 @@ impl<I, FontHash> Window<I, FontHash>
             flags &= !Self::RESIZE_BLOCKED_COL;
             flags &= !Self::RESIZE_BLOCKED_ROW;
             let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
-            if cursor_pos.x >= self.position.x - Self::CURSOR_ERROR_MARGIN &&
-                cursor_pos.x <= self.position.x + Self::CURSOR_ERROR_MARGIN 
+            let error_margin = style.cursor_error_margin;
+            if cursor_pos.x >= self.position.x - error_margin &&
+                cursor_pos.x <= self.position.x + error_margin
             {
                 flags |= Self::RESIZE_LEFT;
             }
-            if cursor_pos.x >= self.position.x + self.main_rect.max.x - Self::CURSOR_ERROR_MARGIN &&
-                cursor_pos.x <= self.position.x + self.main_rect.max.x + Self::CURSOR_ERROR_MARGIN
+            if cursor_pos.x >= self.position.x + self.main_rect.max.x - error_margin &&
+                cursor_pos.x <= self.position.x + self.main_rect.max.x + error_margin
             {
                 flags |= Self::RESIZE_RIGHT;
             }
-            if cursor_pos.y >= self.position.y - Self::CURSOR_ERROR_MARGIN &&
-                cursor_pos.y <= self.position.y + Self::CURSOR_ERROR_MARGIN
+            if cursor_pos.y >= self.position.y - error_margin &&
+                cursor_pos.y <= self.position.y + error_margin
             {
                 flags |= Self::RESIZE_TOP;
             }
-            if cursor_pos.y >= self.position.y + self.main_rect.max.y - Self::CURSOR_ERROR_MARGIN &&
-                cursor_pos.y <= self.position.y + self.main_rect.max.y + Self::CURSOR_ERROR_MARGIN
+            if cursor_pos.y >= self.position.y + self.main_rect.max.y - error_margin &&
+                cursor_pos.y <= self.position.y + self.main_rect.max.y + error_margin
             {
                 flags |= Self::RESIZE_BOTTOM;
             }
@@ -595,11 +613,17 @@ impl<I, FontHash> Window<I, FontHash>
                     nox.set_cursor(CursorIcon::SeResize);
                 }
                 else {
-                    if self.resize_left() || self.resize_right() {
-                        nox.set_cursor(CursorIcon::ColResize);
+                    if self.resize_left() {
+                        nox.set_cursor(CursorIcon::WResize);
                     }
-                    if self.resize_top() || self.resize_bottom() {
-                        nox.set_cursor(CursorIcon::RowResize);
+                    if self.resize_right() {
+                        nox.set_cursor(CursorIcon::EResize);
+                    }
+                    if self.resize_top() {
+                        nox.set_cursor(CursorIcon::NResize);
+                    }
+                    if self.resize_bottom() {
+                        nox.set_cursor(CursorIcon::SResize);
                     }
                 }
             }
@@ -648,19 +672,19 @@ impl<I, FontHash> Window<I, FontHash>
             if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.outline_vertex_range = 0..vertices.len();
+            self.outline_vertex_range = VertexRange::new(0..vertices.len());
             outline_points.clear();
             nox_geom::shapes::outline_points(&points, self.outline_thin_width, false, &mut |p| { outline_points.push(p.into()); });
             let mut vertex_begin = vertices.len();
             if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.outline_thin_vertex_range = vertex_begin..vertices.len();
+            self.outline_thin_vertex_range = VertexRange::new(vertex_begin..vertices.len());
             vertex_begin = vertices.len();
             if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.main_rect_vertex_range = vertex_begin..vertices.len();
+            self.main_rect_vertex_range = VertexRange::new(vertex_begin..vertices.len());
             points.clear();
             self.title_bar_rect.to_points_partial_round(true, true, false, false,
                 &mut |p| { points.push(p.into()); }
@@ -669,7 +693,7 @@ impl<I, FontHash> Window<I, FontHash>
             if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.title_bar_vertex_range = vertex_begin..vertices.len();
+            self.title_bar_vertex_range = VertexRange::new(vertex_begin..vertices.len());
             points.clear();
             self.separator_rect.to_points_no_round(
                 &mut |p| { points.push(p.into()); }
@@ -678,7 +702,7 @@ impl<I, FontHash> Window<I, FontHash>
             if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.separator_vertex_range = vertex_begin..vertices.len();
+            self.separator_vertex_range = VertexRange::new(vertex_begin..vertices.len());
             let active_widgets = self.active_widgets.take().unwrap();
             let mut flags = self.flags;
             for &widget in &active_widgets  {
@@ -691,7 +715,7 @@ impl<I, FontHash> Window<I, FontHash>
                         if !earcut::earcut(points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                             flags &= !Self::RENDERABLE;
                         }
-                        vertex_begin..vertices.len()
+                        VertexRange::new(vertex_begin..vertices.len())
                     }
                 );
             }
@@ -713,11 +737,12 @@ impl<I, FontHash> Window<I, FontHash>
         &mut self,
         render_commands: &mut RenderCommands,
         style: &Style<FontHash>,
-        inv_aspect_ratio: f32,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
+        vertex_buffer: &mut RingBuf,
+        index_buffer: &mut RingBuf,
+        inv_aspect_ratio: f32,
+        get_custom_pipeline: &mut impl FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error>
     {
         if !self.renderable() {
@@ -746,63 +771,63 @@ impl<I, FontHash> Window<I, FontHash>
             widget.set_vertex_params(style, &mut vertices);
         }
         self.active_widgets = Some(active_widgets);
-        let vertex_sample = vertices[self.main_rect_vertex_range.start];
+        let vertex_sample = vertices[self.main_rect_vertex_range.start()];
         if vertex_sample.color != style.window_bg_col {
             let target_color = style.window_bg_col;
-            for vertex in &mut vertices[self.main_rect_vertex_range.clone()] {
+            for vertex in &mut vertices[self.main_rect_vertex_range.range()] {
                 vertex.color = target_color;
             }
         }
-        let vertex_sample = vertices[self.title_bar_vertex_range.start];
+        let vertex_sample = vertices[self.title_bar_vertex_range.start()];
         if vertex_sample.color != style.window_title_bar_col {
             let target_color = style.window_title_bar_col;
-            for vertex in &mut vertices[self.title_bar_vertex_range.clone()] {
+            for vertex in &mut vertices[self.title_bar_vertex_range.range()] {
                 vertex.color = target_color;
             }
         }
-        let vertex_sample = vertices[self.separator_vertex_range.start];
+        let vertex_sample = vertices[self.separator_vertex_range.start()];
         let offset = vec2(0.0, self.title_bar_rect.max.y - self.separator_rect.max.y * 0.5);
         if vertex_sample.offset != offset || vertex_sample.color != style.separator_col {
             let target_color = style.separator_col;
-            for vertex in &mut vertices[self.separator_vertex_range.clone()] {
+            for vertex in &mut vertices[self.separator_vertex_range.range()] {
                 vertex.offset = offset;
                 vertex.color = target_color;
             }
         }
         let any_resize = self.any_resize();
         if self.cursor_in_window() || any_resize {
-            let vertex_sample = vertices[self.outline_vertex_range.start];
+            let vertex_sample = vertices[self.outline_vertex_range.start()];
             let offset = vec2(0.0, 0.0);
             let target_color = if any_resize || self.held() {
-                style.outline_col_hl
+                style.window_outline_col_hl
             } else {
-                style.outline_col
+                style.window_outline_col
             };
             if vertex_sample.offset != offset || vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_vertex_range.clone()] {
+                for vertex in &mut vertices[self.outline_vertex_range.range()] {
                     vertex.offset = offset;
                     vertex.color = target_color;
                 }
             }
-            let vertex_sample = vertices[self.outline_thin_vertex_range.start];
-            if vertex_sample.color.a != 0.0 {
-                for vertex in &mut vertices[self.outline_thin_vertex_range.clone()] {
-                    vertex.color = ColorRGBA::transparent_black();
+            let vertex_sample = vertices[self.outline_thin_vertex_range.start()];
+            if vertex_sample.color.alpha != 0.0 {
+                for vertex in &mut vertices[self.outline_thin_vertex_range.range()] {
+                    vertex.color = ColorSRGBA::black(0.0);
                 }
             }
         } else {
-            let vertex_sample = vertices[self.outline_vertex_range.start];
-            let target_color = ColorRGBA::transparent_black();
+            let vertex_sample = vertices[self.outline_vertex_range.start()];
+            let target_color = ColorSRGBA::black(0.0);
             if vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_vertex_range.clone()] {
+                for vertex in &mut vertices[self.outline_vertex_range.range()] {
                     vertex.color = target_color;
                 }
             }
-            let vertex_sample = vertices[self.outline_thin_vertex_range.start];
+            let vertex_sample = vertices[self.outline_thin_vertex_range.start()];
             let offset = vec2(0.0, 0.0);
-            let target_color = style.outline_thin_col;
+            let target_color = style.window_outline_thin_col;
             if vertex_sample.offset != offset || vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_thin_vertex_range.clone()] {
+                for vertex in &mut vertices[self.outline_thin_vertex_range.range()] {
                     vertex.offset = offset;
                     vertex.color = target_color;
                 }
@@ -853,17 +878,35 @@ impl<I, FontHash> Window<I, FontHash>
             }
         })?;
         render_text(self.title_text.as_ref().unwrap(), render_commands, vertex_buffer, index_buffer)?;
+        let mut on_top_contents = None;
+        let window_pos = self.position;
         for &widget in unsafe { self.active_widgets.as_ref().unwrap_unchecked() } {
             let (_, widget) = self.get_widget(widget);
-            widget.render_commands(
+            if let Some(contents) = widget.render_commands(
                 render_commands,
                 style,
                 base_pipeline_id,
                 text_pipeline_id,
                 vertex_buffer,
                 index_buffer,
-                self.position,
+                window_pos,
                 inv_aspect_ratio,
+                get_custom_pipeline,
+            )? {
+                on_top_contents = Some(contents);
+            }
+        }
+        if let Some(contents) = on_top_contents {
+            contents.render_commands(
+                render_commands,
+                style,
+                base_pipeline_id,
+                text_pipeline_id,
+                vertex_buffer,
+                index_buffer,
+                window_pos,
+                inv_aspect_ratio,
+                get_custom_pipeline,
             )?;
         }
         if self.hover_window_active() {
@@ -1016,11 +1059,11 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
         *value
     }
 
-    pub fn update_color_picker(
+    pub fn update_color_picker<C: Color>(
         &mut self,
         id: u32,
         title: &str,
-        _value: &mut ColorRGBA,
+        value: &mut C,
     )
     {
         unsafe {
@@ -1034,6 +1077,12 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             .or_insert((0, ColorPicker::new(title)));
         if *last_triangulation != self.window.last_triangulation {
             self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+        }
+        if color_picker.picking() {
+            *value = C::from_hsva(color_picker.calc_color(self.style));
+        }
+        else {
+            color_picker.set_color(*value);
         }
         color_picker.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
         self.widget_y += color_picker.calc_size(&self.style, self.text_renderer).y + self.style.item_pad_outer.y;

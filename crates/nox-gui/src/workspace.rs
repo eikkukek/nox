@@ -19,6 +19,9 @@ use nox_geom::{
 
 use crate::*;
 
+pub(crate) const COLOR_PICKER_PIPELINE_HASH: &str = "nox_gui color picker";
+pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: &str = "nox_gui color picker hue";
+
 #[derive(Default)]
 struct BasePipelines {
     base_pipeline_layout: Option<PipelineLayoutId>,
@@ -154,11 +157,30 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         self.output_format = output_format;
         self.create_custom_pipelines(
             render_context,
-            &[("nox_gui color picker", CustomPipelineInfo::new(
-                COLOR_PICKER_VERTEX_SHADER,
-                COLOR_PICKER_FRAGMENT_SHADER,
-                &[VertexInputBinding::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)],
-            ))],
+            &[
+                (
+                    COLOR_PICKER_PIPELINE_HASH,
+                    CustomPipelineInfo::new(
+                        COLOR_PICKER_VERTEX_SHADER,
+                        COLOR_PICKER_FRAGMENT_SHADER,
+                        &[
+                            VertexInputBinding
+                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)
+                        ],
+                    )
+                ),
+                (
+                    COLOR_PICKER_HUE_PIPELINE_HASH,
+                    CustomPipelineInfo::new(
+                        COLOR_PICKER_VERTEX_SHADER,
+                        COLOR_PICKER_FRAGMENT_SHADER_HUE,
+                        &[
+                            VertexInputBinding
+                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)
+                        ],
+                    )
+                ),
+            ],
             cache_id,
             alloc
         )?;
@@ -438,11 +460,16 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
             self.windows.get_mut(id).unwrap().render_commands(
                 render_commands,
                 &self.style,
-                inv_aspect_ratio,
-                vertex_buffer,
-                index_buffer,
                 base_pipeline,
                 text_pipeline,
+                vertex_buffer,
+                index_buffer,
+                inv_aspect_ratio,
+                &mut |hash| {
+                    self.custom_pipelines
+                        .get(&CompactString::new(hash))
+                        .map(|v| v.pipeline)
+                }
             )?;
         }
         vertex_buffer.finish_frame();

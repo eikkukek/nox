@@ -19,7 +19,7 @@ pub use style::*;
 pub use widget::*;
 pub use slider::*;
 pub use window::*;
-pub use workspace::Workspace;
+pub use workspace::*;
 
 pub use nox_font as font;
 

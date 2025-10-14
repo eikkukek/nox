@@ -9,6 +9,7 @@ struct Example<'a> {
     aspect_ratio: f32,
     slider_value: f32,
     slider_value_int: u32,
+    color: ColorSRGBA,
     checkbox_checked: bool,
     show_other_window: bool,
 }
@@ -22,6 +23,7 @@ impl<'a> Example<'a> {
             aspect_ratio: 1.0,
             slider_value: 0.0,
             slider_value_int: 0,
+            color: Default::default(),
             checkbox_checked: false,
             show_other_window: false,
         }
@@ -74,8 +76,7 @@ impl<'a> Interface for Example<'a> {
                     println!("hello");
                 }
                 win.update_checkbox(1, "Show other window", &mut self.show_other_window);
-                let mut color = ColorRGBA::white();
-                win.update_color_picker(0, "Color picker", &mut color);
+                win.update_color_picker(0, "Color picker", &mut self.color);
                 Ok(())
             }
         )?;

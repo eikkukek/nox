@@ -1,9 +1,12 @@
 use nox::*;
 
+use nox_geom::*;
+
 use nox_font::RenderedText;
 
 use crate::*;
 
+#[inline(always)]
 pub fn render_text(
     text: &RenderedText,
     render_commands: &mut RenderCommands,
@@ -48,4 +51,20 @@ pub fn render_text(
         )?;
     }
     Ok(())
+}
+
+#[inline(always)]
+pub fn set_vertex_params(
+    vertices: &mut [Vertex],
+    range: VertexRange,
+    offset: Vec2,
+    target_color: ColorSRGBA,
+) {
+    let vertex_sample = vertices[range.start()];
+    if vertex_sample.offset != offset || vertex_sample.color != target_color {
+        for vertex in &mut vertices[range.range()] {
+            vertex.offset = offset;
+            vertex.color = target_color;
+        }
+    }
 }

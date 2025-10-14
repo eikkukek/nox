@@ -102,6 +102,10 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         style.calc_text_box_size(vec2(title_text.text_width, title_text.row_height))
     }
 
+    fn is_active(&self, _style: &Style<FontHash>, _window_pos: Vec2, _cursor_pos: Vec2) -> bool {
+        self.held()
+    }
+
     fn update(
         &mut self,
         nox: &Nox<I>,
@@ -110,7 +114,9 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         _window_width: f32,
         window_pos: Vec2,
         cursor_pos: Vec2,
+        _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
+        other_widget_active: bool,
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
@@ -131,7 +137,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
                 self.flags |= Self::PRESSED * bounding_rect.is_point_inside(cursor_pos) as u32;
                 self.flags &= !Self::HELD;
             }
-        } else if cursor_in_this_window {
+        } else if cursor_in_this_window && !other_widget_active {
             let bounding_rect = BoundingRect::from_position_size(
                 window_pos + self.offset,
                 self.rect.max
@@ -172,29 +178,29 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
     )
     {
         let offset = self.offset;
-        let vertex_sample = vertices[self.outline_vertex_range.start];
+        let vertex_sample = vertices[self.outline_vertex_range.start()];
         if self.cursor_in_button() || self.held() {
             let target_color = if self.held() {
-                style.outline_col_hl
+                style.widget_outline_col_hl
             } else {
-                style.outline_col
+                style.widget_outline_col
             };
             if vertex_sample.offset != offset || vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_vertex_range.clone()] {
+                for vertex in &mut vertices[self.outline_vertex_range.range()] {
                     vertex.offset = offset;
                     vertex.color = target_color;
                 }
             }
         }
-        else if vertex_sample.color.a != 0.0 {
-            for vertex in &mut vertices[self.outline_vertex_range.clone()] {
-                vertex.color = ColorRGBA::transparent_black();
+        else if vertex_sample.color.alpha != 0.0 {
+            for vertex in &mut vertices[self.outline_vertex_range.range()] {
+                vertex.color = ColorSRGBA::black(0.0);
             }
         }
-        let vertex_sample = vertices[self.rect_vertex_range.start];
+        let vertex_sample = vertices[self.rect_vertex_range.start()];
         if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col {
             let target_color = style.widget_bg_col;
-            for vertex in &mut vertices[self.rect_vertex_range.clone()] {
+            for vertex in &mut vertices[self.rect_vertex_range.range()] {
                 vertex.offset = offset;
                 vertex.color = target_color;
             }
@@ -211,7 +217,8 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
-    ) -> Result<(), Error>
+        _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
+    ) -> Result<Option<&dyn OnTopContents<I, FontHash>>, Error>
     {
         let title_text = unsafe {
             self.title_text.as_ref().unwrap_unchecked()
@@ -231,23 +238,23 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
             }
         })?;
         render_text(title_text, render_commands, vertex_buffer, index_buffer)?;
-        Ok(())
+        Ok(None)
     }
 
     fn hide(
         &self,
         vertices: &mut [Vertex],
     ) {
-        let vertex_sample = vertices[self.rect_vertex_range.start];
-        if vertex_sample.color.a != 0.0 {
-            for vertex in &mut vertices[self.rect_vertex_range.clone()] {
-                vertex.color = ColorRGBA::transparent_black();
+        let vertex_sample = vertices[self.rect_vertex_range.start()];
+        if vertex_sample.color.alpha != 0.0 {
+            for vertex in &mut vertices[self.rect_vertex_range.range()] {
+                vertex.color = ColorSRGBA::black(0.0);
             }
         }
-        let vertex_sample = vertices[self.outline_vertex_range.start];
-        if vertex_sample.color.a != 0.0 {
-            for vertex in &mut vertices[self.outline_vertex_range.clone()] {
-                vertex.color = ColorRGBA::transparent_black();
+        let vertex_sample = vertices[self.outline_vertex_range.start()];
+        if vertex_sample.color.alpha != 0.0 {
+            for vertex in &mut vertices[self.outline_vertex_range.range()] {
+                vertex.color = ColorSRGBA::black(0.0);
             }
         }
     }
