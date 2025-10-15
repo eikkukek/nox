@@ -42,6 +42,7 @@ impl From<[f32; 2]> for ColorPickerVertex {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct PushConstantsVertex{
     pub vert_off: Vec2,
     pub scale: Vec2,
@@ -71,6 +72,7 @@ impl PushConstantsVertex {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct TextPushConstantsFragment {
     pub color: ColorSRGBA,
 }
@@ -91,19 +93,31 @@ impl TextPushConstantsFragment {
 }
 
 #[repr(C)]
-pub struct HuePickerPushConstantsFragment {
+#[derive(Clone, Copy)]
+pub struct AlphaPickerPushConstantsFragment {
+    pub hue: f32,
     pub sat: f32,
     pub val: f32,
+    pub picker_width: f32,
+    pub tile_width: f32,
 }
 
-pub fn hue_picker_push_constants_fragment(sat: f32, val: f32) -> HuePickerPushConstantsFragment {
-    HuePickerPushConstantsFragment {
-        sat,
-        val,
+pub fn aplha_picker_push_constants_fragment(
+    color: ColorHSVA,
+    picker_width: f32,
+    tile_width: f32,
+) -> AlphaPickerPushConstantsFragment
+{
+    AlphaPickerPushConstantsFragment {
+        hue: color.hue,
+        sat: color.sat,
+        val: color.val,
+        picker_width,
+        tile_width,
     }
 }
 
-impl HuePickerPushConstantsFragment {
+impl AlphaPickerPushConstantsFragment {
 
     pub unsafe fn as_bytes(&self) -> &[u8] {
         unsafe {
@@ -113,6 +127,7 @@ impl HuePickerPushConstantsFragment {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct ColorPickerPushConstantsFragment {
     pub hue: f32,
 }
@@ -244,19 +259,17 @@ pub const COLOR_PICKER_FRAGMENT_SHADER: &'static str = "
 
     const float FRAC_PI_3 = 3.14159265358979323846 / 3.0;
 
-    const float EXP = 1.0f / 2.4f;
-
     float map_rgb(float n, float hue, float sat, float val) {
-        float k = mod(n + hue / FRAC_PI_3, 6.0);
-        float ch = val - val * sat * max(min(min(k, 4.0f - k), 1.0), 0.0);
-        return pow((ch + 0.055) / 1.055, 2.4);
+        float k = mod(n + hue / FRAC_PI_3, 6.0f);
+        float ch = val - val * sat * max(min(min(k, 4.0f - k), 1.0f), 0.0f);
+        return pow((ch + 0.055f) / 1.055f, 2.4f);
     }
 
     vec3 hsv_to_srgb(vec3 c)  {
         return vec3(
-            map_rgb(5.0, c.x, c.y, c.z),
-            map_rgb(3.0, c.x, c.y, c.z),
-            map_rgb(1.0, c.x, c.y, c.z)
+            map_rgb(5.0f, c.x, c.y, c.z),
+            map_rgb(3.0f, c.x, c.y, c.z),
+            map_rgb(1.0f, c.x, c.y, c.z)
         );
     }
 
@@ -279,17 +292,13 @@ pub const COLOR_PICKER_FRAGMENT_SHADER_HUE: &'static str = "
 
     layout(location = 0) out vec4 out_color;
 
-    layout(push_constant) uniform PushConstant {
-        layout(offset = 32) float sat;
-        float val;
-    } pc;
-
     const float TAU = 3.14159265358979323846 * 2.0;
     const float FRAC_PI_3 = 3.14159265358979323846 / 3.0;
 
     float map_rgb(float n, float hue, float sat, float val) {
         float k = mod(n + hue / FRAC_PI_3, 6.0f);
-        return val - val * sat * max(min(min(k, 4.0f - k), 1.0), 0.0);
+        float ch = val - val * sat * max(min(min(k, 4.0f - k), 1.0f), 0.0f);
+        return pow((ch + 0.055f) / 1.055f, 2.4f);
     }
 
     vec3 hsv_to_srgb(vec3 c)  {
@@ -300,10 +309,71 @@ pub const COLOR_PICKER_FRAGMENT_SHADER_HUE: &'static str = "
         );
     }
 
-
     void main() {
         float hue = TAU * in_pos.x;
-        vec3 color_hsv = vec3(hue, pc.sat, pc.val);
+        vec3 color_hsv = vec3(hue, 1.0, 1.0);
         out_color = vec4(hsv_to_srgb(color_hsv), 1.0);
+    }
+";
+
+pub const COLOR_PICKER_FRAGMENT_SHADER_ALPHA: &'static str = "
+    #version 450
+
+    layout(location = 0) in vec2 in_pos;
+
+    layout(location = 0) out vec4 out_color;
+
+    layout(push_constant) uniform PushConstant {
+        layout(offset = 32) float hue;
+        float sat;
+        float val;
+        float picker_width;
+        float tile_width;
+    } pc;
+
+    const float FRAC_PI_3 = 3.14159265358979323846 / 3.0;
+
+    float map_rgb(float n, float hue, float sat, float val) {
+        float k = mod(n + hue / FRAC_PI_3, 6.0f);
+        float ch = val - val * sat * max(min(min(k, 4.0f - k), 1.0f), 0.0f);
+        return pow((ch + 0.055f) / 1.055f, 2.4f);
+    }
+
+    vec3 hsv_to_srgb(vec3 c)  {
+        return vec3(
+            map_rgb(5.0f, c.x, c.y, c.z),
+            map_rgb(3.0f, c.x, c.y, c.z),
+            map_rgb(1.0f, c.x, c.y, c.z)
+        );
+    }
+
+    vec3 bg_col() {
+        const vec3 bg1 = vec3(0.039f);
+        const vec3 bg2 = vec3(0.31f);
+        float m = mod(pc.picker_width * (in_pos.x + 0.01), pc.tile_width * 2.0);
+        float frac = pc.tile_width;
+        if (in_pos.y >= 0.5f) {
+            if (m >= frac) {
+                return bg1;
+            }
+            return bg2;
+        }
+        if (m >= frac) {
+            return bg2;
+        }
+        return bg1;
+    }
+
+    void main() {
+        vec3 color_hsv = vec3(
+            pc.hue,
+            pc.sat,
+            pc.val
+        );
+        float alpha = in_pos.x;
+        vec3 bg = bg_col();
+        vec3 color = hsv_to_srgb(color_hsv);
+        color = color * alpha + bg * (1.0 - alpha);
+        out_color = vec4(color, 1.0);
     }
 ";

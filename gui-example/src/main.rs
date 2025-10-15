@@ -72,11 +72,11 @@ impl<'a> Interface for Example<'a> {
                     win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0)?;
                     win.update_slider(2, "Slider 3", &mut self.slider_value_int, 0, 10)?;
                 }
+                win.update_checkbox(1, "Show other window", &mut self.show_other_window);
+                win.update_color_picker(0, "Color picker", &mut self.color);
                 if win.update_button(0, "Print \"hello\"") {
                     println!("hello");
                 }
-                win.update_checkbox(1, "Show other window", &mut self.show_other_window);
-                win.update_color_picker(0, "Color picker", &mut self.color);
                 Ok(())
             }
         )?;

@@ -8,12 +8,21 @@ use crate::*;
 
 #[inline(always)]
 pub fn render_text(
-    text: &RenderedText,
     render_commands: &mut RenderCommands,
+    text: &RenderedText,
+    pc_vertex: PushConstantsVertex,
+    pc_fragment: TextPushConstantsFragment,
     vertex_buffer: &mut RingBuf,
     index_buffer: &mut RingBuf,
 ) -> Result<(), Error>
 {
+    render_commands.push_constants(|pc| unsafe {
+        if pc.stage == ShaderStage::Vertex {
+            pc_vertex.as_bytes()
+        } else {
+            pc_fragment.as_bytes()
+        }
+    })?;
     let vertex_buffer_id = vertex_buffer.id();
     let index_buffer_id = index_buffer.id();
     for text in &text.text {

@@ -35,6 +35,7 @@ pub struct Style<FontHash> {
     pub default_handle_radius: f32,
     pub default_value_drag_speed: f32,
     pub color_picker_size: Vec2,
+    pub alpha_tile_width: f32,
     pub override_cursor: bool,
     pub f32_format: fn(f32, &mut CompactString) -> core::fmt::Result,
     pub f64_format: fn(f64, &mut CompactString) -> core::fmt::Result,
@@ -73,6 +74,7 @@ impl<FontHash> Style<FontHash> {
             separator_height: 0.0015,
             default_handle_radius: 0.01,
             color_picker_size: vec2(0.3, 0.3),
+            alpha_tile_width: 0.3 / 20.0,
             default_value_drag_speed: 5.0,
             override_cursor: true,
             f32_format: |value: f32, to: &mut CompactString| -> core::fmt::Result {

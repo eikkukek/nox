@@ -21,6 +21,7 @@ use crate::*;
 
 pub(crate) const COLOR_PICKER_PIPELINE_HASH: &str = "nox_gui color picker";
 pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: &str = "nox_gui color picker hue";
+pub(crate) const COLOR_PICKER_ALPHA_PIPELINE_HASH: &str = "nox_gui color picker alpha";
 
 #[derive(Default)]
 struct BasePipelines {
@@ -33,16 +34,16 @@ struct BasePipelines {
 }
 
 pub struct CustomPipelineInfo<'a> {
-    pub vertex_shader: &'a str,
-    pub fragment_shader: &'a str,
+    pub vertex_shader: ShaderId,
+    pub fragment_shader: ShaderId,
     pub vertex_input_bindings: &'a [VertexInputBinding],
 }
 
 impl<'a> CustomPipelineInfo<'a> {
 
     pub fn new(
-        vertex_shader: &'a str,
-        fragment_shader: &'a str,
+        vertex_shader: ShaderId,
+        fragment_shader: ShaderId,
         vertex_input_bindings: &'a [VertexInputBinding],
     ) -> Self
     {
@@ -155,14 +156,34 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         }
         self.output_samples = output_samples;
         self.output_format = output_format;
+        let mut color_picker_shaders = [Default::default(); 4];
+        render_context.edit_resources(|r| {
+            color_picker_shaders[0] = r.create_shader(
+                COLOR_PICKER_VERTEX_SHADER,
+                "nox_gui color picker vertex shader", ShaderStage::Vertex
+            )?;
+            color_picker_shaders[1] = r.create_shader(
+                COLOR_PICKER_FRAGMENT_SHADER,
+                "nox_gui color picker fragment shader", ShaderStage::Fragment
+            )?;
+            color_picker_shaders[2] = r.create_shader(
+                COLOR_PICKER_FRAGMENT_SHADER_HUE,
+                "nox_gui color picker fragment shader hue", ShaderStage::Fragment
+            )?;
+            color_picker_shaders[3] = r.create_shader(
+                COLOR_PICKER_FRAGMENT_SHADER_ALPHA,
+                "nox_gui color picker fragment shader alpha", ShaderStage::Fragment
+            )?;
+            Ok(())
+        })?;
         self.create_custom_pipelines(
             render_context,
             &[
                 (
                     COLOR_PICKER_PIPELINE_HASH,
                     CustomPipelineInfo::new(
-                        COLOR_PICKER_VERTEX_SHADER,
-                        COLOR_PICKER_FRAGMENT_SHADER,
+                        color_picker_shaders[0],
+                        color_picker_shaders[1],
                         &[
                             VertexInputBinding
                                 ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)
@@ -172,13 +193,24 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
                 (
                     COLOR_PICKER_HUE_PIPELINE_HASH,
                     CustomPipelineInfo::new(
-                        COLOR_PICKER_VERTEX_SHADER,
-                        COLOR_PICKER_FRAGMENT_SHADER_HUE,
+                        color_picker_shaders[0],
+                        color_picker_shaders[2],
                         &[
                             VertexInputBinding
                                 ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)
                         ],
                     )
+                ),
+                (
+                    COLOR_PICKER_ALPHA_PIPELINE_HASH,
+                    CustomPipelineInfo::new(
+                        color_picker_shaders[0],
+                        color_picker_shaders[3],
+                        &[
+                            VertexInputBinding
+                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)
+                        ],
+                    ),
                 ),
             ],
             cache_id,
@@ -281,10 +313,8 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
                 if self.custom_pipelines.contains_key(&hash) {
                     continue
                 }
-                let vertex_shader = r 
-                    .create_shader(info.vertex_shader, (CompactString::new(hash.clone()) + " vertex shader").as_str(), ShaderStage::Vertex)?;
-                let fragment_shader = r
-                    .create_shader(info.fragment_shader, (CompactString::new(hash.clone()) + " fragment shader").as_str(), ShaderStage::Fragment)?;
+                let vertex_shader = info.vertex_shader;
+                let fragment_shader = info.fragment_shader;
                 let pipeline_layout = r
                     .create_pipeline_layout([vertex_shader, fragment_shader])?;
                 let mut pipeline_info = GraphicsPipelineInfo::new(pipeline_layout);

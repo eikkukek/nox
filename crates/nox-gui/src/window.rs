@@ -152,14 +152,7 @@ impl HoverWindow {
             inv_aspect_ratio
         );
         let pc_fragment = text_push_constants_fragment(style.text_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_text(&self.rendered_text, render_commands, vertex_buffer, index_buffer)?;
+        render_text(render_commands, &self.rendered_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         Ok(())
     }
 }
@@ -870,14 +863,8 @@ impl<I, FontHash> Window<I, FontHash>
             inv_aspect_ratio,
         );
         let pc_fragment = text_push_constants_fragment(style.text_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_text(self.title_text.as_ref().unwrap(), render_commands, vertex_buffer, index_buffer)?;
+        render_text(render_commands, self.title_text.as_ref().unwrap(),
+            pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         let mut on_top_contents = None;
         let window_pos = self.position;
         for &widget in unsafe { self.active_widgets.as_ref().unwrap_unchecked() } {

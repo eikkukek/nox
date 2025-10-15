@@ -1,7 +1,7 @@
 use core::{
     hash::Hash,
     marker::PhantomData,
-    f32::consts::TAU,
+    f32::consts::{PI, TAU},
     fmt::Write,
 };
 
@@ -25,17 +25,24 @@ struct Contents<I, FontHash> {
     g_text_val: f32,
     b_text: RenderedText,
     b_text_val: f32,
+    alpha_text: RenderedText,
+    alpha_text_val: f32,
+    hue_text: RenderedText,
+    hue_text_val: f32,
+    hue_text_box_offset: Vec2,
     offset: Vec2,
     picker_handle_offset: Vec2,
     hue_picker_offset: Vec2,
     hue_picker_handle_offset_x: f32,
+    alpha_picker_offset: Vec2,
+    alpha_picker_handle_offset_x: f32,
     hsva: ColorHSVA,
     srgba: ColorSRGBA,
     rgba: ColorRGBA,
     window_rect: Rect,
     text_box_rect: Rect,
     picker_handle: Circle,
-    hue_picker_handle: Rect,
+    hue_alpha_picker_handle_height: f32,
     picker_vertices: GlobalVec<ColorPickerVertex>,
     other_vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
@@ -50,9 +57,14 @@ struct Contents<I, FontHash> {
     g_text_box_outline_vertex_range: VertexRange,
     b_text_box_vertex_range: VertexRange,
     b_text_box_outline_vertex_range: VertexRange,
+    alpha_text_box_vertex_range: VertexRange,
+    alpha_text_box_outline_vertex_range: VertexRange,
+    hue_text_box_vertex_range: VertexRange,
+    hue_text_box_outline_vertex_range: VertexRange,
     picker_handle_vertex_range: VertexRange,
     picker_handle_outline_vertex_range: VertexRange,
     hue_picker_handle_vertex_range: VertexRange,
+    alpha_picker_handle_vertex_range: VertexRange,
     outline_width: f32,
     rgb_text_size: Vec2,
     flags: u32,
@@ -61,16 +73,18 @@ struct Contents<I, FontHash> {
 
 impl<I, FontHash> Contents<I, FontHash> {
 
-    const PICKER_HANDLE_HELD: u32 = 0x1;
-    const HUE_PICKER_HELD: u32 = 0x2;
-    const SHOWN: u32 = 0x4;
-    const FONT_CHANGED: u32 = 0x8;
-    const R_HOVERED: u32 = 0x10;
-    const R_CHANGED: u32 = 0x20;
-    const G_HOVERED: u32 = 0x40;
-    const G_CHANGED: u32 = 0x80;
-    const B_HOVERED: u32 = 0x100;
-    const B_CHANGED: u32 = 0x200;
+    const WIDGET_HELD: u32 = 0x1;
+    const SHOWN: u32 = 0x2;
+    const PICKER_HELD: u32 = 0x4;
+    const HUE_PICKER_HELD: u32 = 0x8;
+    const ALPHA_PICKER_HELD: u32 = 0x10;
+    const FONT_CHANGED: u32 = 0x20;
+    const HOVERED_CHANGED: u32 = 0x40;
+    const R_HOVERED: u32 = 0x80;
+    const G_HOVERED: u32 = 0x100;
+    const B_HOVERED: u32 = 0x200;
+    const ALPHA_HOVERED: u32 = 0x400;
+    const HUE_HOVERED: u32 = 0x800;
 
     fn new() -> Self {
         let mut points = GlobalVec::new();
@@ -93,17 +107,24 @@ impl<I, FontHash> Contents<I, FontHash> {
             g_text_val: f32::NAN,
             b_text: Default::default(),
             b_text_val: f32::NAN,
+            alpha_text: Default::default(),
+            alpha_text_val: f32::NAN,
+            hue_text: Default::default(),
+            hue_text_val: f32::NAN,
+            hue_text_box_offset: Default::default(),
             offset: Default::default(),
             picker_handle_offset: Default::default(),
             hue_picker_offset: Default::default(),
             hue_picker_handle_offset_x: 0.0,
+            alpha_picker_offset: Default::default(),
+            alpha_picker_handle_offset_x: Default::default(),
             hsva: Default::default(),
             srgba: Default::default(),
             rgba: Default::default(),
             window_rect: Default::default(),
             text_box_rect: Default::default(),
             picker_handle: Default::default(),
-            hue_picker_handle: Default::default(),
+            hue_alpha_picker_handle_height: 0.0,
             picker_vertices,
             other_vertices: Default::default(),
             indices,
@@ -118,9 +139,14 @@ impl<I, FontHash> Contents<I, FontHash> {
             g_text_box_outline_vertex_range: Default::default(),
             b_text_box_vertex_range: Default::default(),
             b_text_box_outline_vertex_range: Default::default(),
+            alpha_text_box_vertex_range: Default::default(),
+            alpha_text_box_outline_vertex_range: Default::default(),
+            hue_text_box_vertex_range: Default::default(),
+            hue_text_box_outline_vertex_range: Default::default(),
             picker_handle_vertex_range: Default::default(),
             picker_handle_outline_vertex_range: Default::default(),
             hue_picker_handle_vertex_range: Default::default(),
+            alpha_picker_handle_vertex_range: Default::default(),
             outline_width: 0.0,
             rgb_text_size: Default::default(),
             flags: Self::FONT_CHANGED,
@@ -138,10 +164,20 @@ impl<I, FontHash> Contents<I, FontHash> {
         self.flags &= !Self::SHOWN;
         self.flags |= Self::SHOWN * value as u32;
     }
+
+    #[inline(always)]
+    fn widget_held(&self) -> bool {
+        self.flags & Self::WIDGET_HELD == Self::WIDGET_HELD
+    }
+
+    fn set_widget_held(&mut self, value: bool) {
+        self.flags &= !Self::WIDGET_HELD;
+        self.flags |= Self::WIDGET_HELD * value as u32;
+    }
     
     #[inline(always)]
-    fn picker_handle_held(&self) -> bool {
-        self.flags & Self::PICKER_HANDLE_HELD == Self::PICKER_HANDLE_HELD
+    fn picker_held(&self) -> bool {
+        self.flags & Self::PICKER_HELD == Self::PICKER_HELD
     }
     
     #[inline(always)]
@@ -150,13 +186,18 @@ impl<I, FontHash> Contents<I, FontHash> {
     }
 
     #[inline(always)]
-    fn r_hovered(&self) -> bool {
-        self.flags & Self::R_HOVERED == Self::R_HOVERED
+    fn alpha_picker_held(&self) -> bool {
+        self.flags & Self::ALPHA_PICKER_HELD == Self::ALPHA_PICKER_HELD
     }
 
     #[inline(always)]
-    fn r_changed(&self) -> bool {
-        self.flags & Self::R_CHANGED == Self::R_CHANGED
+    fn hovered_changed(&self) -> bool {
+        self.flags & Self::HOVERED_CHANGED == Self::HOVERED_CHANGED
+    }
+
+    #[inline(always)]
+    fn r_hovered(&self) -> bool {
+        self.flags & Self::R_HOVERED == Self::R_HOVERED
     }
 
     #[inline(always)]
@@ -165,18 +206,43 @@ impl<I, FontHash> Contents<I, FontHash> {
     }
 
     #[inline(always)]
-    fn g_changed(&self) -> bool {
-        self.flags & Self::G_CHANGED == Self::G_CHANGED
-    }
-
-    #[inline(always)]
     fn b_hovered(&self) -> bool {
         self.flags & Self::B_HOVERED == Self::B_HOVERED
     }
 
     #[inline(always)]
+    fn alpha_hovered(&self) -> bool {
+        self.flags & Self::ALPHA_HOVERED == Self::ALPHA_HOVERED
+    }
+
+    #[inline(always)]
+    fn hue_hovered(&self) -> bool {
+        self.flags & Self::HUE_HOVERED == Self::HUE_HOVERED
+    }
+
+    #[inline(always)]
+    fn r_changed(&self) -> bool {
+        self.r_hovered() && self.hovered_changed()
+    }
+
+    #[inline(always)]
+    fn g_changed(&self) -> bool {
+        self.g_hovered() && self.hovered_changed()
+    }
+
+    #[inline(always)]
     fn b_changed(&self) -> bool {
-        self.flags & Self::B_CHANGED == Self::B_CHANGED
+        self.b_hovered() && self.hovered_changed()
+    }
+
+    #[inline(always)]
+    fn alpha_changed(&self) -> bool {
+        self.alpha_hovered() && self.hovered_changed()
+    }
+
+    #[inline(always)]
+    fn hue_changed(&self) -> bool {
+        self.hue_hovered() && self.hovered_changed()
     }
 
     #[inline(always)]
@@ -218,22 +284,31 @@ impl<I, FontHash> Contents<I, FontHash> {
                 text_renderer.render(
                     &[text_segment("B 255", &style.font_regular)], false, 0.0
                 ).unwrap_or_default(),
+                text_renderer.render(
+                    &[text_segment("A 255", &style.font_regular)], false, 0.0
+                ).unwrap_or_default(),
+                text_renderer.render(
+                    &[text_segment("H 360°", &style.font_regular)], false, 0.0
+                ).unwrap_or_default(),
             );
             let rgb_text_size_x = style.calc_text_box_width(
                 samples.0.text_width
                     .max(samples.1.text_width)
                     .max(samples.2.text_width)
+                    .max(samples.3.text_width)
+                    .max(samples.4.text_width)
             );
-            let text_height = style.calc_text_height(samples.0.row_height);
+            let text_box_height = style.calc_text_box_height(samples.0.row_height);
             let rgb_text_size_y =
-                text_height * 3.0 +
-                item_pad_outer.y * 4.0;
+                text_box_height * 4.0 +
+                item_pad_outer.y * 5.0;
             self.rgb_text_size = vec2(rgb_text_size_x, rgb_text_size_y);
             text_box_rect_max.x = rgb_text_size_x;
             text_box_rect_max.y = style.calc_text_box_height(samples.0.row_height);
             self.flags &= !Self::FONT_CHANGED;
         }
         let srgba = self.srgba;
+        let hsva = self.hsva;
         if self.r_text_val != srgba.r {
             let mut fmt = CompactString::default();
             write!(fmt, "R {}", ColorRGBA::map_channel(srgba.r)).ok();
@@ -258,24 +333,48 @@ impl<I, FontHash> Contents<I, FontHash> {
             ).unwrap_or_default();
             self.b_text_val = srgba.b;
         }
+        if self.alpha_text_val != srgba.alpha {
+            let mut fmt = CompactString::default();
+            write!(fmt, "A {}", (srgba.alpha * 255.0).round()).ok();
+            self.alpha_text = text_renderer.render(
+                &[text_segment(&fmt, &style.font_regular)], false, 0.0
+            ).unwrap_or_default();
+            self.alpha_text_val = srgba.alpha;
+        }
+        if self.hue_text_val != hsva.hue {
+            let mut fmt = CompactString::default();
+            write!(fmt, "H {}°", (hsva.hue * 180.0 / PI).round()).ok();
+            self.hue_text = text_renderer.render(
+                &[text_segment(&fmt, &style.font_regular)], false, 0.0
+            ).unwrap_or_default();
+            self.hue_text_val = hsva.hue;
+        }
         let offset = self.offset;
         let picker_size = style.color_picker_size;
+        let hue_alpha_picker_height = picker_size.y * 0.1;
         let item_pad_outer = style.item_pad_outer;
         let hue_picker_offset = vec2(
             offset.x,
-            offset.y + picker_size.y + item_pad_outer.y,
+            offset.y + (picker_size.y + item_pad_outer.y),
         ) + item_pad_outer;
+        let alpha_picker_offset = hue_picker_offset + vec2(0.0, hue_alpha_picker_height + item_pad_outer.y);
         let text_offset = vec2(
             offset.x + item_pad_outer.x + picker_size.x + item_pad_outer.x,
             offset.y + item_pad_outer.y,
         );
+        let hue_text_box_offset = vec2(
+            offset.x + item_pad_outer.x + picker_size.x + item_pad_outer.x,
+            (hue_picker_offset.y + picker_size.y * 0.05 - text_box_rect_max.y * 0.5)
+                .max(offset.y + self.rgb_text_size.y),
+        );
+        self.hue_text_box_offset = hue_text_box_offset;
         let color_picker_offset = offset + item_pad_outer;
         let cursor_pos = cursor_pos - window_pos;
         let error_margin = vec2(style.cursor_error_margin, style.cursor_error_margin);
         let error_margin_2 = error_margin * 2.0;
-        if self.picker_handle_held() {
+        if self.picker_held() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.flags &= !Self::PICKER_HANDLE_HELD;
+                self.flags &= !Self::PICKER_HELD;
             } else {
                 self.picker_handle_offset = cursor_pos.clamp(
                     color_picker_offset,
@@ -293,59 +392,95 @@ impl<I, FontHash> Contents<I, FontHash> {
                 );
             }
         }
+        else if self.alpha_picker_held() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::ALPHA_PICKER_HELD;
+            } else {
+                self.alpha_picker_handle_offset_x = cursor_pos.x.clamp(
+                    alpha_picker_offset.x,
+                    alpha_picker_offset.x + picker_size.x,
+                );
+            }
+        }
         else if self.r_changed() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.flags &= !Self::R_CHANGED;
+                self.flags &= !Self::HOVERED_CHANGED;
             } else {
-                let r = self.rgba.r as f32 + (delta_cursor_pos.x * style.default_value_drag_speed) * 255.0;
+                let r = self.rgba.r as f32 + delta_cursor_pos.x * style.default_value_drag_speed * 255.0;
                 self.rgba.r = r.clamp(0.0, 255.0) as u8;
             }
         }
         else if self.g_changed() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.flags &= !Self::G_CHANGED;
+                self.flags &= !Self::HOVERED_CHANGED;
             } else {
-                let g = self.rgba.g as f32 + (delta_cursor_pos.x * style.default_value_drag_speed) * 255.0;
+                let g = self.rgba.g as f32 + delta_cursor_pos.x * style.default_value_drag_speed * 255.0;
                 self.rgba.g = g.clamp(0.0, 255.0) as u8;
             }
         }
         else if self.b_changed() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.flags &= !Self::B_CHANGED;
+                self.flags &= !Self::HOVERED_CHANGED;
             } else {
-                let b = self.rgba.b as f32 + (delta_cursor_pos.x * style.default_value_drag_speed) * 255.0;
+                let b = self.rgba.b as f32 + delta_cursor_pos.x * style.default_value_drag_speed * 255.0;
                 self.rgba.b = b.clamp(0.0, 255.0) as u8;
+            }
+        }
+        else if self.alpha_changed() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::HOVERED_CHANGED;
+            } else {
+                let alpha = (self.srgba.alpha + delta_cursor_pos.x * style.default_value_drag_speed)
+                    .clamp(0.0, 1.0);
+                self.srgba.alpha = alpha;
+                self.hsva.alpha = alpha;
+            }
+        }
+        else if self.hue_changed() {
+            if !nox.is_mouse_button_held(MouseButton::Left) {
+                self.flags &= !Self::HOVERED_CHANGED
+            } else {
+                let hue = self.hsva.hue + (delta_cursor_pos.x * style.default_value_drag_speed) * TAU;
+                self.hsva.hue = hue.clamp(0.0, TAU);
             }
         }
         else if nox.was_mouse_button_pressed(MouseButton::Left) {
             if BoundingRect::from_min_max(
                     color_picker_offset - error_margin,
-                    color_picker_offset + picker_size + error_margin_2
+                    color_picker_offset + picker_size + error_margin
                 )
                 .is_point_inside(cursor_pos)
             {
-                self.flags |= Self::PICKER_HANDLE_HELD;
+                self.flags |= Self::PICKER_HELD;
             }
             else if BoundingRect::from_position_size(
                     hue_picker_offset - error_margin,
-                    vec2(picker_size.x, picker_size.y * 0.1) +
+                    vec2(picker_size.x, hue_alpha_picker_height) +
                         error_margin_2,
                 )
                 .is_point_inside(cursor_pos)
             {
                 self.flags |= Self::HUE_PICKER_HELD;
             }
-            else if self.r_hovered() {
-                self.flags |= Self::R_CHANGED;
+            else if BoundingRect::from_position_size(
+                    alpha_picker_offset - error_margin,
+                    vec2(picker_size.x, hue_alpha_picker_height) +
+                        error_margin_2
+                )
+                .is_point_inside(cursor_pos)
+            {
+                self.flags |= Self::ALPHA_PICKER_HELD;
             }
-            else if self.g_hovered() {
-                self.flags |= Self::G_CHANGED;
-            }
-            else if self.b_hovered() {
-                self.flags |= Self::B_CHANGED;
+            else if self.r_hovered() || self.g_hovered() ||
+                self.b_hovered() || self.hue_hovered() || self.alpha_hovered()
+            {
+                self.flags |= Self::HOVERED_CHANGED;
             }
         } else {
-            self.flags &= !(Self::R_HOVERED | Self::G_HOVERED | Self::B_HOVERED);
+            self.flags &= !(
+                Self::R_HOVERED | Self::G_HOVERED | Self::B_HOVERED | Self::ALPHA_HOVERED |
+                Self::HUE_HOVERED
+            );
             if BoundingRect::from_position_size(
                     text_offset - error_margin,
                     text_box_rect_max + error_margin_2
@@ -370,6 +505,22 @@ impl<I, FontHash> Contents<I, FontHash> {
             {
                 self.flags |= Self::B_HOVERED;
             }
+            else if BoundingRect::from_position_size(
+                    text_offset + vec2(0.0, item_pad_outer.y * 3.0 + text_box_rect_max.y * 3.0) - error_margin,
+                    text_box_rect_max + error_margin_2
+                )
+                .is_point_inside(cursor_pos)
+            {
+                self.flags |= Self::ALPHA_HOVERED;
+            }
+            else if BoundingRect::from_position_size(
+                    hue_text_box_offset - error_margin,
+                    text_box_rect_max + error_margin_2
+                )
+                .is_point_inside(cursor_pos)
+            {
+                self.flags |= Self::HUE_HOVERED;
+            }
             let hsva = self.hsva;
             self.picker_handle_offset = vec2(
                 offset.x + picker_size.x * hsva.sat,
@@ -377,9 +528,13 @@ impl<I, FontHash> Contents<I, FontHash> {
             ) + item_pad_outer;
             self.hue_picker_handle_offset_x = offset.x + picker_size.x * hsva.hue / TAU
                 + item_pad_outer.x;
+            self.alpha_picker_handle_offset_x = offset.x + picker_size.x * hsva.alpha
+                + item_pad_outer.x;
         }
         if style.override_cursor {
-            if self.r_hovered() || self.b_hovered() || self.g_hovered() {
+            if self.r_hovered() || self.b_hovered() || self.g_hovered() || self.alpha_hovered() ||
+                self.hue_hovered()
+            {
                 nox.set_cursor(CursorIcon::ColResize);
             } else if BoundingRect::from_position_size(
                     self.offset, self.window_rect.max
@@ -390,12 +545,18 @@ impl<I, FontHash> Contents<I, FontHash> {
             }
         }
         let rgb_text_size = self.rgb_text_size;
+        let hue_text_box_max_y = hue_text_box_offset.y - offset.y + text_box_rect_max.y + item_pad_outer.y;
         let mut window_rect_max = item_pad_outer + item_pad_outer + picker_size +
-            vec2(item_pad_outer.x + item_pad_outer.x + rgb_text_size.x, picker_size.y * 0.1 + item_pad_outer.y);
-        window_rect_max.y = window_rect_max.y.max(rgb_text_size.y);
+            vec2(
+                item_pad_outer.x + rgb_text_size.x,
+                hue_alpha_picker_height + item_pad_outer.y +
+                hue_alpha_picker_height + item_pad_outer.y
+            );
+        window_rect_max.y = window_rect_max.y.max(hue_text_box_max_y);
         let handle_radius = style.default_handle_radius;
         let rounding = style.rounding;
         let outline_width = style.outline_width;
+        let hue_alpha_picker_handle_height = picker_size.y * 0.06;
         let requires_triangulation =
             self.window_rect.max != window_rect_max ||
             self.window_rect.rounding != rounding ||
@@ -403,20 +564,27 @@ impl<I, FontHash> Contents<I, FontHash> {
             self.text_box_rect.rounding != rounding ||
             self.outline_width != outline_width ||
             self.picker_handle.radius != handle_radius ||
-            self.hue_picker_handle.max.x != handle_radius;
+            self.hue_alpha_picker_handle_height != hue_alpha_picker_handle_height;
         self.window_rect.max = window_rect_max;
         self.window_rect.rounding = rounding;
         self.text_box_rect.max = text_box_rect_max;
         self.text_box_rect.rounding = rounding;
         self.outline_width = outline_width;
         self.picker_handle.radius = handle_radius;
-        self.hue_picker_handle.max = vec2(handle_radius, handle_radius);
+        self.hue_alpha_picker_handle_height = hue_alpha_picker_handle_height;
         self.hue_picker_offset = hue_picker_offset;
+        self.alpha_picker_offset = alpha_picker_offset;
         requires_triangulation
     }
 
     #[inline(always)]
     fn calc_color(&mut self, style: &Style<FontHash>) -> ColorHSVA {
+        if self.alpha_changed() {
+            let hsva = self.hsva;
+            self.alpha_picker_handle_offset_x = self.offset.x + style.color_picker_size.x * hsva.alpha
+                + style.item_pad_outer.x;
+            return hsva
+        }
         if self.r_changed() || self.g_changed() || self.b_changed() {
             self.srgba = self.rgba.to_srgba();
             self.hsva = self.srgba.to_hsva();
@@ -430,7 +598,21 @@ impl<I, FontHash> Contents<I, FontHash> {
             ) + item_pad_outer;
             self.hue_picker_handle_offset_x = offset.x + picker_size.x * hsva.hue / TAU
                 + item_pad_outer.x;
-            return self.hsva
+            return hsva
+        }
+        if self.hue_hovered() {
+            self.srgba = self.hsva.to_srgba();
+            let hsva = self.hsva;
+            let offset = self.offset;
+            let picker_size = style.color_picker_size;
+            let item_pad_outer = style.item_pad_outer;
+            self.picker_handle_offset = vec2(
+                offset.x + picker_size.x * hsva.sat,
+                offset.y + picker_size.y * (1.0 - hsva.val),
+            ) + item_pad_outer;
+            self.hue_picker_handle_offset_x = offset.x + picker_size.x * hsva.hue / TAU
+                + item_pad_outer.x;
+            return hsva
         }
         let picker_size = style.color_picker_size;
         let offset = self.offset;
@@ -441,10 +623,12 @@ impl<I, FontHash> Contents<I, FontHash> {
             handle_offset.y / picker_size.y,
         );
         let mut color = ColorHSVA::new(
-            (self.hue_picker_handle_offset_x - offset.x - item_pad_outer.x) / picker_size.x * TAU,
+            (self.hue_picker_handle_offset_x - offset.x - item_pad_outer.x).clamp(0.0, picker_size.x)
+                / picker_size.x * TAU,
             1.0,
             1.0,
-            self.srgba.alpha,
+            (self.alpha_picker_handle_offset_x - offset.x - item_pad_outer.x).clamp(0.0, picker_size.x)
+                / picker_size.x,
         );
         color.val = lerp(1.0, 0.0, t.y);
         color.sat = lerp(0.0, 1.0, t.x);
@@ -469,7 +653,10 @@ impl<I, FontHash> Contents<I, FontHash> {
     fn triangulate(&mut self, style: &Style<FontHash>) {
         self.other_vertices.clear();
         self.indices.resize(
-            self.indices.len() - self.other_vertices_draw_info.index_count as usize,
+            self.indices.len() -
+                (self.other_vertices_draw_info.index_count as usize +
+                    self.other_vertices_draw_info_bg.index_count as usize
+                ),
             Default::default()
         );
         let mut index_offset = self.indices.len() as u32;
@@ -516,6 +703,8 @@ impl<I, FontHash> Contents<I, FontHash> {
         self.r_text_box_outline_vertex_range = f();
         self.g_text_box_outline_vertex_range = f();
         self.b_text_box_outline_vertex_range = f();
+        self.alpha_text_box_outline_vertex_range = f();
+        self.hue_text_box_outline_vertex_range = f();
         tmp_vertices.clear();
         tmp_indices.clear();
         earcut::earcut(
@@ -531,6 +720,8 @@ impl<I, FontHash> Contents<I, FontHash> {
         self.r_text_box_vertex_range = f();
         self.g_text_box_vertex_range = f();
         self.b_text_box_vertex_range = f();
+        self.alpha_text_box_vertex_range = f();
+        self.hue_text_box_vertex_range = f();
         self.indices.append_map(&indices_usize, |&i| i as u32);
         self.other_vertices_draw_info_bg = DrawInfo {
             first_index: index_offset,
@@ -560,12 +751,21 @@ impl<I, FontHash> Contents<I, FontHash> {
             &mut self.other_vertices, &mut indices_usize
         ).unwrap();
         self.picker_handle_vertex_range = VertexRange::new(vertex_off..self.other_vertices.len());
-        vertex_off = self.other_vertices.len();
         points.clear();
-        self.hue_picker_handle.max.y = style.color_picker_size.y * 0.1;
-        self.hue_picker_handle.to_points(&mut |p| { points.push(p.into()); });
-        earcut::earcut(&points, &[], false, &mut self.other_vertices, &mut indices_usize).unwrap();
+        let hue_alpha_picker_handle_height = self.hue_alpha_picker_handle_height;
+        let half_width = hue_alpha_picker_handle_height * 0.5;
+        vertex_off = self.other_vertices.len();
+        self.other_vertices.push([0.0, hue_alpha_picker_handle_height].into());
+        self.other_vertices.push([-half_width, 0.0].into());
+        self.other_vertices.push([half_width, 0.0].into());
+        indices_usize.append(&[vertex_off, vertex_off + 1, vertex_off + 2]);
         self.hue_picker_handle_vertex_range = VertexRange::new(vertex_off..self.other_vertices.len());
+        vertex_off += 3;
+        self.other_vertices.push([0.0, self.hue_alpha_picker_handle_height].into());
+        self.other_vertices.push([-half_width, 0.0].into());
+        self.other_vertices.push([half_width, 0.0].into());
+        indices_usize.append(&[vertex_off, vertex_off + 1, vertex_off + 2]);
+        self.alpha_picker_handle_vertex_range = VertexRange::new(vertex_off..self.other_vertices.len());
         self.indices.append_map(&indices_usize, |&i| i as u32);
         self.other_vertices_draw_info = DrawInfo {
             first_index: index_offset,
@@ -575,6 +775,13 @@ impl<I, FontHash> Contents<I, FontHash> {
     }
 
     fn set_vertex_params(&mut self, style: &Style<FontHash>) {
+        let hue_picker_black =
+            if self.hsva.hue > PI * 0.05 && self.hsva.hue < PI * 1.2 {
+                true
+            } else {
+                false
+            };
+        let picker_size = style.color_picker_size;
         let mut offset = self.offset;
         let mut target_color = style.hover_window_bg_col;
         set_vertex_params(&mut self.other_vertices, self.window_vertex_range, offset, target_color);
@@ -583,9 +790,10 @@ impl<I, FontHash> Contents<I, FontHash> {
         let item_pad_outer = style.item_pad_outer;
         let text_box_height = style.calc_text_box_height(self.r_text.row_height);
         let tmp_offset = vec2(
-            self.offset.x + item_pad_outer.x + style.color_picker_size.x + item_pad_outer.x,
+            self.offset.x + item_pad_outer.x + picker_size.x + item_pad_outer.x,
             self.offset.y + item_pad_outer.y,
         );
+        let hue_text_box_offset = self.hue_text_box_offset;
         offset = tmp_offset;
         target_color = style.on_top_contents_widget_bg_col;
         set_vertex_params(&mut self.other_vertices, self.r_text_box_vertex_range, offset, target_color);
@@ -593,6 +801,10 @@ impl<I, FontHash> Contents<I, FontHash> {
         set_vertex_params(&mut self.other_vertices, self.g_text_box_vertex_range, offset, target_color);
         offset.y += text_box_height + item_pad_outer.y;
         set_vertex_params(&mut self.other_vertices, self.b_text_box_vertex_range, offset, target_color);
+        offset.y += text_box_height + item_pad_outer.y;
+        set_vertex_params(&mut self.other_vertices, self.alpha_text_box_vertex_range, offset, target_color);
+        offset = hue_text_box_offset;
+        set_vertex_params(&mut self.other_vertices, self.hue_text_box_vertex_range, offset, target_color);
         offset = tmp_offset;
         target_color = if self.r_changed() {
             style.on_top_contents_widget_outline_col_hl
@@ -620,24 +832,65 @@ impl<I, FontHash> Contents<I, FontHash> {
             ColorSRGBA::black(0.0)
         };
         set_vertex_params(&mut self.other_vertices, self.b_text_box_outline_vertex_range, offset, target_color);
-
-        let handle_lightness = if self.hsva.val < 0.5 {
-            1.0
+        offset.y += text_box_height + item_pad_outer.y;
+        target_color = if self.alpha_changed() {
+            style.on_top_contents_widget_outline_col_hl
+        } else if self.alpha_hovered() {
+            style.on_top_contents_widget_outline_col
         } else {
-            0.0
+            ColorSRGBA::black(0.0)
+        };
+        set_vertex_params(&mut self.other_vertices, self.alpha_text_box_outline_vertex_range, offset, target_color);
+        offset = hue_text_box_offset; 
+        target_color = if self.hue_changed() {
+            style.on_top_contents_widget_outline_col_hl
+        } else if self.hue_hovered() {
+            style.on_top_contents_widget_outline_col
+        } else {
+            ColorSRGBA::black(0.0)
+        };
+        set_vertex_params(&mut self.other_vertices, self.hue_text_box_outline_vertex_range, offset, target_color);
+        let hsva = self.hsva;
+        let srgba = self.srgba;
+        let tmp = hsva.val > 0.5;
+        let sat_low = hsva.sat < 0.5;
+        let picker_handle_col =
+        if sat_low && tmp ||
+            (tmp && hue_picker_black)
+        {
+            ColorSRGBA::black(1.0)
+        } else {
+            ColorSRGBA::white(1.0)
         };
         offset = self.picker_handle_offset;
-        target_color = self.srgba.with_alpha(1.0);
+        target_color = srgba.with_alpha(1.0);
         set_vertex_params(&mut self.other_vertices, self.picker_handle_vertex_range, offset, target_color);
-        target_color = ColorSRGBA::new(handle_lightness, handle_lightness, handle_lightness, 1.0);
+        target_color = picker_handle_col;
         set_vertex_params(&mut self.other_vertices,
             self.picker_handle_outline_vertex_range, offset, target_color);
-        target_color = ColorSRGBA::black(1.0);
+        target_color =
+            if hue_picker_black {
+                ColorSRGBA::black(1.0)
+            } else {
+                ColorSRGBA::white(1.0)
+            };
         offset = vec2(
-            self.hue_picker_handle_offset_x - self.hue_picker_handle.max.x * 0.5,
-            self.offset.y + style.color_picker_size.y + item_pad_outer.y + item_pad_outer.y,
+            self.hue_picker_handle_offset_x,
+            self.offset.y + picker_size.y + item_pad_outer.y + item_pad_outer.y,
         );
         set_vertex_params(&mut self.other_vertices, self.hue_picker_handle_vertex_range, offset, target_color);
+        target_color =
+            if srgba.alpha < 0.4 || (!hue_picker_black && tmp && !sat_low) || !tmp   {
+                ColorSRGBA::white(1.0)
+            } else {
+                ColorSRGBA::black(1.0)
+            };
+        offset = vec2(
+            self.alpha_picker_handle_offset_x,
+            self.offset.y + picker_size.y + picker_size.y * 0.1 +
+                item_pad_outer.y + item_pad_outer.y + item_pad_outer.y,
+        );
+        set_vertex_params(&mut self.other_vertices, self.alpha_picker_handle_vertex_range, offset, target_color);
     }
 }
 
@@ -709,13 +962,14 @@ impl<I, FontHash> OnTopContents<I, FontHash> for Contents<I, FontHash>
         let item_pad_outer = style.item_pad_outer;
         let item_pad_inner = style.item_pad_inner;
         let offset = self.offset;
+        let hsva = self.hsva;
         let pc_vertex = push_constants_vertex(
             window_pos + offset + item_pad_outer,
             picker_size,
             inv_aspect_ratio,
         );
         let pc_fragment = color_picker_push_constants_fragments(
-            self.hsva.hue,
+            hsva.hue,
         );
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -738,12 +992,28 @@ impl<I, FontHash> OnTopContents<I, FontHash> for Contents<I, FontHash>
             index_buffer_info,
         )?;
         render_commands.bind_pipeline(get_custom_pipeline(COLOR_PICKER_HUE_PIPELINE_HASH).unwrap())?;
+        let hue_picker_size_y = picker_size.y * 0.1;
         let pc_vertex = push_constants_vertex(
-            window_pos + offset + vec2(0.0, picker_size.y + style.item_pad_outer.y) + item_pad_outer,
-            vec2(picker_size.x, picker_size.y * 0.1),
+            window_pos + offset + vec2(0.0, picker_size.y + item_pad_outer.y) + item_pad_outer,
+            vec2(picker_size.x, hue_picker_size_y),
             inv_aspect_ratio
         );
-        let pc_fragment = hue_picker_push_constants_fragment(1.0, 1.0);
+        render_commands.push_constants(|_| unsafe {
+            pc_vertex.as_bytes()
+        })?;
+        render_commands.draw_indexed(
+            self.picker_draw_info,
+            [vertex_buffer_info],
+            index_buffer_info,
+        )?;
+        render_commands.bind_pipeline(get_custom_pipeline(COLOR_PICKER_ALPHA_PIPELINE_HASH).unwrap())?;
+        let pc_vertex = push_constants_vertex(
+            window_pos + offset + vec2(0.0, picker_size.y + hue_picker_size_y + item_pad_outer.y + item_pad_outer.y) +
+                item_pad_outer,
+            vec2(picker_size.x, hue_picker_size_y),
+            inv_aspect_ratio
+        );
+        let pc_fragment = aplha_picker_push_constants_fragment(hsva, picker_size.x, style.alpha_tile_width);
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
                 pc_vertex.as_bytes()
@@ -754,7 +1024,7 @@ impl<I, FontHash> OnTopContents<I, FontHash> for Contents<I, FontHash>
         render_commands.draw_indexed(
             self.picker_draw_info,
             [vertex_buffer_info],
-            index_buffer_info,
+            index_buffer_info
         )?;
         render_commands.bind_pipeline(base_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
@@ -785,7 +1055,7 @@ impl<I, FontHash> OnTopContents<I, FontHash> for Contents<I, FontHash>
         );
         let text_height = style.calc_text_height(self.r_text.row_height);
         let font_scale = vec2(style.font_scale, style.font_scale);
-        let text_box_width = self.text_box_rect.max.x;
+        let text_box_size = self.text_box_rect.max;
         let mut pc_vertex = push_constants_vertex(
             text_offset,
             font_scale,
@@ -794,22 +1064,23 @@ impl<I, FontHash> OnTopContents<I, FontHash> for Contents<I, FontHash>
         let pc_fragment = text_push_constants_fragment(style.text_col);
         let mut f = |text: &RenderedText| -> Result<(), Error> {
             let text_width = style.calc_text_width(text.text_width);
-            pc_vertex.vert_off.x = text_offset.x + text_box_width * 0.5 - text_width * 0.5;
+            pc_vertex.vert_off.x = text_offset.x + text_box_size.x * 0.5 - text_width * 0.5;
             pc_vertex.vert_off.y += item_pad_inner.y;
-            render_commands.push_constants(|pc| unsafe {
-                if pc.stage == ShaderStage::Vertex {
-                    pc_vertex.as_bytes()
-                } else {
-                    pc_fragment.as_bytes()
-                }
-            })?;
-            render_text(&text, render_commands, vertex_buffer, index_buffer)?;
+            render_text(render_commands, &text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
             pc_vertex.vert_off.y += text_height + item_pad_outer.y + item_pad_inner.y;
             Ok(())
         };
         f(&self.r_text)?;
         f(&self.g_text)?;
         f(&self.b_text)?;
+        f(&self.alpha_text)?;
+        let hue_text_box_offset = self.hue_text_box_offset;
+        let text_width = style.calc_text_width(self.hue_text.text_width);
+        pc_vertex.vert_off = window_pos + vec2(
+            hue_text_box_offset.x + text_box_size.x * 0.5 - text_width * 0.5,
+            hue_text_box_offset.y + item_pad_inner.y,
+        );
+        render_text(render_commands, &self.hue_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         Ok(())
     }
 }
@@ -841,11 +1112,14 @@ impl<I, FontHash> ColorPicker<I, FontHash> {
 
     #[inline(always)]
     pub fn picking(&self) -> bool {
-        self.contents.picker_handle_held() ||
+        self.contents.picker_held() ||
         self.contents.hue_picker_held() ||
+        self.contents.alpha_picker_held() ||
         self.contents.r_changed() ||
         self.contents.g_changed() ||
-        self.contents.b_changed()
+        self.contents.b_changed() ||
+        self.contents.hue_hovered() ||
+        self.contents.alpha_changed()
     }
 
     #[inline(always)]
@@ -928,18 +1202,25 @@ impl<I, FontHash> Widget<I, FontHash> for ColorPicker<I, FontHash>
         let cursor_in_contents = self.contents
             .bounding_rect(error_margin)
             .is_point_inside(rel_cursor_pos);
-        if nox.was_mouse_button_pressed(MouseButton::Left) {
-            if self.contents.shown() {
-                self.contents.set_shown(cursor_in_contents);
-            } else {
+        if self.contents.widget_held() {
+            if nox.was_mouse_button_released(MouseButton::Left) {
+                self.contents.set_widget_held(false);
                 self.contents.set_shown(cursor_in_color_rect);
             }
         }
-        let shown = self.contents.shown();
+        if nox.was_mouse_button_pressed(MouseButton::Left) {
+            if self.contents.shown() {
+                self.contents.set_shown(cursor_in_contents);
+            }
+            if cursor_in_color_rect {
+                self.contents.set_widget_held(true);
+            }
+        }
         if other_widget_active {
             self.contents.set_shown(false);
         }
-        else if shown {
+        let shown = self.contents.shown();
+        if shown {
             self.contents.offset = self.offset + vec2(
                 text_size.x + style.item_pad_outer.x,
                 text_size.y + style.outline_width,
@@ -1015,14 +1296,8 @@ impl<I, FontHash> Widget<I, FontHash> for ColorPicker<I, FontHash>
             inv_aspect_ratio,
         );
         let pc_fragment = text_push_constants_fragment(style.text_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_text(self.title_text.as_ref().unwrap(), render_commands, vertex_buffer, index_buffer)?;
+        render_text(render_commands, self.title_text.as_ref().unwrap(),
+            pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         if self.contents.shown() {
             Ok(Some(&self.contents))
         } else {

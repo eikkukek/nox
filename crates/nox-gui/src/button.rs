@@ -230,14 +230,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
             inv_aspect_ratio
         );
         let pc_fragment = text_push_constants_fragment(style.text_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_text(title_text, render_commands, vertex_buffer, index_buffer)?;
+        render_text(render_commands, title_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         Ok(None)
     }
 

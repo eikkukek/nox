@@ -258,14 +258,7 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
             inv_aspect_ratio
         );
         let pc_fragment = text_push_constants_fragment(style.text_col);
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_text(title_text, render_commands, vertex_buffer, index_buffer)?;
+        render_text(render_commands, title_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         if self.checked() {
             let checkbox_text = self.checkbox_text.as_ref().unwrap();
             let checkbox_pos = window_pos + self.offset + vec2(style.calc_text_width(title_text.text_width) + style.item_pad_outer.x, 0.0);
@@ -275,14 +268,7 @@ impl<I, FontHash> Widget<I, FontHash> for Checkbox<I, FontHash>
                 vec2(style.font_scale, style.font_scale),
                 inv_aspect_ratio,
             );
-            render_commands.push_constants(|pc| unsafe {
-                if pc.stage == ShaderStage::Vertex {
-                    pc_vertex.as_bytes()
-                } else {
-                    pc_fragment.as_bytes()
-                }
-            })?;
-            render_text(checkbox_text, render_commands, vertex_buffer, index_buffer)?;
+            render_text(render_commands, checkbox_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         }
         Ok(None)
     }
