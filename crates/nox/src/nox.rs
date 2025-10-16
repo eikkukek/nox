@@ -2,7 +2,10 @@ use std::sync::{Arc, RwLock};
 
 use std::time;
 
+use nox_mem::vec_types::{Vector, GlobalVec};
+
 use rustc_hash::FxHashMap;
+use compact_str::CompactString;
 
 use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
@@ -52,7 +55,7 @@ pub struct Nox<'a, I>
     physical_keys: FxHashMap<PhysicalKey, InputState>,
     logical_keys: FxHashMap<Key, InputState>,
     mouse_buttons: FxHashMap<MouseButton, InputState>,
-    input_text: Option<SmolStr>,
+    input_text: GlobalVec<(KeyCode, CompactString)>,
     delta_counter: time::Instant,
     delta_time: time::Duration,
     window_size: (u32, u32),
@@ -74,7 +77,7 @@ impl<'a, I: Interface> Nox<'a, I>
             physical_keys: Default::default(),
             logical_keys: Default::default(),
             mouse_buttons: Default::default(),
-            input_text: None,
+            input_text: Default::default(),
             delta_counter: time::Instant::now(),
             delta_time: time::Duration::ZERO,
             window_size: Default::default(),
@@ -106,6 +109,11 @@ impl<'a, I: Interface> Nox<'a, I>
     #[inline(always)]
     pub fn delta_time(&self) -> time::Duration {
         self.delta_time
+    }
+
+    #[inline(always)]
+    pub fn delta_time_secs_f32(&self) -> f32 {
+        self.delta_time.as_secs_f32()
     }
 
     #[inline(always)]
@@ -218,6 +226,11 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
+    pub fn get_input_text(&self) -> &[(KeyCode, CompactString)] {
+        &self.input_text
+    }
+
+    #[inline(always)]
     fn reset_input(&mut self) {
         self.mouse_scroll_delta = Default::default();
         self.mouse_scroll_delta_lines = Default::default();
@@ -285,7 +298,15 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         logic.released = state == ElementState::Released;
                         logic.held = state != ElementState::Released;
                         logic.repeat = repeat;
-                        self.input_text = text;
+                        if let Some(text) = text && (phys.pressed || repeat) {
+                            self.input_text.push((
+                                match physical_key {
+                                    PhysicalKey::Code(c) => c,
+                                    PhysicalKey::Unidentified(_) => KeyCode::Backspace,
+                                },
+                                CompactString::new(&text))
+                            );
+                        }
                     },
                 };
             },
@@ -318,6 +339,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         self.error_flag = true;
                         eprintln!("Failed to update: {:?}", e);
                     }
+                    self.input_text.clear();
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
                         let mut handles = match renderer.transfer_requests(self.interface.clone(), renderer_context.transfer_requests) {

@@ -16,4 +16,5 @@ spirv-cross2 = { version = "0.4.6", default-features = false }
 shaderc = "0.9.1"
 memmap2 = "0.9.7"
 rustc-hash = "2.1.1"
+compact_str = { version = "0.9.0" }
 token-cell = "2.0.0"
