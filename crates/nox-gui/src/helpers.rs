@@ -77,3 +77,16 @@ pub fn set_vertex_params(
         }
     }
 }
+
+#[inline(always)]
+pub fn hide_vertices(
+    vertices: &mut [Vertex],
+    range: VertexRange,
+) {
+    let vertex_sample = vertices[range.start()];
+    if vertex_sample.color.alpha != 0.0 {
+        for vertex in &mut vertices[range.range()] {
+            vertex.color = ColorSRGBA::black(0.0);
+        }
+    }
+}

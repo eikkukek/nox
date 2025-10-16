@@ -23,6 +23,8 @@ pub(crate) const COLOR_PICKER_PIPELINE_HASH: &str = "nox_gui color picker";
 pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: &str = "nox_gui color picker hue";
 pub(crate) const COLOR_PICKER_ALPHA_PIPELINE_HASH: &str = "nox_gui color picker alpha";
 
+pub(crate) const INPUT_TEXT_PIPELINE_HASH: &str = "nox_gui input text";
+
 #[derive(Default)]
 struct BasePipelines {
     base_pipeline_layout: Option<PipelineLayoutId>,
@@ -157,6 +159,7 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         self.output_samples = output_samples;
         self.output_format = output_format;
         let mut color_picker_shaders = [Default::default(); 4];
+        let mut input_text_shaders = [Default::default(); 4];
         render_context.edit_resources(|r| {
             color_picker_shaders[0] = r.create_shader(
                 COLOR_PICKER_VERTEX_SHADER,
@@ -174,6 +177,14 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
                 COLOR_PICKER_FRAGMENT_SHADER_ALPHA,
                 "nox_gui color picker fragment shader alpha", ShaderStage::Fragment
             )?;
+            input_text_shaders[0] = r.create_shader(
+                INPUT_TEXT_VERTEX_SHADER,
+                "nox_gui input text vertex shader", ShaderStage::Vertex
+            )?;
+            input_text_shaders[1] = r.create_shader(
+                INPUT_TEXT_FRAGMENT_SHADER,
+                "nox_gui input text fragment shader", ShaderStage::Fragment
+            )?;
             Ok(())
         })?;
         self.create_custom_pipelines(
@@ -186,7 +197,7 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
                         color_picker_shaders[1],
                         &[
                             VertexInputBinding
-                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)
+                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex),
                         ],
                     )
                 ),
@@ -197,7 +208,7 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
                         color_picker_shaders[2],
                         &[
                             VertexInputBinding
-                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)
+                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex),
                         ],
                     )
                 ),
@@ -208,7 +219,20 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
                         color_picker_shaders[3],
                         &[
                             VertexInputBinding
-                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex)
+                                ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex),
+                        ],
+                    ),
+                ),
+                (
+                    INPUT_TEXT_PIPELINE_HASH,
+                    CustomPipelineInfo::new(
+                        input_text_shaders[0],
+                        input_text_shaders[1],
+                        &[
+                            VertexInputBinding
+                                ::new::<0, font::Vertex>(0, VertexInputRate::Vertex),
+                            VertexInputBinding
+                                ::new::<1, font::VertexOffset>(1, VertexInputRate::Instance),
                         ],
                     ),
                 ),

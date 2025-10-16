@@ -8,7 +8,7 @@ use crate::*;
 use nox_geom::*;
 
 #[repr(C)]
-#[derive(Clone, Copy, VertexInput)]
+#[derive(Default, Clone, Copy, VertexInput)]
 pub struct Vertex {
     pub pos: Vec2,
     pub offset: Vec2,
@@ -84,6 +84,31 @@ pub fn text_push_constants_fragment(color: ColorSRGBA) -> TextPushConstantsFragm
 }
 
 impl TextPushConstantsFragment {
+
+    pub unsafe fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            value_as_bytes(self).unwrap()
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct InputTextPushConstantsFragment {
+    pub color: ColorSRGBA,
+    pub rect_min: Vec2,
+    pub rect_max: Vec2
+}
+
+pub fn input_text_push_constants_fragment(color: ColorSRGBA, bounding_rect: BoundingRect) -> InputTextPushConstantsFragment {
+    InputTextPushConstantsFragment {
+        color,
+        rect_min: bounding_rect.min,
+        rect_max: bounding_rect.max,
+    }
+}
+
+impl InputTextPushConstantsFragment {
 
     pub unsafe fn as_bytes(&self) -> &[u8] {
         unsafe {
@@ -375,5 +400,58 @@ pub const COLOR_PICKER_FRAGMENT_SHADER_ALPHA: &'static str = "
         vec3 color = hsv_to_srgb(color_hsv);
         color = color * alpha + bg * (1.0 - alpha);
         out_color = vec4(color, 1.0);
+    }
+";
+
+pub const INPUT_TEXT_VERTEX_SHADER: &'static str = "
+    #version 450
+
+    layout(location = 0) in vec2 in_pos;
+
+    layout(location = 1) in vec2 in_offset;
+
+    layout(location = 0) out vec2 out_pos;
+
+    layout(push_constant) uniform PushConstant {
+        vec2 vert_off;
+        vec2 scale;
+        float inv_aspect_ratio;
+    } pc;
+
+    void main() {
+        vec2 pos = in_pos + in_offset;
+        pos.x *= pc.scale.x;
+        pos.y *= pc.scale.y;
+        pos += pc.vert_off;
+        out_pos = pos;
+        pos.x *= pc.inv_aspect_ratio;
+        gl_Position = vec4(pos, 0.0, 1.0);
+    }
+";
+
+pub const INPUT_TEXT_FRAGMENT_SHADER: &'static str = "
+    #version 450
+
+    layout(location = 0) in vec2 in_pos;
+
+    layout(location = 0) out vec4 out_color;
+
+    layout(push_constant) uniform PushConstant {
+        layout(offset = 32) vec4 color;
+        vec2 rect_min;
+        vec2 rect_max;
+    } pc;
+
+    bool in_rect() {
+        return pc.rect_min.x < in_pos.x && pc.rect_max.x > in_pos.x &&
+            pc.rect_min.y < in_pos.y && pc.rect_max.y > in_pos.y;
+    }
+
+    void main() {
+        if (in_rect()) {
+            out_color = pc.color;
+        } else {
+            out_color = vec4(0.0);
+        }
     }
 ";

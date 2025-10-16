@@ -91,18 +91,18 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
     }
     
     #[inline(always)]
-    fn calc_size(
+    fn calc_height(
         &mut self,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-    ) -> Vec2 {
+    ) -> f32 {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        style.calc_text_box_size(vec2(title_text.text_width, title_text.row_height))
+        style.calc_text_box_height(title_text.row_height)
     }
 
-    fn is_active(&self, _style: &Style<FontHash>, _window_pos: Vec2, _cursor_pos: Vec2) -> bool {
+    fn is_active(&self, _nox: &Nox<I>, _style: &Style<FontHash>, _window_pos: Vec2, _cursor_pos: Vec2) -> bool {
         self.held()
     }
 
@@ -117,6 +117,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
+        _window_moving: bool,
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
@@ -181,7 +182,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         let vertex_sample = vertices[self.outline_vertex_range.start()];
         if self.cursor_in_button() || self.held() {
             let target_color = if self.held() {
-                style.widget_outline_col_hl
+                style.widget_outline_hl_col
             } else {
                 style.widget_outline_col
             };

@@ -40,11 +40,12 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         Some((face.ascender() - face.descender() + face.line_gap()) as f32 / face.units_per_em() as f32)
     }
 
-    pub fn render(
+    pub fn render_and_collect_offsets(
         &mut self,
         text: &[TextSegment<H>],
         line_center: bool,
         mut max_normalized_width: f32,
+        mut collect_offsets: impl FnMut(char, [f32; 2]),
     ) -> Option<RenderedText>
     {
         if max_normalized_width == 0.0 {
@@ -132,6 +133,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                     let offsets = offsets.entry(c).or_insert(Some(Default::default())).as_mut().unwrap();
                     offsets.push(VertexOffset { offset: [glyph_x, glyph_y] });
                 }
+                collect_offsets(c, [glyph_x, glyph_y]);
                 pen_x += position.x_advance as f32 / units_per_em;
             }
         }
@@ -151,6 +153,16 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
             row_height: height,
             text_rows: rows,
         })
+    }
+
+    #[inline(always)]
+    pub fn render(
+        &mut self,
+        text: &[TextSegment<H>],
+        line_center: bool,
+        max_normalized_width: f32,
+    ) -> Option<RenderedText> {
+        self.render_and_collect_offsets(text, line_center, max_normalized_width, |_, _| {})
     }
 }
 

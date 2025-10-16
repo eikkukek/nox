@@ -56,13 +56,19 @@ pub trait Widget<I, FontHash>
         offset: Vec2,
     );
 
-    fn calc_size(
+    fn calc_height(
         &mut self,
         style: &Style<FontHash>,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-    ) -> Vec2;
+    ) -> f32;
 
-    fn is_active(&self, style: &Style<FontHash>, window_pos: Vec2, cursor_pos: Vec2) -> bool;
+    fn is_active(
+        &self,
+        nox: &Nox<I>,
+        style: &Style<FontHash>,
+        window_pos: Vec2,
+        cursor_pos: Vec2,
+    ) -> bool;
 
     fn update(
         &mut self,
@@ -75,6 +81,7 @@ pub trait Widget<I, FontHash>
         delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
+        window_moving: bool,
     ) -> UpdateResult;
 
     fn triangulate(

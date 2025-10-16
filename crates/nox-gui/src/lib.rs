@@ -8,6 +8,7 @@ mod button;
 mod slider;
 mod checkbox;
 mod color_picker;
+mod input_text;
 mod window;
 mod workspace;
 
@@ -27,5 +28,6 @@ pub use compact_str::CompactString;
 
 use button::Button;
 use checkbox::Checkbox;
+use input_text::InputText;
 use color_picker::ColorPicker;
 use helpers::*;

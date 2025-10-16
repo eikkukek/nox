@@ -85,6 +85,7 @@ impl<I, FontHash> Contents<I, FontHash> {
     const B_HOVERED: u32 = 0x200;
     const ALPHA_HOVERED: u32 = 0x400;
     const HUE_HOVERED: u32 = 0x800;
+    const CLICKED: u32 = 0x1000;
 
     fn new() -> Self {
         let mut points = GlobalVec::new();
@@ -251,6 +252,17 @@ impl<I, FontHash> Contents<I, FontHash> {
     }
 
     #[inline(always)]
+    fn clicked(&self) -> bool {
+        self.flags & Self::CLICKED == Self::CLICKED
+    }
+
+    #[inline(always)]
+    fn set_clicked(&mut self, value: bool) {
+        self.flags &= !Self::CLICKED;
+        self.flags |= value as u32;
+    }
+
+    #[inline(always)]
     fn bounding_rect(&self, error_margin: f32) -> BoundingRect {
         BoundingRect::from_position_size(
             self.offset - vec2(error_margin, error_margin),
@@ -372,6 +384,7 @@ impl<I, FontHash> Contents<I, FontHash> {
         let cursor_pos = cursor_pos - window_pos;
         let error_margin = vec2(style.cursor_error_margin, style.cursor_error_margin);
         let error_margin_2 = error_margin * 2.0;
+        let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
         if self.picker_held() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.flags &= !Self::PICKER_HELD;
@@ -444,7 +457,7 @@ impl<I, FontHash> Contents<I, FontHash> {
                 self.hsva.hue = hue.clamp(0.0, TAU);
             }
         }
-        else if nox.was_mouse_button_pressed(MouseButton::Left) {
+        else if mouse_pressed {
             if BoundingRect::from_min_max(
                     color_picker_offset - error_margin,
                     color_picker_offset + picker_size + error_margin
@@ -456,7 +469,7 @@ impl<I, FontHash> Contents<I, FontHash> {
             else if BoundingRect::from_position_size(
                     hue_picker_offset - error_margin,
                     vec2(picker_size.x, hue_alpha_picker_height) +
-                        error_margin_2,
+                        error_margin,
                 )
                 .is_point_inside(cursor_pos)
             {
@@ -553,6 +566,13 @@ impl<I, FontHash> Contents<I, FontHash> {
                 hue_alpha_picker_height + item_pad_outer.y
             );
         window_rect_max.y = window_rect_max.y.max(hue_text_box_max_y);
+        if mouse_pressed && BoundingRect::from_position_size(
+                offset,
+                window_rect_max,
+            ).is_point_inside(cursor_pos)
+        {
+            self.flags |= Self::CLICKED;
+        }
         let handle_radius = style.default_handle_radius;
         let rounding = style.rounding;
         let outline_width = style.outline_width;
@@ -807,7 +827,7 @@ impl<I, FontHash> Contents<I, FontHash> {
         set_vertex_params(&mut self.other_vertices, self.hue_text_box_vertex_range, offset, target_color);
         offset = tmp_offset;
         target_color = if self.r_changed() {
-            style.on_top_contents_widget_outline_col_hl
+            style.on_top_contents_widget_outline_hl_col
         } else if self.r_hovered() {
             style.on_top_contents_widget_outline_col
         } else {
@@ -816,7 +836,7 @@ impl<I, FontHash> Contents<I, FontHash> {
         set_vertex_params(&mut self.other_vertices, self.r_text_box_outline_vertex_range, offset, target_color);
         offset.y += text_box_height + item_pad_outer.y;
         target_color = if self.g_changed() {
-            style.on_top_contents_widget_outline_col_hl
+            style.on_top_contents_widget_outline_hl_col
         } else if self.g_hovered() {
             style.on_top_contents_widget_outline_col
         } else {
@@ -825,7 +845,7 @@ impl<I, FontHash> Contents<I, FontHash> {
         set_vertex_params(&mut self.other_vertices, self.g_text_box_outline_vertex_range, offset, target_color);
         offset.y += text_box_height + item_pad_outer.y;
         target_color = if self.b_changed() {
-            style.on_top_contents_widget_outline_col_hl
+            style.on_top_contents_widget_outline_hl_col
         } else if self.b_hovered() {
             style.on_top_contents_widget_outline_col
         } else {
@@ -834,7 +854,7 @@ impl<I, FontHash> Contents<I, FontHash> {
         set_vertex_params(&mut self.other_vertices, self.b_text_box_outline_vertex_range, offset, target_color);
         offset.y += text_box_height + item_pad_outer.y;
         target_color = if self.alpha_changed() {
-            style.on_top_contents_widget_outline_col_hl
+            style.on_top_contents_widget_outline_hl_col
         } else if self.alpha_hovered() {
             style.on_top_contents_widget_outline_col
         } else {
@@ -843,7 +863,7 @@ impl<I, FontHash> Contents<I, FontHash> {
         set_vertex_params(&mut self.other_vertices, self.alpha_text_box_outline_vertex_range, offset, target_color);
         offset = hue_text_box_offset; 
         target_color = if self.hue_changed() {
-            style.on_top_contents_widget_outline_col_hl
+            style.on_top_contents_widget_outline_hl_col
         } else if self.hue_hovered() {
             style.on_top_contents_widget_outline_col
         } else {
@@ -1153,18 +1173,25 @@ impl<I, FontHash> Widget<I, FontHash> for ColorPicker<I, FontHash>
     }
 
     #[inline(always)]
-    fn calc_size(
+    fn calc_height(
         &mut self,
         style: &Style<FontHash>,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
-    ) -> Vec2 {
+    ) -> f32 {
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
         );
-        style.calc_text_size(vec2(title_text.text_width, title_text.row_height))
+        style.calc_text_height(title_text.row_height)
     }
 
-    fn is_active(&self, style: &Style<FontHash>, window_pos: Vec2, cursor_pos: Vec2) -> bool {
+    fn is_active(
+        &self,
+        _nox: &Nox<I>,
+        style: &Style<FontHash>,
+        window_pos: Vec2,
+        cursor_pos: Vec2
+    ) -> bool
+    {
         let error_margin = style.cursor_error_margin;
         let error_margin_2 = style.cursor_error_margin + style.cursor_error_margin;
         self.picking() || (self.contents.shown() && BoundingRect::from_position_size(
@@ -1184,6 +1211,7 @@ impl<I, FontHash> Widget<I, FontHash> for ColorPicker<I, FontHash>
         delta_cursor_pos: Vec2,
         _cursor_in_this_window: bool,
         other_widget_active: bool,
+        window_moving: bool,
     ) -> UpdateResult {
         let title_text = self.title_text.as_ref().unwrap();
         let text_size = style.calc_text_size(vec2(title_text.text_width, title_text.row_height));
@@ -1202,19 +1230,18 @@ impl<I, FontHash> Widget<I, FontHash> for ColorPicker<I, FontHash>
         let cursor_in_contents = self.contents
             .bounding_rect(error_margin)
             .is_point_inside(rel_cursor_pos);
-        if self.contents.widget_held() {
-            if nox.was_mouse_button_released(MouseButton::Left) {
+        if nox.was_mouse_button_released(MouseButton::Left) {
+            if self.contents.widget_held() {
                 self.contents.set_widget_held(false);
                 self.contents.set_shown(cursor_in_color_rect);
+            } else if self.contents.shown() {
+                self.contents.set_shown(cursor_in_contents || window_moving || self.contents.clicked());
+                self.contents.set_clicked(false);
             }
         }
-        if nox.was_mouse_button_pressed(MouseButton::Left) {
-            if self.contents.shown() {
-                self.contents.set_shown(cursor_in_contents);
-            }
-            if cursor_in_color_rect {
-                self.contents.set_widget_held(true);
-            }
+        let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
+        if cursor_in_color_rect && mouse_pressed {
+            self.contents.set_widget_held(true);
         }
         if other_widget_active {
             self.contents.set_shown(false);

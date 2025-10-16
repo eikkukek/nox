@@ -9,6 +9,7 @@ struct Example<'a> {
     aspect_ratio: f32,
     slider_value: f32,
     slider_value_int: u32,
+    input_text: String,
     color: ColorSRGBA,
     checkbox_checked: bool,
     show_other_window: bool,
@@ -23,6 +24,7 @@ impl<'a> Example<'a> {
             aspect_ratio: 1.0,
             slider_value: 0.0,
             slider_value_int: 0,
+            input_text: "Input here".into(),
             color: Default::default(),
             checkbox_checked: false,
             show_other_window: false,
@@ -77,6 +79,8 @@ impl<'a> Interface for Example<'a> {
                 if win.update_button(0, "Print \"hello\"") {
                     println!("hello");
                 }
+                win.update_input_text(0, "Input text", &mut self.input_text);
+                win.update_input_text(1, "Input float", &mut self.slider_value);
                 Ok(())
             }
         )?;
