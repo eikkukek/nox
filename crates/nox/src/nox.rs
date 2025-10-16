@@ -107,6 +107,13 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
+    pub fn set_cursor_hide(&self, hide: bool) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_cursor_visible(!hide);
+        }
+    }
+
+    #[inline(always)]
     pub fn delta_time(&self) -> time::Duration {
         self.delta_time
     }

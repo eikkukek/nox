@@ -31,10 +31,13 @@ pub(crate) struct InputText<I, FontHash> {
     text_cursor_pos: usize,
     input_rect: Rect,
     input_rect_vertex_range: VertexRange,
+    input_rect_outline_vertex_range: VertexRange,
     selection_rect_vertices: [Vertex; 4],
     cursor_rect: Rect,
     flags: u32,
     cursor_timer: f32,
+    double_click_timer: f32,
+    outline_thin_width: f32,
     _marker: PhantomData<(I, FontHash)>,
 }
 
@@ -47,6 +50,7 @@ impl<I, FontHash> InputText<I, FontHash>
     const ACTIVE: u32 = 0x8;
     const CURSOR_VISIBLE: u32 = 0x10;
     const SELECTION_LEFT: u32 = 0x20;
+    const MOUSE_VISIBLE: u32 = 0x40;
 
     const SELECTION_INDICES: [u32; 6] = [
         3, 1, 0,
@@ -67,11 +71,14 @@ impl<I, FontHash> InputText<I, FontHash>
             input_text: None,
             input_rect: Default::default(),
             input_rect_vertex_range: Default::default(),
+            input_rect_outline_vertex_range: Default::default(),
             selection_rect_vertices: Default::default(),
             cursor_rect: Default::default(),
             cursor_rect_vertex_range: Default::default(),
-            flags: 0,
+            flags: Self::MOUSE_VISIBLE,
             cursor_timer: 0.0,
+            double_click_timer: 100.0,
+            outline_thin_width: 0.0,
             _marker: PhantomData,
         }
     }
@@ -99,6 +106,11 @@ impl<I, FontHash> InputText<I, FontHash>
     #[inline(always)]
     fn cursor_visible(&self) -> bool {
         self.flags & Self::CURSOR_VISIBLE == Self::CURSOR_VISIBLE
+    }
+
+    #[inline(always)]
+    fn mouse_visible(&self) -> bool {
+        self.flags & Self::MOUSE_VISIBLE == Self::MOUSE_VISIBLE
     }
 
     #[inline(always)]
@@ -216,7 +228,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         _cursor_pos: Vec2
     ) -> bool
     {
-        self.held()
+        self.held() || !self.mouse_visible()
     }
 
     fn update(
@@ -227,7 +239,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         window_width: f32,
         window_pos: Vec2,
         cursor_pos: Vec2,
-        _delta_cursor_pos: Vec2,
+        delta_cursor_pos: Vec2,
         _cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
@@ -251,14 +263,14 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                 cursor_timer = 0.0;
             }
             self.cursor_timer = cursor_timer;
-            if let Some(selection) = self.selection && selection.0 != selection.1 {
+            if let Some(mut selection) = self.selection && selection.0 != selection.1 {
+                self.selection = None;
                 if self.selection_left() {
                     self.text_cursor_pos = selection.0;
                 } else {
                     self.text_cursor_pos = selection.1;
                 }
                 let input = nox.get_input_text();
-                self.selection = None;
                 if nox.was_key_pressed(KeyCode::Backspace) || !input.is_empty() {
                     let start_count = self.input.char_indices().count();
                     for i in (selection.0..selection.1).rev() {
@@ -267,7 +279,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                     }
                     let mut text_cursor_pos = selection.0;
                     for text in input {
-                        if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter {
+                        if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter && text.0 != KeyCode::Escape {
                             self.input.insert_str(
                                 self.input
                                     .char_indices()
@@ -281,23 +293,54 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                         }
                     }
                     self.text_cursor_pos = text_cursor_pos;
-                    if selection.1 == self.text_cursor_pos {
-                        self.text_cursor_pos = selection.0 - selection.1;
-                    }
                     let end_count = self.input.char_indices().count();
                     if start_count > end_count {
                         cursor_move = CursorMove::Backspace;
                     }
                     self.input_text = None;
                 } else if nox.was_key_pressed(KeyCode::ArrowLeft) {
-                    self.text_cursor_pos = selection.0;
+                    if nox.is_key_held(KeyCode::ShiftLeft) {
+                        if self.selection_left() {
+                            if selection.0 != 0 {
+                                selection.0 -= 1;
+                                self.text_cursor_pos = selection.0;
+                            }
+                            self.text_cursor_pos = selection.0;
+                        } else if selection.1 != selection.0 {
+                            selection.1 -= 1;
+                            self.text_cursor_pos = selection.1;
+                        }
+                        cursor_move = CursorMove::Left;
+                        self.selection = Some(selection);
+                    } else {
+                        self.text_cursor_pos = selection.0;
+                    }
+                    self.flags |= Self::CURSOR_VISIBLE;
+                    self.cursor_timer = 0.0;
                 } else if nox.was_key_pressed(KeyCode::ArrowRight) {
-                    self.text_cursor_pos = selection.1;
+                    if nox.is_key_held(KeyCode::ShiftLeft) {
+                        if self.selection_left() {
+                            if selection.0 != selection.1 {
+                                selection.0 += 1;
+                            }
+                            self.text_cursor_pos = selection.0;
+                        } else if selection.1 != self.input_offsets.len() {
+                            selection.1 += 1;
+                            self.text_cursor_pos = selection.1;
+                        }
+                        cursor_move = CursorMove::Right;
+                        self.selection = Some(selection);
+                    } else {
+                        self.text_cursor_pos = selection.1;
+                    }
+                    self.flags |= Self::CURSOR_VISIBLE;
+                    self.cursor_timer = 0.0;
                 } else {
                     self.selection = Some(selection);
                 }
             }
             else {
+                self.flags &= !Self::SELECTION_LEFT;
                 let mut text_cursor_pos = self.text_cursor_pos;
                 let start_pos = text_cursor_pos;
                 let start_count = self.input.char_indices().count();
@@ -309,13 +352,19 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                         self.input_text = None;
                         text_cursor_pos = remove;
                     } else if nox.was_key_pressed(KeyCode::ArrowLeft) {
+                        if nox.is_key_held(KeyCode::ShiftLeft) {
+                            self.selection = Some((text_cursor_pos - 1, text_cursor_pos));
+                            self.flags |= Self::SELECTION_LEFT;
+                        }
                         text_cursor_pos -= 1;
+                        self.cursor_timer = 0.0;
+                        self.flags |= Self::CURSOR_VISIBLE;
                     }
                 }
                 let input = nox.get_input_text();
                 if !input.is_empty() {
                     for text in input {
-                        if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter {
+                        if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter && text.0 != KeyCode::Escape {
                             self.input.insert_str(
                                 self.input
                                     .char_indices()
@@ -333,7 +382,11 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                 let end_count = self.input.char_indices().count();
                 if nox.was_key_pressed(KeyCode::ArrowRight) {
                     text_cursor_pos = (text_cursor_pos + 1).clamp(0, end_count);
-                    cursor_move = CursorMove::Right;
+                    if text_cursor_pos != end_count && nox.is_key_held(KeyCode::ShiftLeft) {
+                        self.selection  = Some((text_cursor_pos - 1, text_cursor_pos));
+                    }
+                    self.cursor_timer = 0.0;
+                    self.flags |= Self::CURSOR_VISIBLE;
                 }
                 if start_count > end_count {
                     cursor_move = CursorMove::Backspace;
@@ -400,12 +453,14 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                 if text_cursor_pos_x - self.input_text_offset_x < 0.0 {
                     self.input_text_offset_x = text_cursor_pos_x;
                 }
+                self.flags &= !Self::MOUSE_VISIBLE;
             },
             CursorMove::Right => {
                 if input_text_max_x - self.calc_cursor_offset(font_scale, self.text_cursor_pos).x < 0.0
                 {
                     self.input_text_offset_x = text_cursor_pos_x - input_text_max_x;
                 }
+                self.flags &= !Self::MOUSE_VISIBLE;
             },
             CursorMove::Backspace => {
                 let pos = self.calc_cursor_offset(font_scale, self.text_cursor_pos).x;
@@ -416,118 +471,145 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                 {
                     self.input_text_offset_x = (self.input_text_offset_x - delta).clamp(0.0, f32::INFINITY);
                 }
+                self.flags &= !Self::MOUSE_VISIBLE;
             }
         }
-        self.flags &= !Self::HOVERING;
-        let mut cursor_in_widget = false;
+        if delta_cursor_pos.x != 0.0 || delta_cursor_pos.y != 0.0 {
+            self.flags |= Self::MOUSE_VISIBLE;
+        }
+        let mouse_visible = self.mouse_visible();
         let override_cursor = style.override_cursor;
+        self.flags &= !Self::HOVERING;
+        let mut cursor_in_widget = !mouse_visible;
         let mouse_released = nox.was_mouse_button_released(MouseButton::Left);
         let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
         let rel_cursor_pos = cursor_pos - window_pos;
         let error_margin = style.cursor_error_margin;
         if !other_widget_active {
-            self.flags |= Self::HOVERING *
-                BoundingRect::from_position_size(
-                    input_offset - vec2(error_margin, 0.0),
-                    input_rect.max + vec2(error_margin + error_margin, 0.0)
-                ).is_point_inside(rel_cursor_pos) as u32;
-            let input_min = input_offset.x + item_pad_inner.x;
-            let input_min_max = (input_min, input_min + input_width);
-            let input_box_min_max = (input_offset.x, input_offset.x + input_rect.max.x - item_pad_inner.x);
-            let text_offset = -self.input_text_offset_x;
-            let enter_pressed = nox.was_key_pressed(KeyCode::Enter);
-            if self.hovering() && !enter_pressed {
-                cursor_in_widget = true;
-                if mouse_pressed {
-                    self.text_cursor_pos =
-                        self.calc_cursor_index(
-                            rel_cursor_pos.x,
-                            input_min_max,
-                            input_box_min_max,
-                            text_offset,
-                            input_min,
-                        );
-                    self.flags |= Self::HELD;
-                }
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::Text);
-                }
-            } else if enter_pressed || (!window_moving && mouse_released && !self.held()) {
-                self.flags &= !Self::ACTIVE;
+            if override_cursor {
+                nox.set_cursor_hide(!mouse_visible);
             }
-            if mouse_pressed {
-                self.selection = None;
-                self.flags &= !Self::SELECTION_LEFT;
-            }
-            if self.held() {
-                if mouse_released {
-                    self.flags &= !Self::HELD;
-                    if let Some(selection) = self.selection && selection.0 == selection.1 {
-                        self.selection = None;
-                    }
-                } else {
-                    self.flags |= Self::ACTIVE;
-                    self.flags |= Self::CURSOR_VISIBLE;
-                    let text_cursor_pos = self.calc_cursor_index(
-                        rel_cursor_pos.x,
-                        input_min_max,
-                        input_box_min_max,
-                        text_offset,
-                        input_min,
-                    );
-                    let selection_left = self.selection_left();
-                    if let Some(mut selection) = self.selection {
-                        if selection_left || text_cursor_pos < selection.0 {
-                            selection.0 = text_cursor_pos;
-                            self.flags |= Self::SELECTION_LEFT;
-                            let offset = self.calc_cursor_offset(font_scale, selection.0).x;
-                            if offset < 0.0 {
-                                self.input_text_offset_x -=
-                                    style.input_text_scroll_speed *
-                                    nox.delta_time_secs_f32();
-                            } else if offset > input_text_max_x {
-                                self.input_text_offset_x +=
-                                    style.input_text_scroll_speed *
-                                    nox.delta_time_secs_f32();
-                            }
-                            if selection.1 < selection.0 {
-                                let tmp = selection.0;
-                                selection.0 = selection.1;
-                                selection.1 = tmp;
-                                self.flags &= !Self::SELECTION_LEFT;
-                            }
-                        } else {
-                            selection.1 = text_cursor_pos;
-                            let offset = self.calc_cursor_offset(font_scale, selection.1).x;
-                            if offset > input_text_max_x {
-                                self.input_text_offset_x +=
-                                    style.input_text_scroll_speed *
-                                    nox.delta_time_secs_f32();
-                            } else if offset < 0.0 {
-                                self.input_text_offset_x -=
-                                    style.input_text_scroll_speed *
-                                    nox.delta_time_secs_f32();
-                            }
-                            if selection.1 < selection.0 {
-                                let tmp = selection.0;
-                                selection.0 = selection.1;
-                                selection.1 = tmp;
-                                self.flags |= Self::SELECTION_LEFT;
-                            }
-                        }
-                        self.selection = Some(selection);
-                        self.text_cursor_pos = if self.selection_left() {
-                            selection.0
-                        } else {
-                            selection.1
-                        };
-                    } else {
-                        self.selection = Some((text_cursor_pos, text_cursor_pos));
-                        self.text_cursor_pos = text_cursor_pos;
-                    }
+            if mouse_visible {
+                self.flags |= Self::HOVERING *
+                    BoundingRect::from_position_size(
+                        input_offset - vec2(error_margin, 0.0),
+                        input_rect.max + vec2(error_margin + error_margin, 0.0)
+                    ).is_point_inside(rel_cursor_pos) as u32;
+                let input_min = input_offset.x + item_pad_inner.x;
+                let input_min_max = (input_min, input_min + input_width);
+                let input_box_min_max = (input_offset.x, input_offset.x + input_rect.max.x - item_pad_inner.x);
+                let text_offset = -self.input_text_offset_x;
+                let deactivate = nox.was_key_pressed(KeyCode::Enter) | nox.was_key_pressed(KeyCode::Escape);
+                let mut select_all = false;
+                if self.hovering() {
                     cursor_in_widget = true;
+                    if mouse_pressed {
+                        if self.double_click_timer < style.double_click_window_secs {
+                            select_all = true;
+                        } else {
+                            self.text_cursor_pos =
+                                self.calc_cursor_index(
+                                    rel_cursor_pos.x,
+                                    input_min_max,
+                                    input_box_min_max,
+                                    text_offset,
+                                    input_min,
+                                );
+                            self.flags |= Self::HELD;
+                        }
+                        self.double_click_timer = 0.0;
+                    }
                     if override_cursor {
                         nox.set_cursor(CursorIcon::Text);
+                    }
+                }
+                select_all &= self.selection.is_none();
+                if select_all {
+                    self.flags |= Self::ACTIVE;
+                    self.selection = Some((0, self.input_offsets.len()));
+                    self.flags |= Self::CURSOR_VISIBLE;
+                    self.cursor_timer = 0.0;
+                }
+                if deactivate || (!self.hovering() && !self.held() && !window_moving && mouse_released) {
+                    self.flags &= !Self::ACTIVE;
+                    self.flags |= Self::MOUSE_VISIBLE;
+                }
+                if !select_all {
+                    if mouse_pressed {
+                        self.selection = None;
+                    }
+                    if self.held() {
+                        if mouse_released {
+                            self.flags &= !Self::HELD;
+                            if let Some(selection) = self.selection && selection.0 == selection.1 {
+                                self.selection = None;
+                            }
+                        } else {
+                            self.flags |= Self::ACTIVE;
+                            self.flags |= Self::CURSOR_VISIBLE;
+                            let text_cursor_pos = self.calc_cursor_index(
+                                rel_cursor_pos.x,
+                                input_min_max,
+                                input_box_min_max,
+                                text_offset,
+                                input_min,
+                            );
+                            let selection_left = self.selection_left();
+                            if let Some(mut selection) = self.selection {
+                                if selection_left || text_cursor_pos < selection.0 {
+                                    selection.0 = text_cursor_pos;
+                                    self.flags |= Self::SELECTION_LEFT;
+                                    let offset = self.calc_cursor_offset(font_scale, selection.0).x;
+                                    if offset < 0.0 {
+                                        self.input_text_offset_x -=
+                                            style.input_text_scroll_speed *
+                                            nox.delta_time_secs_f32();
+                                    } else if offset > input_text_max_x {
+                                        self.input_text_offset_x +=
+                                            style.input_text_scroll_speed *
+                                            nox.delta_time_secs_f32();
+                                    }
+                                    if selection.1 < selection.0 {
+                                        let tmp = selection.0;
+                                        selection.0 = selection.1;
+                                        selection.1 = tmp;
+                                        self.flags &= !Self::SELECTION_LEFT;
+                                    }
+                                } else {
+                                    selection.1 = text_cursor_pos;
+                                    let offset = self.calc_cursor_offset(font_scale, selection.1).x;
+                                    if offset > input_text_max_x {
+                                        self.input_text_offset_x +=
+                                            style.input_text_scroll_speed *
+                                            nox.delta_time_secs_f32();
+                                    } else if offset < 0.0 {
+                                        self.input_text_offset_x -=
+                                            style.input_text_scroll_speed *
+                                            nox.delta_time_secs_f32();
+                                    }
+                                    if selection.1 < selection.0 {
+                                        let tmp = selection.0;
+                                        selection.0 = selection.1;
+                                        selection.1 = tmp;
+                                        self.flags |= Self::SELECTION_LEFT;
+                                    }
+                                }
+                                selection.1 = selection.1.clamp(0, self.input_offsets.len());
+                                self.selection = Some(selection);
+                                self.text_cursor_pos = if self.selection_left() {
+                                    selection.0
+                                } else {
+                                    selection.1
+                                };
+                            } else {
+                                self.selection = Some((text_cursor_pos, text_cursor_pos));
+                                self.text_cursor_pos = text_cursor_pos;
+                            }
+                            cursor_in_widget = true;
+                            if override_cursor {
+                                nox.set_cursor(CursorIcon::Text);
+                            }
+                        }
                     }
                 }
             }
@@ -543,9 +625,11 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         let cursor_rect_max = vec2(style.input_text_cursor_width, text_height);
         let requires_triangulation =
             self.input_rect != input_rect ||
-            self.cursor_rect.max != cursor_rect_max;
+            self.cursor_rect.max != cursor_rect_max ||
+            self.outline_thin_width != style.outline_thin_width;
         self.input_rect = input_rect;
         self.cursor_rect.max = cursor_rect_max;
+        self.outline_thin_width = style.outline_thin_width;
         if let Some(selection) = self.selection {
             let left = input_text_offset.x +
                 self.calc_cursor_offset(font_scale, selection.0).x.clamp(0.0, input_text_max_x);
@@ -579,6 +663,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         } else {
             self.flags &= !Self::SELECTION_LEFT;
         }
+        self.double_click_timer += nox.delta_time_secs_f32();
         UpdateResult {
             min_widget_width: style.input_text_min_width,
             requires_triangulation,
@@ -592,6 +677,12 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     ) {
         self.input_rect.to_points(&mut |p| { points.push(p.into()); });
+        let mut outline_points = GlobalVec::new();
+        nox_geom::shapes::outline_points(
+            points, self.outline_thin_width, false,
+            &mut |p| { outline_points.push(p.into()); }
+        );
+        self.input_rect_outline_vertex_range = tri(&outline_points);
         self.input_rect_vertex_range = tri(points);
         points.clear();
         self.cursor_rect.to_points(&mut |p| { points.push(p.into()); });
@@ -610,6 +701,12 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         let mut offset = self.offset + vec2(title_width + style.item_pad_outer.x, 0.0);
         let mut target_color = style.input_text_bg_col;
         set_vertex_params(vertices, self.input_rect_vertex_range, offset, target_color);
+        target_color = style.input_text_bg_outline_col;
+        if self.active() {
+            set_vertex_params(vertices, self.input_rect_outline_vertex_range, offset, target_color);
+        } else {
+            hide_vertices(vertices, self.input_rect_outline_vertex_range);
+        }
         if self.cursor_visible() {
             offset += style.item_pad_inner + self.calc_cursor_offset(style.font_scale, self.text_cursor_pos);
             target_color = style.text_col;

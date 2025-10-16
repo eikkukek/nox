@@ -1,4 +1,10 @@
+use std::{
+    fs::{self, File}, io::Write, path::PathBuf,
+};
+
+use memmap2::Mmap;
 use nox::*;
+
 use nox_gui::{
     *
 };
@@ -11,6 +17,8 @@ struct Example<'a> {
     slider_value_int: u32,
     input_text: String,
     color: ColorSRGBA,
+    pipeline_cache: PipelineCacheId,
+    cache_dir: PathBuf,
     checkbox_checked: bool,
     show_other_window: bool,
 }
@@ -18,6 +26,11 @@ struct Example<'a> {
 impl<'a> Example<'a> {
 
     pub fn new(workspace: Workspace<'a, Self, &'static str>) -> Self {
+        let mut cache_dir = std
+            ::env::current_exe()
+            .unwrap_or_default();
+        cache_dir.pop();
+        cache_dir.push("my_cache.cache");
         Self {
             workspace,
             output_format: Default::default(),
@@ -26,6 +39,8 @@ impl<'a> Example<'a> {
             slider_value_int: 0,
             input_text: "Input here".into(),
             color: Default::default(),
+            pipeline_cache: Default::default(),
+            cache_dir,
             checkbox_checked: false,
             show_other_window: false,
         }
@@ -54,6 +69,17 @@ impl<'a> Interface for Example<'a> {
                     &[ColorFormat::SrgbRGBA8, ColorFormat::UnormRGBA8],
                     FormatFeature::ColorAttachment | FormatFeature::SampledImage,
                 ).unwrap();
+            self.pipeline_cache =
+                if fs::exists(&self.cache_dir)? {
+                    let file = File::open(&self.cache_dir)?;
+                    let map = unsafe {
+                        Mmap::map(&file)?
+                    };
+                    r.create_pipeline_cache(Some(&map))?
+                } else {
+                    File::create_new(&self.cache_dir)?;
+                    r.create_pipeline_cache(None)?
+                };
             Ok(())
         })?;
         self.workspace
@@ -148,6 +174,20 @@ impl<'a> Interface for Example<'a> {
         )?;
         Ok(())
     }
+
+    fn clean_up(
+        &mut self,
+        renderer: &mut RendererContext,
+    )
+    {
+        renderer.edit_resources(|r| {
+            let mut file = File::create(&self.cache_dir)?;
+            let data = r.retrieve_pipeline_cache_data(self.pipeline_cache)?;
+            file.write(&data)?;
+            println!("cache written");
+            Ok(())
+        }).ok();
+    }
 }
 
 fn main() {
@@ -158,6 +198,9 @@ fn main() {
             )
             .unwrap()
     };
-    let example = Example::new(Workspace::new([("regular", font::Face::parse(&font, 0).unwrap())], "regular", 0.01));
+    let example = 
+        Example::new(Workspace::new(
+            [("regular", font::Face::parse(&font, 0).unwrap())], "regular", 0.01)
+        );
     Nox::new(example, &mut Default::default()).run();
 }
