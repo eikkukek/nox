@@ -47,7 +47,7 @@ impl Interface for Example {
             app_name: array_string!("shapes"),
             app_version: Default::default(),
             window_size: [540, 540],
-            enable_vulkan_validation: true,
+            enable_vulkan_validation: false,
         }
     }
 
