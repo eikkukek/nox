@@ -57,9 +57,9 @@ impl Interface for App {
         let mut text = VertexTextRenderer::new([("regular", regular), ("italic", italic), ("bold", bold)], 0.07);
         self.rendered_text = text.render(
             &[
-                text_segment("To AV moi @ 2 gå ", "italic"),
-                text_segment("this is bold ", "bold"),
-                text_segment("this is regular", "regular"),
+                text_segment("To AV moi @ 2 gå ", &"italic"),
+                text_segment("this is bold ", &"bold"),
+                text_segment("this is regular", &"regular"),
             ],
             true,
             5.0
@@ -245,11 +245,11 @@ impl Interface for App {
         }
         let pc = PC {
             _text_width: self.rendered_text.text_width,
-            _font_height: self.rendered_text.font_height,
+            _font_height: self.rendered_text.row_height,
             _text_rows: self.rendered_text.text_rows,
             _aspect_ratio: self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32,
         };
-        commands.push_constants(unsafe { value_as_bytes(&pc).unwrap() })?;
+        commands.push_constants(|_| unsafe { value_as_bytes(&pc).unwrap() })?;
         for (i, text) in self.rendered_text.iter().enumerate() {
             commands.draw_indexed(
                 DrawInfo {
