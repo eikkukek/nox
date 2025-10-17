@@ -75,14 +75,17 @@ impl CustomPipeline {
     }
 }
 
-pub struct Workspace<'a, I, FontHash>
+pub struct Workspace<'a, I, FontHash, Style, HoverStyle>
     where
         I: Interface,
         FontHash: Clone + PartialEq + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
     text_renderer: VertexTextRenderer<'a, FontHash>,
-    style: Style<FontHash>,
-    windows: FxHashMap<u32, Window<I, FontHash>>,
+    style: Style,
+    hover_style: HoverStyle,
+    windows: FxHashMap<u32, Window<I, FontHash, Style, HoverStyle>>,
     active_windows: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
@@ -98,10 +101,12 @@ pub struct Workspace<'a, I, FontHash>
     output_format: ColorFormat,
 }
 
-impl<'a, I, FontHash> Workspace<'a, I, FontHash>
+impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, HoverStyle>
     where
         I: Interface,
-        FontHash: Clone + PartialEq + Eq + Hash
+        FontHash: Clone + PartialEq + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
 
     const BEGAN: u32 = 1;
@@ -117,15 +122,18 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
 
     pub fn new(
         fonts: impl IntoIterator<Item = (FontHash, Face<'a>)>,
-        font_regular: FontHash,
+        style: Style,
+        hover_style: HoverStyle,
         font_curve_tolerance: f32,
     ) -> Self
     {
         let mut text_renderer = VertexTextRenderer::new(fonts, font_curve_tolerance);
-        text_renderer.render(&[text_segment("0123456789", &font_regular)], false, 0.0);
+        text_renderer.render(&[text_segment("0123456789", &style.font_regular())], false, 0.0);
+        text_renderer.render(&[text_segment("0123456789", &hover_style.font_regular())], false, 0.0);
         Self {
             text_renderer,
-            style: Style::new(font_regular),
+            style,
+            hover_style,
             windows: Default::default(),
             active_windows: Default::default(),
             vertex_buffer: None,
@@ -417,7 +425,7 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
         mut f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(WindowContext<I, FontHash>) -> Result<(), Error>
+            F: FnMut(WindowContext<I, FontHash, Style, HoverStyle>) -> Result<(), Error>
     {
         if !self.began() {
             return Err(Error::UserError(
@@ -428,10 +436,9 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
             title,
             initial_position,
             initial_size,
-            self.style.rounding,
         ));
         window.set_last_frame(self.frame);
-        f(WindowContext::new(window, &self.style, &mut self.text_renderer))?;
+        f(WindowContext::new(window, &self.style, &self.hover_style, &mut self.text_renderer))?;
         if !self.active_windows.contains(&id) {
             self.active_windows.push(id);
         }
@@ -467,6 +474,7 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
             let cursor_in_window = window.update(
                 nox,
                 &self.style,
+                &self.hover_style,
                 &mut self.text_renderer,
                 cursor_pos,
                 delta_cursor_pos,
@@ -482,7 +490,7 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
             let id = self.active_windows.remove(idx).unwrap();
             self.active_windows.push(id);
         }
-        if !cursor_in_some_window && self.style.override_cursor {
+        if !cursor_in_some_window && self.style.override_cursor() {
             nox.set_cursor(CursorIcon::Default);
         }
         self.flags &= !Self::BEGAN;
@@ -514,6 +522,7 @@ impl<'a, I, FontHash> Workspace<'a, I, FontHash>
             self.windows.get_mut(id).unwrap().render_commands(
                 render_commands,
                 &self.style,
+                &self.hover_style,
                 base_pipeline,
                 text_pipeline,
                 vertex_buffer,

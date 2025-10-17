@@ -2,135 +2,351 @@ use core::fmt::Write;
 
 use crate::*;
 
+use nox_font::VertexTextRenderer;
 use nox_geom::*;
 
-pub struct Style<FontHash> {
-    pub window_bg_col: ColorSRGBA,
-    pub window_title_bar_col: ColorSRGBA,
-    pub window_outline_col: ColorSRGBA,
-    pub window_outline_hl_col: ColorSRGBA,
-    pub window_outline_thin_col: ColorSRGBA,
-    pub widget_bg_col: ColorSRGBA,
-    pub widget_outline_col: ColorSRGBA,
-    pub widget_outline_hl_col: ColorSRGBA,
-    pub separator_col: ColorSRGBA,
-    pub handle_col: ColorSRGBA,
-    pub text_col: ColorSRGBA,
-    pub hover_window_bg_col: ColorSRGBA,
-    pub on_top_contents_bg_col: ColorSRGBA,
-    pub on_top_contents_widget_bg_col: ColorSRGBA,
-    pub on_top_contents_widget_outline_col: ColorSRGBA,
-    pub on_top_contents_widget_outline_hl_col: ColorSRGBA,
-    pub input_text_bg_col: ColorSRGBA,
-    pub input_text_bg_outline_col: ColorSRGBA,
-    pub input_text_selection_col: ColorSRGBA,
-    pub font_regular: FontHash,
-    pub checkbox_symbol: char,
-    pub item_pad_outer: Vec2,
-    pub item_pad_inner: Vec2,
-    pub font_scale: f32,
-    pub rounding: f32,
-    pub cursor_error_margin: f32,
-    pub slider_min_width: f32,
-    pub input_text_min_width: f32,
-    pub input_text_max_width: f32,
-    pub outline_width: f32,
-    pub outline_thin_width: f32,
-    pub separator_height: f32,
-    pub default_handle_radius: f32,
-    pub default_value_drag_speed: f32,
-    pub color_picker_size: Vec2,
-    pub alpha_tile_width: f32,
-    pub input_text_cursor_width: f32,
-    pub input_text_cursor_switch_speed: f32,
-    pub input_text_scroll_speed: f32,
-    pub double_click_window_secs: f32,
-    pub override_cursor: bool,
-    pub f32_format: fn(f32, &mut CompactString) -> core::fmt::Result,
-    pub f64_format: fn(f64, &mut CompactString) -> core::fmt::Result,
+pub trait WindowStyle<FontHash> {
+
+    fn font_regular(&self) -> &FontHash;
+
+    #[inline(always)]
+    fn window_bg_col(&self) -> ColorSRGBA {
+        DEFAULT_WINDOW_BG_COL
+    }
+
+    #[inline(always)]
+    fn window_title_bar_col(&self) -> ColorSRGBA {
+        DEFAULT_WINDOW_TITLE_BAR_COL
+    }
+
+    #[inline(always)]
+    fn window_outline_col(&self) -> ColorSRGBA {
+        DEFAULT_WINDOW_OUTLINE_COL
+    }
+
+    #[inline(always)]
+    fn focused_window_outline_col(&self) -> ColorSRGBA {
+        DEFAULT_FOCUSED_WINDOW_OUTLINE_COL
+    }
+
+    #[inline(always)]
+    fn widget_bg_col(&self) -> ColorSRGBA {
+        DEFAULT_WIDGET_BG_COL
+    }
+
+    #[inline(always)]
+    fn focused_widget_outline_col(&self) -> ColorSRGBA {
+        DEFAULT_FOCUSED_WIDGET_OUTLINE_COL
+    }
+
+    #[inline(always)]
+    fn active_widget_outline_col(&self) -> ColorSRGBA {
+        DEFAULT_ACTIVE_WIDGET_OUTLINE_COL
+    }
+
+    #[inline(always)]
+    fn text_col(&self) -> ColorSRGBA {
+        DEFAULT_TEXT_COL
+    }
+
+    #[inline(always)]
+    fn separator_col(&self) -> ColorSRGBA {
+        DEFAULT_SEPARATOR_COL
+    }
+
+    #[inline(always)]
+    fn handle_col(&self) -> ColorSRGBA {
+        DEFAULT_HANDLE_COL
+    }
+
+    #[inline(always)]
+    fn input_text_bg_col(&self) -> ColorSRGBA {
+        DEFAULT_INPUT_TEXT_BG_COL
+    }
+
+    #[inline(always)]
+    fn input_text_active_outline_col(&self) -> ColorSRGBA {
+        DEFAULT_INPUT_TEXT_ACTIVE_OUTLINE_COL
+    }
+
+    #[inline(always)]
+    fn input_text_selection_bg_col(&self) -> ColorSRGBA {
+        DEFAULT_INPUT_TEXT_SELECTION_BG_COL
+    }
+
+    #[inline(always)]
+    fn checkbox_symbol(&self) -> char {
+        '󰄬'
+    }
+
+    #[inline(always)]
+    fn item_pad_outer(&self) -> Vec2 {
+        vec2(0.02, 0.02)
+    }
+
+    #[inline(always)]
+    fn item_pad_inner(&self) -> Vec2 {
+        vec2(0.01, 0.01)
+    }
+
+    #[inline(always)]
+    fn font_scale(&self) -> f32 {
+        0.02
+    }
+
+    #[inline(always)]
+    fn rounding(&self) -> f32 {
+        0.005
+    }
+
+    #[inline(always)]
+    fn cursor_error_margin(&self) -> f32 {
+        0.02
+    }
+
+    #[inline(always)]
+    fn outline_width(&self) -> f32 {
+        0.002
+    }
+
+    #[inline(always)]
+    fn focused_outline_width(&self) -> f32 {
+        0.0035
+    }
+
+    #[inline(always)]
+    fn separator_height(&self) -> f32 {
+        0.0015
+    }
+
+    #[inline(always)]
+    fn default_handle_radius(&self) -> f32 {
+        0.01
+    }
+
+    #[inline(always)]
+    fn color_picker_size(&self) -> Vec2 {
+        vec2(0.3, 0.3)
+    }
+
+    #[inline(always)]
+    fn alpha_tile_width(&self) -> f32 {
+        0.3 / 20.0
+    }
+
+    #[inline(always)]
+    fn default_value_drag_speed(&self) -> f32 {
+        5.0
+    }
+
+    #[inline(always)]
+    fn input_text_cursor_width(&self) -> f32 {
+        0.005
+    }
+
+    #[inline(always)]
+    fn input_text_cursor_switch_speed(&self) -> f32 {
+        0.5
+    }
+
+    #[inline(always)]
+    fn input_text_selection_scroll_speed(&self) -> f32 {
+        3.0
+    }
+
+    #[inline(always)]
+    fn double_click_secs(&self) -> f32 {
+        0.5
+    }
+
+    #[inline(always)]
+    fn override_cursor(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn f32_format(&self, value: f32, to: &mut CompactString) -> core::fmt::Result {
+        write!(to, "{:.2}", value)
+    }
+
+    #[inline(always)]
+    fn f64_format(&self, value: f64, to: &mut CompactString) -> core::fmt::Result {
+        write!(to, "{:.2}", value)
+    }
+
+    #[inline(always)]
+    fn min_slider_width(&self) -> f32 {
+        0.05
+    }
+
+    #[inline(always)]
+    fn min_input_text_width(&self) -> f32 {
+        0.05
+    }
+
+    #[inline(always)]
+    fn max_input_text_width(&self) -> f32 {
+        0.5
+    }
+
+    #[inline(always)]
+    fn calc_font_height(&self, text_renderer: &mut VertexTextRenderer<FontHash>) -> f32
+        where 
+            FontHash: Clone + Eq + core::hash::Hash,
+    {
+        text_renderer.font_height(self.font_regular()).unwrap_or_default() as f32 *
+            self.font_scale()
+    }
+
+    #[inline(always)]
+    fn calc_text_size(&self, text: &font::RenderedText) -> Vec2 {
+        vec2(text.text_width, text.row_height * text.text_rows as f32) * self.font_scale()
+    }
+
+    #[inline(always)]
+    fn calc_text_width(&self, text: &font::RenderedText) -> f32 {
+        text.text_width * self.font_scale()
+    }
+
+    #[inline(always)]
+    fn calc_text_height(&self, text: &font::RenderedText) -> f32 {
+        text.row_height * text.text_rows as f32 * self.font_scale()
+    }
+
+    #[inline(always)]
+    fn calc_text_box_size(&self, text: &font::RenderedText) -> Vec2 {
+        self.item_pad_inner() + self.item_pad_inner() + self.calc_text_size(text)
+    } 
+
+    #[inline(always)]
+    fn calc_text_box_width(&self, text: &font::RenderedText) -> f32 {
+        self.item_pad_inner().x + self.item_pad_inner().x +  self.calc_text_width(text)
+    }
+
+    #[inline(always)]
+    fn calc_text_box_height(&self, text: &font::RenderedText) -> f32 {
+        self.item_pad_inner().y + self.item_pad_inner().y + self.calc_text_height(text)
+    }
+
+    #[inline(always)]
+    fn calc_text_box_size_from_text_size(&self, text_size: Vec2) -> Vec2 {
+        self.item_pad_inner() + self.item_pad_inner() +  text_size
+    }
+
+    #[inline(always)]
+    fn calc_text_box_width_from_text_width(&self, text_width: f32) -> f32 {
+        self.item_pad_inner().x + self.item_pad_inner().x +  text_width
+    }
+
+    #[inline(always)]
+    fn calc_text_box_height_from_text_height(&self, text_height: f32) -> f32 {
+        self.item_pad_inner().y + self.item_pad_inner().y +  text_height
+    }
 }
 
-impl<FontHash> Style<FontHash> {
+pub struct DefaultStyle<FontHash>(pub FontHash);
 
+impl<FontHash> DefaultStyle<FontHash> {
+
+    #[inline(always)]
     pub fn new(font_regular: FontHash) -> Self {
-        Self {
-            window_bg_col: ColorSRGBA::new(31.0 / 255.0, 44.0 / 255.0, 46.0 / 255.0, 1.0),
-            window_title_bar_col: ColorSRGBA::new(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0),
-            window_outline_thin_col: ColorSRGBA::new(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0),
-            window_outline_col: ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0),
-            window_outline_hl_col: ColorSRGBA::new(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0),
-            widget_bg_col: ColorSRGBA::new(52.0 / 255.0, 74.0 / 255.0, 74.0 / 255.0, 1.0),
-            widget_outline_col: ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0),
-            widget_outline_hl_col: ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0),
-            separator_col: ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0),
-            handle_col: ColorSRGBA::new(83.0 / 255.0, 118.0 / 255.0, 121.0 / 255.0, 1.0),
-            text_col: ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 1.0),
-            hover_window_bg_col: ColorSRGBA::new(10.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 1.0),
-            on_top_contents_bg_col: ColorSRGBA::new(10.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 1.0),
-            on_top_contents_widget_bg_col: ColorSRGBA::new(20.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 1.0),
-            on_top_contents_widget_outline_col: ColorSRGBA::new(31.0 / 255.0, 46.0 / 255.0, 46.0 / 255.0, 1.0),
-            on_top_contents_widget_outline_hl_col: ColorSRGBA::new(16.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0),
-            input_text_bg_col: ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0),
-            input_text_bg_outline_col: ColorSRGBA::new(40.0 / 255.0, 215.0 / 255.0, 215.0 / 255.0, 0.7),
-            input_text_selection_col: ColorSRGBA::new(24.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0, 0.7),
-            font_regular,
-            checkbox_symbol: '󰄬',
-            item_pad_outer: vec2(0.02, 0.02),
-            item_pad_inner: vec2(0.01, 0.01),
-            font_scale: 0.02,
-            rounding: 0.005,
-            cursor_error_margin: 0.02,
-            slider_min_width: 0.05,
-            input_text_min_width: 0.05,
-            input_text_max_width: 0.5,
-            outline_width: 0.0035,
-            outline_thin_width: 0.002,
-            separator_height: 0.0015,
-            default_handle_radius: 0.01,
-            color_picker_size: vec2(0.3, 0.3),
-            alpha_tile_width: 0.3 / 20.0,
-            default_value_drag_speed: 5.0,
-            input_text_cursor_width: 0.005,
-            input_text_cursor_switch_speed: 0.5,
-            input_text_scroll_speed: 3.0,
-            double_click_window_secs: 0.5,
-            override_cursor: true,
-            f32_format: |value: f32, to: &mut CompactString| -> core::fmt::Result {
-                write!(to, "{:.2}", value)
-            },
-            f64_format: |value: f64, to: &mut CompactString| -> core::fmt::Result {
-                write!(to, "{:.2}", value)
-            },
-        }
+        Self(font_regular)
     }
-
-    #[inline(always)]
-    pub fn calc_text_size(&self, text_size: Vec2) -> Vec2 {
-        text_size * self.font_scale
-    }
-
-    #[inline(always)]
-    pub fn calc_text_width(&self, text_width: f32) -> f32 {
-        text_width * self.font_scale
-    }
-
-    #[inline(always)]
-    pub fn calc_text_height(&self, text_height: f32) -> f32 {
-        text_height * self.font_scale
-    }
-
-    #[inline(always)]
-    pub fn calc_text_box_size(&self, text_size: Vec2) -> Vec2 {
-        self.item_pad_inner * 2.0 + text_size * self.font_scale
-    } 
-
-    #[inline(always)]
-    pub fn calc_text_box_height(&self, text_height: f32) -> f32 {
-        self.item_pad_inner.y * 2.0 + text_height * self.font_scale
-    }
-
-    #[inline(always)]
-    pub fn calc_text_box_width(&self, text_width: f32) -> f32 {
-        self.item_pad_inner.x * 2.0 + text_width * self.font_scale
-    } 
 }
+
+impl<FontHash> WindowStyle<FontHash> for DefaultStyle<FontHash> {
+
+    #[inline(always)]
+    fn font_regular(&self) -> &FontHash {
+        &self.0
+    }
+}
+
+pub struct DefaultHoverStyle<FontHash>(pub FontHash);
+
+impl<FontHash> DefaultHoverStyle<FontHash> {
+
+    #[inline(always)]
+    pub fn new(font_regular: FontHash) -> Self {
+        Self(font_regular)
+    }
+}
+
+impl<FontHash> WindowStyle<FontHash> for DefaultHoverStyle<FontHash> {
+
+    #[inline(always)]
+    fn font_regular(&self) -> &FontHash {
+        &self.0
+    }
+
+    #[inline(always)]
+    fn window_bg_col(&self) -> ColorSRGBA {
+        DEFAULT_HOVER_CONTENTS_WINDOW_BG_COL
+    }
+
+    #[inline(always)]
+    fn widget_bg_col(&self) -> ColorSRGBA {
+        DEFAULT_HOVER_CONTENTS_WIDGET_BG_COL
+    }
+
+    #[inline(always)]
+    fn focused_widget_outline_col(&self) -> ColorSRGBA {
+        DEFAULT_HOVER_CONTENTS_FOCUSED_WIDGET_OUTLINE_COL
+    }
+
+    #[inline(always)]
+    fn active_widget_outline_col(&self) -> ColorSRGBA {
+        DEFAULT_HOVER_CONTENTS_ACTIVE_WIDGET_OUTLINE_COL
+    }
+}
+
+const DEFAULT_WINDOW_BG_COL: ColorSRGBA =
+    ColorSRGBA::new(31.0 / 255.0, 44.0 / 255.0, 46.0 / 255.0, 1.0);
+
+const DEFAULT_WINDOW_TITLE_BAR_COL: ColorSRGBA =
+    ColorSRGBA::new(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);
+
+const DEFAULT_WINDOW_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);
+
+const DEFAULT_FOCUSED_WINDOW_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0);
+
+const DEFAULT_WIDGET_BG_COL: ColorSRGBA =
+    ColorSRGBA::new(52.0 / 255.0, 74.0 / 255.0, 74.0 / 255.0, 1.0);
+
+const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0);
+
+const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0);
+
+const DEFAULT_TEXT_COL: ColorSRGBA =
+    ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 1.0);
+
+const DEFAULT_SEPARATOR_COL: ColorSRGBA =
+    ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0);
+
+const DEFAULT_HANDLE_COL: ColorSRGBA =
+    ColorSRGBA::new(83.0 / 255.0, 118.0 / 255.0, 121.0 / 255.0, 1.0);
+
+const DEFAULT_INPUT_TEXT_BG_COL: ColorSRGBA =
+    ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0);
+
+const DEFAULT_INPUT_TEXT_ACTIVE_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(40.0 / 255.0, 215.0 / 255.0, 215.0 / 255.0, 0.7);
+
+const DEFAULT_INPUT_TEXT_SELECTION_BG_COL: ColorSRGBA
+    = ColorSRGBA::new(24.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0, 0.7);
+
+const DEFAULT_HOVER_CONTENTS_WINDOW_BG_COL: ColorSRGBA =
+    ColorSRGBA::new(10.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 1.0);
+
+const DEFAULT_HOVER_CONTENTS_WIDGET_BG_COL: ColorSRGBA =
+    ColorSRGBA::new(20.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 1.0);
+
+const DEFAULT_HOVER_CONTENTS_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(31.0 / 255.0, 46.0 / 255.0, 46.0 / 255.0, 1.0);
+
+const DEFAULT_HOVER_CONTENTS_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(16.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);

@@ -17,7 +17,7 @@ pub struct UpdateResult {
     pub cursor_in_widget: bool,
 }
 
-pub trait OnTopContents<I, FontHash>
+pub trait HoverContents<I, FontHash, HoverStyle: WindowStyle<FontHash>>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
@@ -26,7 +26,7 @@ pub trait OnTopContents<I, FontHash>
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: &Style<FontHash>,
+        style: &HoverStyle,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -43,10 +43,12 @@ pub struct VertexRange {
     end: u32,
 }
 
-pub trait Widget<I, FontHash>
+pub trait Widget<I, FontHash, Style, HoverStyle>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>
 {
 
     fn hover_text(&self) -> Option<&str>;
@@ -58,14 +60,15 @@ pub trait Widget<I, FontHash>
 
     fn calc_height(
         &mut self,
-        style: &Style<FontHash>,
+        style: &Style,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
     ) -> f32;
 
     fn is_active(
         &self,
         nox: &Nox<I>,
-        style: &Style<FontHash>,
+        style: &Style,
+        hover_style: &HoverStyle,
         window_pos: Vec2,
         cursor_pos: Vec2,
     ) -> bool;
@@ -73,7 +76,8 @@ pub trait Widget<I, FontHash>
     fn update(
         &mut self,
         nox: &Nox<I>,
-        style: &Style<FontHash>,
+        style: &Style,
+        hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_width: f32,
         window_pos: Vec2,
@@ -92,14 +96,15 @@ pub trait Widget<I, FontHash>
 
     fn set_vertex_params(
         &mut self,
-        style: &Style<FontHash>,
+        style: &Style,
+        hover_style: &HoverStyle,
         vertices: &mut [Vertex],
     );
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: &Style<FontHash>,
+        style: &Style,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -107,7 +112,7 @@ pub trait Widget<I, FontHash>
         window_pos: Vec2,
         inv_aspect_ratio: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn OnTopContents<I, FontHash>>, Error>;
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>;
 
     fn hide(
         &self,

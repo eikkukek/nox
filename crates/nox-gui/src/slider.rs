@@ -26,10 +26,14 @@ pub trait Sliderable: Copy {
 
     fn calc_t(&self, min: Self, max: Self) -> f32;
 
-    fn display<FontHash>(&self, style: &Style<FontHash>, to: &mut CompactString) -> core::fmt::Result;
+    fn display<FontHash>(
+        &self,
+        style: &impl WindowStyle<FontHash>,
+        to: &mut CompactString
+    ) -> core::fmt::Result;
 }
 
-pub(crate) struct Slider<I, FontHash>
+pub(crate) struct Slider<I, FontHash, Style, HoverStyle>
 {
     title: CompactString,
     title_text: Option<RenderedText>,
@@ -43,11 +47,13 @@ pub(crate) struct Slider<I, FontHash>
     pub quantized_t: f32,
     pub hover_text: CompactString,
     falgs: u32,
-    outline_width: f32,
-    _marker: PhantomData<(I, FontHash)>,
+    focused_outline_width: f32,
+    _marker: PhantomData<(I, FontHash, Style, HoverStyle)>,
 }
 
-impl<I, FontHash> Slider<I, FontHash>
+impl<I, FontHash, Style, HoverStyle> Slider<I, FontHash, Style, HoverStyle>
+    where
+        Style: WindowStyle<FontHash>,
 {
 
     const HELD: u32 = 0x1;
@@ -71,7 +77,7 @@ impl<I, FontHash> Slider<I, FontHash>
             quantized_t: 1.0,
             hover_text: Default::default(),
             falgs: 0,
-            outline_width: 0.0,
+            focused_outline_width: 0.0,
             _marker: PhantomData,
         }
     }
@@ -79,12 +85,12 @@ impl<I, FontHash> Slider<I, FontHash>
     #[inline(always)]
     fn slider_off(
         &self,
-        style: &Style<FontHash>,
+        style: &Style,
         text_width: f32,
     ) -> Vec2
     {
         let mut pos = self.offset;
-        pos.x += text_width + style.item_pad_outer.x;
+        pos.x += text_width + style.item_pad_outer().x;
         //pos.y += text_box_height / 2.0 - text_box_height / 4.0;
         pos
     }
@@ -124,10 +130,13 @@ impl<I, FontHash> Slider<I, FontHash>
     }  
 }
 
-impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
+impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
+        Slider<I, FontHash, Style, HoverStyle>
     where 
         I: Interface,
         FontHash: Clone + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
 
     #[inline(always)]
@@ -146,24 +155,35 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
 
     fn calc_height(
         &mut self,
-        style: &Style<FontHash>,
+        style: &Style,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
     ) -> f32
     {
         let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
-        style.calc_text_height(title_text.row_height)
+            .render(
+                &[text_segment(self.title.as_str(), &style.font_regular())], false, 0.0
+        ).unwrap_or_default());
+        style.calc_text_height(title_text)
     }
 
-    fn is_active(&self, _nox: &Nox<I>, _style: &Style<FontHash>, _window_pos: Vec2, _cursor_pos: Vec2) -> bool {
+    fn is_active(
+        &self,
+        _nox: &Nox<I>,
+        _style: &Style,
+        _hover_style: &HoverStyle,
+        _window_pos: Vec2,
+        _cursor_pos: Vec2
+    ) -> bool
+    {
         self.held()
     }
 
     fn update(
         &mut self,
         nox: &Nox<I>,
-        style: &Style<FontHash>,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        style: &Style,
+        _hover_style: &HoverStyle,
+        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_width: f32,
         window_pos: Vec2,
         cursor_pos: Vec2,
@@ -176,15 +196,14 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
             I: Interface,
             FontHash: Clone + Eq + Hash
     {
-        let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(self.title.as_str(), &style.font_regular)], false, 0.0).unwrap_or_default());
-        let text_width = style.calc_text_width(title_text.text_width);
-        let text_box_height = style.calc_text_box_height(title_text.row_height);
+        let title_text = self.title_text.as_ref().unwrap();
+        let text_width = style.calc_text_width(title_text);
+        let text_box_height = style.calc_text_box_height(title_text);
         let mut width = text_width +
-            style.item_pad_outer.x + style.item_pad_outer.x + style.item_pad_outer.x;
-        let min_window_width = width + style.slider_min_width;
+            style.item_pad_outer().x + style.item_pad_outer().x + style.item_pad_outer().x;
+        let min_window_width = width + style.min_slider_width();
         if window_width < min_window_width {
-            width = style.slider_min_width;
+            width = style.min_slider_width();
         } else {
             width = window_width - width;
         }
@@ -194,18 +213,21 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
                 width,
                 text_box_height / 2.0,
             ),
-            style.rounding,
+            style.rounding(),
         );
         let handle_rect = rect(
             Default::default(),
             vec2(
-                style.item_pad_inner.x * 2.0,
+                style.item_pad_inner().x * 2.0,
                 slider_rect.max.y,
             ),
-            style.rounding,
+            style.rounding(),
         );
-        let requires_triangulation = slider_rect != self.slider_rect || handle_rect != self.handle_rect || self.outline_width != style.outline_width;
-        self.outline_width = style.outline_width;
+        let requires_triangulation =
+            slider_rect != self.slider_rect ||
+            handle_rect != self.handle_rect ||
+            self.focused_outline_width != style.focused_outline_width();
+        self.focused_outline_width = style.focused_outline_width();
         if requires_triangulation {
             self.slider_rect = slider_rect;
             self.handle_rect = handle_rect;
@@ -236,7 +258,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         UpdateResult {
             requires_triangulation,
             cursor_in_widget,
-            min_widget_width: min_window_width - style.item_pad_outer.x - style.item_pad_outer.x,
+            min_widget_width: min_window_width - style.item_pad_outer().x - style.item_pad_outer().x,
         }
     }
 
@@ -248,7 +270,9 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
     {
         self.slider_rect.to_points(&mut |p| { points.push(p.into()); });
         let mut outline_points = GlobalVec::<[f32; 2]>::new();
-        nox_geom::shapes::outline_points(points, self.outline_width, false, &mut |p| { outline_points.push(p.into()); });
+        nox_geom::shapes::outline_points(points,
+            self.focused_outline_width, false, &mut |p| { outline_points.push(p.into()); }
+        );
         self.outline_rect_vertex_range = tri(&outline_points);
         self.slider_rect_vertex_range = tri(&points);
         points.clear();
@@ -258,20 +282,21 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
 
     fn set_vertex_params(
         &mut self,
-        style: &Style<FontHash>,
+        style: &Style,
+        _hover_style: &HoverStyle,
         vertices: &mut [Vertex],
     )
     {
         let title_text = self.title_text.as_ref().unwrap();
-        let text_width = style.calc_text_width(title_text.text_width);
+        let text_width = style.calc_text_width(title_text);
         let slider_off = self.slider_off(style, text_width);
         let vertex_sample = vertices[self.outline_rect_vertex_range.start()];
         if self.cursor_in_slider() || self.held() {
             let offset = slider_off;
             let target_color = if self.held() {
-                style.widget_outline_hl_col
+                style.active_widget_outline_col()
             } else {
-                style.widget_outline_col
+                style.focused_widget_outline_col()
             };
             if vertex_sample.offset != offset || vertex_sample.color != target_color {
                 for vertex in &mut vertices[self.outline_rect_vertex_range.range()] {
@@ -286,8 +311,8 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
             }
         }
         let vertex_sample = vertices[self.slider_rect_vertex_range.start()];
-        if vertex_sample.offset != slider_off || vertex_sample.color != style.widget_bg_col {
-            let target_color = style.widget_bg_col;
+        if vertex_sample.offset != slider_off || vertex_sample.color != style.widget_bg_col() {
+            let target_color = style.widget_bg_col();
             for vertex in &mut vertices[self.slider_rect_vertex_range.range()] {
                 vertex.offset = slider_off;
                 vertex.color = target_color;
@@ -295,8 +320,8 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         }
         let vertex_sample = vertices[self.handle_rect_vertex_range.start()];
         let handle_off = self.handle_off(slider_off);
-        if vertex_sample.offset != handle_off || vertex_sample.color != style.handle_col {
-            let target_color = style.handle_col;
+        if vertex_sample.offset != handle_off || vertex_sample.color != style.handle_col() {
+            let target_color = style.handle_col();
             for vertex in &mut vertices[self.handle_rect_vertex_range.range()] {
                 vertex.offset = handle_off;
                 vertex.color = target_color;
@@ -307,7 +332,7 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: &Style<FontHash>,
+        style: &Style,
         _base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -315,18 +340,22 @@ impl<I, FontHash> Widget<I, FontHash> for Slider<I, FontHash>
         window_pos: Vec2,
         inv_aspect_ratio: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn OnTopContents<I, FontHash>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
         let title_text = unsafe {
             self.title_text.as_ref().unwrap_unchecked()
         };
         render_commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
-            window_pos + vec2(self.offset.x, self.offset.y + (self.slider_rect.max.y - style.calc_text_height(title_text.row_height)) / 2.0),
-            vec2(style.font_scale, style.font_scale),
+            window_pos + vec2(
+                self.offset.x,
+                self.offset.y +
+                    (self.slider_rect.max.y - style.calc_text_height(title_text)) / 2.0
+            ),
+            vec2(style.font_scale(), style.font_scale()),
             inv_aspect_ratio,
         );
-        let pc_fragment = text_push_constants_fragment(style.text_col);
+        let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands, title_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         Ok(None)
     }
@@ -376,11 +405,11 @@ impl Sliderable for f32 {
     #[inline(always)]
     fn display<FontHash>(
         &self,
-        style: &Style<FontHash>,
+        style: &impl WindowStyle<FontHash>,
         to: &mut CompactString,
     ) -> core::fmt::Result
     {
-        (style.f32_format)(*self, to)
+        style.f32_format(*self, to)
     }
 }
 
@@ -405,11 +434,11 @@ impl Sliderable for f64 {
     #[inline(always)]
     fn display<FontHash>(
         &self,
-        style: &Style<FontHash>,
+        style: &impl WindowStyle<FontHash>,
         to: &mut CompactString,
     ) -> core::fmt::Result
     {
-        (style.f64_format)(*self, to)
+        style.f64_format(*self, to)
     }
 }
 
@@ -444,7 +473,7 @@ macro_rules! impl_sliderable_int {
                 #[inline(always)]
                 fn display<FontHash>(
                     &self,
-                    _style: &Style<FontHash>,
+                    _style: &impl WindowStyle<FontHash>,
                     to: &mut CompactString,
                 ) -> core::fmt::Result
                 {

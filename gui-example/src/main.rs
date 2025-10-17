@@ -5,12 +5,16 @@ use std::{
 use memmap2::Mmap;
 use nox::*;
 
-use nox_gui::{
-    *
-};
+use nox_gui::*;
 
 struct Example<'a> {
-    workspace: Workspace<'a, Self, &'static str>,
+    workspace: Workspace<
+        'a,
+        Self,
+        &'static str,
+        DefaultStyle<&'static str>,
+        DefaultHoverStyle<&'static str>,
+    >,
     output_format: ColorFormat,
     aspect_ratio: f32,
     slider_value: f32,
@@ -25,7 +29,16 @@ struct Example<'a> {
 
 impl<'a> Example<'a> {
 
-    pub fn new(workspace: Workspace<'a, Self, &'static str>) -> Self {
+    pub fn new(
+        workspace: Workspace<
+            'a,
+            Self,
+            &'static str,
+            DefaultStyle<&'static str>,
+            DefaultHoverStyle<&'static str>,
+        >,
+    ) -> Self
+    {
         let mut cache_dir = std
             ::env::current_exe()
             .unwrap_or_default();
@@ -200,7 +213,10 @@ fn main() {
     };
     let example = 
         Example::new(Workspace::new(
-            [("regular", font::Face::parse(&font, 0).unwrap())], "regular", 0.01)
-        );
+            [("regular", font::Face::parse(&font, 0).unwrap())], 
+            DefaultStyle::new("regular"),
+            DefaultHoverStyle::new("regular"),
+            0.01,
+        ));
     Nox::new(example, &mut Default::default()).run();
 }

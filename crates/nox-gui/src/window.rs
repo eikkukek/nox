@@ -2,6 +2,7 @@ use core::{
     hash::Hash,
     str::FromStr,
 };
+use std::marker::PhantomData;
 
 use nox::{
     mem::vec_types::{GlobalVec, Vector},
@@ -53,7 +54,7 @@ impl HoverWindow {
 
     fn update<FontHash>(
         &mut self,
-        style: &Style<FontHash>,
+        style: &impl WindowStyle<FontHash>,
         text_renderer: &mut VertexTextRenderer<FontHash>,
         cursor_pos: Vec2,
         text: &str,
@@ -63,13 +64,13 @@ impl HoverWindow {
     {
         if text != self.text {
             self.rendered_text = text_renderer.render(
-                &[text_segment(text, &style.font_regular)], false, 0.0
+                &[text_segment(text, style.font_regular())], false, 0.0
             ).unwrap_or_default();
         }
         let rect = rect(
             Default::default(),
-            style.calc_text_box_size(vec2(self.rendered_text.text_width, self.rendered_text.row_height)),
-            style.rounding,
+            style.calc_text_box_size(&self.rendered_text),
+            style.rounding(),
         );
         if rect != self.rect {
             self.rect = rect;
@@ -94,11 +95,11 @@ impl HoverWindow {
 
     fn set_vertex_params<FontHash>(
         &mut self,
-        style: &Style<FontHash>,
+        style: &impl WindowStyle<FontHash>,
     ) {
         let vertex_sample = self.vertices[0];
-        if vertex_sample.color != style.hover_window_bg_col {
-            let target_color = style.hover_window_bg_col;
+        if vertex_sample.color != style.window_bg_col() {
+            let target_color = style.window_bg_col();
             for vertex in &mut self.vertices {
                 vertex.color = target_color;
             }
@@ -108,7 +109,7 @@ impl HoverWindow {
     fn render_commands<FontHash>(
         &self,
         render_commands: &mut RenderCommands,
-        style: &Style<FontHash>,
+        style: & impl WindowStyle<FontHash>,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -149,17 +150,17 @@ impl HoverWindow {
         )?;
         render_commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
-            self.position + style.item_pad_inner,
-            vec2(style.font_scale, style.font_scale),
+            self.position + style.item_pad_inner(),
+            vec2(style.font_scale(), style.font_scale()),
             inv_aspect_ratio
         );
-        let pc_fragment = text_push_constants_fragment(style.text_col);
+        let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands, &self.rendered_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         Ok(())
     }
 }
 
-pub(crate) struct Window<I, FontHash>
+pub(crate) struct Window<I, FontHash, Style, HoverStyle>
 {
     main_rect: Rect,
     title_bar_rect: Rect,
@@ -175,26 +176,29 @@ pub(crate) struct Window<I, FontHash>
     title_text: Option<RenderedText>,
     vertices: Option<GlobalVec<Vertex>>,
     indices: GlobalVec<u32>,
-    buttons: FxHashMap<u32, (u64, Button<I, FontHash>)>,
-    sliders: FxHashMap<u32, (u64, Slider<I, FontHash>)>,
-    checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash>)>,
-    color_pickers: FxHashMap<u32, (u64, ColorPicker<I, FontHash>)>,
-    input_texts: FxHashMap<u32, (u64, InputText<I, FontHash>)>,
+    buttons: FxHashMap<u32, (u64, Button<I, FontHash, Style, HoverStyle>)>,
+    sliders: FxHashMap<u32, (u64, Slider<I, FontHash, Style, HoverStyle>)>,
+    checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash, Style, HoverStyle>)>,
+    color_pickers: FxHashMap<u32, (u64, ColorPicker<I, FontHash, Style, HoverStyle>)>,
+    input_texts: FxHashMap<u32, (u64, InputText<I, FontHash, Style, HoverStyle>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
     prev_active_widgets: Option<GlobalVec<ActiveWidget>>,
     hover_window: Option<HoverWindow>,
     last_triangulation: u64,
     last_frame: u64,
     min_height: f32,
+    focused_outline_width: f32,
     outline_width: f32,
-    outline_thin_width: f32,
     flags: u32,
+    _marker: PhantomData<(Style, HoverStyle)>,
 }
 
-impl<I, FontHash> Window<I, FontHash>
+impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
 
     const RENDERABLE: u32 = 0x1;
@@ -213,12 +217,11 @@ impl<I, FontHash> Window<I, FontHash>
         title: &str,
         position: [f32; 2],
         size: [f32; 2],
-        rounding: f32,
     ) -> Self
     {
         Self {
             main_rect: rect(Default::default(), size, 0.0),
-            title_bar_rect: rect::<Vec2>(Default::default(), Default::default(), rounding),
+            title_bar_rect: Default::default(),
             separator_rect: Default::default(),
             main_rect_vertex_range: Default::default(),
             title_bar_vertex_range: Default::default(),
@@ -242,9 +245,10 @@ impl<I, FontHash> Window<I, FontHash>
             last_triangulation: 0,
             last_frame: 0,
             min_height: 0.0,
+            focused_outline_width: 0.0,
             outline_width: 0.0,
-            outline_thin_width: 0.0,
             flags: Self::REQUIRES_TRIANGULATION,
+            _marker: PhantomData,
         }
     }
 
@@ -332,34 +336,58 @@ impl<I, FontHash> Window<I, FontHash>
     }
 
     #[inline(always)]
-    fn get_widget(&self, widget: ActiveWidget) -> (u64, &dyn Widget<I, FontHash>) {
+    fn get_widget(&self, widget: ActiveWidget) -> (u64, &dyn Widget<I, FontHash, Style, HoverStyle>) {
         match widget {
             ActiveWidget::Slider(id) =>
-                self.sliders.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
+                self.sliders.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
             ActiveWidget::Button(id) =>
-                self.buttons.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
+                self.buttons.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
             ActiveWidget::Checkbox(id) =>
-                self.checkboxs.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
+                self.checkboxs.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
             ActiveWidget::ColorPicker(id) =>
-                self.color_pickers.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
+                self.color_pickers.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
             ActiveWidget::InputText(id) =>
-                self.input_texts.get(&id).map(|(l, w)| (*l, w as &dyn Widget<I, FontHash>)).unwrap(),
+                self.input_texts.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
         }
     }
 
     #[inline(always)]
-    fn get_widget_mut(&mut self, widget: ActiveWidget) -> (&mut u64, &mut dyn Widget<I, FontHash>) {
+    fn get_widget_mut(
+        &mut self,
+        widget: ActiveWidget
+    ) -> (&mut u64, &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+    {
         match widget {
             ActiveWidget::Slider(id) =>
-                self.sliders.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
+                self.sliders.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
             ActiveWidget::Button(id) =>
-                self.buttons.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
+                self.buttons.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
             ActiveWidget::Checkbox(id) =>
-                self.checkboxs.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
+                self.checkboxs.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
             ActiveWidget::ColorPicker(id) =>
-                self.color_pickers.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
+                self.color_pickers.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
             ActiveWidget::InputText(id) =>
-                self.input_texts.get_mut(&id).map(|(l, w)| (l, w as &mut dyn Widget<I, FontHash>)).unwrap(),
+                self.input_texts.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
         }
     }
 
@@ -385,7 +413,8 @@ impl<I, FontHash> Window<I, FontHash>
     pub fn update(
         &mut self,
         nox: &Nox<I>,
-        style: &Style<FontHash>,
+        style: &Style,
+        hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
@@ -397,8 +426,8 @@ impl<I, FontHash> Window<I, FontHash>
     {
         let mut cursor_in_this_window =
             !cursor_in_other_window &&
-            self.bounding_rect(style.cursor_error_margin).is_point_inside(cursor_pos);
-        if cursor_in_this_window && style.override_cursor && !self.any_resize() {
+            self.bounding_rect(style.cursor_error_margin()).is_point_inside(cursor_pos);
+        if cursor_in_this_window && style.override_cursor() && !self.any_resize() {
             nox.set_cursor(CursorIcon::Default);
         }
         let mut min_width: f32 = 0.0;
@@ -423,7 +452,7 @@ impl<I, FontHash> Window<I, FontHash>
         let mut active_widget = None;
         for (i, &widget) in active_widgets.iter().enumerate() {
             let (_, widget) = self.get_widget_mut(widget);
-            if widget.is_active(nox, style, window_pos, cursor_pos) {
+            if widget.is_active(nox, style, hover_style, window_pos, cursor_pos) {
                 active_widget = Some(i);
                 break
             }
@@ -438,6 +467,7 @@ impl<I, FontHash> Window<I, FontHash>
             } = widget.update(
                 nox,
                 style,
+                hover_style,
                 text_renderer,
                 window_width,
                 window_pos,
@@ -451,9 +481,10 @@ impl<I, FontHash> Window<I, FontHash>
                 },
                 window_moving
             );
-            min_width = min_width.max(min_widget_width + style.item_pad_outer.x + style.item_pad_outer.x);
+            min_width = min_width.max(min_widget_width +
+                style.item_pad_outer().x + style.item_pad_outer().x);
             if cursor_in_widget && let Some(hover_text) = widget.hover_text() {
-                hover_window.update(style, text_renderer, cursor_pos, hover_text);
+                hover_window.update(hover_style, text_renderer, cursor_pos, hover_text);
                 self.flags |= Self::HOVER_WINDOW_ACTIVE;
             }
             if requires_triangulation {
@@ -466,12 +497,12 @@ impl<I, FontHash> Window<I, FontHash>
         self.active_widgets = Some(active_widgets);
         self.hover_window = Some(hover_window);
         let title_text = self.title_text.as_ref().unwrap();
-        min_width = min_width.max(style.calc_text_box_width(title_text.text_width) + style.item_pad_outer.x);
+        min_width = min_width.max(style.calc_text_box_width(title_text) + style.item_pad_outer().x);
         if self.main_rect.max.x < min_width {
             self.main_rect.max.x = min_width;
         }
         let mut main_rect_max = self.main_rect.max;
-        let override_cursor = style.override_cursor;
+        let override_cursor = style.override_cursor();
         if self.held() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.flags &= !Self::HELD;
@@ -579,7 +610,7 @@ impl<I, FontHash> Window<I, FontHash>
             flags &= !Self::RESIZE_BLOCKED_COL;
             flags &= !Self::RESIZE_BLOCKED_ROW;
             let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
-            let error_margin = style.cursor_error_margin;
+            let error_margin = style.cursor_error_margin();
             if cursor_pos.x >= self.position.x - error_margin &&
                 cursor_pos.x <= self.position.x + error_margin
             {
@@ -651,22 +682,24 @@ impl<I, FontHash> Window<I, FontHash>
         }
         let mut title_bar_rect = self.title_bar_rect;
         title_bar_rect.max.x = self.main_rect.max.x;
-        title_bar_rect.max.y = style.calc_text_box_height(title_text.row_height);
+        title_bar_rect.max.y = style.calc_text_box_height(&title_text);
         let mut separator_rect = self.separator_rect;
         separator_rect.max.x = self.main_rect.max.x;
-        separator_rect.max.y = style.separator_height;
+        separator_rect.max.y = style.separator_height();
         let requires_triangulation =
-            (style.rounding != self.main_rect.rounding ||
-            self.outline_width != style.outline_width ||
-            self.outline_thin_width != style.outline_thin_width ||
+            (style.rounding() != self.main_rect.rounding ||
+            style.rounding() != self.title_bar_rect.rounding ||
+            self.focused_outline_width != style.focused_outline_width() ||
+            self.outline_width != style.outline_width() ||
             main_rect_max != self.main_rect.max ||
             self.title_bar_rect != title_bar_rect ||
             self.separator_rect != separator_rect
         ) as u32;
         self.flags |= Self::REQUIRES_TRIANGULATION * requires_triangulation;
-        self.main_rect.rounding = style.rounding;
-        self.outline_width = style.outline_width;
-        self.outline_thin_width = style.outline_thin_width;
+        self.main_rect.rounding = style.rounding();
+        self.title_bar_rect.rounding = style.rounding();
+        self.focused_outline_width = style.focused_outline_width();
+        self.outline_width = style.outline_width();
         self.main_rect.max = main_rect_max;
         self.title_bar_rect = title_bar_rect;
         self.separator_rect = separator_rect;
@@ -685,13 +718,17 @@ impl<I, FontHash> Window<I, FontHash>
             let mut indices_usize = GlobalVec::new();
             self.main_rect.to_points(&mut |p| { points.push(p.into()); });
             let mut outline_points = GlobalVec::new();
-            nox_geom::shapes::outline_points(&points, self.outline_width, false, &mut |p| { outline_points.push(p.into()); });
+            nox_geom::shapes::outline_points(&points,
+                self.focused_outline_width, false, &mut |p| { outline_points.push(p.into()); }
+            );
             if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
             self.outline_vertex_range = VertexRange::new(0..vertices.len());
             outline_points.clear();
-            nox_geom::shapes::outline_points(&points, self.outline_thin_width, false, &mut |p| { outline_points.push(p.into()); });
+            nox_geom::shapes::outline_points(&points,
+                self.outline_width, false, &mut |p| { outline_points.push(p.into()); }
+            );
             let mut vertex_begin = vertices.len();
             if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
@@ -753,7 +790,8 @@ impl<I, FontHash> Window<I, FontHash>
     pub fn render_commands(
         &mut self,
         render_commands: &mut RenderCommands,
-        style: &Style<FontHash>,
+        style: &Style,
+        hover_style: &HoverStyle,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -785,27 +823,27 @@ impl<I, FontHash> Window<I, FontHash>
         };
         for &widget in &active_widgets {
             let (_, widget) = self.get_widget_mut(widget);
-            widget.set_vertex_params(style, &mut vertices);
+            widget.set_vertex_params(style, hover_style, &mut vertices);
         }
         self.active_widgets = Some(active_widgets);
         let vertex_sample = vertices[self.main_rect_vertex_range.start()];
-        if vertex_sample.color != style.window_bg_col {
-            let target_color = style.window_bg_col;
+        if vertex_sample.color != style.window_bg_col() {
+            let target_color = style.window_bg_col();
             for vertex in &mut vertices[self.main_rect_vertex_range.range()] {
                 vertex.color = target_color;
             }
         }
         let vertex_sample = vertices[self.title_bar_vertex_range.start()];
-        if vertex_sample.color != style.window_title_bar_col {
-            let target_color = style.window_title_bar_col;
+        if vertex_sample.color != style.window_title_bar_col() {
+            let target_color = style.window_title_bar_col();
             for vertex in &mut vertices[self.title_bar_vertex_range.range()] {
                 vertex.color = target_color;
             }
         }
         let vertex_sample = vertices[self.separator_vertex_range.start()];
         let offset = vec2(0.0, self.title_bar_rect.max.y - self.separator_rect.max.y * 0.5);
-        if vertex_sample.offset != offset || vertex_sample.color != style.separator_col {
-            let target_color = style.separator_col;
+        if vertex_sample.offset != offset || vertex_sample.color != style.separator_col() {
+            let target_color = style.separator_col();
             for vertex in &mut vertices[self.separator_vertex_range.range()] {
                 vertex.offset = offset;
                 vertex.color = target_color;
@@ -816,9 +854,9 @@ impl<I, FontHash> Window<I, FontHash>
             let vertex_sample = vertices[self.outline_vertex_range.start()];
             let offset = vec2(0.0, 0.0);
             let target_color = if any_resize || self.held() {
-                style.window_outline_hl_col
+                style.window_outline_col()
             } else {
-                style.window_outline_col
+                style.focused_window_outline_col()
             };
             if vertex_sample.offset != offset || vertex_sample.color != target_color {
                 for vertex in &mut vertices[self.outline_vertex_range.range()] {
@@ -842,7 +880,7 @@ impl<I, FontHash> Window<I, FontHash>
             }
             let vertex_sample = vertices[self.outline_thin_vertex_range.start()];
             let offset = vec2(0.0, 0.0);
-            let target_color = style.window_outline_thin_col;
+            let target_color = style.window_outline_col();
             if vertex_sample.offset != offset || vertex_sample.color != target_color {
                 for vertex in &mut vertices[self.outline_thin_vertex_range.range()] {
                     vertex.offset = offset;
@@ -882,11 +920,11 @@ impl<I, FontHash> Window<I, FontHash>
         )?;
         render_commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
-            self.position + vec2(style.item_pad_outer.x, style.item_pad_inner.y),
-            vec2(style.font_scale, style.font_scale),
+            self.position + vec2(style.item_pad_outer().x, style.item_pad_inner().y),
+            vec2(style.font_scale(), style.font_scale()),
             inv_aspect_ratio,
         );
-        let pc_fragment = text_push_constants_fragment(style.text_col);
+        let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands, self.title_text.as_ref().unwrap(),
             pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         let mut on_top_contents = None;
@@ -910,7 +948,7 @@ impl<I, FontHash> Window<I, FontHash>
         if let Some(contents) = on_top_contents {
             contents.render_commands(
                 render_commands,
-                style,
+                hover_style,
                 base_pipeline_id,
                 text_pipeline_id,
                 vertex_buffer,
@@ -925,10 +963,10 @@ impl<I, FontHash> Window<I, FontHash>
                     .as_mut()
                     .unwrap_unchecked()
             };
-            hover_window.set_vertex_params(style);
+            hover_window.set_vertex_params(hover_style);
             hover_window.render_commands(
                 render_commands,
-                style,
+                hover_style,
                 base_pipeline_id,
                 text_pipeline_id,
                 vertex_buffer,
@@ -946,37 +984,44 @@ impl<I, FontHash> Window<I, FontHash>
     }
 }
 
-pub struct WindowContext<'a, 'b, I, FontHash>
+pub struct WindowContext<'a, 'b, I, FontHash, Style, HoverStyle>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash, 
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
-    style: &'a Style<FontHash>,
-    window: &'a mut Window<I, FontHash>,
+    style: &'a Style,
+    hover_style: &'a HoverStyle,
+    window: &'a mut Window<I, FontHash, Style, HoverStyle>,
     text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
     widget_y: f32,
 }
 
-impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
+impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, Style, HoverStyle>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
 
     pub(crate) fn new(
-        window: &'a mut Window<I, FontHash>,
-        style: &'a Style<FontHash>,
+        window: &'a mut Window<I, FontHash, Style, HoverStyle>,
+        style: &'a Style,
+        hover_style: &'a HoverStyle,
         text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
     ) -> Self {
         let title_text = window.title_text.get_or_insert(text_renderer.render(
-            &[text_segment(window.title.as_str(), &style.font_regular)],
+            &[text_segment(window.title.as_str(), &style.font_regular())],
             false,
             0.0,
         ).unwrap_or_default());
         Self {
-            widget_y: style.calc_text_box_height(title_text.row_height) + style.item_pad_inner.y,
+            widget_y: style.calc_text_box_height(title_text) + style.item_pad_inner().y,
             window,
             style,
+            hover_style,
             text_renderer,
         }
     }
@@ -997,11 +1042,11 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             .entry(id)
             .or_insert((0, Button::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
         }
-        button.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
+        button.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
         self.widget_y += button.calc_height(&self.style, self.text_renderer) +
-            self.style.item_pad_outer.y;
+            self.style.item_pad_outer().y;
         button.pressed()
     }
 
@@ -1024,7 +1069,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             .entry(id)
             .or_insert((0, Slider::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
         }
         if slider.held() {
             slider.quantized_t = value.slide_and_quantize_t(min, max, slider.t);
@@ -1038,9 +1083,9 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             .map_err(|e| {
                 Error::UserError(format!("nox_gui: failed to format slider value: {}", e))
             })?;
-        slider.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
+        slider.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
         self.widget_y += slider.calc_height(&self.style, self.text_renderer) +
-            self.style.item_pad_outer.y;
+            self.style.item_pad_outer().y;
         Ok(())
     }
 
@@ -1061,15 +1106,15 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             .entry(id)
             .or_insert((0, Checkbox::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
         }
         if checkbox.pressed() {
             *value = !*value;
         }
         checkbox.set_checked(*value);
-        checkbox.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
+        checkbox.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
         self.widget_y += checkbox.calc_height(&self.style, self.text_renderer) +
-            self.style.item_pad_outer.y;
+            self.style.item_pad_outer().y;
         *value
     }
 
@@ -1090,17 +1135,17 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             .entry(id)
             .or_insert((0, ColorPicker::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
         }
         if color_picker.picking() {
-            *value = C::from_hsva(color_picker.calc_color(self.style));
+            *value = C::from_hsva(color_picker.calc_color(self.hover_style));
         }
         else {
             color_picker.set_color(*value);
         }
-        color_picker.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
-        self.widget_y += color_picker.calc_height(&self.style, self.text_renderer) +
-            self.style.item_pad_outer.y;
+        color_picker.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
+        self.widget_y += color_picker.calc_height(self.style, self.text_renderer) +
+            self.style.item_pad_outer().y;
     }
 
     pub fn update_input_text<T: core::fmt::Display + FromStr>(
@@ -1120,7 +1165,7 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
             .entry(id)
             .or_insert((0, InputText::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
         }
         if input_text.active() {
             if let Some(v) = input_text.get_input() {
@@ -1129,18 +1174,21 @@ impl<'a, 'b, I, FontHash> WindowContext<'a, 'b, I, FontHash>
         } else {
             input_text.set_input(value);
         }
-        input_text.set_offset(vec2(self.style.item_pad_outer.x, self.widget_y));
+        input_text.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
         self.widget_y += input_text.calc_height(self.style, self.text_renderer) +
-            self.style.item_pad_outer.y;
+            self.style.item_pad_outer().y;
     }
 }
 
-impl<'a, 'b, I, FontHash> Drop for WindowContext<'a, 'b, I, FontHash>
+impl<'a, 'b, I, FontHash, Style, HoverStyle> Drop for
+        WindowContext<'a, 'b, I, FontHash, Style, HoverStyle>
     where 
         I: Interface,
         FontHash: Clone + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
     fn drop(&mut self) {
-        self.window.min_height = self.widget_y + self.style.item_pad_outer.y
+        self.window.min_height = self.widget_y + self.style.item_pad_outer().y
     }
 }

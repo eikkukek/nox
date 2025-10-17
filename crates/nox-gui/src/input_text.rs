@@ -18,7 +18,7 @@ use nox_font::{RenderedText, VertexTextRenderer, text_segment};
 
 use crate::*;
 
-pub(crate) struct InputText<I, FontHash> {
+pub(crate) struct InputText<I, FontHash, Style, HoverStyle> {
     offset: Vec2,
     title: CompactString,
     title_text: Option<RenderedText>,
@@ -37,11 +37,11 @@ pub(crate) struct InputText<I, FontHash> {
     flags: u32,
     cursor_timer: f32,
     double_click_timer: f32,
-    outline_thin_width: f32,
-    _marker: PhantomData<(I, FontHash)>,
+    outline_width: f32,
+    _marker: PhantomData<(I, FontHash, Style, HoverStyle)>,
 }
 
-impl<I, FontHash> InputText<I, FontHash>
+impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
 {
 
     const HOVERING: u32 = 0x1;
@@ -78,7 +78,7 @@ impl<I, FontHash> InputText<I, FontHash>
             flags: Self::MOUSE_VISIBLE,
             cursor_timer: 0.0,
             double_click_timer: 100.0,
-            outline_thin_width: 0.0,
+            outline_width: 0.0,
             _marker: PhantomData,
         }
     }
@@ -191,10 +191,13 @@ impl<I, FontHash> InputText<I, FontHash>
     }
 }
 
-impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
+impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
+        InputText<I, FontHash, Style, HoverStyle>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
 
     fn hover_text(&self) -> Option<&str> {
@@ -213,17 +216,18 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
     #[inline(always)]
     fn calc_height(
         &mut self,
-        style: &Style<FontHash>,
+        style: &Style,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
     ) -> f32
     {
-        style.calc_text_box_height(text_renderer.font_height(&style.font_regular).unwrap_or_default())
+        style.calc_text_box_height_from_text_height(style.calc_font_height(text_renderer))
     }
 
     fn is_active(
         &self,
         _nox: &Nox<I>,
-        _style: &Style<FontHash>,
+        _style: &Style,
+        _hover_style: &HoverStyle,
         _window_pos: Vec2,
         _cursor_pos: Vec2
     ) -> bool
@@ -234,7 +238,8 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
     fn update(
         &mut self,
         nox: &Nox<I>,
-        style: &Style<FontHash>,
+        style: &Style,
+        _hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_width: f32,
         window_pos: Vec2,
@@ -251,14 +256,14 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
             Backspace,
         }
         let mut cursor_move = CursorMove::None;
-        let font_scale = style.font_scale;
+        let font_scale = style.font_scale();
         let start_width = self.input_text
             .as_ref()
-            .map(|v| style.calc_text_width(v.text_width))
+            .map(|v| style.calc_text_width(v))
             .unwrap_or_default();
         if self.active() {
             let mut cursor_timer = self.cursor_timer + nox.delta_time().as_secs_f32();
-            if cursor_timer >= style.input_text_cursor_switch_speed {
+            if cursor_timer >= style.input_text_cursor_switch_speed() {
                 self.toggle_cursor_visible();
                 cursor_timer = 0.0;
             }
@@ -403,7 +408,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         }
         let title_text = self.title_text.get_or_insert(text_renderer
             .render(
-                &[text_segment(&self.title, &style.font_regular)],
+                &[text_segment(&self.title, style.font_regular())],
                 false, 0.0
             )
             .unwrap_or_default()
@@ -412,7 +417,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
             self.input_offsets.clear();
             text_renderer
                 .render_and_collect_offsets(
-                    &[text_segment(&self.input, &style.font_regular)],
+                    &[text_segment(&self.input, style.font_regular())],
                     false, 0.0,
                     |_, [x, y]| { self.input_offsets.push(vec2(x, y) * font_scale); }
                 )
@@ -421,27 +426,26 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         let input_text = unsafe {
             self.input_text.as_ref().unwrap_unchecked()
         };
-        let title_width = style.calc_text_width(title_text.text_width);
-        let text_height = style.calc_text_height(title_text.row_height);
-        let item_pad_outer = style.item_pad_outer;
-        let item_pad_inner = style.item_pad_inner;
+        let Vec2 { x: title_width, y: title_height } = style.calc_text_size(title_text);
+        let item_pad_outer = style.item_pad_outer();
+        let item_pad_inner = style.item_pad_inner();
         let offset = self.offset;
         let input_offset = offset + vec2(title_width + item_pad_outer.x, 0.0);
         let input_text_offset = input_offset + item_pad_inner;
         let mut width = title_width +
             item_pad_outer.x + item_pad_outer.x + item_pad_outer.x;
-        let min_window_width = width + style.input_text_min_width;
+        let min_window_width = width + style.min_input_text_width();
         if window_width < min_window_width {
-            width = style.input_text_min_width;
+            width = style.min_input_text_width();
         } else {
-            width = (window_width - width).min(style.input_text_max_width);
+            width = (window_width - width).min(style.max_input_text_width());
         }
         let input_rect = rect(
             Default::default(),
-            vec2(width, style.calc_text_box_height(title_text.row_height)),
-            style.rounding,
+            vec2(width, style.calc_text_box_height(title_text)),
+            style.rounding(),
         );
-        let input_width = style.calc_text_width(input_text.text_width);
+        let input_width = style.calc_text_width(input_text);
         let text_cursor_pos_x = self.input_offsets
             .get(self.text_cursor_pos)
             .map(|v| v.x)
@@ -478,13 +482,13 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
             self.flags |= Self::MOUSE_VISIBLE;
         }
         let mouse_visible = self.mouse_visible();
-        let override_cursor = style.override_cursor;
+        let override_cursor = style.override_cursor();
         self.flags &= !Self::HOVERING;
         let mut cursor_in_widget = !mouse_visible;
         let mouse_released = nox.was_mouse_button_released(MouseButton::Left);
         let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
         let rel_cursor_pos = cursor_pos - window_pos;
-        let error_margin = style.cursor_error_margin;
+        let error_margin = style.cursor_error_margin();
         if !other_widget_active {
             if override_cursor {
                 nox.set_cursor_hide(!mouse_visible);
@@ -499,12 +503,11 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                 let input_min_max = (input_min, input_min + input_width);
                 let input_box_min_max = (input_offset.x, input_offset.x + input_rect.max.x - item_pad_inner.x);
                 let text_offset = -self.input_text_offset_x;
-                let deactivate = nox.was_key_pressed(KeyCode::Enter) | nox.was_key_pressed(KeyCode::Escape);
                 let mut select_all = false;
                 if self.hovering() {
                     cursor_in_widget = true;
                     if mouse_pressed {
-                        if self.double_click_timer < style.double_click_window_secs {
+                        if self.double_click_timer < style.double_click_secs() {
                             select_all = true;
                         } else {
                             self.text_cursor_pos =
@@ -530,7 +533,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                     self.flags |= Self::CURSOR_VISIBLE;
                     self.cursor_timer = 0.0;
                 }
-                if deactivate || (!self.hovering() && !self.held() && !window_moving && mouse_released) {
+                if !self.hovering() && !self.held() && !window_moving && mouse_released {
                     self.flags &= !Self::ACTIVE;
                     self.flags |= Self::MOUSE_VISIBLE;
                 }
@@ -562,11 +565,11 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                                     let offset = self.calc_cursor_offset(font_scale, selection.0).x;
                                     if offset < 0.0 {
                                         self.input_text_offset_x -=
-                                            style.input_text_scroll_speed *
+                                            style.input_text_selection_scroll_speed() *
                                             nox.delta_time_secs_f32();
                                     } else if offset > input_text_max_x {
                                         self.input_text_offset_x +=
-                                            style.input_text_scroll_speed *
+                                            style.input_text_selection_scroll_speed() *
                                             nox.delta_time_secs_f32();
                                     }
                                     if selection.1 < selection.0 {
@@ -580,11 +583,11 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                                     let offset = self.calc_cursor_offset(font_scale, selection.1).x;
                                     if offset > input_text_max_x {
                                         self.input_text_offset_x +=
-                                            style.input_text_scroll_speed *
+                                            style.input_text_selection_scroll_speed() *
                                             nox.delta_time_secs_f32();
                                     } else if offset < 0.0 {
                                         self.input_text_offset_x -=
-                                            style.input_text_scroll_speed *
+                                            style.input_text_selection_scroll_speed() *
                                             nox.delta_time_secs_f32();
                                     }
                                     if selection.1 < selection.0 {
@@ -611,7 +614,14 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                             }
                         }
                     }
-                }
+                } 
+            }
+            let deactivate =
+                nox.was_key_pressed(KeyCode::Enter) |
+                nox.was_key_pressed(KeyCode::Escape);
+            if deactivate {
+                self.flags &= !Self::ACTIVE;
+                self.flags |= Self::MOUSE_VISIBLE;
             }
         } else {
             self.flags &= !Self::ACTIVE;
@@ -622,14 +632,14 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
             self.flags |= Self::CURSOR_VISIBLE;
             self.cursor_timer = 0.0;
         }
-        let cursor_rect_max = vec2(style.input_text_cursor_width, text_height);
+        let cursor_rect_max = vec2(style.input_text_cursor_width(), title_height);
         let requires_triangulation =
             self.input_rect != input_rect ||
             self.cursor_rect.max != cursor_rect_max ||
-            self.outline_thin_width != style.outline_thin_width;
+            self.outline_width != style.outline_width();
         self.input_rect = input_rect;
         self.cursor_rect.max = cursor_rect_max;
-        self.outline_thin_width = style.outline_thin_width;
+        self.outline_width = style.outline_width();
         if let Some(selection) = self.selection {
             let left = input_text_offset.x +
                 self.calc_cursor_offset(font_scale, selection.0).x.clamp(0.0, input_text_max_x);
@@ -639,7 +649,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                 vec2(left, offset.y + item_pad_inner.y),
                 vec2(right, offset.y + input_rect.max.y - item_pad_inner.y),
             );
-            let col = style.input_text_selection_col;
+            let col = style.input_text_selection_bg_col();
             self.selection_rect_vertices[0] = Vertex {
                 pos: rect.min,
                 offset: Default::default(),
@@ -665,7 +675,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         }
         self.double_click_timer += nox.delta_time_secs_f32();
         UpdateResult {
-            min_widget_width: style.input_text_min_width,
+            min_widget_width: style.min_input_text_width(),
             requires_triangulation,
             cursor_in_widget,
         }
@@ -679,7 +689,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         self.input_rect.to_points(&mut |p| { points.push(p.into()); });
         let mut outline_points = GlobalVec::new();
         nox_geom::shapes::outline_points(
-            points, self.outline_thin_width, false,
+            points, self.outline_width, false,
             &mut |p| { outline_points.push(p.into()); }
         );
         self.input_rect_outline_vertex_range = tri(&outline_points);
@@ -691,25 +701,27 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
 
     fn set_vertex_params(
         &mut self,
-        style: &Style<FontHash>,
+        style: &Style,
+        _hover_style: &HoverStyle,
         vertices: &mut [shaders::Vertex],
     )
     {
         let title_width = style.calc_text_width(
-            self.title_text.as_ref().unwrap().text_width
+            self.title_text.as_ref().unwrap()
         );
-        let mut offset = self.offset + vec2(title_width + style.item_pad_outer.x, 0.0);
-        let mut target_color = style.input_text_bg_col;
+        let mut offset = self.offset + vec2(title_width + style.item_pad_outer().x, 0.0);
+        let mut target_color = style.input_text_bg_col();
         set_vertex_params(vertices, self.input_rect_vertex_range, offset, target_color);
-        target_color = style.input_text_bg_outline_col;
+        target_color = style.input_text_active_outline_col();
         if self.active() {
             set_vertex_params(vertices, self.input_rect_outline_vertex_range, offset, target_color);
         } else {
             hide_vertices(vertices, self.input_rect_outline_vertex_range);
         }
         if self.cursor_visible() {
-            offset += style.item_pad_inner + self.calc_cursor_offset(style.font_scale, self.text_cursor_pos);
-            target_color = style.text_col;
+            offset += style.item_pad_inner() +
+                self.calc_cursor_offset(style.font_scale(), self.text_cursor_pos);
+            target_color = style.text_col();
             set_vertex_params(vertices, self.cursor_rect_vertex_range, offset, target_color);
         } else {
             hide_vertices(vertices, self.cursor_rect_vertex_range);
@@ -727,7 +739,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: &Style<FontHash>,
+        style: &Style,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -735,7 +747,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
         window_pos: Vec2,
         inv_aspect_ratio: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn OnTopContents<I, FontHash>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
         if let Some(selection) = self.selection && selection.0 != selection.1 {
             let vert_mem = unsafe {
@@ -768,10 +780,10 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
                     DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
             )?;
         }
-        let item_pad_outer = style.item_pad_outer;
-        let item_pad_inner = style.item_pad_inner;
-        let font_scale = vec2(style.font_scale, style.font_scale);
-        let text_col = style.text_col;
+        let item_pad_outer = style.item_pad_outer();
+        let item_pad_inner = style.item_pad_inner();
+        let font_scale = vec2(style.font_scale(), style.font_scale());
+        let text_col = style.text_col();
         render_commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
             window_pos + self.offset + vec2(0.0, item_pad_inner.y),
@@ -782,7 +794,7 @@ impl<I, FontHash> Widget<I, FontHash> for InputText<I, FontHash>
             pc_vertex, pc_fragment, vertex_buffer, index_buffer
         )?;
         let title_width = style.calc_text_width(
-            self.title_text.as_ref().unwrap().text_width
+            self.title_text.as_ref().unwrap()
         );
         let pos = window_pos + self.offset + vec2(title_width + item_pad_outer.x, 0.0);
         render_commands.bind_pipeline(get_custom_pipeline(INPUT_TEXT_PIPELINE_HASH).unwrap())?;

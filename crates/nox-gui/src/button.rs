@@ -19,7 +19,7 @@ use nox_geom::{
     *,
 };
 
-pub(crate) struct Button<I, FontHash> {
+pub(crate) struct Button<I, FontHash, Style, HoverStyle> {
     title: CompactString,
     title_text: Option<RenderedText>,
     rect: Rect,
@@ -27,11 +27,11 @@ pub(crate) struct Button<I, FontHash> {
     outline_vertex_range: VertexRange,
     offset: Vec2,
     flags: u32,
-    outline_width: f32,
-    _marker: PhantomData<(I, FontHash)>,
+    focused_outline_width: f32,
+    _marker: PhantomData<(I, FontHash, Style, HoverStyle)>,
 }
 
-impl<I, FontHash> Button<I, FontHash> {
+impl<I, FontHash, Style, HoverStyle> Button<I, FontHash, Style, HoverStyle> {
 
     const HELD: u32 = 0x1;
     const PRESSED: u32 = 0x2;
@@ -49,7 +49,7 @@ impl<I, FontHash> Button<I, FontHash> {
             outline_vertex_range: Default::default(),
             offset: Default::default(),
             flags: 0,
-            outline_width: 0.0,
+            focused_outline_width: 0.0,
             _marker: PhantomData,
         }
     }
@@ -70,10 +70,13 @@ impl<I, FontHash> Button<I, FontHash> {
     }
 }
 
-impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
+impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
+        Button<I, FontHash, Style, HoverStyle>
     where 
         I: Interface,
         FontHash: Clone + Eq + Hash,
+        Style: WindowStyle<FontHash>,
+        HoverStyle: WindowStyle<FontHash>,
 {
 
     #[inline(always)]
@@ -93,24 +96,34 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
     #[inline(always)]
     fn calc_height(
         &mut self,
-        style: &Style<FontHash>,
+        style: &Style,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
     ) -> f32 {
         let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
+                .render(&[text_segment(&self.title, &style.font_regular())], false, 0.0
+            ).unwrap_or_default()
         );
-        style.calc_text_box_height(title_text.row_height)
+        style.calc_text_box_height(title_text)
     }
 
-    fn is_active(&self, _nox: &Nox<I>, _style: &Style<FontHash>, _window_pos: Vec2, _cursor_pos: Vec2) -> bool {
+    fn is_active(
+        &self,
+        _nox: &Nox<I>,
+        _style: &Style,
+        _hover_style: &HoverStyle,
+        _window_pos: Vec2,
+        _cursor_pos: Vec2
+    ) -> bool
+    {
         self.held()
     }
 
     fn update(
         &mut self,
         nox: &Nox<I>,
-        style: &Style<FontHash>,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        style: &Style,
+        _hover_style: &HoverStyle,
+        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         _window_width: f32,
         window_pos: Vec2,
         cursor_pos: Vec2,
@@ -121,14 +134,14 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
-        let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(&self.title, &style.font_regular)], false, 0.0).unwrap_or_default()
-        );
-        let rect_size = style.calc_text_box_size(vec2(title_text.text_width, title_text.row_height));
-        let rect = rect(Default::default(), rect_size, style.rounding);
-        let requires_triangulation = self.rect != rect || self.outline_width != style.outline_width;
+        let title_text = self.title_text.as_ref().unwrap();
+        let rect_size = style.calc_text_box_size(title_text);
+        let rect = rect(Default::default(), rect_size, style.rounding());
+        let requires_triangulation =
+            self.rect != rect ||
+            self.focused_outline_width != style.focused_outline_width();
         self.rect = rect;
-        self.outline_width = style.outline_width;
+        self.focused_outline_width = style.focused_outline_width();
         let mut cursor_in_widget = false;
         self.flags &= !Self::CURSOR_IN_BUTTON;
         if self.held() {
@@ -167,14 +180,17 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
     {
         let mut outline_points = GlobalVec::new();
         self.rect.to_points(&mut |p| { points.push(p.into()); });
-        nox_geom::shapes::outline_points(points, self.outline_width, false, &mut |p| { outline_points.push(p.into()); });
+        nox_geom::shapes::outline_points(points,
+            self.focused_outline_width, false, &mut |p| { outline_points.push(p.into()); }
+        );
         self.outline_vertex_range = tri(&outline_points);
         self.rect_vertex_range = tri(&points);
     }
 
     fn set_vertex_params(
         &mut self,
-        style: &Style<FontHash>,
+        style: &Style,
+        _hover_style: &HoverStyle,
         vertices: &mut [Vertex],
     )
     {
@@ -182,9 +198,9 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         let vertex_sample = vertices[self.outline_vertex_range.start()];
         if self.cursor_in_button() || self.held() {
             let target_color = if self.held() {
-                style.widget_outline_hl_col
+                style.active_widget_outline_col()
             } else {
-                style.widget_outline_col
+                style.focused_widget_outline_col()
             };
             if vertex_sample.offset != offset || vertex_sample.color != target_color {
                 for vertex in &mut vertices[self.outline_vertex_range.range()] {
@@ -199,8 +215,8 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
             }
         }
         let vertex_sample = vertices[self.rect_vertex_range.start()];
-        if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col {
-            let target_color = style.widget_bg_col;
+        if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col() {
+            let target_color = style.widget_bg_col();
             for vertex in &mut vertices[self.rect_vertex_range.range()] {
                 vertex.offset = offset;
                 vertex.color = target_color;
@@ -211,7 +227,7 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: &Style<FontHash>,
+        style: &Style,
         _base_pipeline: GraphicsPipelineId,
         text_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -219,18 +235,18 @@ impl<I, FontHash> Widget<I, FontHash> for Button<I, FontHash>
         window_pos: Vec2,
         inv_aspect_ratio: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn OnTopContents<I, FontHash>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
         let title_text = unsafe {
             self.title_text.as_ref().unwrap_unchecked()
         };
         render_commands.bind_pipeline(text_pipeline)?;
         let pc_vertex = push_constants_vertex(
-            window_pos + self.offset + style.item_pad_inner,
-            vec2(style.font_scale, style.font_scale),
+            window_pos + self.offset + style.item_pad_inner(),
+            vec2(style.font_scale(), style.font_scale()),
             inv_aspect_ratio
         );
-        let pc_fragment = text_push_constants_fragment(style.text_col);
+        let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands, title_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         Ok(None)
     }
