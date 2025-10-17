@@ -10,7 +10,7 @@ pub struct Vec2 {
 }
 
 #[inline(always)]
-pub fn vec2(x: f32, y: f32) -> Vec2 {
+pub const fn vec2(x: f32, y: f32) -> Vec2 {
     Vec2 { x, y }
 }
 
