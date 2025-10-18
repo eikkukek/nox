@@ -300,14 +300,13 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
         rel_cursor_pos: f32,
         text_min_max: (f32, f32),
         text_box_min_max: (f32, f32),
-        text_offset: f32,
         input_offset: f32,
     ) -> usize
     {
         if self.input_offsets.is_empty() { return 0 }
         if rel_cursor_pos < text_box_min_max.0 {
             for i in 1..self.input_offsets.len() {
-                let offset = input_offset + self.input_offsets[i].x + text_offset;
+                let offset = input_offset + self.input_offsets[i].x;
                 if offset >= text_box_min_max.0 {
                     return i - 1
                 }
@@ -316,7 +315,7 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
         }
         if rel_cursor_pos > text_box_min_max.1 {
             for (i, &offset) in self.input_offsets.iter().enumerate().rev() {
-                let offset = offset.x + text_offset;
+                let offset = offset.x;
                 if input_offset + offset < text_box_min_max.1 {
                     return i + 1
                 }
@@ -327,7 +326,7 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
             return self.input_offsets.len()
         }
         for i in 1..self.input_offsets.len() {
-            let offset = self.input_offsets[i].x + text_offset;
+            let offset = self.input_offsets[i].x;
             if text_min_max.0 + offset >= rel_cursor_pos
             {
                 return i - 1
@@ -662,33 +661,35 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             .map(|v| v.x)
             .unwrap_or_else(|| input_width);
         let input_text_max_x = width - item_pad_inner.x - item_pad_inner.x;
-        match cursor_move {
-            CursorMove::None => {},
-            CursorMove::Left => {
-                if text_cursor_pos_x - self.input_text_offset_x < 0.0 {
-                    self.input_text_offset_x = text_cursor_pos_x;
+        if !self.center_text() {
+            match cursor_move {
+                CursorMove::None => {},
+                CursorMove::Left => {
+                    if text_cursor_pos_x - self.input_text_offset_x < 0.0 {
+                        self.input_text_offset_x = text_cursor_pos_x;
+                    }
+                    self.flags &= !Self::MOUSE_VISIBLE;
+                },
+                CursorMove::Right => {
+                    if input_text_max_x -
+                        self.calc_cursor_offset(font_scale, self.text_cursor_pos).x < 0.0
+                    {
+                        self.input_text_offset_x = text_cursor_pos_x - input_text_max_x;
+                    }
+                    self.flags &= !Self::MOUSE_VISIBLE;
+                },
+                CursorMove::Backspace => {
+                    let pos = self.calc_cursor_offset(font_scale, self.text_cursor_pos).x;
+                    let delta = start_width - input_width;
+                    if input_text_max_x - pos > 0.0 &&
+                        input_width - text_cursor_pos_x <
+                        input_text_max_x - pos
+                    {
+                        self.input_text_offset_x =
+                            (self.input_text_offset_x - delta).clamp(0.0, f32::INFINITY);
+                    }
+                    self.flags &= !Self::MOUSE_VISIBLE;
                 }
-                self.flags &= !Self::MOUSE_VISIBLE;
-            },
-            CursorMove::Right => {
-                if input_text_max_x -
-                    self.calc_cursor_offset(font_scale, self.text_cursor_pos).x < 0.0
-                {
-                    self.input_text_offset_x = text_cursor_pos_x - input_text_max_x;
-                }
-                self.flags &= !Self::MOUSE_VISIBLE;
-            },
-            CursorMove::Backspace => {
-                let pos = self.calc_cursor_offset(font_scale, self.text_cursor_pos).x;
-                let delta = start_width - input_width;
-                if input_text_max_x - pos > 0.0 &&
-                    input_width - text_cursor_pos_x <
-                    input_text_max_x - pos
-                {
-                    self.input_text_offset_x =
-                        (self.input_text_offset_x - delta).clamp(0.0, f32::INFINITY);
-                }
-                self.flags &= !Self::MOUSE_VISIBLE;
             }
         }
         if delta_cursor_pos.x != 0.0 || delta_cursor_pos.y != 0.0 {
@@ -712,11 +713,10 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                         input_offset - vec2(error_margin, 0.0),
                         input_rect.max + vec2(error_margin + error_margin, 0.0)
                     ).is_point_inside(rel_cursor_pos) as u32;
-                let input_min = input_offset.x + item_pad_inner.x;
+                let input_min = input_offset.x + item_pad_inner.x - self.input_text_offset_x;
                 let input_min_max = (input_min, input_min + input_width);
                 let input_box_min_max =
                     (input_offset.x, input_offset.x + input_rect.max.x - item_pad_inner.x);
-                let text_offset = -self.input_text_offset_x;
                 let mut select_all = false;
                 if self.hovering() {
                     cursor_in_widget = true;
@@ -729,7 +729,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                                     rel_cursor_pos.x,
                                     input_min_max,
                                     input_box_min_max,
-                                    text_offset,
                                     input_min,
                                 );
                             self.flags |= Self::HELD;
@@ -769,7 +768,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                                 rel_cursor_pos.x,
                                 input_min_max,
                                 input_box_min_max,
-                                text_offset,
                                 input_min,
                             );
                             let selection_left = self.selection_left();
@@ -847,8 +845,12 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             self.flags |= Self::CURSOR_VISIBLE;
             self.cursor_timer = 0.0;
         }
-        if self.center_text() && !self.active() {
-            let text_width = style.calc_text_width(self.input_text_formatted.as_ref().unwrap());
+        if self.center_text() {
+            let text_width =  if self.active() {
+                style.calc_text_width(self.input_text.as_ref().unwrap())
+            } else {
+                style.calc_text_width(self.input_text_formatted.as_ref().unwrap())
+            };
             if text_width + item_pad_inner.x + item_pad_inner.x > self.width_override {
                 self.input_text_offset_x = 0.0;
                 input_rect.max.x = style.calc_text_box_width_from_text_width(text_width);

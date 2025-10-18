@@ -184,6 +184,11 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         } else {
             self.flags &= !Self::HELD_MOVED;
         }
+        if style.override_cursor() && (cursor_in_rect || self.held())  {
+            if style.override_cursor() {
+                nox.set_cursor(CursorIcon::ColResize);
+            }
+        }
         let mut update_results = self.input_text.update(
             nox, style, hover_style,
             text_renderer, window_width, window_pos,
