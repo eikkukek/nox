@@ -1,5 +1,7 @@
 use std::{
-    fs::{self, File}, io::Write, path::PathBuf,
+    fs::{self, File},
+    path::PathBuf,
+    io::Write,
 };
 
 use memmap2::Mmap;
@@ -19,6 +21,7 @@ struct Example<'a> {
     aspect_ratio: f32,
     slider_value: f32,
     slider_value_int: u32,
+    drag_value_int: i8,
     input_text: String,
     color: ColorSRGBA,
     pipeline_cache: PipelineCacheId,
@@ -50,7 +53,8 @@ impl<'a> Example<'a> {
             aspect_ratio: 1.0,
             slider_value: 0.0,
             slider_value_int: 0,
-            input_text: "Input here".into(),
+            drag_value_int: 0,
+            input_text: Default::default(),
             color: Default::default(),
             pipeline_cache: Default::default(),
             cache_dir,
@@ -118,8 +122,27 @@ impl<'a> Interface for Example<'a> {
                 if win.update_button(0, "Print \"hello\"") {
                     println!("hello");
                 }
-                win.update_input_text(0, "Input text", &mut self.input_text);
-                win.update_input_text(1, "Input float", &mut self.slider_value);
+                win.update_input_text(0,
+                    "Input text", &mut self.input_text,
+                    "Input text here",
+                    None,
+                );
+                win.update_drag_value(
+                    0,
+                    "Input int",
+                    &mut self.drag_value_int,
+                    i8::MIN,
+                    i8::MAX,
+                    Some(500.0),
+                    0.1,
+                    false,
+                    None,
+                    /*
+                    Some(|fmt, input| -> core::fmt::Result {
+                        fmt.write_fmt(format_args!("float {}", input))
+                    })
+                    */
+                );
                 Ok(())
             }
         )?;

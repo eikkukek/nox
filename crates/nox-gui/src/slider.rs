@@ -2,6 +2,7 @@ use core::{
     fmt::Write,
     hash::Hash,
     marker::PhantomData,
+    str::FromStr,
 };
 
 use compact_str::CompactString;
@@ -20,16 +21,18 @@ use nox_geom::{
 
 use crate::*;
 
-pub trait Sliderable: Copy {
+pub trait Sliderable: Copy + FromStr {
 
     fn slide_and_quantize_t(&mut self, min: Self, max: Self, t: f32) -> f32;
+
+    fn drag(&mut self, min: Self, max: Self, amount: f32);
 
     fn calc_t(&self, min: Self, max: Self) -> f32;
 
     fn display<FontHash>(
         &self,
         style: &impl WindowStyle<FontHash>,
-        to: &mut CompactString
+        to: &mut impl Write, 
     ) -> core::fmt::Result;
 }
 
@@ -394,6 +397,12 @@ impl Sliderable for f32 {
     }
 
     #[inline(always)]
+    fn drag(&mut self, min: Self, max: Self, amount: f32) {
+        *self += amount;
+        *self = self.clamp(min, max);
+    }
+
+    #[inline(always)]
     fn calc_t(&self, min: Self, max: Self) -> f32 {
         if *self >= max { return 1.0 }
         if *self <= min { return 0.0 }
@@ -406,7 +415,7 @@ impl Sliderable for f32 {
     fn display<FontHash>(
         &self,
         style: &impl WindowStyle<FontHash>,
-        to: &mut CompactString,
+        to: &mut impl Write,
     ) -> core::fmt::Result
     {
         style.f32_format(*self, to)
@@ -423,6 +432,12 @@ impl Sliderable for f64 {
     }
 
     #[inline(always)]
+    fn drag(&mut self, min: Self, max: Self, amount: f32) {
+        *self += amount as f64;
+        *self = self.clamp(min, max);
+    }
+
+    #[inline(always)]
     fn calc_t(&self, min: Self, max: Self) -> f32 {
         if *self >= max { return 1.0 }
         if *self <= min { return 0.0 }
@@ -435,7 +450,7 @@ impl Sliderable for f64 {
     fn display<FontHash>(
         &self,
         style: &impl WindowStyle<FontHash>,
-        to: &mut CompactString,
+        to: &mut impl Write,
     ) -> core::fmt::Result
     {
         style.f64_format(*self, to)
@@ -443,6 +458,69 @@ impl Sliderable for f64 {
 }
 
 macro_rules! impl_sliderable_int {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl Sliderable for $t {
+
+                #[inline(always)]
+                fn slide_and_quantize_t(&mut self, min: Self, max: Self, t: f32) -> f32 {
+                    let mut as_float = 0.0;
+                    as_float.slide_and_quantize_t(min as f32, max as f32, t);
+                    let fract = as_float.fract();
+                    *self = 
+                        if fract >= 0.5 {
+                            as_float.ceil() as Self
+                        } else {
+                            as_float.floor() as Self
+                        };
+                    self.calc_t(min, max)
+                }
+
+                #[inline(always)]
+                fn drag(&mut self, min: Self, max: Self, mut amount: f32) {
+                    if amount.abs() < f32::EPSILON {
+                        return
+                    }
+                    if amount.is_sign_negative() {
+                        amount = amount.min(-1.0);
+                        let amount = amount as Self;
+                        if (*self > 0 && amount >= Self::MIN) || Self::MIN - *self <= amount {
+                            *self += amount;
+                        }
+                    } else {
+                        amount = amount.max(1.0);
+                        let amount = amount as Self;
+                        if (*self < 0 && amount <= Self::MAX) || Self::MAX - *self >= amount {
+                            *self += amount;
+                        }
+                    }
+                    *self = (*self).clamp(min, max);
+                }
+
+                #[inline(always)]
+                fn calc_t(&self, min: Self, max: Self) -> f32 {
+                    if *self >= max { return 1.0 }
+                    if *self <= min { return 0.0 }
+                    let d0 = max - min;
+                    let d1 = self - min;
+                    d1 as f32 / d0 as f32
+                }
+
+                #[inline(always)]
+                fn display<FontHash>(
+                    &self,
+                    _style: &impl WindowStyle<FontHash>,
+                    to: &mut impl Write,
+                ) -> core::fmt::Result
+                {
+                    write!(to, "{}", *self)
+                }
+            }
+        )+
+    };
+}
+
+macro_rules! impl_sliderable_uint {
     ($($t:ty),+ $(,)?) => {
         $(
             impl Sliderable for $t {
@@ -462,6 +540,27 @@ macro_rules! impl_sliderable_int {
                 }
 
                 #[inline(always)]
+                fn drag(&mut self, min: Self, max: Self, mut amount: f32) {
+                    if amount.abs() < f32::EPSILON {
+                        return
+                    }
+                    if amount.is_sign_negative() {
+                        amount = amount.min(-1.0);
+                        let amount = amount.abs() as Self;
+                        if amount <= *self {
+                            *self -= amount;
+                        }
+                    } else {
+                        amount = amount.max(1.0);
+                        let amount = amount as Self;
+                        if Self::MAX - *self >= amount {
+                            *self += amount;
+                        }
+                    }
+                    *self = (*self).clamp(min, max);
+                }
+
+                #[inline(always)]
                 fn calc_t(&self, min: Self, max: Self) -> f32 {
                     if *self >= max { return 1.0 }
                     if *self <= min { return 0.0 }
@@ -474,7 +573,7 @@ macro_rules! impl_sliderable_int {
                 fn display<FontHash>(
                     &self,
                     _style: &impl WindowStyle<FontHash>,
-                    to: &mut CompactString,
+                    to: &mut impl Write,
                 ) -> core::fmt::Result
                 {
                     write!(to, "{}", *self)
@@ -486,5 +585,8 @@ macro_rules! impl_sliderable_int {
 
 impl_sliderable_int!(
     i8, i16, i32, i64, i128,
+);
+
+impl_sliderable_uint!(
     u8, u16, u32, u64, u128,
 );

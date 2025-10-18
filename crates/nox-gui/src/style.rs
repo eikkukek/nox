@@ -75,6 +75,11 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
+    fn input_text_empty_text_color(&self) -> ColorSRGBA {
+        DEFAULT_TEXT_COL.with_alpha(0.4)
+    }
+
+    #[inline(always)]
     fn checkbox_symbol(&self) -> char {
         '󰄬'
     }
@@ -165,12 +170,12 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn f32_format(&self, value: f32, to: &mut CompactString) -> core::fmt::Result {
+    fn f32_format(&self, value: f32, to: &mut impl Write) -> core::fmt::Result {
         write!(to, "{:.2}", value)
     }
 
     #[inline(always)]
-    fn f64_format(&self, value: f64, to: &mut CompactString) -> core::fmt::Result {
+    fn f64_format(&self, value: f64, to: &mut impl Write) -> core::fmt::Result {
         write!(to, "{:.2}", value)
     }
 

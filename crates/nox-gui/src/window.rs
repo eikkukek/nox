@@ -1,8 +1,8 @@
 use core::{
     hash::Hash,
     str::FromStr,
+    marker::PhantomData,
 };
-use std::marker::PhantomData;
 
 use nox::{
     mem::vec_types::{GlobalVec, Vector},
@@ -28,6 +28,7 @@ enum ActiveWidget {
     Checkbox(u32),
     ColorPicker(u32),
     InputText(u32),
+    DragValue(u32),
 }
 
 struct HoverWindow {
@@ -181,6 +182,7 @@ pub(crate) struct Window<I, FontHash, Style, HoverStyle>
     checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash, Style, HoverStyle>)>,
     color_pickers: FxHashMap<u32, (u64, ColorPicker<I, FontHash, Style, HoverStyle>)>,
     input_texts: FxHashMap<u32, (u64, InputText<I, FontHash, Style, HoverStyle>)>,
+    drag_values: FxHashMap<u32, (u64, DragValue<I, FontHash, Style, HoverStyle>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
     prev_active_widgets: Option<GlobalVec<ActiveWidget>>,
     hover_window: Option<HoverWindow>,
@@ -239,6 +241,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             checkboxs: FxHashMap::default(),
             color_pickers: FxHashMap::default(),
             input_texts: FxHashMap::default(),
+            drag_values: FxHashMap::default(),
             active_widgets: Some(Default::default()),
             prev_active_widgets: Some(Default::default()),
             hover_window: Some(HoverWindow::new()),
@@ -358,6 +361,10 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 self.input_texts.get(&id).map(
                     |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
                 ).unwrap(),
+            ActiveWidget::DragValue(id) =>
+                self.drag_values.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
         }
     }
 
@@ -386,6 +393,10 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 ).unwrap(),
             ActiveWidget::InputText(id) =>
                 self.input_texts.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
+            ActiveWidget::DragValue(id) =>
+                self.drag_values.get_mut(&id).map(
                     |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
                 ).unwrap(),
         }
@@ -683,12 +694,12 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         let mut title_bar_rect = self.title_bar_rect;
         title_bar_rect.max.x = self.main_rect.max.x;
         title_bar_rect.max.y = style.calc_text_box_height(&title_text);
+        title_bar_rect.rounding = style.rounding();
         let mut separator_rect = self.separator_rect;
         separator_rect.max.x = self.main_rect.max.x;
         separator_rect.max.y = style.separator_height();
         let requires_triangulation =
             (style.rounding() != self.main_rect.rounding ||
-            style.rounding() != self.title_bar_rect.rounding ||
             self.focused_outline_width != style.focused_outline_width() ||
             self.outline_width != style.outline_width() ||
             main_rect_max != self.main_rect.max ||
@@ -697,9 +708,9 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         ) as u32;
         self.flags |= Self::REQUIRES_TRIANGULATION * requires_triangulation;
         self.main_rect.rounding = style.rounding();
-        self.title_bar_rect.rounding = style.rounding();
-        self.focused_outline_width = style.focused_outline_width();
+        self.title_bar_rect = title_bar_rect;
         self.outline_width = style.outline_width();
+        self.focused_outline_width = style.focused_outline_width();
         self.main_rect.max = main_rect_max;
         self.title_bar_rect = title_bar_rect;
         self.separator_rect = separator_rect;
@@ -1148,11 +1159,17 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             self.style.item_pad_outer().y;
     }
 
-    pub fn update_input_text<T: core::fmt::Display + FromStr>(
+    #[inline(always)]
+    fn update_input_text_internal<T: core::fmt::Display + FromStr>(
         &mut self,
         id: u32,
         title: &str,
         value: &mut T,
+        empty_input_prompt: &str,
+        width_override: Option<f32>,
+        skip_title: bool,
+        center_text: bool,
+        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>
     )
     {
         unsafe {
@@ -1167,6 +1184,10 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         if *last_triangulation != self.window.last_triangulation {
             self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
         }
+        input_text.set_params(
+            width_override, None, skip_title, center_text,
+            empty_input_prompt, format_input
+        );
         if input_text.active() {
             if let Some(v) = input_text.get_input() {
                 *value = v;
@@ -1176,6 +1197,79 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         }
         input_text.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
         self.widget_y += input_text.calc_height(self.style, self.text_renderer) +
+            self.style.item_pad_outer().y;
+    }
+
+    #[inline(always)]
+    pub fn update_input_text<T: core::fmt::Display + FromStr>(
+        &mut self,
+        id: u32,
+        title: &str,
+        value: &mut T,
+        empty_input_prompt: &str,
+        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>
+    )
+    {
+        self.update_input_text_internal(
+            id,
+            title, value, empty_input_prompt,
+            None, false, false, format_input,
+        );
+    }
+    
+    #[inline(always)]
+    pub fn update_input_text_with_width<T: core::fmt::Display + FromStr>(
+        &mut self,
+        id: u32,
+        title: &str,
+        value: &mut T,
+        empty_input_prompt: &str,
+        width_override: f32,
+        skip_title: bool,
+        center_text: bool,
+        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>
+    )
+    {
+        self.update_input_text_internal(
+            id,
+            title, value, empty_input_prompt,
+            Some(width_override), skip_title, center_text, format_input
+        );
+    }
+
+    #[inline(always)]
+    pub fn update_drag_value<T: Sliderable>(
+        &mut self,
+        id: u32,
+        title: &str,
+        value: &mut T,
+        min: T,
+        max: T,
+        drag_speed: Option<f32>,
+        min_width: f32,
+        skip_title: bool,
+        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
+    )
+    {
+        unsafe {
+            self.window.active_widgets
+                .as_mut()
+                .unwrap_unchecked()
+                .push(ActiveWidget::DragValue(id));
+        }
+        let (last_triangulation, drag_value) = self.window.drag_values
+            .entry(id)
+            .or_insert((0, DragValue::new(title)));
+        if *last_triangulation != self.window.last_triangulation {
+            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
+        }
+        drag_value.set_input_params(self.style, min_width, skip_title, format_input);
+        drag_value.calc_value(
+            self.style, value, min, max,
+            drag_speed.unwrap_or(self.style.default_value_drag_speed()),
+        );
+        drag_value.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
+        self.widget_y += drag_value.calc_height(self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
     }
 }

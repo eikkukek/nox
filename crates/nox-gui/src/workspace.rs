@@ -286,8 +286,12 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                 );
             let mut text_info = GraphicsPipelineInfo::new(text_layout);
             text_info
-                .with_vertex_input_binding(VertexInputBinding::new::<0, font::Vertex>(0, VertexInputRate::Vertex))
-                .with_vertex_input_binding(VertexInputBinding::new::<1, font::VertexOffset>(1, VertexInputRate::Instance))
+                .with_vertex_input_binding(
+                    VertexInputBinding::new::<0, font::Vertex>(0, VertexInputRate::Vertex)
+                )
+                .with_vertex_input_binding(
+                    VertexInputBinding::new::<1, font::VertexOffset>(1, VertexInputRate::Instance)
+                )
                 .with_sample_shading(SampleShadingInfo::new(output_samples, min_sample_shading, false, false))
                 .with_color_output(output_format, WriteMask::all(), Some(Self::BLEND_STATE));
             let mut custom_pipelines = GlobalVec::new();

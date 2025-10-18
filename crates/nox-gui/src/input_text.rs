@@ -24,6 +24,9 @@ pub(crate) struct InputText<I, FontHash, Style, HoverStyle> {
     title_text: Option<RenderedText>,
     input: CompactString,
     input_text: Option<RenderedText>,
+    input_text_formatted: Option<RenderedText>,
+    empty_input_prompt: CompactString,
+    format_input: Box<fn(&mut dyn Write, &str) -> core::fmt::Result>,
     input_offsets: GlobalVec<Vec2>,
     input_text_offset_x: f32,
     selection: Option<(usize, usize)>,
@@ -38,10 +41,14 @@ pub(crate) struct InputText<I, FontHash, Style, HoverStyle> {
     cursor_timer: f32,
     double_click_timer: f32,
     outline_width: f32,
+    width_override: f32,
+    bg_col_override: ColorSRGBA,
     _marker: PhantomData<(I, FontHash, Style, HoverStyle)>,
 }
 
 impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
+    where
+        Style: WindowStyle<FontHash>,
 {
 
     const HOVERING: u32 = 0x1;
@@ -51,6 +58,13 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     const CURSOR_VISIBLE: u32 = 0x10;
     const SELECTION_LEFT: u32 = 0x20;
     const MOUSE_VISIBLE: u32 = 0x40;
+    const FORMAT_ERROR: u32 = 0x80;
+    const SKIP_TITLE: u32 = 0x100;
+    const CENTER_TEXT: u32 = 0x200;
+    const CURSOR_ENABLE: u32 = 0x400;
+    const SELECT_ALL: u32 = 0x800;
+    const WIDTH_OVERRIDE: u32 = 0x1000;
+    const BG_COL_OVERRIDE: u32 = 0x2000;
 
     const SELECTION_INDICES: [u32; 6] = [
         3, 1, 0,
@@ -63,24 +77,151 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
             offset: Default::default(),
             title: CompactString::new(title),
             title_text: None,
+            input_text: None,
+            input_text_formatted: None,
+            format_input: Box::new(|fmt, input| -> core::fmt::Result {
+                write!(fmt, "{}", input)
+            }),
+            empty_input_prompt: Default::default(),
             input: Default::default(),
             input_offsets: Default::default(),
             input_text_offset_x: 0.0,
             text_cursor_pos: Default::default(),
             selection: None,
-            input_text: None,
             input_rect: Default::default(),
             input_rect_vertex_range: Default::default(),
             input_rect_outline_vertex_range: Default::default(),
             selection_rect_vertices: Default::default(),
             cursor_rect: Default::default(),
             cursor_rect_vertex_range: Default::default(),
-            flags: Self::MOUSE_VISIBLE,
+            flags: Self::MOUSE_VISIBLE | Self::CURSOR_ENABLE,
             cursor_timer: 0.0,
             double_click_timer: 100.0,
             outline_width: 0.0,
+            width_override: 0.0,
+            bg_col_override: Default::default(),
             _marker: PhantomData,
         }
+    }
+
+    #[inline(always)]
+    pub fn input_offset(&self, style: &Style) -> Vec2 {
+        self.offset + vec2(
+            if self.skip_title() {
+                Default::default()
+            } else {
+                let text_width = self.title_text
+                    .as_ref()
+                    .map(|v| v.text_width)
+                    .unwrap_or_default();
+                let title_width = text_width * style.font_scale();
+                title_width + style.item_pad_outer().x
+            },
+            0.0,
+        )
+    }
+
+    #[inline(always)]
+    pub fn rel_bounding_rect(&self, style: &Style) -> BoundingRect {
+        BoundingRect::from_position_size(
+            self.input_offset(style),
+            self.input_rect.max,
+        )
+    }
+
+    #[inline(always)]
+    pub fn outline_points(&self, width: f32, outline_points: &mut GlobalVec<[f32; 2]>) {
+        let mut points = GlobalVec::new();
+        self.input_rect.to_points(&mut |p| { points.push(p); });
+        nox_geom::shapes::outline_points(
+            &points,
+            width, false,
+            &mut |p| { outline_points.push(p.into()); }
+        );
+    }
+
+    #[inline(always)]
+    pub fn set_params(
+        &mut self,
+        width_override: Option<f32>,
+        bg_col_override: Option<ColorSRGBA>,
+        skip_title: bool,
+        center_text: bool,
+        empty_input_prompt: &str,
+        format_input: Option<fn(&mut dyn Write, &str) -> core::fmt::Result>,
+    )
+    {
+        self.flags &= !(
+            Self::CENTER_TEXT |
+            Self::SKIP_TITLE |
+            Self::WIDTH_OVERRIDE |
+            Self::BG_COL_OVERRIDE
+        );
+        self.flags |= Self::CENTER_TEXT * center_text as u32;
+        if let Some(width_override) = width_override {
+            self.width_override = width_override;
+            self.flags |= Self::WIDTH_OVERRIDE;
+        }
+        if let Some(bg_col_override) = bg_col_override {
+            self.bg_col_override = bg_col_override;
+            self.flags |= Self::BG_COL_OVERRIDE;
+        }
+        self.flags |= Self::SKIP_TITLE * skip_title as u32;
+        if let Some(format) = format_input {
+            *self.format_input = format;
+        }
+        if empty_input_prompt != self.empty_input_prompt {
+            self.empty_input_prompt = CompactString::new(empty_input_prompt);
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_input_sliderable(&mut self, style: &Style, input: &impl Sliderable) {
+        self.flags &= !Self::FORMAT_ERROR;
+        self.input.clear();
+        self.input_offsets.clear();
+        if let Err(_) = input.display(style, &mut self.input) {
+            self.flags |= Self::FORMAT_ERROR;
+        }
+        self.input_text = None;
+        self.text_cursor_pos = 0;
+    }
+
+    #[inline(always)]
+    pub fn set_input(&mut self, input: &impl Display) {
+        self.flags &= !Self::FORMAT_ERROR;
+        self.input.clear();
+        self.input_offsets.clear();
+        if let Err(_) = write!(self.input, "{}", input) {
+            self.flags |= Self::FORMAT_ERROR;
+        }
+        self.input_text = None;
+        self.text_cursor_pos = 0;
+    }
+
+    #[inline(always)]
+    pub fn get_input<T: FromStr>(&mut self) -> Option<T> {
+        T::from_str(&self.input).ok()
+    }
+
+    #[inline(always)]
+    pub fn activate_and_select_all(&mut self) {
+        self.flags |= Self::CURSOR_ENABLE;
+        self.flags |= Self::ACTIVE;
+        self.flags |= Self::CURSOR_VISIBLE;
+        self.flags |= Self::SELECT_ALL;
+        self.cursor_timer = 0.0;
+    }
+
+    #[inline(always)]
+    pub fn set_cursor_enable(&mut self, value: bool) {
+        self.flags &= !Self::CURSOR_ENABLE;
+        self.flags |= Self::CURSOR_ENABLE * value as u32;
+    }
+
+    #[inline(always)]
+    fn cursor_enabled(&self) -> bool {
+        self.flags & Self::CURSOR_ENABLE == Self::CURSOR_ENABLE
     }
 
     #[inline(always)]
@@ -94,13 +235,13 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     }
 
     #[inline(always)]
-    fn activated(&self) -> bool {
-        self.flags & Self::ACTIVATED == Self::ACTIVATED
+    pub fn active(&self) -> bool {
+        self.flags & Self::ACTIVE == Self::ACTIVE
     }
 
     #[inline(always)]
-    pub fn active(&self) -> bool {
-        self.flags & Self::ACTIVE == Self::ACTIVE
+    fn activated(&self) -> bool {
+        self.flags & Self::ACTIVATED == Self::ACTIVATED
     }
 
     #[inline(always)]
@@ -124,16 +265,33 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     }
 
     #[inline(always)]
-    pub fn set_input(&mut self, input: &impl Display) {
-        self.input.clear();
-        write!(self.input, "{}", input).ok();
-        self.input_text = None;
-        self.text_cursor_pos = 0;
+    fn has_format_error(&self) -> bool {
+        self.flags & Self::FORMAT_ERROR == Self::FORMAT_ERROR
     }
 
     #[inline(always)]
-    pub fn get_input<T: FromStr>(&mut self) -> Option<T> {
-        T::from_str(&self.input).ok()
+    fn skip_title(&self) -> bool {
+        self.flags & Self::SKIP_TITLE == Self::SKIP_TITLE
+    }
+
+    #[inline(always)]
+    fn has_width_override(&self) -> bool {
+        self.flags & Self::WIDTH_OVERRIDE == Self::WIDTH_OVERRIDE
+    }
+
+    #[inline(always)]
+    fn has_bg_col_override(&self) -> bool {
+        self.flags & Self::BG_COL_OVERRIDE == Self::BG_COL_OVERRIDE
+    }
+
+    #[inline(always)]
+    fn center_text(&self) -> bool {
+        self.flags & Self::CENTER_TEXT == Self::CENTER_TEXT
+    }
+
+    #[inline(always)]
+    fn select_all(&self) -> bool {
+        self.flags & Self::SELECT_ALL == Self::SELECT_ALL
     }
 
     #[inline(always)]
@@ -146,6 +304,7 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
         input_offset: f32,
     ) -> usize
     {
+        if self.input_offsets.is_empty() { return 0 }
         if rel_cursor_pos < text_box_min_max.0 {
             for i in 1..self.input_offsets.len() {
                 let offset = input_offset + self.input_offsets[i].x + text_offset;
@@ -284,7 +443,9 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                     }
                     let mut text_cursor_pos = selection.0;
                     for text in input {
-                        if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter && text.0 != KeyCode::Escape {
+                        if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter &&
+                            text.0 != KeyCode::Escape
+                        {
                             self.input.insert_str(
                                 self.input
                                     .char_indices()
@@ -369,7 +530,9 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                 let input = nox.get_input_text();
                 if !input.is_empty() {
                     for text in input {
-                        if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter && text.0 != KeyCode::Escape {
+                        if text.0 != KeyCode::Backspace &&
+                            text.0 != KeyCode::Enter && text.0 != KeyCode::Escape
+                        {
                             self.input.insert_str(
                                 self.input
                                     .char_indices()
@@ -406,14 +569,39 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             self.flags &= !Self::CURSOR_VISIBLE;
             self.input_text_offset_x = 0.0;
         }
-        let title_text = self.title_text.get_or_insert(text_renderer
-            .render(
-                &[text_segment(&self.title, style.font_regular())],
-                false, 0.0
-            )
-            .unwrap_or_default()
-        );
+        let has_format_error = self.has_format_error();
+        let skip_title = self.skip_title();
+        let title_text = if !skip_title {
+            Some(self.title_text.get_or_insert(text_renderer
+                .render(
+                    &[text_segment(&self.title, style.font_regular())],
+                    false, 0.0
+                )
+                .unwrap_or_default()
+            ))
+        } else {
+            None
+        };
         self.input_text.get_or_insert_with(|| {
+            if self.input.is_empty() {
+                self.input_text_formatted = Some(text_renderer
+                    .render(&[text_segment(&self.empty_input_prompt, style.font_regular())],
+                    false, 0.0
+                ).unwrap_or_default())
+            } else {
+                let mut fmt = CompactString::default();
+                if has_format_error {
+                    fmt = "Format error!".into();
+                }
+                else if let Err(e) = (self.format_input)(&mut fmt, &self.input) {
+                    fmt.clear();
+                    write!(fmt, "Format error: ! {}", e).ok();
+                }
+                self.input_text_formatted = Some(text_renderer
+                    .render(&[text_segment(&fmt, style.font_regular())],
+                    false, 0.0
+                ).unwrap_or_default());
+            }
             self.input_offsets.clear();
             text_renderer
                 .render_and_collect_offsets(
@@ -426,26 +614,49 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         let input_text = unsafe {
             self.input_text.as_ref().unwrap_unchecked()
         };
-        let Vec2 { x: title_width, y: title_height } = style.calc_text_size(title_text);
+        let Vec2 { x: title_width, y: title_height } =
+            if skip_title {
+                vec2(0.0, style.calc_font_height(text_renderer))
+            } else {
+                style.calc_text_size(title_text.unwrap())
+            };
         let item_pad_outer = style.item_pad_outer();
         let item_pad_inner = style.item_pad_inner();
         let offset = self.offset;
-        let input_offset = offset + vec2(title_width + item_pad_outer.x, 0.0);
-        let input_text_offset = input_offset + item_pad_inner;
-        let mut width = title_width +
-            item_pad_outer.x + item_pad_outer.x + item_pad_outer.x;
-        let min_window_width = width + style.min_input_text_width();
-        if window_width < min_window_width {
-            width = style.min_input_text_width();
+        let input_offset = if skip_title {
+            offset
         } else {
-            width = (window_width - width).min(style.max_input_text_width());
-        }
-        let input_rect = rect(
+            offset + vec2(title_width + item_pad_outer.x, 0.0)
+        };
+        let input_width = style.calc_text_width(input_text);
+        let width = if self.has_width_override() {
+            if self.center_text() {
+                (input_width + item_pad_inner.x + item_pad_inner.x).max(self.width_override)
+            } else {
+                self.width_override
+            }
+        } else {
+            let mut width = title_width +
+                item_pad_outer.x + item_pad_outer.x + item_pad_outer.x;
+            let min_window_width = width + style.min_input_text_width();
+            if window_width < min_window_width {
+                width = style.min_input_text_width();
+            } else {
+                width = (window_width - width).min(style.max_input_text_width());
+            }
+            width
+        };
+        let mut input_rect = rect(
             Default::default(),
-            vec2(width, style.calc_text_box_height(title_text)),
+            vec2(
+                width,
+                style.calc_text_box_height(input_text).max(
+                    style.calc_text_box_height_from_text_height(style.calc_font_height(text_renderer))
+                )
+            ),
             style.rounding(),
         );
-        let input_width = style.calc_text_width(input_text);
+        let input_text_offset = input_offset + item_pad_inner;
         let text_cursor_pos_x = self.input_offsets
             .get(self.text_cursor_pos)
             .map(|v| v.x)
@@ -460,7 +671,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                 self.flags &= !Self::MOUSE_VISIBLE;
             },
             CursorMove::Right => {
-                if input_text_max_x - self.calc_cursor_offset(font_scale, self.text_cursor_pos).x < 0.0
+                if input_text_max_x -
+                    self.calc_cursor_offset(font_scale, self.text_cursor_pos).x < 0.0
                 {
                     self.input_text_offset_x = text_cursor_pos_x - input_text_max_x;
                 }
@@ -473,7 +685,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                     input_width - text_cursor_pos_x <
                     input_text_max_x - pos
                 {
-                    self.input_text_offset_x = (self.input_text_offset_x - delta).clamp(0.0, f32::INFINITY);
+                    self.input_text_offset_x =
+                        (self.input_text_offset_x - delta).clamp(0.0, f32::INFINITY);
                 }
                 self.flags &= !Self::MOUSE_VISIBLE;
             }
@@ -493,7 +706,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             if override_cursor {
                 nox.set_cursor_hide(!mouse_visible);
             }
-            if mouse_visible {
+            if mouse_visible && self.cursor_enabled() {
                 self.flags |= Self::HOVERING *
                     BoundingRect::from_position_size(
                         input_offset - vec2(error_margin, 0.0),
@@ -501,7 +714,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                     ).is_point_inside(rel_cursor_pos) as u32;
                 let input_min = input_offset.x + item_pad_inner.x;
                 let input_min_max = (input_min, input_min + input_width);
-                let input_box_min_max = (input_offset.x, input_offset.x + input_rect.max.x - item_pad_inner.x);
+                let input_box_min_max =
+                    (input_offset.x, input_offset.x + input_rect.max.x - item_pad_inner.x);
                 let text_offset = -self.input_text_offset_x;
                 let mut select_all = false;
                 if self.hovering() {
@@ -527,12 +741,13 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                     }
                 }
                 select_all &= self.selection.is_none();
-                if select_all {
+                if select_all || self.select_all() {
                     self.flags |= Self::ACTIVE;
                     self.selection = Some((0, self.input_offsets.len()));
                     self.flags |= Self::CURSOR_VISIBLE;
                     self.cursor_timer = 0.0;
                 }
+                self.flags &= !Self::SELECT_ALL;
                 if !self.hovering() && !self.held() && !window_moving && mouse_released {
                     self.flags &= !Self::ACTIVE;
                     self.flags |= Self::MOUSE_VISIBLE;
@@ -632,6 +847,16 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             self.flags |= Self::CURSOR_VISIBLE;
             self.cursor_timer = 0.0;
         }
+        if self.center_text() && !self.active() {
+            let text_width = style.calc_text_width(self.input_text_formatted.as_ref().unwrap());
+            if text_width + item_pad_inner.x + item_pad_inner.x > self.width_override {
+                self.input_text_offset_x = 0.0;
+                input_rect.max.x = style.calc_text_box_width_from_text_width(text_width);
+            } else {
+                self.input_text_offset_x =
+                    text_width * 0.5 - self.width_override * 0.5 + style.item_pad_inner().x;
+            }
+        }
         let cursor_rect_max = vec2(style.input_text_cursor_width(), title_height);
         let requires_triangulation =
             self.input_rect != input_rect ||
@@ -675,7 +900,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         }
         self.double_click_timer += nox.delta_time_secs_f32();
         UpdateResult {
-            min_widget_width: style.min_input_text_width(),
+            min_widget_width: width,
             requires_triangulation,
             cursor_in_widget,
         }
@@ -706,11 +931,19 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         vertices: &mut [shaders::Vertex],
     )
     {
-        let title_width = style.calc_text_width(
-            self.title_text.as_ref().unwrap()
-        );
-        let mut offset = self.offset + vec2(title_width + style.item_pad_outer().x, 0.0);
-        let mut target_color = style.input_text_bg_col();
+        let mut offset = if !self.skip_title() {
+            let title_width = style.calc_text_width(
+                self.title_text.as_ref().unwrap()
+            );
+            self.offset + vec2(title_width + style.item_pad_outer().x, 0.0)
+        } else {
+            self.offset
+        };
+        let mut target_color = if self.has_bg_col_override() {
+            self.bg_col_override
+        } else {
+            style.input_text_bg_col()
+        };
         set_vertex_params(vertices, self.input_rect_vertex_range, offset, target_color);
         target_color = style.input_text_active_outline_col();
         if self.active() {
@@ -783,21 +1016,36 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         let item_pad_outer = style.item_pad_outer();
         let item_pad_inner = style.item_pad_inner();
         let font_scale = vec2(style.font_scale(), style.font_scale());
-        let text_col = style.text_col();
-        render_commands.bind_pipeline(text_pipeline_id)?;
-        let pc_vertex = push_constants_vertex(
-            window_pos + self.offset + vec2(0.0, item_pad_inner.y),
-            font_scale, inv_aspect_ratio
-        );
-        let pc_fragment = text_push_constants_fragment(text_col);
-        render_text(render_commands, &self.title_text.as_ref().unwrap(),
-            pc_vertex, pc_fragment, vertex_buffer, index_buffer
-        )?;
-        let title_width = style.calc_text_width(
-            self.title_text.as_ref().unwrap()
-        );
-        let pos = window_pos + self.offset + vec2(title_width + item_pad_outer.x, 0.0);
+        let keep_title = !self.skip_title();
+        let title_width = if keep_title {
+            render_commands.bind_pipeline(text_pipeline_id)?;
+            let text_col = style.text_col();
+            let pc_vertex = push_constants_vertex(
+                window_pos + self.offset + vec2(0.0, item_pad_inner.y),
+                font_scale, inv_aspect_ratio
+            );
+            let pc_fragment = text_push_constants_fragment(text_col);
+            render_text(render_commands, &self.title_text.as_ref().unwrap(),
+                pc_vertex, pc_fragment, vertex_buffer, index_buffer
+            )?;
+            style.calc_text_width(
+                self.title_text.as_ref().unwrap()
+            )
+        } else {
+            Default::default()
+        };
+        let pos = window_pos + self.offset + 
+            if keep_title {
+                vec2(title_width + item_pad_outer.x, 0.0)
+            } else {
+                Default::default()
+            };
         render_commands.bind_pipeline(get_custom_pipeline(INPUT_TEXT_PIPELINE_HASH).unwrap())?;
+        let text_col = if self.input.is_empty() {
+            style.input_text_empty_text_color()
+        } else {
+            style.text_col()
+        };
         let pc_vertex = push_constants_vertex(
             pos + item_pad_inner - vec2(self.input_text_offset_x, 0.0),
             font_scale, inv_aspect_ratio
@@ -818,7 +1066,12 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         })?;
         let vertex_buffer_id = vertex_buffer.id();
         let index_buffer_id = index_buffer.id();
-        for text in &self.input_text.as_ref().unwrap().text {
+        let text = if self.active() {
+            self.input_text.as_ref().unwrap()
+        } else {
+            self.input_text_formatted.as_ref().unwrap()
+        };
+        for text in text {
             let vert_mem = unsafe {
                 vertex_buffer.allocate(render_commands, text.trigs.vertices.len())?
             };

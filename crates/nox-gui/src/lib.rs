@@ -6,6 +6,7 @@ mod helpers;
 mod widget;
 mod button;
 mod slider;
+mod drag_value;
 mod checkbox;
 mod color_picker;
 mod input_text;
@@ -19,6 +20,7 @@ pub use color::*;
 pub use style::*;
 pub use widget::*;
 pub use slider::*;
+pub use drag_value::*;
 pub use window::*;
 pub use workspace::*;
 
