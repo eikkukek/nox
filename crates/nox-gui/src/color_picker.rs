@@ -34,7 +34,7 @@ struct Contents<I, FontHash, HoverStyle> {
     srgba: ColorSRGBA,
     rgba: ColorRGBA,
     window_rect: Rect,
-    picker_handle: Circle,
+    picker_handle_radius: f32,
     hue_alpha_picker_handle_height: f32,
     picker_vertices: GlobalVec<ColorPickerVertex>,
     other_vertices: GlobalVec<Vertex>,
@@ -106,7 +106,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
             srgba: Default::default(),
             rgba: Default::default(),
             window_rect: Default::default(),
-            picker_handle: Default::default(),
+            picker_handle_radius: 0.0,
             hue_alpha_picker_handle_height: 0.0,
             picker_vertices,
             other_vertices: Default::default(),
@@ -513,13 +513,13 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
             self.window_rect.rounding != rounding ||
             self.outline_width != outline_width ||
             self.focused_outline_width != focused_outline_width ||
-            self.picker_handle.radius != handle_radius ||
+            self.picker_handle_radius != handle_radius ||
             self.hue_alpha_picker_handle_height != hue_alpha_picker_handle_height;
         self.window_rect.max = window_rect_max;
         self.window_rect.rounding = rounding;
         self.outline_width = outline_width;
         self.focused_outline_width = focused_outline_width;
-        self.picker_handle.radius = handle_radius;
+        self.picker_handle_radius = handle_radius;
         self.hue_alpha_picker_handle_height = hue_alpha_picker_handle_height;
         self.hue_picker_offset = hue_picker_offset;
         self.alpha_picker_offset = alpha_picker_offset;
@@ -651,7 +651,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         points.clear();
         indices_usize.clear();
         outline_points.clear();
-        self.picker_handle.to_points(16, &mut |p| { points.push(p.into()); });
+        circle(vec2(0.0, 0.0), self.picker_handle_radius).to_points(16, &mut |p| { points.push(p.into()); });
         nox_geom::shapes::outline_points(
             &points,
             self.focused_outline_width,

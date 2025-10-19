@@ -135,6 +135,11 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
+    fn animation_curve_size(&self) -> Vec2 {
+        vec2(0.4, 0.3)
+    }
+
+    #[inline(always)]
     fn alpha_tile_width(&self) -> f32 {
         0.3 / 20.0
     }
@@ -199,7 +204,7 @@ pub trait WindowStyle<FontHash> {
         where 
             FontHash: Clone + Eq + core::hash::Hash,
     {
-        text_renderer.font_height(self.font_regular()).unwrap_or_default() as f32 *
+        text_renderer.font_height(self.font_regular()).unwrap_or_default() *
             self.font_scale()
     }
 

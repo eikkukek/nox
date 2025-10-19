@@ -146,7 +146,7 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
             inv_aspect_ratio: 1.0,
             flags: 0,
             min_sample_shading: 0.2,
-            output_samples: Default::default(),
+            output_samples: MSAA::None,
             output_format: Default::default(),
         }
     }
@@ -161,8 +161,13 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
         alloc: &impl Allocator,
     ) -> Result<(), Error>
     {
-        if self.output_samples == output_samples && self.output_format != output_format {
+        if self.output_samples == output_samples && self.output_format == output_format {
             return Ok(())
+        }
+        if output_samples == MSAA::None {
+            return Err(
+                Error::UserError("nox_gui: output samples must be defined".into())
+            )
         }
         self.output_samples = output_samples;
         self.output_format = output_format;

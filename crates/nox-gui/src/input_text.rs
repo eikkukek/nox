@@ -20,7 +20,7 @@ use crate::*;
 
 pub struct InputText<TitleText, I, FontHash, Style, HoverStyle> {
     offset: Vec2,
-    title_text: TitleText,
+    title: TitleText,
     input: CompactString,
     input_text: Option<RenderedText>,
     input_text_formatted: Option<RenderedText>,
@@ -77,7 +77,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> InputText<TitleText, I, FontHash
     pub fn new(title: &str) -> Self {
         Self {
             offset: Default::default(),
-            title_text: TitleText::new(title),
+            title: TitleText::new(title),
             input_text: None,
             input_text_formatted: None,
             format_input: Box::new(|fmt, input| -> core::fmt::Result {
@@ -111,7 +111,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> InputText<TitleText, I, FontHash
             if self.skip_title() {
                 Default::default()
             } else {
-                let text_width = self.title_text.get_text_width();
+                let text_width = self.title.get_text_width();
                 let title_width = text_width * style.font_scale();
                 title_width + style.item_pad_outer().x
             },
@@ -587,8 +587,8 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         }
         let has_format_error = self.has_format_error();
         let skip_title = self.skip_title();
-        let title_text = if !skip_title {
-            self.title_text.get_text(text_renderer, style.font_regular())
+        let title = if !skip_title {
+            self.title.get_text(text_renderer, style.font_regular())
         } else {
             None
         };
@@ -628,7 +628,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             if skip_title {
                 vec2(0.0, style.calc_font_height(text_renderer))
             } else {
-                style.calc_text_size(title_text.unwrap())
+                style.calc_text_size(title.unwrap())
             };
         let item_pad_outer = style.item_pad_outer();
         let item_pad_inner = style.item_pad_inner();
@@ -914,13 +914,10 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         }
         self.double_click_timer += nox.delta_time_secs_f32();
         if self.has_width_override() && !self.skip_title() {
-            width += self.title_text.get_text_width() * font_scale + item_pad_outer.x;
+            width += self.title.get_text_width() * font_scale + item_pad_outer.x;
         }
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
         self.flags |= Self::ACTIVATED_LAST_FRAME * (!active_this_frame && self.active()) as u32;
-        if self.activated_last_frame() {
-            println!("here");
-        }
         UpdateResult {
             min_widget_width: width,
             requires_triangulation,
@@ -954,7 +951,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
     )
     {
         let mut offset = if !self.skip_title() {
-            let title_width = style.font_scale() * self.title_text.get_text_width();
+            let title_width = style.font_scale() * self.title.get_text_width();
             self.offset + vec2(title_width + style.item_pad_outer().x, 0.0)
         } else {
             self.offset
@@ -1040,12 +1037,12 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         let title_width = if keep_title {
             render_commands.bind_pipeline(text_pipeline_id)?;
             let text_col = style.text_col();
-            self.title_text.render(
+            self.title.render(
                 render_commands,
                 window_pos + self.offset + vec2(0.0, item_pad_inner.y),
                 text_col, font_scale, inv_aspect_ratio, vertex_buffer, index_buffer
             )?;
-            style.font_scale() * self.title_text.get_text_width()
+            style.font_scale() * self.title.get_text_width()
         } else {
             Default::default()
         };

@@ -989,7 +989,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             self.prev_active_widgets
                 .as_mut()
                 .unwrap_unchecked()
-                .move_from_vec(self.active_widgets.as_mut().unwrap_unchecked()).unwrap();
+                .move_from_vec(self.active_widgets.as_mut().unwrap_unchecked());
         }
         Ok(())
     }

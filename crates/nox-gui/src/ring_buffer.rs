@@ -75,7 +75,7 @@ impl RingBuf {
             offset = 0;
             new_tail = size;
         }
-        let oldest_region = self.frame_regions.back().unwrap();
+        let oldest_region = self.frame_regions.last().unwrap();
         if tail < oldest_region.tail && tail > oldest_region.head
         {
             render_commands.wait_for_previous_frame()?;

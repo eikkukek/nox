@@ -1,3 +1,7 @@
+use core::ops::Deref;
+
+use nox_mem::vec_types::{GlobalVec, Vector};
+
 use crate::{fn_2d::line_intersection, *};
 
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
@@ -23,8 +27,8 @@ pub fn quad(
 impl Quad {
 
     pub fn eval(&self, t: f32) -> Vec2 {
-        let t2 = 1.0 - t;
-        t2 * t2 * self.start + 2.0 * t2 * t * self.mid + t * t * self.end
+        let tm1 = 1.0 - t;
+        tm1 * tm1 * self.start + 2.0 * tm1 * t * self.mid + t * t * self.end
     }
 
     pub fn flatten<F>(
@@ -84,33 +88,43 @@ impl Quad {
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
 pub struct Cubic {
     pub start: Vec2,
-    pub mid0: Vec2,
-    pub mid1: Vec2,
+    pub mid_0: Vec2,
+    pub mid_1: Vec2,
     pub end: Vec2,
 }
 
 #[inline(always)]
 pub fn cubic(
     start: Vec2,
-    mid0: Vec2,
-    mid1: Vec2,
+    mid_0: Vec2,
+    mid_1: Vec2,
     end: Vec2
 ) -> Cubic
 {
     Cubic {
         start,
-        mid0,
-        mid1,
+        mid_0,
+        mid_1,
         end,
     }
 }
 
 impl Cubic {
 
+    pub fn eval(&self, t: f32) -> Vec2 {
+        let tm1 = 1.0 - t;
+        let tm1_2 = tm1 * tm1;
+        let t_2 = t * t;
+        tm1_2 * tm1 * self.start +
+        3.0 * tm1_2 * t * self.mid_0 +
+        3.0 * tm1 * t_2 * self.mid_1 +
+        t_2 * t * self.end
+    }
+
     pub fn split(&self, t: f32) -> (Self, Self) {
-        let q0 = self.start.lerp(self.mid0, t);
-        let q1 = self.mid0.lerp(self.mid1, t);
-        let q2 = self.mid1.lerp(self.end, t);
+        let q0 = self.start.lerp(self.mid_0, t);
+        let q1 = self.mid_0.lerp(self.mid_1, t);
+        let q2 = self.mid_1.lerp(self.end, t);
 
         let r0 = q0.lerp(q1, t);
         let r1 = q1.lerp(q2, t);
@@ -123,7 +137,7 @@ impl Cubic {
     }
 
     pub fn to_quad(&self) -> Option<Quad> {
-        let mid = line_intersection(self.start, self.mid0, self.mid1, self.end)?;
+        let mid = line_intersection(self.start, self.mid_0, self.mid_1, self.end)?;
         Some(quad(self.start, mid, self.end))
     }
 
@@ -137,7 +151,7 @@ impl Cubic {
     {
         const N_MUL: f32 = 36.0 * 36.0 / 3.0;
         const N_POW: f32 = 1.0 / 6.0;
-        let err = self.end - self.mid1 * 3.0 + self.mid0 * 3.0 - self.start;
+        let err = self.end - self.mid_1 * 3.0 + self.mid_0 * 3.0 - self.start;
         let mut n = (err.sqr_mag() / (N_MUL * tolerance * tolerance)).powf(N_POW) as u32;
         if n == 0 {
             collect(self.start);
@@ -152,7 +166,7 @@ impl Cubic {
             }
         }
         let mut current = *self;
-        for i in (1..n).rev() {
+        for i in (1..=n).rev() {
             let t = 1.0 / i as f32;
             let (left, right) = current.split(t);
             if let Some(quad) = left.to_quad() {
@@ -160,5 +174,206 @@ impl Cubic {
             }
             current = right;
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct AnimationCurve {
+    cubics: GlobalVec<Cubic>,
+    min_y: f32,
+    max_y: f32,
+}
+
+impl AnimationCurve {
+
+    pub fn new(c: Cubic) -> Self {
+        let c =
+            if c.start.x <= c.end.x {
+                cubic(
+                    c.start,
+                    c.mid_0.clamp(c.start, c.end),
+                    c.mid_1.clamp(c.start, c.end),
+                    c.start
+                )
+            } else {
+                cubic(
+                    c.end,
+                    c.mid_0.clamp(c.end, c.start),
+                    c.mid_1.clamp(c.end, c.start),
+                    c.start,
+                )
+            };
+        Self {
+            cubics: GlobalVec::with_len(1, c),
+            min_y: c.start.y.min(c.mid_0.y).min(c.mid_1.y).min(c.end.y),
+            max_y: c.start.y.max(c.mid_0.y).max(c.mid_1.y).max(c.end.y),
+        }
+    }
+
+    #[inline(always)]
+    pub fn min_coords(&self) -> Vec2 {
+        vec2(self.cubics[0].start.x, self.min_y)
+    }
+
+    #[inline(always)]
+    pub fn max_coords(&self) -> Vec2 {
+        vec2(self.cubics.last().unwrap().end.x, self.max_y)
+    }
+
+    pub fn add_point(
+        &mut self,
+        point: Vec2,
+        tolerance: f32,
+    ) -> &mut Self
+    {
+        let min_x = self.min_coords().x;
+        let max_x = self.max_coords().x;
+        if (point.x - min_x).abs() < f32::EPSILON ||
+            (point.x - max_x).abs() < f32::EPSILON
+        {
+            return self
+        }
+        if point.x < min_x {
+            let first = self.cubics[0];
+            let d = first.start - point;
+            self.cubics.insert(0, cubic(point, d * 0.25, d * 0.75, first.start));
+            self.min_y = self.min_y.min(point.y);
+            self.max_y = self.max_y.max(point.y);
+            return self
+        }
+        if point.x > max_x {
+            let last = self.cubics.last().unwrap();
+            let d = point - last.end;
+            self.cubics.push(cubic(last.end, d * 0.25, d * 0.75, point));
+            self.min_y = self.min_y.min(point.y);
+            self.max_y = self.max_y.max(point.y);
+            return self
+        }
+        let mut idx = None;
+        for (i, cubic) in self.cubics.iter().enumerate() {
+            if cubic.start.x > point.x {
+                idx = Some(i);
+            }
+        }
+        let idx = idx.unwrap();
+        let c = self.cubics[idx];
+        const N_MUL: f32 = 36.0 * 36.0 / 3.0;
+        const N_POW: f32 = 1.0 / 6.0;
+        let err = c.end - c.mid_1 * 3.0 + c.mid_0 * 3.0 - c.start;
+        let n = (err.sqr_mag() / (N_MUL * tolerance * tolerance)).powf(N_POW) as u32;
+        for i in (1..=n).rev() {
+            let t = 1.0 / i as f32;
+            if c.eval(t).x > point.x {
+                let (left, right) = c.split(t);
+                self.cubics[idx] = left;
+                self.cubics.insert(idx + 1, right);
+                return self
+            }
+        }
+        return self
+    }
+
+    #[inline(always)]
+    pub fn get_cubic(&self, index: usize) -> Cubic {
+        self.cubics[index]
+    }
+
+    #[inline(always)]
+    pub fn set_start(&mut self, index: usize, mut pos: Vec2) -> Vec2 {
+        if index != 0 {
+            let c = self.cubics[index];
+            let prev = &mut self.cubics[index - 1];
+            pos.x = pos.x.clamp(prev.mid_0.x.max(prev.mid_1.x), c.mid_0.x.min(c.mid_1.x));
+            prev.end = pos;
+            self.cubics[index].start = pos;
+            self.min_y = self.min_y.min(pos.y);
+            self.max_y = self.max_y.max(pos.y);
+            pos
+        } else {
+            let c = &mut self.cubics[index];
+            pos.x = pos.x.clamp(f32::MIN, c.mid_0.x.min(c.mid_1.x));
+            c.start = pos;
+            self.min_y = self.min_y.min(pos.y);
+            self.max_y = self.max_y.max(pos.y);
+            pos
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_mid_0(&mut self, index: usize, mut pos: Vec2) -> Vec2 {
+        let c = &mut self.cubics[index];
+        pos.x = pos.x.clamp(c.start.x, c.end.x);
+        c.mid_0 = pos;
+        self.min_y = self.min_y.min(pos.y);
+        self.max_y = self.max_y.max(pos.y);
+        pos
+    }
+
+    #[inline(always)]
+    pub fn set_mid_1(&mut self, index: usize, mut pos: Vec2) -> Vec2 {
+        let c = &mut self.cubics[index];
+        pos.x = pos.x.clamp(c.start.x, c.end.x);
+        c.mid_1 = pos;
+        self.min_y = self.min_y.min(pos.y);
+        self.max_y = self.max_y.max(pos.y);
+        pos
+    }
+
+    #[inline(always)]
+    pub fn set_end(&mut self, index: usize, mut pos: Vec2) -> Vec2 {
+        if index != self.cubics.len() - 1 {
+            let c = self.cubics[index];
+            let next = &mut self.cubics[index + 1];
+            pos.x = pos.x.clamp(c.mid_0.x.max(c.mid_1.x), next.mid_0.x.min(next.mid_1.x));
+            next.start = pos;
+            self.cubics[index].end = pos;
+            self.min_y = self.min_y.min(pos.y);
+            self.max_y = self.max_y.max(pos.y);
+            pos
+        } else {
+            let c = &mut self.cubics[index];
+            pos.x = pos.x.clamp(c.mid_0.x.max(c.mid_1.x), f32::MAX);
+            c.end = pos;
+            self.min_y = self.min_y.min(pos.y);
+            self.max_y = self.max_y.max(pos.y);
+            pos
+        }
+    }
+
+    pub fn clone_from_other(&mut self, other: &Self) {
+        self.cubics.clone_from_slice(&other.cubics);
+    }
+
+    pub fn iter(&self) -> core::slice::Iter<Cubic> {
+        self.cubics.iter()
+    }
+}
+
+impl<'c> IntoIterator for &'c AnimationCurve {
+
+    type Item = &'c Cubic;
+    type IntoIter = core::slice::Iter<'c, Cubic>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'c> IntoIterator for &'c mut AnimationCurve {
+
+    type Item = &'c Cubic;
+    type IntoIter = core::slice::Iter<'c, Cubic>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl Deref for AnimationCurve {
+
+    type Target = GlobalVec<Cubic>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cubics
     }
 }
