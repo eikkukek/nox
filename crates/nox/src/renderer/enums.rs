@@ -4,6 +4,7 @@ use nox_mem::AsRaw;
 #[repr(u32)]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
 pub enum MSAA {
+    None = 0,
     #[default]
     X1 = vk::SampleCountFlags::TYPE_1.as_raw(),
     X2 = vk::SampleCountFlags::TYPE_2.as_raw(),

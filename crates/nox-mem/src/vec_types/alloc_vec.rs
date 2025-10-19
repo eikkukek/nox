@@ -349,6 +349,22 @@ impl<T> GlobalVec<T> {
     {
         <Self as Vector<T>>::append_map(self, slice, f).unwrap()
     }
+
+    #[inline(always)]
+    pub fn clone_from_slice(&mut self, from: &[T])
+        where
+            T: Clone
+    {
+        <Self as Vector<T>>::clone_from_slice(self, from).unwrap();
+    }
+
+    #[inline(always)]
+    pub fn move_from_vec<V>(&mut self, from: &mut V)
+        where
+            V: Vector<T>
+    {
+        <Self as Vector<T>>::move_from_vec(self, from).unwrap();
+    }
 }
 
 impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityPol, IsGlobal>
@@ -540,7 +556,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
     }
 
     #[inline(always)]
-    fn back(&self) -> Option<&T> {
+    fn last(&self) -> Option<&T> {
         if self.len == 0 {
             None
         }
@@ -554,7 +570,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
     }
 
     #[inline(always)]
-    fn back_mut(&mut self) -> Option<&mut T> {
+    fn last_mut(&mut self) -> Option<&mut T> {
         if self.len == 0 {
             None
         }
@@ -769,7 +785,7 @@ impl_traits!{
                 value.fmt(f)?;
                 <str as Display>::fmt(&", ", f)?;
             }
-            self.back().unwrap().fmt(f)?;
+            self.last().unwrap().fmt(f)?;
             <char as Display>::fmt(&']', f)
         }
     ,

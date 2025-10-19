@@ -81,7 +81,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                     if word == " " {
                         continue
                     }
-                    if shapes.back().unwrap().1 == " " {
+                    if shapes.last().unwrap().1 == " " {
                         pen_x -= space;
                     }
                     shapes[line_start].0 =

@@ -54,9 +54,9 @@ pub trait Vector<T>:
 
     fn pop(&mut self) -> Option<T>;
 
-    fn back(&self) -> Option<&T>;
+    fn last(&self) -> Option<&T>;
 
-    fn back_mut(&mut self) -> Option<&mut T>;
+    fn last_mut(&mut self) -> Option<&mut T>;
 
     fn insert(&mut self, index: usize, value: T) -> Result<&mut T, CapacityError>;
 

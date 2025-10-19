@@ -59,6 +59,7 @@ pub struct RenderCommands<'a>{
     tmp_alloc: &'a ArenaAlloc,
     semaphore: vk::Semaphore,
     semaphore_value: u64,
+    frame_buffer_size: Dimensions,
     buffered_frames: u32,
 }
 
@@ -72,6 +73,7 @@ impl<'a> RenderCommands<'a> {
         semaphore: vk::Semaphore,
         semaphore_value: u64,
         tmp_alloc: &'a ArenaAlloc,
+        frame_buffer_size: Dimensions,
         buffered_frames: u32,
     ) -> Self
     {
@@ -84,6 +86,7 @@ impl<'a> RenderCommands<'a> {
             semaphore,
             semaphore_value,
             tmp_alloc,
+            frame_buffer_size,
             buffered_frames,
         }
     }
@@ -99,6 +102,11 @@ impl<'a> RenderCommands<'a> {
     #[inline(always)]
     pub fn buffered_frames(&self) -> u32 {
         self.buffered_frames
+    }
+
+    #[inline(always)]
+    pub fn frame_buffer_size(&self) -> Dimensions {
+        self.frame_buffer_size
     }
 
     #[inline(always)]

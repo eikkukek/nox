@@ -573,6 +573,7 @@ impl<'a> Renderer<'a> {
                 compute_state.semaphore,
                 compute_state.timeline_value,
                 &self.tmp_alloc,
+                frame_data.extent.into(),
                 self.buffered_frames,
             );
             frame_graph

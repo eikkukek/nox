@@ -201,7 +201,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     }
 
     #[inline(always)]
-    fn back(&self) -> Option<&T> {
+    fn last(&self) -> Option<&T> {
         if self.len == 0 {
             None
         }
@@ -211,7 +211,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     }
 
     #[inline(always)]
-    fn back_mut(&mut self) -> Option<&mut T> {
+    fn last_mut(&mut self) -> Option<&mut T> {
          if self.len == 0 {
             None
         }
@@ -413,7 +413,7 @@ impl_traits! {
                 value.fmt(f)?;
                 <str as Display>::fmt(&", ", f)?;
             }
-            self.back().unwrap().fmt(f)?;
+            self.last().unwrap().fmt(f)?;
             <char as Display>::fmt(&']', f)
         }
     ,
