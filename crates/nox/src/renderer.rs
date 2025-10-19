@@ -164,7 +164,7 @@ pub struct ComputeState {
     timeline_value: u64,
 }
 
-pub struct Renderer<'a> {
+pub(crate) struct Renderer<'a> {
     transfer_commands: GlobalVec<TransferCommands>,
     main_thread_context: ThreadContext,
     frame_states: ArrayVec<Rc<TokenCell<FrameState, FrameToken>>, {MAX_BUFFERED_FRAMES as usize}>,
@@ -182,7 +182,7 @@ pub struct Renderer<'a> {
 
 impl<'a> Renderer<'a> {
 
-    pub(crate) fn new(
+    pub fn new(
         window: &Window,
         app_name: &AppName,
         app_version: Version,

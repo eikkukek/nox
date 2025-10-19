@@ -124,6 +124,16 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
+    pub fn window_size(&self) -> (u32, u32) {
+        self.window_size
+    }
+
+    #[inline(always)]
+    pub fn window_size_f32(&self) -> (f32, f32) {
+        (self.window_size.0 as f32, self.window_size.1 as f32)
+    }
+
+    #[inline(always)]
     pub fn aspect_ratio(&self) -> f64 {
         self.window_size.0 as f64 /
         self.window_size.1 as f64
