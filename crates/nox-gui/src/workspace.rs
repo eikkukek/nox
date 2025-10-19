@@ -95,6 +95,7 @@ pub struct Workspace<'a, I, FontHash, Style, HoverStyle>
     ring_buffer_size: usize,
     prev_cursor_position: Vec2,
     inv_aspect_ratio: f32,
+    unit_scale: f32,
     flags: u32,
     min_sample_shading: f32,
     output_samples: MSAA,
@@ -143,7 +144,8 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
             frame: 0,
             ring_buffer_size: 1 << 23,
             prev_cursor_position: Default::default(),
-            inv_aspect_ratio: 1.0,
+            inv_aspect_ratio: 0.0,
+            unit_scale: 0.0,
             flags: 0,
             min_sample_shading: 0.2,
             output_samples: MSAA::None,
@@ -470,10 +472,14 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
         });
         let aspect_ratio = nox.aspect_ratio() as f32;
         self.inv_aspect_ratio = 1.0 / aspect_ratio;
+        let window_size: Vec2 = nox.window_size_f32().into();
+        let unit_scale = self.style.pixels_per_unit() / window_size.y;
+        self.unit_scale = unit_scale;
         let mut cursor_pos: Vec2 = nox.normalized_cursor_position_f32().into();
         cursor_pos *= 2.0;
         cursor_pos -= vec2(1.0, 1.0);
         cursor_pos.x *= aspect_ratio;
+        cursor_pos /= unit_scale;
         let delta_cursor_pos = cursor_pos - self.prev_cursor_position;
         self.prev_cursor_position = cursor_pos;
         let mut cursor_in_some_window = false;
@@ -488,12 +494,16 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                 cursor_pos,
                 delta_cursor_pos,
                 cursor_in_some_window,
+                window_size,
+                aspect_ratio,
+                unit_scale,
             );
             if cursor_in_window && nox.was_mouse_button_pressed(MouseButton::Left) {
                 window_pressed = Some(i);
             }
             cursor_in_some_window |= cursor_in_window;
             window.triangulate();
+            window.refresh_position(aspect_ratio, unit_scale, window_size);
         }
         if let Some(idx) = window_pressed {
             let id = self.active_windows.remove(idx).unwrap();
@@ -525,6 +535,7 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
             ))
         };
         let inv_aspect_ratio = self.inv_aspect_ratio;
+        let unit_scale = self.unit_scale;
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
         for id in &self.active_windows {
@@ -537,6 +548,7 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                 vertex_buffer,
                 index_buffer,
                 inv_aspect_ratio,
+                unit_scale,
                 &mut |hash| {
                     self.custom_pipelines
                         .get(&CompactString::new(hash))

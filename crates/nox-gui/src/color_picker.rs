@@ -773,6 +773,7 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error> {
         let picker_vertex_count = self.picker_vertices.len();
@@ -802,7 +803,8 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
         let pc_vertex = push_constants_vertex(
             window_pos,
             vec2(1.0, 1.0),
-            inv_aspect_ratio
+            inv_aspect_ratio,
+            unit_scale,
         );
         render_commands.push_constants(|_| unsafe {
             pc_vertex.as_bytes()
@@ -829,6 +831,7 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
             window_pos + offset + item_pad_outer,
             picker_size,
             inv_aspect_ratio,
+            unit_scale,
         );
         let pc_fragment = color_picker_push_constants_fragments(
             hsva.hue,
@@ -858,7 +861,8 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
         let pc_vertex = push_constants_vertex(
             window_pos + offset + vec2(0.0, picker_size.y + item_pad_outer.y) + item_pad_outer,
             vec2(picker_size.x, hue_picker_size_y),
-            inv_aspect_ratio
+            inv_aspect_ratio,
+            unit_scale,
         );
         render_commands.push_constants(|_| unsafe {
             pc_vertex.as_bytes()
@@ -873,7 +877,8 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
             window_pos + offset + vec2(0.0, picker_size.y + hue_picker_size_y + item_pad_outer.y + item_pad_outer.y) +
                 item_pad_outer,
             vec2(picker_size.x, hue_picker_size_y),
-            inv_aspect_ratio
+            inv_aspect_ratio,
+            unit_scale,
         );
         let pc_fragment = aplha_picker_push_constants_fragment(
             hsva, picker_size.x, style.alpha_tile_width()
@@ -894,7 +899,8 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
         let pc_vertex = push_constants_vertex(
             window_pos,
             vec2(1.0, 1.0),
-            inv_aspect_ratio
+            inv_aspect_ratio,
+            unit_scale,
         );
         render_commands.push_constants(|_| unsafe {
             pc_vertex.as_bytes()
@@ -916,7 +922,7 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
             drag_value.render_commands(
                 render_commands, style, base_pipeline_id,
                 text_pipeline_id, vertex_buffer, index_buffer, window_pos,
-                inv_aspect_ratio, get_custom_pipeline
+                inv_aspect_ratio, unit_scale, get_custom_pipeline,
             )?;
             Ok(())
         };
@@ -1150,6 +1156,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
@@ -1158,6 +1165,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             window_pos + self.offset,
             vec2(style.font_scale(), style.font_scale()),
             inv_aspect_ratio,
+            unit_scale,
         );
         let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands, self.title_text.as_ref().unwrap(),

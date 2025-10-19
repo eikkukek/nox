@@ -1,5 +1,5 @@
 use core::{
-    ops::{Add, AddAssign, Sub, SubAssign, Mul, MulAssign, Neg},
+    ops::{Add, AddAssign, Sub, SubAssign, Mul, MulAssign, Div, DivAssign, Neg},
     fmt::Display,
 };
 
@@ -178,6 +178,26 @@ impl Neg for Vec2 {
             x: -self.x,
             y: -self.y,
         }
+    }
+}
+
+impl Div<f32> for Vec2 {
+
+    type Output = Vec2;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        Self {
+            x: self.x / rhs,
+            y: self.y / rhs,
+        }
+    }
+}
+
+impl DivAssign<f32> for Vec2 {
+
+    fn div_assign(&mut self, rhs: f32) {
+        self.x /= rhs;
+        self.y /= rhs;
     }
 }
 

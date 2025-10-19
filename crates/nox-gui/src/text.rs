@@ -33,6 +33,7 @@ pub trait Text {
         color: ColorSRGBA,
         font_scale: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
     ) -> Result<(), Error>;
@@ -102,6 +103,7 @@ impl Text for DefaultText {
         color: ColorSRGBA,
         font_scale: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
     ) -> Result<(), Error>
@@ -110,6 +112,7 @@ impl Text for DefaultText {
             offset,
             font_scale,
             inv_aspect_ratio,
+            unit_scale,
         );
         let pc_fragment = text_push_constants_fragment(color);
         render_text(
@@ -165,6 +168,7 @@ impl Text for EmptyText {
         _color: ColorSRGBA,
         _font_scale: Vec2,
         _inv_aspect_ratio: f32,
+        _unit_scale: f32,
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
     ) -> Result<(), Error>

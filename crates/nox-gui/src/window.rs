@@ -116,6 +116,7 @@ impl HoverWindow {
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
     ) -> Result<(), Error>
     {
         let vert_count = self.vertices.len();
@@ -135,7 +136,7 @@ impl HoverWindow {
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
         }
         render_commands.bind_pipeline(base_pipeline_id)?;
-        let pc_vertex = push_constants_vertex(self.position, vec2(1.0, 1.0), inv_aspect_ratio);
+        let pc_vertex = push_constants_vertex(self.position, vec2(1.0, 1.0), inv_aspect_ratio, unit_scale);
         render_commands.push_constants(|_| unsafe {
             pc_vertex.as_bytes()
         })?;
@@ -153,7 +154,8 @@ impl HoverWindow {
         let pc_vertex = push_constants_vertex(
             self.position + style.item_pad_inner(),
             vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio
+            inv_aspect_ratio,
+            unit_scale,
         );
         let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands, &self.rendered_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
@@ -188,9 +190,11 @@ pub(crate) struct Window<I, FontHash, Style, HoverStyle>
     hover_window: Option<HoverWindow>,
     last_triangulation: u64,
     last_frame: u64,
+    min_width: f32,
     min_height: f32,
     focused_outline_width: f32,
     outline_width: f32,
+    distance_from_edge: Vec2,
     flags: u32,
     _marker: PhantomData<(Style, HoverStyle)>,
 }
@@ -214,6 +218,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
     const RESIZE_BLOCKED_COL: u32 = 0x100;
     const RESIZE_BLOCKED_ROW: u32 = 0x200;
     const HOVER_WINDOW_ACTIVE: u32 = 0x400;
+    const APPEARING: u32 = 0x800;
 
     pub(crate) fn new(
         title: &str,
@@ -247,10 +252,12 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             hover_window: Some(HoverWindow::new()),
             last_triangulation: 0,
             last_frame: 0,
+            min_width: 0.0,
             min_height: 0.0,
             focused_outline_width: 0.0,
             outline_width: 0.0,
-            flags: Self::REQUIRES_TRIANGULATION,
+            distance_from_edge: Default::default(),
+            flags: Self::REQUIRES_TRIANGULATION | Self::APPEARING,
             _marker: PhantomData,
         }
     }
@@ -323,6 +330,11 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
     #[inline(always)]
     fn resize_blocked_row(&self) -> bool {
         self.flags & Self::RESIZE_BLOCKED_ROW == Self::RESIZE_BLOCKED_ROW
+    }
+
+    #[inline(always)]
+    fn appearing(&self) -> bool {
+        self.flags & Self::APPEARING == Self::APPEARING
     }
 
     #[inline(always)]
@@ -430,6 +442,9 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         cursor_in_other_window: bool,
+        win_size: Vec2,
+        aspect_ratio: f32,
+        unit_scale: f32,
     ) -> bool
         where 
             I: Interface,
@@ -509,6 +524,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         self.hover_window = Some(hover_window);
         let title_text = self.title_text.as_ref().unwrap();
         min_width = min_width.max(style.calc_text_box_width(title_text) + style.item_pad_outer().x);
+        self.min_width = min_width;
         if self.main_rect.max.x < min_width {
             self.main_rect.max.x = min_width;
         }
@@ -520,6 +536,11 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             } else {
                 self.position += delta_cursor_pos;
             }
+        }
+        if self.held() || self.appearing() {
+            let norm_pos = pos_to_norm_pos(self.position, unit_scale, aspect_ratio);
+            self.distance_from_edge = vec2(norm_pos.x * win_size.x, norm_pos.y * win_size.y);
+            self.flags &= !Self::APPEARING;
         }
         if self.resize_left() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
@@ -718,6 +739,47 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
     }
 
     #[inline(always)]
+    pub fn refresh_position(&mut self, aspect_ratio: f32, unit_scale: f32, win_size: Vec2) {
+        // pos = (2.0 * orig_pos - 1.0) * aspect_ratio.x / unit_scale   | * unit scale
+        // pos * unit_scale = (2.0 * orig_pos - 1.0) * aspect_ratio.x   | / aspect_ratio.x
+        // pos * unit_scale / aspect_ratio.x = 2.0 * orig_pos - 1.0     | + 1.0 
+        // pos * unit_scale / aspect_ratio.x + 1.0 = orig_pos * 2.0     | / 2.0     
+        // orig_pos = (pos * unit_scale / aspect_ratio.x + 1.0) / 2.0
+        if !self.held() && !self.resize_left() && !self.resize_top() {
+            let distance_from_edge = self.distance_from_edge;
+            let dist = vec2(distance_from_edge.x / win_size.x, distance_from_edge.y / win_size.y);
+            self.position = norm_pos_to_pos(dist, unit_scale, aspect_ratio);
+        }
+        let mut norm_pos = self.position * unit_scale;
+        norm_pos.x /= aspect_ratio;
+        norm_pos = (norm_pos + vec2(1.0, 1.0)) * 0.5;
+        let mut norm_size = self.main_rect.max * unit_scale;
+        norm_size.x /= aspect_ratio;
+        norm_size = norm_size * 0.5;
+        if norm_size.x >= 1.0 || norm_size.y >= 1.0 {
+            let mut new_size = norm_size.clamp(vec2(0.0, 0.0), vec2(1.0, 1.0));
+            new_size *= 2.0;
+            new_size.x *= aspect_ratio;
+            new_size /= unit_scale;
+            if new_size.x >= self.min_width && new_size.y >= self.min_height {
+                self.main_rect.max = new_size;
+                norm_size = new_size * unit_scale;
+                norm_size.x /= aspect_ratio;
+                norm_size = norm_size * 0.5;
+                self.flags |= Self::REQUIRES_TRIANGULATION;
+            }
+        }
+        if norm_size.x < 1.0 && norm_size.y < 1.0 && (norm_pos.x < 0.0 || norm_pos.y < 0.0 ||
+            norm_pos.x + norm_size.x >= 1.0 || norm_pos.y + norm_size.y >= 1.0)
+        {
+            norm_pos = norm_pos.clamp(vec2(0.0, 0.0), vec2(1.0 - norm_size.x, 1.0 - norm_size.y));
+            let new_pos = norm_pos_to_pos(norm_pos, unit_scale, aspect_ratio);
+            self.position = new_pos;
+        } 
+        self.distance_from_edge = vec2(norm_pos.x * win_size.x, norm_pos.y * win_size.y);
+    }
+
+    #[inline(always)]
     pub fn triangulate(&mut self) {
         if self.requires_triangulation() {
             let new_triangulation = self.last_triangulation + 1;
@@ -808,6 +870,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         get_custom_pipeline: &mut impl FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error>
     {
@@ -915,6 +978,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             self.position,
             vec2(1.0, 1.0),
             inv_aspect_ratio,
+            unit_scale,
         );
         render_commands.push_constants(|_| unsafe {
             pc_vertex.as_bytes()
@@ -934,6 +998,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             self.position + vec2(style.item_pad_outer().x, style.item_pad_inner().y),
             vec2(style.font_scale(), style.font_scale()),
             inv_aspect_ratio,
+            unit_scale,
         );
         let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands, self.title_text.as_ref().unwrap(),
@@ -951,6 +1016,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 index_buffer,
                 window_pos,
                 inv_aspect_ratio,
+                unit_scale,
                 get_custom_pipeline,
             )? {
                 on_top_contents = Some(contents);
@@ -966,6 +1032,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 index_buffer,
                 window_pos,
                 inv_aspect_ratio,
+                unit_scale,
                 get_custom_pipeline,
             )?;
         }
@@ -982,7 +1049,8 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 text_pipeline_id,
                 vertex_buffer,
                 index_buffer,
-                inv_aspect_ratio
+                inv_aspect_ratio,
+                unit_scale,
             )?;
         }
         unsafe {

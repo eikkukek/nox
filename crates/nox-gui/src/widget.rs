@@ -33,6 +33,7 @@ pub trait HoverContents<I, FontHash, HoverStyle: WindowStyle<FontHash>>
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error>;
 }
@@ -111,6 +112,7 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>;
 

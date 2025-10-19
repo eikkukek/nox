@@ -996,6 +996,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
@@ -1015,7 +1016,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
                     .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), 6);
             }
             render_commands.bind_pipeline(base_pipeline_id)?;
-            let pc_vertex = push_constants_vertex(window_pos, vec2(1.0, 1.0), inv_aspect_ratio);
+            let pc_vertex = push_constants_vertex(window_pos, vec2(1.0, 1.0), inv_aspect_ratio, unit_scale);
             render_commands.push_constants(|_| unsafe {
                 pc_vertex.as_bytes()
             })?;
@@ -1040,7 +1041,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             self.title.render(
                 render_commands,
                 window_pos + self.offset + vec2(0.0, item_pad_inner.y),
-                text_col, font_scale, inv_aspect_ratio, vertex_buffer, index_buffer
+                text_col, font_scale, inv_aspect_ratio, unit_scale, vertex_buffer, index_buffer
             )?;
             style.font_scale() * self.title.get_text_width()
         } else {
@@ -1060,7 +1061,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         };
         let pc_vertex = push_constants_vertex(
             pos + item_pad_inner - vec2(self.input_text_offset_x, 0.0),
-            font_scale, inv_aspect_ratio
+            font_scale, inv_aspect_ratio, unit_scale,
         );
         let pc_fragment = input_text_push_constants_fragment(
             text_col,

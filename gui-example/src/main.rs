@@ -71,7 +71,7 @@ impl<'a> Interface for Example<'a> {
             "example",
             Default::default(),
             [540, 540],
-            false,
+            true,
         )
     }
 
@@ -80,6 +80,7 @@ impl<'a> Interface for Example<'a> {
         _nox: &mut Nox<Self>,
         renderer: &mut RendererContext,
     ) -> Result<(), Error> {
+
         renderer.edit_resources(|r| {
             self.output_format = r
                 .supported_image_format(

@@ -90,3 +90,24 @@ pub fn hide_vertices(
         }
     }
 }
+
+#[inline(always)]
+pub fn pos_to_norm_pos(pos: Vec2, unit_scale: f32, aspect_ratio: f32) -> Vec2 {
+    // pos = (2.0 * orig_pos - 1.0) * aspect_ratio.x / unit_scale   | * unit scale
+    // pos * unit_scale = (2.0 * orig_pos - 1.0) * aspect_ratio.x   | / aspect_ratio.x
+    // pos * unit_scale / aspect_ratio.x = 2.0 * orig_pos - 1.0     | + 1.0 
+    // pos * unit_scale / aspect_ratio.x + 1.0 = orig_pos * 2.0     | / 2.0     
+    // orig_pos = (pos * unit_scale / aspect_ratio.x + 1.0) / 2.0
+    let mut norm_pos = pos * unit_scale;
+    norm_pos.x /= aspect_ratio;
+    (norm_pos + vec2(1.0, 1.0)) * 0.5
+}
+
+#[inline(always)]
+pub fn norm_pos_to_pos(norm_pos: Vec2, unit_scale: f32, aspect_ratio: f32) -> Vec2 {
+    let mut pos = norm_pos;
+    pos *= 2.0;
+    pos -= vec2(1.0, 1.0);
+    pos.x *= aspect_ratio;
+    pos / unit_scale
+}

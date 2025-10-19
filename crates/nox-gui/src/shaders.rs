@@ -47,18 +47,21 @@ pub struct PushConstantsVertex{
     pub vert_off: Vec2,
     pub scale: Vec2,
     pub inv_aspect_ratio: f32,
+    pub unit_scale: f32,
 }
 
 pub fn push_constants_vertex(
     vert_off: Vec2,
     scale: Vec2,
     inv_aspect_ratio: f32,
+    unit_scale: f32,
 ) -> PushConstantsVertex 
 {
     PushConstantsVertex {
         vert_off,
         scale,
         inv_aspect_ratio,
+        unit_scale,
     }
 }
 
@@ -185,13 +188,15 @@ pub const BASE_VERTEX_SHADER: &'static str = "
         vec2 vert_off;
         vec2 scale;
         float inv_aspect_ratio;
+        float unit_scale;
     } pc;
 
     void main() {
         vec2 pos = in_pos;
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
-        pos += pc.vert_off + in_offset;
+        pos *= pc.unit_scale;
+        pos += (pc.vert_off + in_offset) * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
         out_color = in_color;
@@ -221,13 +226,15 @@ pub const TEXT_VERTEX_SHADER: &'static str = "
         vec2 vert_off;
         vec2 scale;
         float inv_aspect_ratio;
+        float unit_scale;
     } pc;
 
     void main() {
         vec2 pos = in_pos + in_offset;
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
-        pos += pc.vert_off;
+        pos *= pc.unit_scale;
+        pos += pc.vert_off * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
     }
@@ -258,13 +265,15 @@ pub const COLOR_PICKER_VERTEX_SHADER: &'static str = "
         vec2 vert_off;
         vec2 scale;
         float inv_aspect_ratio;
+        float unit_scale;
     } pc;
 
     void main() {
         vec2 pos = in_pos;
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
-        pos += pc.vert_off;
+        pos *= pc.unit_scale;
+        pos += pc.vert_off * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
         out_pos = in_pos;
@@ -416,14 +425,16 @@ pub const INPUT_TEXT_VERTEX_SHADER: &'static str = "
         vec2 vert_off;
         vec2 scale;
         float inv_aspect_ratio;
+        float unit_scale;
     } pc;
 
     void main() {
         vec2 pos = in_pos + in_offset;
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
-        pos += pc.vert_off;
-        out_pos = pos;
+        out_pos = pos + pc.vert_off;
+        pos *= pc.unit_scale;
+        pos += pc.vert_off * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
     }

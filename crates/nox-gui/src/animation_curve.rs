@@ -469,6 +469,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
@@ -478,7 +479,8 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             render_commands, 
             window_pos + self.offset,
             style.text_col(),
-            font_scale, inv_aspect_ratio, vertex_buffer, index_buffer
+            font_scale, inv_aspect_ratio, unit_scale,
+            vertex_buffer, index_buffer,
         )?;
         if self.contents_shown() {
             return Ok(Some(self))
@@ -512,6 +514,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> HoverContents<I, FontHash, Hover
         _index_buffer: &mut RingBuf,
         _window_pos: Vec2,
         _inv_aspect_ratio: f32,
+        _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error> {
         Ok(())

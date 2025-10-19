@@ -234,6 +234,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
@@ -244,7 +245,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         let pc_vertex = push_constants_vertex(
             window_pos + self.offset + style.item_pad_inner(),
             vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio
+            inv_aspect_ratio,
+            unit_scale,
         );
         let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands, title_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;

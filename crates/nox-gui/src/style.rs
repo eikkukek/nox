@@ -80,8 +80,8 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn checkbox_symbol(&self) -> char {
-        '󰄬'
+    fn pixels_per_unit(&self) -> f32 {
+        1000.0
     }
 
     #[inline(always)]
@@ -172,6 +172,11 @@ pub trait WindowStyle<FontHash> {
     #[inline(always)]
     fn override_cursor(&self) -> bool {
         true
+    }
+
+    #[inline(always)]
+    fn checkbox_symbol(&self) -> char {
+        '󰄬'
     }
 
     #[inline(always)]

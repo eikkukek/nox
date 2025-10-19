@@ -278,13 +278,14 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
+        unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
         self.input_text.render_commands(
             render_commands, style, base_pipeline_id,
             text_pipeline_id, vertex_buffer, index_buffer,
-            window_pos, inv_aspect_ratio, get_custom_pipeline
+            window_pos, inv_aspect_ratio, unit_scale, get_custom_pipeline
         )
     }
 
