@@ -3,6 +3,7 @@ mod shaders;
 mod color;
 mod style;
 mod helpers;
+mod text;
 mod widget;
 mod button;
 mod slider;
@@ -16,6 +17,7 @@ mod workspace;
 use ring_buffer::*;
 use shaders::*;
 
+pub use text::*;
 pub use color::*;
 pub use style::*;
 pub use widget::*;

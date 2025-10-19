@@ -18,10 +18,9 @@ use nox_font::{RenderedText, VertexTextRenderer, text_segment};
 
 use crate::*;
 
-pub(crate) struct InputText<I, FontHash, Style, HoverStyle> {
+pub struct InputText<TitleText, I, FontHash, Style, HoverStyle> {
     offset: Vec2,
-    title: CompactString,
-    title_text: Option<RenderedText>,
+    title_text: TitleText,
     input: CompactString,
     input_text: Option<RenderedText>,
     input_text_formatted: Option<RenderedText>,
@@ -46,25 +45,28 @@ pub(crate) struct InputText<I, FontHash, Style, HoverStyle> {
     _marker: PhantomData<(I, FontHash, Style, HoverStyle)>,
 }
 
-impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
+impl<TitleText, I, FontHash, Style, HoverStyle> InputText<TitleText, I, FontHash, Style, HoverStyle>
     where
+        TitleText: Text,
         Style: WindowStyle<FontHash>,
 {
 
     const HOVERING: u32 = 0x1;
     const HELD: u32 = 0x2;
-    const ACTIVATED: u32 = 0x4;
-    const ACTIVE: u32 = 0x8;
-    const CURSOR_VISIBLE: u32 = 0x10;
-    const SELECTION_LEFT: u32 = 0x20;
-    const MOUSE_VISIBLE: u32 = 0x40;
-    const FORMAT_ERROR: u32 = 0x80;
-    const SKIP_TITLE: u32 = 0x100;
-    const CENTER_TEXT: u32 = 0x200;
-    const CURSOR_ENABLE: u32 = 0x400;
-    const SELECT_ALL: u32 = 0x800;
-    const WIDTH_OVERRIDE: u32 = 0x1000;
-    const BG_COL_OVERRIDE: u32 = 0x2000;
+    const ACTIVE: u32 = 0x4;
+    const CURSOR_VISIBLE: u32 = 0x8;
+    const SELECTION_LEFT: u32 = 0x10;
+    const MOUSE_VISIBLE: u32 = 0x20;
+    const FORMAT_ERROR: u32 = 0x40;
+    const SKIP_TITLE: u32 = 0x80;
+    const CENTER_TEXT: u32 = 0x100;
+    const CURSOR_ENABLE: u32 = 0x200;
+    const SELECT_ALL: u32 = 0x400;
+    const WIDTH_OVERRIDE: u32 = 0x800;
+    const BG_COL_OVERRIDE: u32 = 0x1000;
+    const CLICKED_LAST_FRAME: u32 = 0x2000;
+    const SELECT_ALL_LAST_FRAME: u32 = 0x4000;
+    const ACTIVATED_LAST_FRAME: u32 = 0x8000;
 
     const SELECTION_INDICES: [u32; 6] = [
         3, 1, 0,
@@ -75,8 +77,7 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     pub fn new(title: &str) -> Self {
         Self {
             offset: Default::default(),
-            title: CompactString::new(title),
-            title_text: None,
+            title_text: TitleText::new(title),
             input_text: None,
             input_text_formatted: None,
             format_input: Box::new(|fmt, input| -> core::fmt::Result {
@@ -110,10 +111,7 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
             if self.skip_title() {
                 Default::default()
             } else {
-                let text_width = self.title_text
-                    .as_ref()
-                    .map(|v| v.text_width)
-                    .unwrap_or_default();
+                let text_width = self.title_text.get_text_width();
                 let title_width = text_width * style.font_scale();
                 title_width + style.item_pad_outer().x
             },
@@ -178,24 +176,30 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     #[inline(always)]
     pub fn set_input_sliderable(&mut self, style: &Style, input: &impl Sliderable) {
         self.flags &= !Self::FORMAT_ERROR;
-        self.input.clear();
-        self.input_offsets.clear();
-        if let Err(_) = input.display(style, &mut self.input) {
+        let mut fmt = CompactString::default();
+        if let Err(_) = input.display(style, &mut fmt) {
             self.flags |= Self::FORMAT_ERROR;
         }
-        self.input_text = None;
+        if fmt != self.input {
+            self.input = fmt;
+            self.input_offsets.clear();
+            self.input_text = None;
+        }
         self.text_cursor_pos = 0;
     }
 
     #[inline(always)]
     pub fn set_input(&mut self, input: &impl Display) {
         self.flags &= !Self::FORMAT_ERROR;
-        self.input.clear();
-        self.input_offsets.clear();
-        if let Err(_) = write!(self.input, "{}", input) {
+        let mut fmt = CompactString::default();
+        if let Err(_) = write!(fmt, "{}", input) {
             self.flags |= Self::FORMAT_ERROR;
         }
-        self.input_text = None;
+        if fmt != self.input {
+            self.input = fmt;
+            self.input_offsets.clear();
+            self.input_text = None;
+        }
         self.text_cursor_pos = 0;
     }
 
@@ -208,6 +212,7 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     pub fn activate_and_select_all(&mut self) {
         self.flags |= Self::CURSOR_ENABLE;
         self.flags |= Self::ACTIVE;
+        self.flags |= Self::ACTIVATED_LAST_FRAME;
         self.flags |= Self::CURSOR_VISIBLE;
         self.flags |= Self::SELECT_ALL;
         self.cursor_timer = 0.0;
@@ -237,11 +242,6 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     #[inline(always)]
     pub fn active(&self) -> bool {
         self.flags & Self::ACTIVE == Self::ACTIVE
-    }
-
-    #[inline(always)]
-    fn activated(&self) -> bool {
-        self.flags & Self::ACTIVATED == Self::ACTIVATED
     }
 
     #[inline(always)]
@@ -292,6 +292,21 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     #[inline(always)]
     fn select_all(&self) -> bool {
         self.flags & Self::SELECT_ALL == Self::SELECT_ALL
+    }
+
+    #[inline(always)]
+    fn clicked_last_frame(&self) -> bool {
+        self.flags & Self::CLICKED_LAST_FRAME == Self::CLICKED_LAST_FRAME
+    }
+
+    #[inline(always)]
+    fn select_all_last_frame(&self) -> bool {
+        self.flags & Self::SELECT_ALL_LAST_FRAME == Self::SELECT_ALL_LAST_FRAME
+    }
+
+    #[inline(always)]
+    fn activated_last_frame(&self) -> bool {
+        self.flags & Self::ACTIVATED_LAST_FRAME == Self::ACTIVATED_LAST_FRAME
     }
 
     #[inline(always)]
@@ -349,9 +364,10 @@ impl<I, FontHash, Style, HoverStyle> InputText<I, FontHash, Style, HoverStyle>
     }
 }
 
-impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
-        InputText<I, FontHash, Style, HoverStyle>
+impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
+        InputText<TitleText, I, FontHash, Style, HoverStyle>
     where
+        TitleText: Text,
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
@@ -419,7 +435,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             .as_ref()
             .map(|v| style.calc_text_width(v))
             .unwrap_or_default();
-        if self.active() {
+        let active_this_frame = self.active();
+        if active_this_frame {
             let mut cursor_timer = self.cursor_timer + nox.delta_time().as_secs_f32();
             if cursor_timer >= style.input_text_cursor_switch_speed() {
                 self.toggle_cursor_visible();
@@ -571,13 +588,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         let has_format_error = self.has_format_error();
         let skip_title = self.skip_title();
         let title_text = if !skip_title {
-            Some(self.title_text.get_or_insert(text_renderer
-                .render(
-                    &[text_segment(&self.title, style.font_regular())],
-                    false, 0.0
-                )
-                .unwrap_or_default()
-            ))
+            self.title_text.get_text(text_renderer, style.font_regular())
         } else {
             None
         };
@@ -628,7 +639,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             offset + vec2(title_width + item_pad_outer.x, 0.0)
         };
         let input_width = style.calc_text_width(input_text);
-        let width = if self.has_width_override() {
+        let mut width = if self.has_width_override() {
             if self.center_text() {
                 (input_width + item_pad_inner.x + item_pad_inner.x).max(self.width_override)
             } else {
@@ -746,13 +757,12 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                     self.flags |= Self::CURSOR_VISIBLE;
                     self.cursor_timer = 0.0;
                 }
-                self.flags &= !Self::SELECT_ALL;
                 if !self.hovering() && !self.held() && !window_moving && mouse_released {
                     self.flags &= !Self::ACTIVE;
                     self.flags |= Self::MOUSE_VISIBLE;
                 }
-                if !select_all {
-                    if mouse_pressed {
+                if !select_all && !window_moving {
+                    if self.clicked_last_frame() && !self.select_all_last_frame() && !self.activated_last_frame() {
                         self.selection = None;
                     }
                     if self.held() {
@@ -827,7 +837,12 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                             }
                         }
                     }
-                } 
+                }
+                self.flags &= !Self::SELECT_ALL_LAST_FRAME;
+                self.flags |= Self::SELECT_ALL_LAST_FRAME * (select_all || self.select_all()) as u32;
+                self.flags &= !Self::SELECT_ALL;
+                self.flags &= !Self::CLICKED_LAST_FRAME;
+                self.flags |= Self::CLICKED_LAST_FRAME * mouse_pressed as u32;
             }
             let deactivate =
                 nox.was_key_pressed(KeyCode::Enter) |
@@ -838,12 +853,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             }
         } else {
             self.flags &= !Self::ACTIVE;
-        }
-        if self.activated() {
-            self.flags &= !Self::ACTIVATED;
-            self.flags |= Self::ACTIVE;
-            self.flags |= Self::CURSOR_VISIBLE;
-            self.cursor_timer = 0.0;
         }
         if self.center_text() {
             let text_width =  if self.active() {
@@ -867,6 +876,9 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         self.input_rect = input_rect;
         self.cursor_rect.max = cursor_rect_max;
         self.outline_width = style.outline_width();
+        if !self.active() {
+            self.selection = None;
+        }
         if let Some(selection) = self.selection {
             let left = input_text_offset.x +
                 self.calc_cursor_offset(font_scale, selection.0).x.clamp(0.0, input_text_max_x);
@@ -901,6 +913,14 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             self.flags &= !Self::SELECTION_LEFT;
         }
         self.double_click_timer += nox.delta_time_secs_f32();
+        if self.has_width_override() && !self.skip_title() {
+            width += self.title_text.get_text_width() * font_scale + item_pad_outer.x;
+        }
+        self.flags &= !Self::ACTIVATED_LAST_FRAME;
+        self.flags |= Self::ACTIVATED_LAST_FRAME * (!active_this_frame && self.active()) as u32;
+        if self.activated_last_frame() {
+            println!("here");
+        }
         UpdateResult {
             min_widget_width: width,
             requires_triangulation,
@@ -934,9 +954,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
     )
     {
         let mut offset = if !self.skip_title() {
-            let title_width = style.calc_text_width(
-                self.title_text.as_ref().unwrap()
-            );
+            let title_width = style.font_scale() * self.title_text.get_text_width();
             self.offset + vec2(title_width + style.item_pad_outer().x, 0.0)
         } else {
             self.offset
@@ -1022,17 +1040,12 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         let title_width = if keep_title {
             render_commands.bind_pipeline(text_pipeline_id)?;
             let text_col = style.text_col();
-            let pc_vertex = push_constants_vertex(
+            self.title_text.render(
+                render_commands,
                 window_pos + self.offset + vec2(0.0, item_pad_inner.y),
-                font_scale, inv_aspect_ratio
-            );
-            let pc_fragment = text_push_constants_fragment(text_col);
-            render_text(render_commands, &self.title_text.as_ref().unwrap(),
-                pc_vertex, pc_fragment, vertex_buffer, index_buffer
+                text_col, font_scale, inv_aspect_ratio, vertex_buffer, index_buffer
             )?;
-            style.calc_text_width(
-                self.title_text.as_ref().unwrap()
-            )
+            style.font_scale() * self.title_text.get_text_width()
         } else {
             Default::default()
         };

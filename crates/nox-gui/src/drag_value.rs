@@ -10,8 +10,8 @@ use nox_geom::*;
 
 use crate::*;
 
-pub struct DragValue<I, FontHash, Style, HoverStyle> {
-    input_text: InputText<I, FontHash, Style, HoverStyle>,
+pub struct DragValue<TitleText, I, FontHash, Style, HoverStyle> {
+    input_text: InputText<TitleText, I, FontHash, Style, HoverStyle>,
     delta_cursor_x: f32,
     flags: u32,
     focused_outline_vertex_range: VertexRange,
@@ -19,8 +19,9 @@ pub struct DragValue<I, FontHash, Style, HoverStyle> {
     _marker: PhantomData<(FontHash, Style, HoverStyle)>,
 }
 
-impl<I, FontHash, Style, HoverStyle> DragValue<I, FontHash, Style, HoverStyle>
-    where 
+impl<TitleText, I, FontHash, Style, HoverStyle> DragValue<TitleText, I, FontHash, Style, HoverStyle>
+    where
+        TitleText: Text,
         Style: WindowStyle<FontHash>,
 {
 
@@ -56,7 +57,7 @@ impl<I, FontHash, Style, HoverStyle> DragValue<I, FontHash, Style, HoverStyle>
     }
 
     #[inline(always)]
-    pub fn calc_value<T>(&mut self, style: &Style, value: &mut T, min: T, max: T, drag_speed: f32, )
+    pub fn calc_value<T>(&mut self, style: &Style, value: &mut T, min: T, max: T, drag_speed: f32)
         where
             T: Sliderable
     {
@@ -66,6 +67,32 @@ impl<I, FontHash, Style, HoverStyle> DragValue<I, FontHash, Style, HoverStyle>
         } else {
             if let Some(v) = self.input_text.get_input() {
                 *value = v;
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn calc_and_map_value<T, U>(
+        &mut self,
+        style: &Style,
+        value: &mut T,
+        min: T,
+        max: T,
+        drag_speed: f32,
+        mut map_to: impl FnMut(&T) -> U,
+        mut map_from: impl FnMut(U) -> T,
+    )
+        where
+            T: Sliderable,
+            U: Sliderable,
+    {
+        if !self.input_text.active() {
+            value.drag(min, max, self.delta_cursor_x * drag_speed);
+            let mapped = map_to(value);
+            self.input_text.set_input_sliderable(style, &mapped);
+        } else {
+            if let Some(v) = self.input_text.get_input() {
+                *value = map_from(v);
             }
         }
     }
@@ -94,18 +121,21 @@ impl<I, FontHash, Style, HoverStyle> DragValue<I, FontHash, Style, HoverStyle>
     }
 }
 
-impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for 
-        DragValue<I, FontHash, Style, HoverStyle>
+impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for 
+        DragValue<TitleText, I, FontHash, Style, HoverStyle>
     where
+        TitleText: Text,
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
         HoverStyle: WindowStyle<FontHash>,
 {
+    #[inline(always)]
     fn hover_text(&self) -> Option<&str> {
         None
     }
 
+    #[inline(always)]
     fn set_offset(
         &mut self,
         offset: Vec2,
@@ -114,15 +144,17 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         self.input_text.set_offset(offset);
     }
 
+    #[inline(always)]
     fn calc_height(
         &mut self,
         style: &Style,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
     ) -> f32
     {
-        style.calc_font_height(text_renderer)
+        style.calc_text_box_height_from_text_height(style.calc_font_height(text_renderer))
     }
 
+    #[inline(always)]
     fn is_active(
         &self,
         nox: &Nox<I>,
@@ -201,7 +233,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         self.focused_outline_width = style.focused_outline_width();
         update_results
     }
-
+    
+    #[inline(always)]
     fn triangulate(
         &mut self,
         points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
@@ -213,6 +246,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         self.input_text.triangulate(points, tri);
     }
 
+    #[inline(always)]
     fn set_vertex_params(
         &mut self,
         style: &Style,
@@ -233,6 +267,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         self.input_text.set_vertex_params(style, hover_style, vertices);
     }
 
+    #[inline(always)]
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
@@ -253,6 +288,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         )
     }
 
+    #[inline(always)]
     fn hide(
         &self,
         vertices: &mut [Vertex],
