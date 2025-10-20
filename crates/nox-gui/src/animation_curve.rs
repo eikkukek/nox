@@ -43,7 +43,7 @@ pub struct AnimationCurve<TitleText, I, FontHash, Style, HoverStyle> {
     handle_vertices: GlobalVec<Vec2>,
     handle_vertex_offsets: GlobalVec<Vec2>,
     indices: GlobalVec<u32>,
-    window_rect_draw_info: DrawInfo,
+    window_draw_info: DrawInfo,
     handle_draw_info: DrawInfo,
     widget_rect_vertex_range: VertexRange,
     window_rect_vertex_range: VertexRange,
@@ -64,7 +64,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
         HoverStyle: WindowStyle<FontHash>,
 {
 
-    const HOVER_CONTENTS_SHOWN: u32 = 0x1;
+    const CONTENTS_SHOWN: u32 = 0x1;
     const WIDGET_HELD: u32 = 0x2;
     const END_POINT_HELD: u32 = 0x4;
     const CONTROL_POINT_HELD: u32 = 0x8;
@@ -84,7 +84,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
             handle_vertices: Default::default(),
             indices: Default::default(),
             handle_vertex_offsets: Default::default(),
-            window_rect_draw_info: Default::default(),
+            window_draw_info: Default::default(),
             handle_draw_info: Default::default(),
             widget_rect_vertex_range: Default::default(),
             window_rect_vertex_range: Default::default(),
@@ -116,7 +116,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
 
     #[inline(always)]
     fn contents_shown(&self) -> bool {
-        self.flags & Self::HOVER_CONTENTS_SHOWN == Self::HOVER_CONTENTS_SHOWN
+        self.flags & Self::CONTENTS_SHOWN == Self::CONTENTS_SHOWN
     }
 
     #[inline(always)]
@@ -145,6 +145,16 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
     }
 
     #[inline(always)]
+    pub fn active(&self) -> bool {
+        self.contents_held()
+    }
+
+    #[inline(always)]
+    fn set_contents_offset(&mut self, offset: Vec2) {
+        self.content_offset = offset;
+    }
+
+    #[inline(always)]
     fn update_contents(
         &mut self,
         nox: &Nox<I>,
@@ -164,13 +174,14 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
         let gui_min = self.min_coords;
         let gui_max = self.max_coords;
         let gui_range = gui_max - gui_min;
+        let offset = self.content_offset;
         let bounding_rect = BoundingRect::from_position_size(
-            self.content_offset,
+            offset,
             gui_curve_size,
         );
         let scale = vec2(
             curve_range.x / gui_range.x * gui_curve_size.x,
-            curve_range.y / gui_range.y * gui_curve_size.y,
+            curve_range.y / gui_range.y * gui_curve_size.y + 0.1,
         );
         let rel_cursor_pos = cursor_pos - window_pos;
         let handle_radius = style.default_handle_radius();
@@ -178,7 +189,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
         let mut held = self.contents_held();
         let mut held_offset = self.held_offset;
         let mut held_index = self.held_index as usize;
-        let pos_offset = gui_min;
+        let pos_offset = gui_min - offset;
         self.handle_vertex_offsets.clear();
         for (i, &cubic) in curve.iter().enumerate() {
             let mut point_offset = vec2(cubic.start.x * scale.x, cubic.start.y * scale.y) - pos_offset;
@@ -290,7 +301,11 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
             self.content_window_rect.rounding != rounding;
         self.handle_radius = handle_radius;
         self.content_window_rect = rect(Default::default(), gui_curve_size, rounding);
-        (requires_triangulation, bounding_rect.is_point_inside(rel_cursor_pos))
+        let cursor_in_contents = bounding_rect.is_point_inside(rel_cursor_pos);
+        if !cursor_in_contents && nox.was_mouse_button_pressed(MouseButton::Left) {
+            self.flags &= !(Self::END_POINT_HELD | Self::CONTROL_POINT_HELD | Self::LEFT_POINT_HELD | Self::CONTENTS_SHOWN);
+        }
+        (requires_triangulation, cursor_in_contents)
     }
 
     #[inline(always)]
@@ -302,7 +317,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
         let vertex_offset = 0;
         earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap();
         self.window_rect_vertex_range = VertexRange::new(vertex_offset..self.vertices.len());
-        self.window_rect_draw_info = DrawInfo {
+        self.window_draw_info = DrawInfo {
             index_count: indices_usize.len() as u32,
             ..Default::default()
         };
@@ -317,7 +332,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> AnimationCurve<TitleText, I, Fon
 
     #[inline(always)]
     fn set_contents_vertex_params(&mut self, style: &HoverStyle) {
-        let offset = self.content_offset;
+        let offset = Default::default();
         let target_color = style.window_bg_col();
         set_vertex_params(
             &mut self.vertices, self.window_rect_vertex_range, offset, target_color
@@ -339,6 +354,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         None
     }
 
+    #[inline(always)]
     fn set_offset(
         &mut self,
         offset: Vec2,
@@ -347,13 +363,14 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         self.offset = offset;
     }
 
+    #[inline(always)]
     fn calc_height(
         &mut self,
         style: &Style,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
     ) -> f32
     {
-        text_renderer.font_height(style.font_regular()).unwrap()
+        text_renderer.font_height(style.font_regular()).unwrap() * style.font_scale()
     }
 
     fn is_active(
@@ -367,6 +384,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
     {
         let error_margin = hover_style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
+        self.widget_held() ||
         self.contents_held() ||
         self.widget_held() ||
         (
@@ -394,31 +412,53 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
     ) -> UpdateResult
     {
         if other_widget_active {
-            self.flags &= !Self::HOVER_CONTENTS_SHOWN;
-        }
-        let mut cursor_in_widget = false;
-        if self.contents_shown() {
-            let (requires_triangulation, cursor_in_contents) = self.update_contents(
-                    nox, hover_style, text_renderer, window_pos,
-                    cursor_pos, delta_cursor_pos, window_moving
-                );
-            cursor_in_widget |= cursor_in_contents;
-            if requires_triangulation {
-                self.triangulate_contents();
-            }
+            self.flags &= !Self::CONTENTS_SHOWN;
         }
         let widget_rect_width = style.animation_curve_size().x;
         let mut width = widget_rect_width;
+        self.title.update(text_renderer, style.font_regular());
         let title_width = self.title.get_text_width();
+        let mut offset = self.offset;
         if title_width != 0.0 {
-            width += title_width * style.font_scale() + style.item_pad_outer().x;
+            let off = title_width * style.font_scale() + style.item_pad_outer().x;
+            width += off;
+            offset += vec2(off, 0.0);
         }
         let widget_rect = rect(
             Default::default(), vec2(widget_rect_width, style.calc_font_height(text_renderer)),
             style.rounding(),
         );
+        let mut cursor_in_widget = BoundingRect::from_position_size(
+            window_pos + offset,
+            widget_rect.max
+        ).is_point_inside(cursor_pos);
+        if cursor_in_widget && nox.was_mouse_button_pressed(MouseButton::Left) {
+            self.flags |= Self::WIDGET_HELD;
+        }
+        if self.widget_held() {
+            if nox.was_mouse_button_released(MouseButton::Left) {
+                if cursor_in_widget {
+                    self.flags |= Self::CONTENTS_SHOWN;
+                }
+                self.flags &= !Self::WIDGET_HELD;
+            }
+        }
         let requires_triangulation = self.widget_rect != widget_rect;
         self.widget_rect = widget_rect;
+        cursor_in_widget |=
+            if self.contents_shown() {
+                self.set_contents_offset(offset);
+                let (requires_triangulation, cursor_in_contents) = self.update_contents(
+                    nox, hover_style, text_renderer, window_pos,
+                    cursor_pos, delta_cursor_pos, window_moving
+                );
+                if requires_triangulation {
+                    self.triangulate_contents();
+                }
+                cursor_in_contents
+            } else {
+                false
+            };
         UpdateResult {
             min_widget_width: width,
             requires_triangulation,
@@ -506,17 +546,79 @@ impl<TitleText, I, FontHash, Style, HoverStyle> HoverContents<I, FontHash, Hover
 
     fn render_commands(
         &self,
-        _render_commands: &mut RenderCommands,
-        _style: &HoverStyle,
-        _base_pipeline_id: GraphicsPipelineId,
-        _text_pipeline_id: GraphicsPipelineId,
-        _vertex_buffer: &mut RingBuf,
-        _index_buffer: &mut RingBuf,
-        _window_pos: Vec2,
-        _inv_aspect_ratio: f32,
-        _unit_scale: f32,
+        render_commands: &mut RenderCommands,
+        style: &HoverStyle,
+        base_pipeline_id: GraphicsPipelineId,
+        text_pipeline_id: GraphicsPipelineId,
+        vertex_buffer: &mut RingBuf,
+        index_buffer: &mut RingBuf,
+        window_pos: Vec2,
+        inv_aspect_ratio: f32,
+        unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error> {
+        let vertex_count = self.vertices.len();
+        let handle_vertex_count = self.handle_vertices.len();
+        let handle_offset_count = self.handle_vertex_offsets.len();
+        let index_count = self.indices.len();
+        let vert_mem = unsafe {
+            vertex_buffer.allocate(render_commands, vertex_count)?
+        };
+        let handle_vert_mem = unsafe {
+            vertex_buffer.allocate(render_commands, handle_vertex_count)?
+        };
+        let handle_offset_mem = unsafe {
+            vertex_buffer.allocate(render_commands, handle_offset_count)?
+        };
+        let idx_mem = unsafe {
+            index_buffer.allocate(render_commands, index_count)?
+        };
+        unsafe {
+            self.vertices
+                .as_ptr()
+                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vertex_count);
+            self.handle_vertices
+                .as_ptr()
+                .copy_to_nonoverlapping(handle_vert_mem.ptr.as_ptr(), handle_vertex_count);
+            self.handle_vertex_offsets
+                .as_ptr()
+                .copy_to_nonoverlapping(handle_offset_mem.ptr.as_ptr(), handle_offset_count);
+            self.indices
+                .as_ptr()
+                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), index_count);
+        }
+        let vertex_buf_id = vertex_buffer.id();
+        let index_buf_id = index_buffer.id();
+        render_commands.bind_pipeline(base_pipeline_id)?;
+        let pc_vertex = push_constants_vertex(
+            window_pos + self.content_offset,
+            vec2(1.0, 1.0), inv_aspect_ratio, unit_scale
+        );
+        render_commands.push_constants(|_| unsafe {
+            pc_vertex.as_bytes()
+        })?;
+        render_commands.draw_indexed(self.window_draw_info,
+            [
+                DrawBufferInfo::new(vertex_buf_id, vert_mem.offset)
+            ],
+            DrawBufferInfo::new(index_buf_id, idx_mem.offset)
+        )?;
+        render_commands.bind_pipeline(text_pipeline_id)?;
+        let pc_fragment = text_push_constants_fragment(style.handle_col());
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
+        })?;
+        render_commands.draw_indexed(self.handle_draw_info,
+            [
+                DrawBufferInfo::new(vertex_buf_id, handle_vert_mem.offset),
+                DrawBufferInfo::new(vertex_buf_id, handle_offset_mem.offset),
+            ],
+            DrawBufferInfo::new(index_buf_id, idx_mem.offset)
+        )?;
         Ok(())
     }
 }

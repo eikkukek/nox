@@ -30,7 +30,7 @@ impl BoundingRect {
         point: Vec2,
     ) -> bool
     {
-        self.min.x < point.x && self.max.x > point.x &&
-        self.min.y < point.y && self.max.y > point.y
+        self.min.x <= point.x && self.max.x >= point.x &&
+        self.min.y <= point.y && self.max.y >= point.y
     }
 }

@@ -189,17 +189,21 @@ impl AnimationCurve {
     pub fn new(c: Cubic) -> Self {
         let c =
             if c.start.x <= c.end.x {
+                let mid_0_x = c.mid_0.x.clamp(c.start.x, c.end.x);
+                let mid_1_y = c.mid_1.x.clamp(c.start.x, c.end.x);
                 cubic(
                     c.start,
-                    c.mid_0.clamp(c.start, c.end),
-                    c.mid_1.clamp(c.start, c.end),
-                    c.start
+                    vec2(mid_0_x, c.mid_0.y),
+                    vec2(mid_1_y, c.mid_1.y),
+                    c.end
                 )
             } else {
+                let mid_0_x = c.mid_0.x.clamp(c.end.x, c.start.x);
+                let mid_1_x = c.mid_1.x.clamp(c.end.x, c.start.x);
                 cubic(
                     c.end,
-                    c.mid_0.clamp(c.end, c.start),
-                    c.mid_1.clamp(c.end, c.start),
+                    vec2(mid_0_x, c.mid_0.y),
+                    vec2(mid_1_x, c.mid_1.y),
                     c.start,
                 )
             };
@@ -344,7 +348,7 @@ impl AnimationCurve {
         self.cubics.clone_from_slice(&other.cubics);
     }
 
-    pub fn iter(&self) -> core::slice::Iter<Cubic> {
+    pub fn iter<'a>(&'a self) -> core::slice::Iter<'a, Cubic> {
         self.cubics.iter()
     }
 }

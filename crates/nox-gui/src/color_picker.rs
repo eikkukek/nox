@@ -1034,7 +1034,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
     {
         let error_margin = hover_style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
-        self.picking() || (self.contents.shown() && BoundingRect::from_position_size(
+        self.contents.widget_held() || self.picking() || (self.contents.shown() && BoundingRect::from_position_size(
             self.contents.offset - vec2(error_margin, error_margin),
             self.contents.window_rect.max + vec2(error_margin_2, error_margin_2)
         ).is_point_inside(cursor_pos - window_pos))

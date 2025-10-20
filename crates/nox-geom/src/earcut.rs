@@ -11,7 +11,7 @@ pub struct EarcutHole<'a> {
     choose_right_most_index: bool,
 }
 
-pub fn earcut_hole(points: &[[f32; 2]], choose_right_most_index: bool) -> EarcutHole {
+pub fn earcut_hole<'a>(points: &'a[[f32; 2]], choose_right_most_index: bool) -> EarcutHole<'a> {
     EarcutHole { points, choose_right_most_index }
 }
 

@@ -29,6 +29,7 @@ pub use window::*;
 pub use workspace::*;
 
 pub use nox_font as font;
+pub use nox_geom as geom;
 
 pub use compact_str::CompactString;
 

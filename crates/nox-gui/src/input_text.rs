@@ -588,7 +588,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         let has_format_error = self.has_format_error();
         let skip_title = self.skip_title();
         let title = if !skip_title {
-            self.title.get_text(text_renderer, style.font_regular())
+            self.title.update(text_renderer, style.font_regular())
         } else {
             None
         };

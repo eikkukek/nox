@@ -29,6 +29,7 @@ enum ActiveWidget {
     ColorPicker(u32),
     InputText(u32),
     DragValue(u32),
+    AnimationCurve(u32),
 }
 
 struct HoverWindow {
@@ -185,6 +186,7 @@ pub(crate) struct Window<I, FontHash, Style, HoverStyle>
     color_pickers: FxHashMap<u32, (u64, ColorPicker<I, FontHash, Style, HoverStyle>)>,
     input_texts: FxHashMap<u32, (u64, InputText<DefaultText, I, FontHash, Style, HoverStyle>)>,
     drag_values: FxHashMap<u32, (u64, DragValue<DefaultText, I, FontHash, Style, HoverStyle>)>,
+    animation_curves: FxHashMap<u32, (u64, AnimationCurve<DefaultText, I, FontHash, Style, HoverStyle>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
     prev_active_widgets: Option<GlobalVec<ActiveWidget>>,
     hover_window: Option<HoverWindow>,
@@ -247,6 +249,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             color_pickers: FxHashMap::default(),
             input_texts: FxHashMap::default(),
             drag_values: FxHashMap::default(),
+            animation_curves: FxHashMap::default(),
             active_widgets: Some(Default::default()),
             prev_active_widgets: Some(Default::default()),
             hover_window: Some(HoverWindow::new()),
@@ -377,6 +380,10 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 self.drag_values.get(&id).map(
                     |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
                 ).unwrap(),
+            ActiveWidget::AnimationCurve(id) =>
+                self.animation_curves.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
         }
     }
 
@@ -409,6 +416,10 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 ).unwrap(),
             ActiveWidget::DragValue(id) =>
                 self.drag_values.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                ).unwrap(),
+            ActiveWidget::AnimationCurve(id) =>
+                self.animation_curves.get_mut(&id).map(
                     |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
                 ).unwrap(),
         }
@@ -1338,6 +1349,36 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         );
         drag_value.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
         self.widget_y += drag_value.calc_height(self.style, self.text_renderer) +
+            self.style.item_pad_outer().y;
+    }
+
+    #[inline(always)]
+    pub fn update_animation_curve(
+        &mut self,
+        id: u32,
+        title: &str,
+        value: &mut bezier::AnimationCurve,
+    )
+    {
+        unsafe {
+            self.window.active_widgets
+                .as_mut()
+                .unwrap_unchecked()
+                .push(ActiveWidget::AnimationCurve(id));
+        }
+        let (last_triangulation, animation_curve) = self.window.animation_curves
+            .entry(id)
+            .or_insert((0, AnimationCurve::new(title)));
+        if *last_triangulation != self.window.last_triangulation {
+            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
+        }
+        if animation_curve.active() {
+            animation_curve.get_curve(value);
+        } else {
+            animation_curve.set_curve(value);
+        }
+        animation_curve.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
+        self.widget_y += animation_curve.calc_height(self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
     }
 }

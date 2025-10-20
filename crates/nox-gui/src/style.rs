@@ -136,7 +136,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn animation_curve_size(&self) -> Vec2 {
-        vec2(0.4, 0.3)
+        vec2(0.3, 0.2)
     }
 
     #[inline(always)]

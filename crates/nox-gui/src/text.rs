@@ -12,7 +12,7 @@ pub trait Text {
 
     fn new(text: &str) -> Self;
 
-    fn get_text<FontHash>(
+    fn update<FontHash>(
         &mut self,
         text_renderer: &mut VertexTextRenderer<FontHash>,
         font: &FontHash,
@@ -55,7 +55,7 @@ impl Text for DefaultText {
     }
 
     #[inline(always)]
-    fn get_text<FontHash>(
+    fn update<FontHash>(
         &mut self,
         text_renderer: &mut VertexTextRenderer<FontHash>,
         font: &FontHash,
@@ -134,7 +134,7 @@ impl Text for EmptyText {
     }
     
     #[inline(always)]
-    fn get_text<FontHash>(
+    fn update<FontHash>(
         &mut self,
         _text_renderer: &mut VertexTextRenderer<FontHash>,
         _font: &FontHash,
