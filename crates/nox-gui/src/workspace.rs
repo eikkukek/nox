@@ -110,7 +110,8 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
         HoverStyle: WindowStyle<FontHash>,
 {
 
-    const BEGAN: u32 = 1;
+    const BEGAN: u32 = 0x1;
+    const CURSOR_IN_WINDOW: u32 = 0x2;
 
     const BLEND_STATE: ColorOutputBlendState = ColorOutputBlendState {
         src_color_blend_factor: BlendFactor::SrcAlpha,
@@ -415,6 +416,11 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
     }
 
     #[inline(always)]
+    fn cursor_in_window(&self) -> bool {
+        self.flags & Self::CURSOR_IN_WINDOW == Self::CURSOR_IN_WINDOW
+    }
+
+    #[inline(always)]
     pub fn begin(&mut self) -> Result<(), Error>
     {
         if self.began() {
@@ -509,10 +515,11 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
             let id = self.active_windows.remove(idx).unwrap();
             self.active_windows.push(id);
         }
-        if !cursor_in_some_window && self.style.override_cursor() {
+        if self.cursor_in_window() && !cursor_in_some_window && self.style.override_cursor() {
             nox.set_cursor(CursorIcon::Default);
         }
-        self.flags &= !Self::BEGAN;
+        self.flags &= !(Self::CURSOR_IN_WINDOW | Self::BEGAN);
+        self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_some_window as u32;
         Ok(())
     }
 

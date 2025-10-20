@@ -264,7 +264,7 @@ impl App {
 impl Interface for App {
 
     fn init_settings(&self) -> InitSettings {
-        InitSettings::new("Test", Version::default(), [540, 540], false)
+        InitSettings::new("Test", Version::default(), [540, 540], true, false)
     }
 
     fn init_callback(

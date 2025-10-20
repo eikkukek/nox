@@ -43,12 +43,13 @@ pub struct Example {
 impl Interface for Example {
 
     fn init_settings(&self) -> InitSettings {
-        InitSettings {
-            app_name: array_string!("shapes"),
-            app_version: Default::default(),
-            window_size: [540, 540],
-            enable_vulkan_validation: false,
-        }
+        InitSettings::new(
+            "shapes",
+            Default::default(),
+            [540, 540],
+            true,
+            false,
+        )
     }
 
     fn init_callback(

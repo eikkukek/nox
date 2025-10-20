@@ -397,7 +397,8 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     init_settings.window_size[0],
                     init_settings.window_size[1],
                 ))
-                .with_min_inner_size(LogicalSize::new(1.0, 1.0));
+                .with_min_inner_size(LogicalSize::new(1.0, 1.0))
+                .with_resizable(init_settings.window_resizeable);
             let window = match event_loop.create_window(window_attributes) {
                 Ok(window) => window,
                 Err(e) => {

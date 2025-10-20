@@ -30,6 +30,7 @@ impl Interface for App {
             "font test",
             Version::new(0, 1, 0),
             [540, 540],
+            true,
             false,
         )
     }

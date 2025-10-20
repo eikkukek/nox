@@ -84,6 +84,7 @@ impl<'a> Interface for Example<'a> {
             Default::default(),
             [540, 540],
             true,
+            false,
         )
     }
 

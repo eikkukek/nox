@@ -166,7 +166,7 @@ impl Cubic {
             }
         }
         let mut current = *self;
-        for i in (1..=n).rev() {
+        for i in (1..n).rev() {
             let t = 1.0 / i as f32;
             let (left, right) = current.split(t);
             if let Some(quad) = left.to_quad() {
