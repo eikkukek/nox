@@ -59,6 +59,7 @@ pub struct Nox<'a, I>
     delta_counter: time::Instant,
     delta_time: time::Duration,
     window_size: (u32, u32),
+    current_cursor: CursorIcon,
 }
 
 impl<'a, I: Interface> Nox<'a, I>
@@ -81,6 +82,7 @@ impl<'a, I: Interface> Nox<'a, I>
             delta_counter: time::Instant::now(),
             delta_time: time::Duration::ZERO,
             window_size: Default::default(),
+            current_cursor: CursorIcon::Default,
         }
     }
 
@@ -100,10 +102,8 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn set_cursor(&self, cursor: CursorIcon) {
-        if let Some(window) = self.window.as_ref() {
-            window.set_cursor(cursor);
-        }
+    pub fn set_cursor(&mut self, cursor: CursorIcon) {
+        self.current_cursor = cursor;            
     }
 
     #[inline(always)]
@@ -356,6 +356,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         self.error_flag = true;
                         eprintln!("Failed to update: {:?}", e);
                     }
+                    window.set_cursor(self.current_cursor);
                     self.input_text.clear();
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
