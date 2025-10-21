@@ -17,7 +17,14 @@ pub struct Vertex {
 impl From<[f32; 2]> for Vertex {
 
     fn from(value: [f32; 2]) -> Self {
-        Vertex { pos: value }
+        Self { pos: value }
+    }
+}
+
+impl From<nox_geom::Vec2> for Vertex {
+
+    fn from(value: nox_geom::Vec2) -> Self {
+        Self { pos: value.into() }
     }
 }
 
@@ -25,4 +32,18 @@ impl From<[f32; 2]> for Vertex {
 #[derive(Default, Clone, Copy, Debug, VertexInput)]
 pub struct VertexOffset {
     pub offset: [f32; 2],
+}
+
+impl From<[f32; 2]> for VertexOffset {
+
+    fn from(value: [f32; 2]) -> Self {
+        Self { offset: value }
+    }
+}
+
+impl From<nox_geom::Vec2> for VertexOffset {
+
+    fn from(value: nox_geom::Vec2) -> Self {
+        Self { offset: value.into() }
+    }
 }

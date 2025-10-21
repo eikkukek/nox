@@ -109,7 +109,6 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                 Some(0.0)
             };
         let mut pen_y = 0.0; let mut rows = 0;
-        let mut result = GlobalVec::new();
         for (start, word, font, shape) in &shapes {
             let FaceCache { face, trigs, offsets } = faces.get_mut(&font).unwrap();
             let units_per_em = face.units_per_em() as f32;
@@ -137,13 +136,14 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                 pen_x += position.x_advance as f32 / units_per_em;
             }
         }
+        let mut result = GlobalVec::new();
         for TextSegment { text: _, font } in text {
             let FaceCache { face: _, trigs, offsets } = faces.get_mut(font).unwrap();
-            for (c, off) in &mut *offsets {
-                result.push(InstancedText {
-                    trigs: trigs[c].clone().unwrap(),
+            for (&c, off) in &mut *offsets {
+                result.push((c, InstancedText {
+                    trigs: trigs[&c].clone().unwrap(),
                     offsets: off.take().unwrap(),
-                });
+                }));
             }
             offsets.clear();
         }
@@ -163,22 +163,5 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         max_normalized_width: f32,
     ) -> Option<RenderedText> {
         self.render_and_collect_offsets(text, line_center, max_normalized_width, |_, _| {})
-    }
-}
-
-impl RenderedText {
-
-    pub fn iter(&self) -> slice::Iter<'_, InstancedText> {
-        self.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a RenderedText {
-    
-    type Item = &'a InstancedText;
-    type IntoIter = slice::Iter<'a, InstancedText>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.text.iter()
     }
 }
