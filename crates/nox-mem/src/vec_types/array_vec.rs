@@ -235,27 +235,27 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         }
     }
 
-    fn remove(&mut self, index: usize) -> Option<T> {
-        if index >= self.len { return None }
+    fn remove(&mut self, index: usize) -> T {
+        if index >= self.len { panic!("index {} was out of bounds with len {} when removing", index, self.len()) }
         let ptr = self.as_mut_ptr();
         let removed = unsafe { ptr::read(ptr.add(index)) };
         for i in index..self.len - 1 {
             unsafe { ptr::write(ptr.add(i), ptr::read(ptr.add(i + 1))) }
         }
         self.len -= 1;
-        Some(removed)
+        removed
     }
 
     #[inline(always)]
-    fn swap_remove(&mut self, index: usize) -> Option<T> {
-        if index >= self.len { return None }
+    fn swap_remove(&mut self, index: usize) -> T {
+        if index >= self.len { panic!("index {} was out of bounds with len {} when removing", index, self.len()) }
         let ptr = self.as_mut_ptr();
         let removed = unsafe { ptr::read(ptr.add(index)) };
         self.len -= 1;
         if index != self.len {
             unsafe { ptr::write(ptr.add(index), ptr::read(ptr.add(self.len))) }
         }
-        Some(removed)
+        removed
     }
 
     #[inline(always)]

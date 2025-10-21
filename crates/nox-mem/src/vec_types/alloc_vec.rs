@@ -598,8 +598,8 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
         }
     }
 
-    fn remove(&mut self, index: usize) -> Option<T> {
-        if index >= self.len { panic!("index {} was out of bound with len {} when removing", index, self.len); }
+    fn remove(&mut self, index: usize) -> T {
+        if index >= self.len { panic!("index {} was out of bounds with len {} when removing", index, self.len); }
         let removed = unsafe { self.data.add(index).read() };
         for i in index..self.len - 1 {
             unsafe { self.data.add(i).write(
@@ -607,18 +607,18 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
             )}
         }
         self.len -= 1;
-        Some(removed)
+        removed
     }
 
     #[inline(always)]
-    fn swap_remove(&mut self, index: usize) -> Option<T> {
-        if index == self.len { return None }
+    fn swap_remove(&mut self, index: usize) -> T {
+        if index == self.len { panic!("index {} was out of bounds with len {} when removing", index, self.len)}
         let removed = unsafe { self.data.add(index).read() };
         self.len -= 1;
         if index != self.len {
             unsafe { self.data.add(index).write(self.data.add(self.len).read()) }
         }
-        Some(removed)
+        removed
     }
 
     fn clear(&mut self) {

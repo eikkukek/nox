@@ -60,17 +60,17 @@ pub trait Vector<T>:
 
     fn insert(&mut self, index: usize, value: T) -> Result<&mut T, CapacityError>;
 
-    fn remove(&mut self, index: usize) -> Option<T>;
+    fn remove(&mut self, index: usize) -> T;
 
     fn retain(&mut self, mut p: impl FnMut(&T) -> bool) {
         for i in (0..self.len()).rev() {
             if !p(&self[i]) {
-                self.remove(i).unwrap();
+                self.remove(i);
             }
         }
     }
 
-    fn swap_remove(&mut self, index: usize) -> Option<T>;
+    fn swap_remove(&mut self, index: usize) -> T;
 
     fn clear(&mut self);
 
