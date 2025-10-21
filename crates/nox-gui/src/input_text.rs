@@ -14,7 +14,7 @@ use nox_geom::{
     *,
 };
 
-use nox_font::{RenderedText, VertexTextRenderer, text_segment};
+use nox_font::{text_segment, RenderedText, VertexTextRenderer};
 
 use crate::*;
 
@@ -411,7 +411,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         _hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
@@ -422,6 +422,8 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         _cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
+        collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult {
         enum CursorMove {
             None,
@@ -585,10 +587,16 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             self.flags &= !Self::CURSOR_VISIBLE;
             self.input_text_offset_x = 0.0;
         }
+        let item_pad_outer = style.item_pad_outer();
+        let item_pad_inner = style.item_pad_inner();
         let has_format_error = self.has_format_error();
         let skip_title = self.skip_title();
         let title = if !skip_title {
-            self.title.update(text_renderer, style.font_regular())
+            let title = self.title.update(text_renderer, style.font_regular());
+            if let Some(title) = &title {
+                collect_text(title, self.offset + vec2(0.0, item_pad_inner.y));
+            }
+            title
         } else {
             None
         };
@@ -630,8 +638,6 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             } else {
                 style.calc_text_size(title.unwrap())
             };
-        let item_pad_outer = style.item_pad_outer();
-        let item_pad_inner = style.item_pad_inner();
         let offset = self.offset;
         let input_offset = if skip_title {
             offset
@@ -918,6 +924,34 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         }
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
         self.flags |= Self::ACTIVATED_LAST_FRAME * (!active_this_frame && self.active()) as u32;
+        let input_off = self.offset + 
+            if !self.skip_title() {
+                vec2(title_width + item_pad_outer.x, 0.0)
+            } else {
+                Default::default()
+            };
+        let input_bounding_rect = BoundingRect::from_position_size(
+            window_pos + input_off + vec2(item_pad_inner.x, 0.0),
+            self.input_rect.max - vec2(item_pad_inner.x + item_pad_inner.x, 0.0),
+        );
+        collect_bounded_text(
+            if self.active() {
+                self.input_text.as_ref().unwrap()
+            } else {
+                self.input_text_formatted.as_ref().unwrap()
+            },
+            (input_off + item_pad_inner - vec2(self.input_text_offset_x, 0.0)) / font_scale,
+            BoundedTextInstance {
+                min_bounds: input_bounding_rect.min,
+                max_bounds: input_bounding_rect.max,
+                color:
+                    if self.input.is_empty() {
+                        style.input_text_empty_text_color()
+                    } else {
+                        style.text_col()
+                    },
+            }
+        );
         UpdateResult {
             min_widget_width: width,
             requires_triangulation,
@@ -989,15 +1023,15 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: &Style,
+        _style: &Style,
         base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
+        _text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
         unit_scale: f32,
-        get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
+        _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
         if let Some(selection) = self.selection && selection.0 != selection.1 {
@@ -1029,93 +1063,6 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
                     DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset)
                 ],
                     DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
-            )?;
-        }
-        let item_pad_outer = style.item_pad_outer();
-        let item_pad_inner = style.item_pad_inner();
-        let font_scale = vec2(style.font_scale(), style.font_scale());
-        let keep_title = !self.skip_title();
-        let title_width = if keep_title {
-            render_commands.bind_pipeline(text_pipeline_id)?;
-            let text_col = style.text_col();
-            self.title.render(
-                render_commands,
-                window_pos + self.offset + vec2(0.0, item_pad_inner.y),
-                text_col, font_scale, inv_aspect_ratio, unit_scale, vertex_buffer, index_buffer
-            )?;
-            style.font_scale() * self.title.get_text_width()
-        } else {
-            Default::default()
-        };
-        let pos = window_pos + self.offset + 
-            if keep_title {
-                vec2(title_width + item_pad_outer.x, 0.0)
-            } else {
-                Default::default()
-            };
-        render_commands.bind_pipeline(get_custom_pipeline(INPUT_TEXT_PIPELINE_HASH).unwrap())?;
-        let text_col = if self.input.is_empty() {
-            style.input_text_empty_text_color()
-        } else {
-            style.text_col()
-        };
-        let pc_vertex = push_constants_vertex(
-            pos + item_pad_inner - vec2(self.input_text_offset_x, 0.0),
-            font_scale, inv_aspect_ratio, unit_scale,
-        );
-        let pc_fragment = input_text_push_constants_fragment(
-            text_col,
-            BoundingRect::from_position_size(
-                pos + vec2(item_pad_inner.x, 0.0),
-                self.input_rect.max - vec2(item_pad_inner.x + item_pad_inner.x, 0.0),
-            )
-        );
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        let vertex_buffer_id = vertex_buffer.id();
-        let index_buffer_id = index_buffer.id();
-        let text = if self.active() {
-            self.input_text.as_ref().unwrap()
-        } else {
-            self.input_text_formatted.as_ref().unwrap()
-        };
-        for text in text {
-            let vert_mem = unsafe {
-                vertex_buffer.allocate(render_commands, text.trigs.vertices.len())?
-            };
-            let vert_off_mem = unsafe {
-                vertex_buffer.allocate(render_commands, text.offsets.len())?
-            };
-            let idx_mem = unsafe {
-                index_buffer.allocate(render_commands, text.trigs.indices.len())?
-            }; 
-            unsafe {
-                text.trigs.vertices
-                    .as_ptr()
-                    .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), text.trigs.vertices.len());
-                text.offsets
-                    .as_ptr()
-                    .copy_to_nonoverlapping(vert_off_mem.ptr.as_ptr(), text.offsets.len());
-                text.trigs.indices
-                    .as_ptr()
-                    .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), text.trigs.indices.len());
-            }
-            render_commands.draw_indexed(
-                DrawInfo {
-                    index_count: text.trigs.indices.len() as u32,
-                    instance_count: text.offsets.len() as u32,
-                    ..Default::default()
-                },
-                [
-                    DrawBufferInfo::new(vertex_buffer_id, vert_mem.offset),
-                    DrawBufferInfo::new(vertex_buffer_id, vert_off_mem.offset),
-                ],
-                DrawBufferInfo::new(index_buffer_id, idx_mem.offset),
             )?;
         }
         Ok(None)

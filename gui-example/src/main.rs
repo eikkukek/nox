@@ -32,6 +32,8 @@ struct Example<'a> {
     animation_curve: bezier::AnimationCurve,
     checkbox_checked: bool,
     show_other_window: bool,
+    output_image: ImageId,
+    output_resolve_image: ImageId,
 }
 
 impl<'a> Example<'a> {
@@ -72,6 +74,8 @@ impl<'a> Example<'a> {
             ),
             checkbox_checked: false,
             show_other_window: false,
+            output_image: Default::default(),
+            output_resolve_image: Default::default(),
         }
     }
 }
@@ -118,6 +122,35 @@ impl<'a> Interface for Example<'a> {
         Ok(())
     }
 
+    fn frame_buffer_size_callback(
+        &mut self,
+        renderer: &mut RendererContext
+    ) -> Result<(), Error>
+    {
+        let frame_buffer_size = renderer.frame_buffer_size();
+        renderer.edit_resources(|r| {
+            r.destroy_image(self.output_image);
+            r.destroy_image(self.output_resolve_image);
+            self.output_image = r
+                .create_image(&mut r.default_binder(), |builder| {
+                    builder
+                        .with_dimensions(frame_buffer_size)
+                        .with_format(self.output_format, false)
+                        .with_samples(MSAA::X8)
+                        .with_usage(ImageUsage::ColorAttachment);
+            })?;
+            self.output_resolve_image = r
+                .create_image(&mut r.default_binder(), |builder| {
+                    builder
+                        .with_dimensions(frame_buffer_size)
+                        .with_format(self.output_format, false)
+                        .with_usage(ImageUsage::ColorAttachment)
+                        .with_usage(ImageUsage::Sampled);
+            })?;
+            Ok(())
+        })
+    }
+
     fn update(
         &mut self,
         nox: &mut Nox<Self>,
@@ -156,7 +189,9 @@ impl<'a> Interface for Example<'a> {
             }
         )?;
         if self.show_other_window {
-            self.workspace.update_window(1, "Other window", [0.25, 0.25], [0.0, 0.0], 
+            let mut fmt = String::new();
+            <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / nox.delta_time_secs_f32())).unwrap();
+            self.workspace.update_window(1, fmt.as_str(), [0.25, 0.25], [0.0, 0.0], 
                 |mut _win| {
                     Ok(())
             })?;
@@ -173,20 +208,8 @@ impl<'a> Interface for Example<'a> {
         let frame_graph = frame_graph.init(1)?;
         let frame_buffer_size = frame_graph.frame_buffer_size();
         self.aspect_ratio = frame_buffer_size.width as f32 / frame_buffer_size.height as f32;
-        let output = frame_graph.add_transient_image(&mut |builder| {
-            builder
-                .with_dimensions(frame_buffer_size)
-                .with_format(self.output_format, false)
-                .with_samples(MSAA::X8)
-                .with_usage(ImageUsage::ColorAttachment);
-        })?;
-        let output_resolve = frame_graph.add_transient_image(&mut |builder| {
-            builder
-                .with_dimensions(frame_buffer_size)
-                .with_format(self.output_format, false)
-                .with_usage(ImageUsage::ColorAttachment)
-                .with_usage(ImageUsage::Sampled);
-        })?;
+        let output = frame_graph.add_image(self.output_image)?;
+        let output_resolve = frame_graph.add_image(self.output_resolve_image)?;
         frame_graph.add_pass(
             PassInfo {
                 max_color_writes: 1,

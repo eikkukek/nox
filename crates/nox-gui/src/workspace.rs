@@ -23,7 +23,7 @@ pub(crate) const COLOR_PICKER_PIPELINE_HASH: &str = "nox_gui color picker";
 pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: &str = "nox_gui color picker hue";
 pub(crate) const COLOR_PICKER_ALPHA_PIPELINE_HASH: &str = "nox_gui color picker alpha";
 
-pub(crate) const INPUT_TEXT_PIPELINE_HASH: &str = "nox_gui input text";
+pub(crate) const BOUNDED_TEXT_PIPELINE_HASH: &str = "nox_gui bounded text";
 
 #[derive(Default)]
 struct BasePipelines {
@@ -175,7 +175,7 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
         self.output_samples = output_samples;
         self.output_format = output_format;
         let mut color_picker_shaders = [Default::default(); 4];
-        let mut input_text_shaders = [Default::default(); 4];
+        let mut bounded_text_shaders = [Default::default(); 4];
         render_context.edit_resources(|r| {
             color_picker_shaders[0] = r.create_shader(
                 COLOR_PICKER_VERTEX_SHADER,
@@ -193,13 +193,13 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                 COLOR_PICKER_FRAGMENT_SHADER_ALPHA,
                 "nox_gui color picker fragment shader alpha", ShaderStage::Fragment
             )?;
-            input_text_shaders[0] = r.create_shader(
-                INPUT_TEXT_VERTEX_SHADER,
-                "nox_gui input text vertex shader", ShaderStage::Vertex
+            bounded_text_shaders[0] = r.create_shader(
+                BOUNDED_TEXT_VERTEX_SHADER,
+                "nox_gui bounded text vertex shader", ShaderStage::Vertex
             )?;
-            input_text_shaders[1] = r.create_shader(
-                INPUT_TEXT_FRAGMENT_SHADER,
-                "nox_gui input text fragment shader", ShaderStage::Fragment
+            bounded_text_shaders[1] = r.create_shader(
+                BOUNDED_TEXT_FRAGMENT_SHADER,
+                "nox_gui bounded text fragment shader", ShaderStage::Fragment
             )?;
             Ok(())
         })?;
@@ -240,15 +240,17 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                     ),
                 ),
                 (
-                    INPUT_TEXT_PIPELINE_HASH,
+                    BOUNDED_TEXT_PIPELINE_HASH,
                     CustomPipelineInfo::new(
-                        input_text_shaders[0],
-                        input_text_shaders[1],
+                        bounded_text_shaders[0],
+                        bounded_text_shaders[1],
                         &[
                             VertexInputBinding
                                 ::new::<0, font::Vertex>(0, VertexInputRate::Vertex),
                             VertexInputBinding
                                 ::new::<1, font::VertexOffset>(1, VertexInputRate::Instance),
+                            VertexInputBinding
+                                ::new::<2, BoundedTextInstance>(2, VertexInputRate::Instance),
                         ],
                     ),
                 ),
@@ -428,6 +430,12 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                 "nox_gui: attempting to call Workspace::begin twice before calling Workspace::end".into()
             ))
         }
+        if let Some(buf) = &mut self.vertex_buffer {
+            buf.finish_frame();
+        }
+        if let Some(buf) = &mut self.index_buffer {
+            buf.finish_frame();
+        }
         self.frame += 1;
         self.flags |= Self::BEGAN;
         Ok(())
@@ -455,7 +463,7 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
             initial_size,
         ));
         window.set_last_frame(self.frame);
-        f(WindowContext::new(window, &self.style, &self.hover_style, &mut self.text_renderer))?;
+        f(WindowContext::new(title, window, &self.style, &self.hover_style, &mut self.text_renderer))?;
         if !self.active_windows.contains(&id) {
             self.active_windows.push(id);
         }
@@ -464,7 +472,7 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
 
     pub fn end(
         &mut self,
-        nox: &Nox<'_, I>,
+        nox: &mut Nox<'_, I>,
     ) -> Result<(), Error>
     {
         if !self.began() {
@@ -512,8 +520,8 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
             window.refresh_position(aspect_ratio, unit_scale, window_size);
         }
         if let Some(idx) = window_pressed {
-            let id = self.active_windows.remove(idx).unwrap();
-            self.active_windows.push(id);
+            let id = self.active_windows.remove(idx);
+           self.active_windows.push(id);
         }
         if self.cursor_in_window() && !cursor_in_some_window && self.style.override_cursor() {
             nox.set_cursor(CursorIcon::Default);
@@ -563,8 +571,6 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                 }
             )?;
         }
-        vertex_buffer.finish_frame();
-        index_buffer.finish_frame();
         Ok(())
     }
 

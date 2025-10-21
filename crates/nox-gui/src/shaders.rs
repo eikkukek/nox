@@ -42,6 +42,14 @@ impl From<[f32; 2]> for ColorPickerVertex {
 }
 
 #[repr(C)]
+#[derive(Default, Clone, Copy, VertexInput)]
+pub struct BoundedTextInstance {
+    pub min_bounds: Vec2,
+    pub max_bounds: Vec2,
+    pub color: ColorSRGBA,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct PushConstantsVertex{
     pub vert_off: Vec2,
@@ -87,31 +95,6 @@ pub fn text_push_constants_fragment(color: ColorSRGBA) -> TextPushConstantsFragm
 }
 
 impl TextPushConstantsFragment {
-
-    pub unsafe fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            value_as_bytes(self).unwrap()
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct InputTextPushConstantsFragment {
-    pub color: ColorSRGBA,
-    pub rect_min: Vec2,
-    pub rect_max: Vec2
-}
-
-pub fn input_text_push_constants_fragment(color: ColorSRGBA, bounding_rect: BoundingRect) -> InputTextPushConstantsFragment {
-    InputTextPushConstantsFragment {
-        color,
-        rect_min: bounding_rect.min,
-        rect_max: bounding_rect.max,
-    }
-}
-
-impl InputTextPushConstantsFragment {
 
     pub unsafe fn as_bytes(&self) -> &[u8] {
         unsafe {
@@ -412,14 +395,21 @@ pub const COLOR_PICKER_FRAGMENT_SHADER_ALPHA: &'static str = "
     }
 ";
 
-pub const INPUT_TEXT_VERTEX_SHADER: &'static str = "
+pub const BOUNDED_TEXT_VERTEX_SHADER: &'static str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
 
     layout(location = 1) in vec2 in_offset;
 
+    layout(location = 2) in vec2 in_min_bounds;
+    layout(location = 3) in vec2 in_max_bounds;
+    layout(location = 4) in vec4 in_color;
+
     layout(location = 0) out vec2 out_pos;
+    layout(location = 1) out flat vec2 out_min_bounds;
+    layout(location = 2) out flat vec2 out_max_bounds;
+    layout(location = 3) out flat vec4 out_color;
 
     layout(push_constant) uniform PushConstant {
         vec2 vert_off;
@@ -433,6 +423,9 @@ pub const INPUT_TEXT_VERTEX_SHADER: &'static str = "
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
         out_pos = pos + pc.vert_off;
+        out_min_bounds = in_min_bounds;
+        out_max_bounds = in_max_bounds;
+        out_color = in_color;
         pos *= pc.unit_scale;
         pos += pc.vert_off * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
@@ -440,27 +433,25 @@ pub const INPUT_TEXT_VERTEX_SHADER: &'static str = "
     }
 ";
 
-pub const INPUT_TEXT_FRAGMENT_SHADER: &'static str = "
+pub const BOUNDED_TEXT_FRAGMENT_SHADER: &'static str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
+    layout(location = 1) in vec2 in_min_bounds;
+    layout(location = 2) in vec2 in_max_bounds;
+    layout(location = 3) in vec4 in_color;
 
     layout(location = 0) out vec4 out_color;
 
-    layout(push_constant) uniform PushConstant {
-        layout(offset = 32) vec4 color;
-        vec2 rect_min;
-        vec2 rect_max;
-    } pc;
-
     bool in_rect() {
-        return pc.rect_min.x < in_pos.x && pc.rect_max.x > in_pos.x &&
-            pc.rect_min.y < in_pos.y && pc.rect_max.y > in_pos.y;
+        return true;
+        return in_min_bounds.x < in_pos.x && in_max_bounds.x > in_pos.x &&
+            in_min_bounds.y < in_pos.y && in_max_bounds.y > in_pos.y;
     }
 
     void main() {
         if (in_rect()) {
-            out_color = pc.color;
+            out_color = in_color;
         } else {
             out_color = vec4(0.0);
         }

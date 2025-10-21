@@ -5,7 +5,7 @@ use core::{
 };
 
 use nox::{
-    mem::vec_types::{GlobalVec, Vector},
+    mem::vec_types::{GhostVec, GlobalVec, Vector},
     *,
 };
 
@@ -13,7 +13,7 @@ use rustc_hash::FxHashMap;
 
 use compact_str::CompactString;
 
-use nox_font::{VertexTextRenderer, text_segment, RenderedText};
+use nox_font::{VertexTextRenderer, text_segment, RenderedText, CombinedRenderedText};
 
 use nox_geom::{
     shapes::*, *
@@ -159,7 +159,11 @@ impl HoverWindow {
             unit_scale,
         );
         let pc_fragment = text_push_constants_fragment(style.text_col());
-        render_text(render_commands, &self.rendered_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
+        render_text(
+            render_commands,
+            self.rendered_text.iter().map(|(c, t)| (*c, t)),
+            pc_vertex, pc_fragment, vertex_buffer, index_buffer
+        )?;
         Ok(())
     }
 }
@@ -178,6 +182,8 @@ pub(crate) struct Window<I, FontHash, Style, HoverStyle>
     position: Vec2,
     title: CompactString,
     title_text: Option<RenderedText>,
+    combined_text: Option<CombinedRenderedText<(), GhostVec<()>>>,
+    combined_bounded_text: Option<CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>>,
     vertices: Option<GlobalVec<Vertex>>,
     indices: GlobalVec<u32>,
     buttons: FxHashMap<u32, (u64, Button<I, FontHash, Style, HoverStyle>)>,
@@ -241,6 +247,8 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             position: position.into(),
             title: title.into(),
             title_text: None,
+            combined_text: Some(CombinedRenderedText::new()),
+            combined_bounded_text: Some(CombinedRenderedText::new()),
             vertices: Some(Default::default()),
             indices: Default::default(),
             buttons: FxHashMap::default(),
@@ -444,9 +452,19 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         )
     }
 
+    #[inline(always)]
+    pub fn begin(&mut self) {
+        unsafe {
+            self.prev_active_widgets
+                .as_mut()
+                .unwrap_unchecked()
+                .move_from_vec(self.active_widgets.as_mut().unwrap_unchecked());
+        }
+    }
+
     pub fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
@@ -485,6 +503,20 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.prev_active_widgets = Some(prev_active_widgets);
         self.vertices = Some(vertices);
+        let item_pad_outer = style.item_pad_outer();
+        let item_pad_inner = style.item_pad_inner();
+        let font_scale = style.font_scale();
+        let mut combined_text = unsafe {
+            self.combined_text.take().unwrap_unchecked()
+        };
+        combined_text.clear();
+        combined_text
+            .add_text(self.title_text.as_ref().unwrap(), vec2(item_pad_outer.x, item_pad_inner.y) / font_scale, ())
+            .unwrap();
+        let mut combined_bounded_text = unsafe {
+            self.combined_bounded_text.take().unwrap_unchecked()
+        };
+        combined_bounded_text.clear();
         let mut hover_window = self.hover_window.take().unwrap();
         let mut active_widget = None;
         for (i, &widget) in active_widgets.iter().enumerate() {
@@ -500,7 +532,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             let UpdateResult {
                 min_widget_width,
                 requires_triangulation,
-                cursor_in_widget
+                cursor_in_widget,
             } = widget.update(
                 nox,
                 style,
@@ -516,10 +548,17 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 } else {
                     false
                 },
-                window_moving
+                window_moving,
+                &mut |text, offset| {
+                    combined_text.add_text(text, offset / font_scale, ()).unwrap();
+                },
+                &mut |text, offset, instance| {
+                    combined_bounded_text.add_text(text, offset, instance).unwrap();
+                },
             );
             min_width = min_width.max(min_widget_width +
-                style.item_pad_outer().x + style.item_pad_outer().x);
+                item_pad_outer.x + item_pad_outer.x
+            );
             if cursor_in_widget && let Some(hover_text) = widget.hover_text() {
                 hover_window.update(hover_style, text_renderer, cursor_pos, hover_text);
                 self.flags |= Self::HOVER_WINDOW_ACTIVE;
@@ -529,12 +568,14 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             }
             cursor_in_some_widget |= cursor_in_widget;
         }
+        self.combined_text = Some(combined_text);
+        self.combined_bounded_text = Some(combined_bounded_text);
         cursor_in_this_window |= cursor_in_some_widget;
         self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
         self.active_widgets = Some(active_widgets);
         self.hover_window = Some(hover_window);
         let title_text = self.title_text.as_ref().unwrap();
-        min_width = min_width.max(style.calc_text_box_width(title_text) + style.item_pad_outer().x);
+        min_width = min_width.max(style.calc_text_box_width(title_text) + item_pad_outer.x);
         self.min_width = min_width;
         if self.main_rect.max.x < min_width {
             self.main_rect.max.x = min_width;
@@ -1004,16 +1045,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 offset: idx_mem.offset,
             },
         )?;
-        render_commands.bind_pipeline(text_pipeline_id)?;
-        let pc_vertex = push_constants_vertex(
-            self.position + vec2(style.item_pad_outer().x, style.item_pad_inner().y),
-            vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio,
-            unit_scale,
-        );
-        let pc_fragment = text_push_constants_fragment(style.text_col());
-        render_text(render_commands, self.title_text.as_ref().unwrap(),
-            pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         let mut on_top_contents = None;
         let window_pos = self.position;
         for &widget in unsafe { self.active_widgets.as_ref().unwrap_unchecked() } {
@@ -1033,6 +1064,33 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 on_top_contents = Some(contents);
             }
         }
+        render_commands.bind_pipeline(text_pipeline_id)?;
+        let pc_vertex = push_constants_vertex(
+            self.position,
+            vec2(style.font_scale(), style.font_scale()),
+            inv_aspect_ratio,
+            unit_scale,
+        );
+        let pc_fragment = text_push_constants_fragment(style.text_col());
+        render_text(render_commands,
+            unsafe { self.combined_text
+                .as_ref()
+                .unwrap_unchecked()
+                .iter()
+                .map(|(&c, v)| (c, &v.0))
+            },
+            pc_vertex, pc_fragment, vertex_buffer, index_buffer
+        )?;
+        render_commands.bind_pipeline(get_custom_pipeline(BOUNDED_TEXT_PIPELINE_HASH).unwrap())?;
+        render_bounded_text(render_commands,
+            unsafe { self.combined_bounded_text
+                .as_ref()
+                .unwrap_unchecked()
+                .iter()
+                .map(|(&c, v)| (c, &v.0, v.1.as_slice()))
+            },
+            pc_vertex, vertex_buffer, index_buffer
+        )?;
         if let Some(contents) = on_top_contents {
             contents.render_commands(
                 render_commands,
@@ -1064,12 +1122,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 unit_scale,
             )?;
         }
-        unsafe {
-            self.prev_active_widgets
-                .as_mut()
-                .unwrap_unchecked()
-                .move_from_vec(self.active_widgets.as_mut().unwrap_unchecked());
-        }
         Ok(())
     }
 }
@@ -1097,11 +1149,17 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
 {
 
     pub(crate) fn new(
+        title: &str,
         window: &'a mut Window<I, FontHash, Style, HoverStyle>,
         style: &'a Style,
         hover_style: &'a HoverStyle,
         text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
     ) -> Self {
+        if title != window.title {
+            window.title = title.into();
+            window.title_text = None;
+        }
+        window.begin();
         let title_text = window.title_text.get_or_insert(text_renderer.render(
             &[text_segment(window.title.as_str(), &style.font_regular())],
             false,

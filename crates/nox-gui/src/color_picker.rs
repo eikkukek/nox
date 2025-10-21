@@ -10,7 +10,7 @@ use nox::{
     *
 };
 
-use nox_font::{text_segment, RenderedText};
+use nox_font::{text_segment, RenderedText, CombinedRenderedText};
 use nox_geom::{
     shapes::*,
     *
@@ -48,6 +48,7 @@ struct Contents<I, FontHash, HoverStyle> {
     picker_handle_outline_vertex_range: VertexRange,
     hue_picker_handle_vertex_range: VertexRange,
     alpha_picker_handle_vertex_range: VertexRange,
+    combined_bounded_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     outline_width: f32,
     focused_outline_width: f32,
     rgba_text_size: Vec2,
@@ -120,6 +121,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
             picker_handle_outline_vertex_range: Default::default(),
             hue_picker_handle_vertex_range: Default::default(),
             alpha_picker_handle_vertex_range: Default::default(),
+            combined_bounded_text: CombinedRenderedText::new(),
             outline_width: 0.0,
             focused_outline_width: 0.0,
             rgba_text_size: Default::default(),
@@ -229,7 +231,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &HoverStyle,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
         window_pos: Vec2,
@@ -425,6 +427,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         self.r_drag_value.calc_value(style, &mut val, 0, 255, style.default_value_drag_speed() * 255.0);
         self.flags |= Self::R_CHANGED * (self.rgba.r != val) as u32;
         self.rgba.r = val;
+        self.combined_bounded_text.clear();
         let mut update_result = self.r_drag_value.update(
             nox, style, style,
             text_renderer, window_rect_max.x, window_pos,
@@ -435,6 +438,8 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
                 false
             },
             window_moving,
+            &mut |_, _| {},
+            &mut |text, offset, instance| self.combined_bounded_text.add_text(text, offset, instance).unwrap(),
         );
         let mut f = |
                 drag_value: &mut DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>,
@@ -452,6 +457,8 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
                     false
                 },
                 window_moving,
+                &mut |_, _| {},
+                &mut |text, offset, instance| self.combined_bounded_text.add_text(text, offset, instance).unwrap(),
             );
             update_result.min_widget_width = update_result.min_widget_width.max(res.min_widget_width);
             update_result.cursor_in_widget |= res.cursor_in_widget;
@@ -931,6 +938,17 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
         f(&self.b_drag_value)?;
         f(&self.alpha_drag_value)?;
         f(&self.hue_drag_value)?;
+        let font_scale = style.font_scale();
+        let pc_vertex = push_constants_vertex(
+            window_pos, vec2(font_scale, font_scale), inv_aspect_ratio, unit_scale
+        );
+        render_commands.bind_pipeline(get_custom_pipeline(BOUNDED_TEXT_PIPELINE_HASH).unwrap())?;
+        render_bounded_text(render_commands,
+            self.combined_bounded_text
+                .iter()
+                .map(|(&c, v)| (c, &v.0, v.1.as_slice())),
+            pc_vertex, vertex_buffer, index_buffer
+        )?;
         Ok(())
     }
 }
@@ -1042,7 +1060,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         hover_style: &HoverStyle,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
@@ -1053,8 +1071,11 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         _cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
+        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult {
         let title_text = self.title_text.as_ref().unwrap();
+        collect_text(title_text, self.offset);
         let text_size = style.calc_text_size(title_text);
         let color_rect_max = vec2(text_size.y, text_size.y);
         let requires_triangulation = self.color_rect.max != color_rect_max;
@@ -1148,28 +1169,18 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
 
     fn render_commands(
         &self,
-        render_commands: &mut RenderCommands,
-        style: &Style,
+        _render_commands: &mut RenderCommands,
+        _style: &Style,
         _base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-        window_pos: Vec2,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
+        _text_pipeline_id: GraphicsPipelineId,
+        _vertex_buffer: &mut RingBuf,
+        _index_buffer: &mut RingBuf,
+        _window_pos: Vec2,
+        _inv_aspect_ratio: f32,
+        _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
-        render_commands.bind_pipeline(text_pipeline_id)?;
-        let pc_vertex = push_constants_vertex(
-            window_pos + self.offset,
-            vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio,
-            unit_scale,
-        );
-        let pc_fragment = text_push_constants_fragment(style.text_col());
-        render_text(render_commands, self.title_text.as_ref().unwrap(),
-            pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         if self.contents.shown() {
             Ok(Some(&self.contents))
         } else {

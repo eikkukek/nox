@@ -6,6 +6,7 @@ use core::{
 
 use nox::{mem::vec_types::Vector, *};
 
+use nox_font::RenderedText;
 use nox_geom::*;
 
 use crate::*;
@@ -170,7 +171,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         hover_style: &HoverStyle,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
@@ -181,6 +182,8 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
+        collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
         self.input_text.set_cursor_enable(self.input_text.active());
@@ -225,7 +228,8 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             nox, style, hover_style,
             text_renderer, window_width, window_pos,
             cursor_pos, delta_cursor_pos, cursor_in_this_window,
-            other_widget_active, window_moving
+            other_widget_active, window_moving, collect_text,
+            collect_bounded_text,
         );
         update_results.cursor_in_widget |= cursor_in_rect || self.held();
         update_results.requires_triangulation |=

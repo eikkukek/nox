@@ -5,7 +5,7 @@ use nox::{
     *,
 };
 
-use nox_font::VertexTextRenderer;
+use nox_font::{RenderedText, VertexTextRenderer};
 
 use nox_geom::Vec2;
 
@@ -76,7 +76,7 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
@@ -87,6 +87,8 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
         cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
+        collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult;
 
     fn triangulate(

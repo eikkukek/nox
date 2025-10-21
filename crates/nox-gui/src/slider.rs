@@ -183,7 +183,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         _hover_style: &HoverStyle,
         _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
@@ -194,6 +194,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         cursor_in_this_window: bool,
         other_widget_active: bool,
         _window_moving: bool,
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
+        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
         where
             I: Interface,
@@ -231,10 +233,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             handle_rect != self.handle_rect ||
             self.focused_outline_width != style.focused_outline_width();
         self.focused_outline_width = style.focused_outline_width();
-        if requires_triangulation {
-            self.slider_rect = slider_rect;
-            self.handle_rect = handle_rect;
-        }
+        self.slider_rect = slider_rect;
+        self.handle_rect = handle_rect;
         let mut cursor_in_widget = false;
         self.falgs &= !Self::CURSOR_IN_SLIDER;
         if self.held() {
@@ -258,6 +258,9 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                 }
             }
         }
+        collect_text(title_text,
+            self.offset + vec2(0.0, (self.slider_rect.max.y - style.calc_text_height(title_text)) / 2.0)
+        );
         UpdateResult {
             requires_triangulation,
             cursor_in_widget,
@@ -334,34 +337,18 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
 
     fn render_commands(
         &self,
-        render_commands: &mut RenderCommands,
-        style: &Style,
+        _render_commands: &mut RenderCommands,
+        _style: &Style,
         _base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-        window_pos: Vec2,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
+        _text_pipeline_id: GraphicsPipelineId,
+        _vertex_buffer: &mut RingBuf,
+        _index_buffer: &mut RingBuf,
+        _window_pos: Vec2,
+        _inv_aspect_ratio: f32,
+        _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
-        let title_text = unsafe {
-            self.title_text.as_ref().unwrap_unchecked()
-        };
-        render_commands.bind_pipeline(text_pipeline_id)?;
-        let pc_vertex = push_constants_vertex(
-            window_pos + vec2(
-                self.offset.x,
-                self.offset.y +
-                    (self.slider_rect.max.y - style.calc_text_height(title_text)) / 2.0
-            ),
-            vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio,
-            unit_scale,
-        );
-        let pc_fragment = text_push_constants_fragment(style.text_col());
-        render_text(render_commands, title_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         Ok(None)
     }
 

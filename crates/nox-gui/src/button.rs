@@ -120,7 +120,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         _hover_style: &HoverStyle,
         _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
@@ -131,10 +131,13 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         cursor_in_this_window: bool,
         other_widget_active: bool,
         _window_moving: bool,
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
+        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
         let title_text = self.title_text.as_ref().unwrap();
+        collect_text(title_text, self.offset + style.item_pad_inner());
         let rect_size = style.calc_text_box_size(title_text);
         let rect = rect(Default::default(), rect_size, style.rounding());
         let requires_triangulation =
@@ -226,30 +229,18 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
 
     fn render_commands(
         &self,
-        render_commands: &mut RenderCommands,
-        style: &Style,
+        _render_commands: &mut RenderCommands,
+        _style: &Style,
         _base_pipeline: GraphicsPipelineId,
-        text_pipeline: GraphicsPipelineId,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-        window_pos: Vec2,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
+        _text_pipeline: GraphicsPipelineId,
+        _vertex_buffer: &mut RingBuf,
+        _index_buffer: &mut RingBuf,
+        _window_pos: Vec2,
+        _inv_aspect_ratio: f32,
+        _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
-        let title_text = unsafe {
-            self.title_text.as_ref().unwrap_unchecked()
-        };
-        render_commands.bind_pipeline(text_pipeline)?;
-        let pc_vertex = push_constants_vertex(
-            window_pos + self.offset + style.item_pad_inner(),
-            vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio,
-            unit_scale,
-        );
-        let pc_fragment = text_push_constants_fragment(style.text_col());
-        render_text(render_commands, title_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
         Ok(None)
     }
 

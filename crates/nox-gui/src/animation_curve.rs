@@ -8,6 +8,7 @@ use nox::{
     *,
 };
 
+use nox_font::RenderedText;
 use nox_geom::{
     shapes::*, *
 };
@@ -398,7 +399,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         hover_style: &HoverStyle,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
@@ -409,6 +410,8 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         _cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
+        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
         if other_widget_active {
@@ -416,7 +419,9 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         }
         let widget_rect_width = style.animation_curve_size().x;
         let mut width = widget_rect_width;
-        self.title.update(text_renderer, style.font_regular());
+        if let Some(text) = self.title.update(text_renderer, style.font_regular()) {
+            collect_text(text, self.offset)
+        }
         let title_width = self.title.get_text_width();
         let mut offset = self.offset;
         if title_width != 0.0 {
@@ -501,27 +506,18 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
 
     fn render_commands(
         &self,
-        render_commands: &mut RenderCommands,
-        style: &Style,
+        _render_commands: &mut RenderCommands,
+        _style: &Style,
         _base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-        window_pos: Vec2,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
+        _text_pipeline_id: GraphicsPipelineId,
+        _vertex_buffer: &mut RingBuf,
+        _index_buffer: &mut RingBuf,
+        _window_pos: Vec2,
+        _inv_aspect_ratio: f32,
+        _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
-        render_commands.bind_pipeline(text_pipeline_id)?;
-        let font_scale = vec2(style.font_scale(), style.font_scale());
-        self.title.render(
-            render_commands, 
-            window_pos + self.offset,
-            style.text_col(),
-            font_scale, inv_aspect_ratio, unit_scale,
-            vertex_buffer, index_buffer,
-        )?;
         if self.contents_shown() {
             return Ok(Some(self))
         }

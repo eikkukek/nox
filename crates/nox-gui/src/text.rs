@@ -1,7 +1,5 @@
 use core::hash::Hash;
 
-use nox::*;
-
 use nox_geom::*;
 
 use nox_font::{VertexTextRenderer, RenderedText, text_segment};
@@ -25,18 +23,6 @@ pub trait Text {
     fn get_text_width(&self) -> f32;
 
     fn get_text_height(&self) -> f32;
-    
-    fn render(
-        &self,
-        render_commands: &mut RenderCommands,
-        offset: Vec2,
-        color: ColorSRGBA,
-        font_scale: Vec2,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-    ) -> Result<(), Error>;
 }
 
 pub struct DefaultText {
@@ -94,34 +80,6 @@ impl Text for DefaultText {
             .map(|v| v.row_height * v.text_rows as f32)
             .unwrap_or_default()
     }
-
-    #[inline(always)]
-    fn render(
-        &self,
-        render_commands: &mut RenderCommands,
-        offset: Vec2,
-        color: ColorSRGBA,
-        font_scale: Vec2,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-    ) -> Result<(), Error>
-    {
-        let pc_vertex = push_constants_vertex(
-            offset,
-            font_scale,
-            inv_aspect_ratio,
-            unit_scale,
-        );
-        let pc_fragment = text_push_constants_fragment(color);
-        render_text(
-            render_commands,
-            self.rendered_text.as_ref().unwrap(),
-            pc_vertex,
-            pc_fragment, vertex_buffer, index_buffer
-        )
-    }
 }
 
 pub struct EmptyText;
@@ -158,22 +116,6 @@ impl Text for EmptyText {
     #[inline(always)]
     fn get_text_height(&self) -> f32 {
         0.0
-    }
-
-    #[inline(always)]
-    fn render(
-        &self,
-        _render_commands: &mut RenderCommands,
-        _offset: Vec2,
-        _color: ColorSRGBA,
-        _font_scale: Vec2,
-        _inv_aspect_ratio: f32,
-        _unit_scale: f32,
-        _vertex_buffer: &mut RingBuf,
-        _index_buffer: &mut RingBuf,
-    ) -> Result<(), Error>
-    {
-        Ok(())
     }
 }
 

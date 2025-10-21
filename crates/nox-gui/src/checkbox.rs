@@ -158,7 +158,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
 
     fn update(
         &mut self,
-        nox: &Nox<I>,
+        nox: &mut Nox<I>,
         style: &Style,
         _hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
@@ -169,6 +169,8 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         cursor_in_this_window: bool,
         other_widget_active: bool,
         _window_moving: bool,
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
+        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
@@ -206,6 +208,16 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                     self.flags |= Self::HELD;
                 }
             }
+        }
+        collect_text(title_text, self.offset + vec2(0.0, style.item_pad_inner().y));
+        if self.checked() {
+            let checkbox_text = self.checkbox_text.as_ref().unwrap();
+            let checkbox_pos = self.offset +
+                vec2(style.calc_text_width(title_text) + style.item_pad_outer().x, 0.0);
+            let size = style.calc_text_size(checkbox_text);
+            collect_text(checkbox_text,
+                checkbox_pos + rect.max * 0.5 - size * 0.5,
+            );
         }
         UpdateResult {
             min_widget_width: self.calc_size(style, text_renderer).x,
@@ -270,39 +282,18 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
 
     fn render_commands(
         &self,
-        render_commands: &mut RenderCommands,
-        style: &Style,
+        _render_commands: &mut RenderCommands,
+        _style: &Style,
         _base_pipeline: GraphicsPipelineId,
-        text_pipeline: GraphicsPipelineId,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-        window_pos: Vec2,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
+        _text_pipeline: GraphicsPipelineId,
+        _vertex_buffer: &mut RingBuf,
+        _index_buffer: &mut RingBuf,
+        _window_pos: Vec2,
+        _inv_aspect_ratio: f32,
+        _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
     {
-        let title_text = self.title_text.as_ref().unwrap();
-        render_commands.bind_pipeline(text_pipeline)?;
-        let pc_vertex = push_constants_vertex(
-            window_pos + self.offset + vec2(0.0, style.item_pad_inner().y),
-            vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio, unit_scale,
-        );
-        let pc_fragment = text_push_constants_fragment(style.text_col());
-        render_text(render_commands, title_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
-        if self.checked() {
-            let checkbox_text = self.checkbox_text.as_ref().unwrap();
-            let checkbox_pos = window_pos + self.offset +
-                vec2(style.calc_text_width(title_text) + style.item_pad_outer().x, 0.0);
-            let size = style.calc_text_size(checkbox_text);
-            let pc_vertex = push_constants_vertex(
-                checkbox_pos + self.rect.max * 0.5 - size * 0.5,
-                vec2(style.font_scale(), style.font_scale()),
-                inv_aspect_ratio, unit_scale,
-            );
-            render_text(render_commands, checkbox_text, pc_vertex, pc_fragment, vertex_buffer, index_buffer)?;
-        }
         Ok(None)
     }
 
