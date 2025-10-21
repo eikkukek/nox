@@ -137,7 +137,7 @@ impl Interface for App {
                 &nox::mem::GlobalAlloc,
                 |_, p| { self.pipeline = p }
             )?;
-            for text in &self.rendered_text {
+            for (_, text) in &self.rendered_text {
                 self.vertex_buffers.push(r.create_buffer(
                     (text.trigs.vertices.len() * size_of!(Vertex)) as u64, 
                     &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
@@ -167,7 +167,7 @@ impl Interface for App {
         _id: renderer::CommandRequestId,
         commands: &mut renderer::TransferCommands,
     ) -> Result<Option<std::thread::JoinHandle<()>>, Error> {
-        for (i, text) in self.rendered_text.iter().enumerate() {
+        for (i, (_, text)) in self.rendered_text.iter().enumerate() {
             let vertices = unsafe { slice_as_bytes(&text.trigs.vertices) }.unwrap();
             commands.copy_data_to_buffer(
                 self.vertex_buffers[i],
@@ -251,7 +251,7 @@ impl Interface for App {
             _aspect_ratio: self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32,
         };
         commands.push_constants(|_| unsafe { value_as_bytes(&pc).unwrap() })?;
-        for (i, text) in self.rendered_text.iter().enumerate() {
+        for (i, (_, text)) in self.rendered_text.iter().enumerate() {
             commands.draw_indexed(
                 DrawInfo {
                     index_count: text.trigs.indices.len() as u32,
