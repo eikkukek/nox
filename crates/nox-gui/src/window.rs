@@ -5,7 +5,7 @@ use core::{
 };
 
 use nox::{
-    mem::vec_types::{GhostVec, GlobalVec, Vector},
+    mem::vec_types::{GlobalVec, Vector},
     *,
 };
 
@@ -29,12 +29,11 @@ enum ActiveWidget {
     ColorPicker(u32),
     InputText(u32),
     DragValue(u32),
-    AnimationCurve(u32),
 }
 
 struct HoverWindow {
     text: CompactString,
-    rendered_text: RenderedText,
+    rendered_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     rect: Rect,
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
@@ -64,16 +63,25 @@ impl HoverWindow {
         where
             FontHash: Clone + Eq + Hash,
     {
+        let mut rect = self.rect;
+        rect.rounding = style.rounding();
         if text != self.text {
-            self.rendered_text = text_renderer.render(
+            self.rendered_text.clear();
+            let text = text_renderer.render(
                 &[text_segment(text, style.font_regular())], false, 0.0
             ).unwrap_or_default();
+            self.rendered_text.add_text(
+                &text,
+                vec2(0.0, 0.0),
+                BoundedTextInstance {
+                    add_scale: vec2(1.0, 1.0),
+                    min_bounds: vec2(f32::MIN, f32::MIN),
+                    max_bounds: vec2(f32::MAX, f32::MAX),
+                    color: style.text_col(),
+                }
+            ).unwrap();
+            rect.max = style.calc_text_box_size(&text);
         }
-        let rect = rect(
-            Default::default(),
-            style.calc_text_box_size(&self.rendered_text),
-            style.rounding(),
-        );
         if rect != self.rect {
             self.rect = rect;
             return self.triangulate();
@@ -158,11 +166,10 @@ impl HoverWindow {
             inv_aspect_ratio,
             unit_scale,
         );
-        let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(
             render_commands,
-            self.rendered_text.iter().map(|(c, t)| (*c, t)),
-            pc_vertex, pc_fragment, vertex_buffer, index_buffer
+            self.rendered_text.iter().map(|(c, (t, b))| (*c, t, b.as_slice())),
+            pc_vertex, vertex_buffer, index_buffer
         )?;
         Ok(())
     }
@@ -182,8 +189,7 @@ pub(crate) struct Window<I, FontHash, Style, HoverStyle>
     position: Vec2,
     title: CompactString,
     title_text: Option<RenderedText>,
-    combined_text: Option<CombinedRenderedText<(), GhostVec<()>>>,
-    combined_bounded_text: Option<CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>>,
+    combined_text: Option<CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>>,
     vertices: Option<GlobalVec<Vertex>>,
     indices: GlobalVec<u32>,
     buttons: FxHashMap<u32, (u64, Button<I, FontHash, Style, HoverStyle>)>,
@@ -192,7 +198,6 @@ pub(crate) struct Window<I, FontHash, Style, HoverStyle>
     color_pickers: FxHashMap<u32, (u64, ColorPicker<I, FontHash, Style, HoverStyle>)>,
     input_texts: FxHashMap<u32, (u64, InputText<DefaultText, I, FontHash, Style, HoverStyle>)>,
     drag_values: FxHashMap<u32, (u64, DragValue<DefaultText, I, FontHash, Style, HoverStyle>)>,
-    animation_curves: FxHashMap<u32, (u64, AnimationCurve<DefaultText, I, FontHash, Style, HoverStyle>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
     prev_active_widgets: Option<GlobalVec<ActiveWidget>>,
     hover_window: Option<HoverWindow>,
@@ -248,7 +253,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             title: title.into(),
             title_text: None,
             combined_text: Some(CombinedRenderedText::new()),
-            combined_bounded_text: Some(CombinedRenderedText::new()),
             vertices: Some(Default::default()),
             indices: Default::default(),
             buttons: FxHashMap::default(),
@@ -257,7 +261,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             color_pickers: FxHashMap::default(),
             input_texts: FxHashMap::default(),
             drag_values: FxHashMap::default(),
-            animation_curves: FxHashMap::default(),
             active_widgets: Some(Default::default()),
             prev_active_widgets: Some(Default::default()),
             hover_window: Some(HoverWindow::new()),
@@ -388,10 +391,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 self.drag_values.get(&id).map(
                     |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
                 ).unwrap(),
-            ActiveWidget::AnimationCurve(id) =>
-                self.animation_curves.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
-                ).unwrap(),
         }
     }
 
@@ -424,10 +423,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 ).unwrap(),
             ActiveWidget::DragValue(id) =>
                 self.drag_values.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
-                ).unwrap(),
-            ActiveWidget::AnimationCurve(id) =>
-                self.animation_curves.get_mut(&id).map(
                     |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
                 ).unwrap(),
         }
@@ -488,7 +483,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         let mut min_width: f32 = 0.0;
         let min_height = self.min_height;
         let mut cursor_in_some_widget = false;
-        let window_width = self.main_rect.max.x;
+        let window_size = self.main_rect.max;
         let window_pos = self.position;
         let (active_widgets, mut prev_active_widgets, mut vertices) = unsafe {(
             self.active_widgets.take().unwrap_unchecked(),
@@ -510,13 +505,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             self.combined_text.take().unwrap_unchecked()
         };
         combined_text.clear();
-        combined_text
-            .add_text(self.title_text.as_ref().unwrap(), vec2(item_pad_outer.x, item_pad_inner.y) / font_scale, ())
-            .unwrap();
-        let mut combined_bounded_text = unsafe {
-            self.combined_bounded_text.take().unwrap_unchecked()
-        };
-        combined_bounded_text.clear();
         let mut hover_window = self.hover_window.take().unwrap();
         let mut active_widget = None;
         for (i, &widget) in active_widgets.iter().enumerate() {
@@ -538,7 +526,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 style,
                 hover_style,
                 text_renderer,
-                window_width,
+                window_size,
                 window_pos,
                 cursor_pos,
                 delta_cursor_pos,
@@ -549,11 +537,8 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                     false
                 },
                 window_moving,
-                &mut |text, offset| {
-                    combined_text.add_text(text, offset / font_scale, ()).unwrap();
-                },
-                &mut |text, offset, instance| {
-                    combined_bounded_text.add_text(text, offset, instance).unwrap();
+                &mut |text, offset, bounded_instance| {
+                    combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap();
                 },
             );
             min_width = min_width.max(min_widget_width +
@@ -568,14 +553,16 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             }
             cursor_in_some_widget |= cursor_in_widget;
         }
-        self.combined_text = Some(combined_text);
-        self.combined_bounded_text = Some(combined_bounded_text);
-        cursor_in_this_window |= cursor_in_some_widget;
+        cursor_in_this_window |= cursor_in_some_widget || active_widget.is_some();
         self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
         self.active_widgets = Some(active_widgets);
         self.hover_window = Some(hover_window);
         let title_text = self.title_text.as_ref().unwrap();
-        min_width = min_width.max(style.calc_text_box_width(title_text) + item_pad_outer.x);
+        let title_add_scale = style.title_add_scale();
+        min_width = min_width.max(
+            style.calc_text_box_width_from_text_width(title_text.text_width * font_scale * title_add_scale) +
+            item_pad_outer.x
+        );
         self.min_width = min_width;
         if self.main_rect.max.x < min_width {
             self.main_rect.max.x = min_width;
@@ -761,13 +748,28 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                     !mouse_pressed as u32
                 );
         }
-        if main_rect_max.y < self.min_height {
-            main_rect_max.y = self.min_height;
-        }
         let mut title_bar_rect = self.title_bar_rect;
         title_bar_rect.max.x = self.main_rect.max.x;
-        title_bar_rect.max.y = style.calc_text_box_height(&title_text);
+        title_bar_rect.max.y = style.calc_text_box_height_from_text_height(
+            title_text.row_height * font_scale * 1.5
+        );
         title_bar_rect.rounding = style.rounding();
+        combined_text
+            .add_text(
+                self.title_text.as_ref().unwrap(),
+                vec2(item_pad_outer.x, item_pad_inner.y) / (font_scale * title_add_scale),
+                BoundedTextInstance {
+                    add_scale: vec2(title_add_scale, title_add_scale),
+                    min_bounds: self.position,
+                    max_bounds: self.position + title_bar_rect.max,
+                    color: style.text_col(),
+                }
+            )
+            .unwrap();
+        self.combined_text = Some(combined_text);
+        if main_rect_max.y < min_height {
+            main_rect_max.y = min_height;
+        }
         let mut separator_rect = self.separator_rect;
         separator_rect.max.x = self.main_rect.max.x;
         separator_rect.max.y = style.separator_height();
@@ -781,10 +783,10 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         ) as u32;
         self.flags |= Self::REQUIRES_TRIANGULATION * requires_triangulation;
         self.main_rect.rounding = style.rounding();
+        self.main_rect.max = main_rect_max;
         self.title_bar_rect = title_bar_rect;
         self.outline_width = style.outline_width();
         self.focused_outline_width = style.focused_outline_width();
-        self.main_rect.max = main_rect_max;
         self.title_bar_rect = title_bar_rect;
         self.separator_rect = separator_rect;
         cursor_in_this_window || self.any_resize()
@@ -1032,8 +1034,17 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             inv_aspect_ratio,
             unit_scale,
         );
-        render_commands.push_constants(|_| unsafe {
-            pc_vertex.as_bytes()
+        let focused_outline_width = self.focused_outline_width;
+        let pc_fragment = base_push_constants_fragment(
+            self.position - vec2(focused_outline_width, focused_outline_width),
+            self.position + self.main_rect.max + vec2(focused_outline_width, focused_outline_width),
+        );
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
         })?;
         render_commands.draw_indexed(
             self.main_draw_info,
@@ -1071,23 +1082,12 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             inv_aspect_ratio,
             unit_scale,
         );
-        let pc_fragment = text_push_constants_fragment(style.text_col());
         render_text(render_commands,
             unsafe { self.combined_text
                 .as_ref()
                 .unwrap_unchecked()
                 .iter()
-                .map(|(&c, v)| (c, &v.0))
-            },
-            pc_vertex, pc_fragment, vertex_buffer, index_buffer
-        )?;
-        render_commands.bind_pipeline(get_custom_pipeline(BOUNDED_TEXT_PIPELINE_HASH).unwrap())?;
-        render_bounded_text(render_commands,
-            unsafe { self.combined_bounded_text
-                .as_ref()
-                .unwrap_unchecked()
-                .iter()
-                .map(|(&c, v)| (c, &v.0, v.1.as_slice()))
+                .map(|(&c, (t, b))| (c, t, b.as_slice()))
             },
             pc_vertex, vertex_buffer, index_buffer
         )?;
@@ -1166,7 +1166,9 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             0.0,
         ).unwrap_or_default());
         Self {
-            widget_y: style.calc_text_box_height(title_text) + style.item_pad_inner().y,
+            widget_y:
+                style.calc_text_box_height_from_text_height(title_text.row_height * style.font_scale() * 1.5) +
+                style.item_pad_inner().y,
             window,
             style,
             hover_style,
@@ -1407,36 +1409,6 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         );
         drag_value.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
         self.widget_y += drag_value.calc_height(self.style, self.text_renderer) +
-            self.style.item_pad_outer().y;
-    }
-
-    #[inline(always)]
-    pub fn update_animation_curve(
-        &mut self,
-        id: u32,
-        title: &str,
-        value: &mut bezier::AnimationCurve,
-    )
-    {
-        unsafe {
-            self.window.active_widgets
-                .as_mut()
-                .unwrap_unchecked()
-                .push(ActiveWidget::AnimationCurve(id));
-        }
-        let (last_triangulation, animation_curve) = self.window.animation_curves
-            .entry(id)
-            .or_insert((0, AnimationCurve::new(title)));
-        if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
-        }
-        if animation_curve.active() {
-            animation_curve.get_curve(value);
-        } else {
-            animation_curve.set_curve(value);
-        }
-        animation_curve.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
-        self.widget_y += animation_curve.calc_height(self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
     }
 }

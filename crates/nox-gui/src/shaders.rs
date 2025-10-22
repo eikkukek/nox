@@ -5,7 +5,9 @@ use nox::{
 
 use crate::*;
 
-use nox_geom::*;
+use nox_geom::{
+    *
+};
 
 #[repr(C)]
 #[derive(Default, Clone, Copy, VertexInput)]
@@ -44,6 +46,7 @@ impl From<[f32; 2]> for ColorPickerVertex {
 #[repr(C)]
 #[derive(Default, Clone, Copy, VertexInput)]
 pub struct BoundedTextInstance {
+    pub add_scale: Vec2,
     pub min_bounds: Vec2,
     pub max_bounds: Vec2,
     pub color: ColorSRGBA,
@@ -84,17 +87,23 @@ impl PushConstantsVertex {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct TextPushConstantsFragment {
-    pub color: ColorSRGBA,
+pub struct BasePushConstantsFragment{
+    pub min_bounds: Vec2,
+    pub max_bounds: Vec2,
 }
 
-pub fn text_push_constants_fragment(color: ColorSRGBA) -> TextPushConstantsFragment {
-    TextPushConstantsFragment {
-        color,
+pub fn base_push_constants_fragment(
+    min_bounds: Vec2,
+    max_bounds: Vec2,
+) -> BasePushConstantsFragment
+{
+    BasePushConstantsFragment {
+        min_bounds,
+        max_bounds,
     }
 }
 
-impl TextPushConstantsFragment {
+impl BasePushConstantsFragment {
 
     pub unsafe fn as_bytes(&self) -> &[u8] {
         unsafe {
@@ -165,7 +174,8 @@ pub const BASE_VERTEX_SHADER: &'static str = "
     layout(location = 1) in vec2 in_offset;
     layout(location = 2) in vec4 in_color;
 
-    layout(location = 0) out vec4 out_color;
+    layout(location = 0) out vec2 out_pos;
+    layout(location = 1) out vec4 out_color;
 
     layout(push_constant) uniform PushConstant {
         vec2 vert_off;
@@ -178,6 +188,7 @@ pub const BASE_VERTEX_SHADER: &'static str = "
         vec2 pos = in_pos;
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
+        out_pos = pos + pc.vert_off + in_offset;
         pos *= pc.unit_scale;
         pos += (pc.vert_off + in_offset) * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
@@ -189,12 +200,27 @@ pub const BASE_VERTEX_SHADER: &'static str = "
 pub const BASE_FRAGMENT_SHADER: &'static str = "
     #version 450
 
-    layout(location = 0) in vec4 in_color;
+    layout(location = 0) in vec2 in_pos;
+    layout(location = 1) in vec4 in_color;
 
     layout(location = 0) out vec4 out_color;
 
+    layout(push_constant) uniform PushConstant {
+        layout(offset = 32) vec2 min_bounds;
+        vec2 max_bounds;
+    } pc;
+
+    bool in_rect() {
+        return pc.min_bounds.x < in_pos.x && pc.max_bounds.x > in_pos.x &&
+            pc.min_bounds.y < in_pos.y && pc.max_bounds.y > in_pos.y;
+    }
+
     void main() {
-        out_color = in_color;
+        if (in_rect()) {
+            out_color = in_color;
+        } else {
+            out_color = vec4(0.0);
+        }
     }
 ";
 
@@ -205,6 +231,16 @@ pub const TEXT_VERTEX_SHADER: &'static str = "
 
     layout(location = 1) in vec2 in_offset;
 
+    layout(location = 2) in vec2 in_add_scale;
+    layout(location = 3) in vec2 in_min_bounds;
+    layout(location = 4) in vec2 in_max_bounds;
+    layout(location = 5) in vec4 in_color;
+
+    layout(location = 0) out vec2 out_pos;
+    layout(location = 1) out flat vec2 out_min_bounds;
+    layout(location = 2) out flat vec2 out_max_bounds;
+    layout(location = 3) out flat vec4 out_color;
+
     layout(push_constant) uniform PushConstant {
         vec2 vert_off;
         vec2 scale;
@@ -214,8 +250,12 @@ pub const TEXT_VERTEX_SHADER: &'static str = "
 
     void main() {
         vec2 pos = in_pos + in_offset;
-        pos.x *= pc.scale.x;
-        pos.y *= pc.scale.y;
+        pos.x *= pc.scale.x * in_add_scale.x;
+        pos.y *= pc.scale.y * in_add_scale.y;
+        out_pos = pos + pc.vert_off;
+        out_min_bounds = in_min_bounds;
+        out_max_bounds = in_max_bounds;
+        out_color = in_color;
         pos *= pc.unit_scale;
         pos += pc.vert_off * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
@@ -226,14 +266,24 @@ pub const TEXT_VERTEX_SHADER: &'static str = "
 pub const TEXT_FRAGMENT_SHADER: &'static str = "
     #version 450
 
+    layout(location = 0) in vec2 in_pos;
+    layout(location = 1) in vec2 in_min_bounds;
+    layout(location = 2) in vec2 in_max_bounds;
+    layout(location = 3) in vec4 in_color;
+
     layout(location = 0) out vec4 out_color;
 
-    layout(push_constant) uniform PushConstant {
-        layout(offset = 32) vec4 color;
-    } pc;
+    bool in_rect() {
+        return in_min_bounds.x < in_pos.x && in_max_bounds.x > in_pos.x &&
+            in_min_bounds.y < in_pos.y && in_max_bounds.y > in_pos.y;
+    }
 
     void main() {
-        out_color = pc.color;
+        if (in_rect()) {
+            out_color = in_color;
+        } else {
+            out_color = vec4(0.0);
+        }
     }
 ";
 
@@ -392,68 +442,5 @@ pub const COLOR_PICKER_FRAGMENT_SHADER_ALPHA: &'static str = "
         vec3 color = hsv_to_srgb(color_hsv);
         color = color * alpha + bg * (1.0 - alpha);
         out_color = vec4(color, 1.0);
-    }
-";
-
-pub const BOUNDED_TEXT_VERTEX_SHADER: &'static str = "
-    #version 450
-
-    layout(location = 0) in vec2 in_pos;
-
-    layout(location = 1) in vec2 in_offset;
-
-    layout(location = 2) in vec2 in_min_bounds;
-    layout(location = 3) in vec2 in_max_bounds;
-    layout(location = 4) in vec4 in_color;
-
-    layout(location = 0) out vec2 out_pos;
-    layout(location = 1) out flat vec2 out_min_bounds;
-    layout(location = 2) out flat vec2 out_max_bounds;
-    layout(location = 3) out flat vec4 out_color;
-
-    layout(push_constant) uniform PushConstant {
-        vec2 vert_off;
-        vec2 scale;
-        float inv_aspect_ratio;
-        float unit_scale;
-    } pc;
-
-    void main() {
-        vec2 pos = in_pos + in_offset;
-        pos.x *= pc.scale.x;
-        pos.y *= pc.scale.y;
-        out_pos = pos + pc.vert_off;
-        out_min_bounds = in_min_bounds;
-        out_max_bounds = in_max_bounds;
-        out_color = in_color;
-        pos *= pc.unit_scale;
-        pos += pc.vert_off * pc.unit_scale;
-        pos.x *= pc.inv_aspect_ratio;
-        gl_Position = vec4(pos, 0.0, 1.0);
-    }
-";
-
-pub const BOUNDED_TEXT_FRAGMENT_SHADER: &'static str = "
-    #version 450
-
-    layout(location = 0) in vec2 in_pos;
-    layout(location = 1) in vec2 in_min_bounds;
-    layout(location = 2) in vec2 in_max_bounds;
-    layout(location = 3) in vec4 in_color;
-
-    layout(location = 0) out vec4 out_color;
-
-    bool in_rect() {
-        return true;
-        return in_min_bounds.x < in_pos.x && in_max_bounds.x > in_pos.x &&
-            in_min_bounds.y < in_pos.y && in_max_bounds.y > in_pos.y;
-    }
-
-    void main() {
-        if (in_rect()) {
-            out_color = in_color;
-        } else {
-            out_color = vec4(0.0);
-        }
     }
 ";

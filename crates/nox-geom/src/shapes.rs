@@ -54,3 +54,21 @@ pub fn outline_points<F, P>(
         }
     }
 }
+
+pub fn line_points<F, P>(
+    points: &[P],
+    width: f32,
+    collect: &mut F,
+)
+    where
+        F: FnMut(Vec2),
+        P: Into<Vec2> + Copy,
+{
+    let n = points.len();
+    for i in (1..n).rev() {
+        let a: Vec2 = points[i].into();
+        let b: Vec2 = points[i - 1].into();
+        let c = a.right(b).normalized() * width;
+        collect(a + c);
+    }
+}

@@ -12,18 +12,13 @@ use nox::{
 
 use nox_font::{text_segment, Face, VertexTextRenderer};
 
-use nox_geom::{
-    Vec2,
-    vec2,
-};
+use nox_geom::*;
 
 use crate::*;
 
 pub(crate) const COLOR_PICKER_PIPELINE_HASH: &str = "nox_gui color picker";
 pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: &str = "nox_gui color picker hue";
 pub(crate) const COLOR_PICKER_ALPHA_PIPELINE_HASH: &str = "nox_gui color picker alpha";
-
-pub(crate) const BOUNDED_TEXT_PIPELINE_HASH: &str = "nox_gui bounded text";
 
 #[derive(Default)]
 struct BasePipelines {
@@ -175,7 +170,6 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
         self.output_samples = output_samples;
         self.output_format = output_format;
         let mut color_picker_shaders = [Default::default(); 4];
-        let mut bounded_text_shaders = [Default::default(); 4];
         render_context.edit_resources(|r| {
             color_picker_shaders[0] = r.create_shader(
                 COLOR_PICKER_VERTEX_SHADER,
@@ -192,14 +186,6 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
             color_picker_shaders[3] = r.create_shader(
                 COLOR_PICKER_FRAGMENT_SHADER_ALPHA,
                 "nox_gui color picker fragment shader alpha", ShaderStage::Fragment
-            )?;
-            bounded_text_shaders[0] = r.create_shader(
-                BOUNDED_TEXT_VERTEX_SHADER,
-                "nox_gui bounded text vertex shader", ShaderStage::Vertex
-            )?;
-            bounded_text_shaders[1] = r.create_shader(
-                BOUNDED_TEXT_FRAGMENT_SHADER,
-                "nox_gui bounded text fragment shader", ShaderStage::Fragment
             )?;
             Ok(())
         })?;
@@ -236,21 +222,6 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                         &[
                             VertexInputBinding
                                 ::new::<0, ColorPickerVertex>(0, VertexInputRate::Vertex),
-                        ],
-                    ),
-                ),
-                (
-                    BOUNDED_TEXT_PIPELINE_HASH,
-                    CustomPipelineInfo::new(
-                        bounded_text_shaders[0],
-                        bounded_text_shaders[1],
-                        &[
-                            VertexInputBinding
-                                ::new::<0, font::Vertex>(0, VertexInputRate::Vertex),
-                            VertexInputBinding
-                                ::new::<1, font::VertexOffset>(1, VertexInputRate::Instance),
-                            VertexInputBinding
-                                ::new::<2, BoundedTextInstance>(2, VertexInputRate::Instance),
                         ],
                     ),
                 ),
@@ -301,6 +272,9 @@ impl<'a, I, FontHash, Style, HoverStyle> Workspace<'a, I, FontHash, Style, Hover
                 )
                 .with_vertex_input_binding(
                     VertexInputBinding::new::<1, font::VertexOffset>(1, VertexInputRate::Instance)
+                )
+                .with_vertex_input_binding(
+                    VertexInputBinding::new::<2, BoundedTextInstance>(2, VertexInputRate::Instance)
                 )
                 .with_sample_shading(SampleShadingInfo::new(output_samples, min_sample_shading, false, false))
                 .with_color_output(output_format, WriteMask::all(), Some(Self::BLEND_STATE));

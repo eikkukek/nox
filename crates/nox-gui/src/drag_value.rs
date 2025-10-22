@@ -175,15 +175,14 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         style: &Style,
         hover_style: &HoverStyle,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
-        window_width: f32,
+        window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
-        collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
         self.input_text.set_cursor_enable(self.input_text.active());
@@ -226,10 +225,9 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         }
         let mut update_results = self.input_text.update(
             nox, style, hover_style,
-            text_renderer, window_width, window_pos,
+            text_renderer, window_size, window_pos,
             cursor_pos, delta_cursor_pos, cursor_in_this_window,
             other_widget_active, window_moving, collect_text,
-            collect_bounded_text,
         );
         update_results.cursor_in_widget |= cursor_in_rect || self.held();
         update_results.requires_triangulation |=

@@ -406,7 +406,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         _cursor_pos: Vec2
     ) -> bool
     {
-        self.held() || !self.mouse_visible()
+        self.active() || self.held()
     }
 
     fn update(
@@ -415,15 +415,14 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         style: &Style,
         _hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        window_width: f32,
+        window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         _cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
-        collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult {
         enum CursorMove {
             None,
@@ -593,8 +592,14 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         let skip_title = self.skip_title();
         let title = if !skip_title {
             let title = self.title.update(text_renderer, style.font_regular());
+            let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
             if let Some(title) = &title {
-                collect_text(title, self.offset + vec2(0.0, item_pad_inner.y));
+                collect_text(title, self.offset + vec2(0.0, item_pad_inner.y), BoundedTextInstance {
+                    add_scale: vec2(1.0, 1.0),
+                    min_bounds,
+                    max_bounds,
+                    color: style.text_col(),
+                });
             }
             title
         } else {
@@ -655,10 +660,10 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             let mut width = title_width +
                 item_pad_outer.x + item_pad_outer.x + item_pad_outer.x;
             let min_window_width = width + style.min_input_text_width();
-            if window_width < min_window_width {
+            if window_size.x < min_window_width {
                 width = style.min_input_text_width();
             } else {
-                width = (window_width - width).min(style.max_input_text_width());
+                width = (window_size.x - width).min(style.max_input_text_width());
             }
             width
         };
@@ -934,14 +939,15 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             window_pos + input_off + vec2(item_pad_inner.x, 0.0),
             self.input_rect.max - vec2(item_pad_inner.x + item_pad_inner.x, 0.0),
         );
-        collect_bounded_text(
+        collect_text(
             if self.active() {
                 self.input_text.as_ref().unwrap()
             } else {
                 self.input_text_formatted.as_ref().unwrap()
             },
-            (input_off + item_pad_inner - vec2(self.input_text_offset_x, 0.0)) / font_scale,
+            input_off + item_pad_inner - vec2(self.input_text_offset_x, 0.0), 
             BoundedTextInstance {
+                add_scale: vec2(1.0, 1.0),
                 min_bounds: input_bounding_rect.min,
                 max_bounds: input_bounding_rect.max,
                 color:

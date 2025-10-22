@@ -11,7 +11,6 @@ mod drag_value;
 mod checkbox;
 mod color_picker;
 mod input_text;
-mod animation_curve;
 mod window;
 mod workspace;
 
@@ -24,7 +23,6 @@ pub use style::*;
 pub use widget::*;
 pub use slider::*;
 pub use drag_value::*;
-pub use animation_curve::*;
 pub use window::*;
 pub use workspace::*;
 

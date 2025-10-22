@@ -187,15 +187,14 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         style: &Style,
         _hover_style: &HoverStyle,
         _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        window_width: f32,
+        window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         _window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
-        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
         where
             I: Interface,
@@ -207,10 +206,10 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         let mut width = text_width +
             style.item_pad_outer().x + style.item_pad_outer().x + style.item_pad_outer().x;
         let min_window_width = width + style.min_slider_width();
-        if window_width < min_window_width {
+        if window_size.x < min_window_width {
             width = style.min_slider_width();
         } else {
-            width = window_width - width;
+            width = window_size.x - width;
         }
         let slider_rect = rect(
             Default::default(),
@@ -258,8 +257,15 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                 }
             }
         }
+        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
         collect_text(title_text,
-            self.offset + vec2(0.0, (self.slider_rect.max.y - style.calc_text_height(title_text)) / 2.0)
+            self.offset + vec2(0.0, (self.slider_rect.max.y - style.calc_text_height(title_text)) / 2.0),
+            BoundedTextInstance {
+                add_scale: vec2(1.0, 1.0),
+                min_bounds,
+                max_bounds,
+                color: style.text_col(),
+            }
         );
         UpdateResult {
             requires_triangulation,

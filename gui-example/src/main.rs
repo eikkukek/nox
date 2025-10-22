@@ -7,10 +7,7 @@ use std::{
 use memmap2::Mmap;
 use nox::*;
 
-use nox_gui::{
-    geom::*,
-    *,
-};
+use nox_gui::*;
 
 struct Example<'a> {
     workspace: Workspace<
@@ -29,7 +26,6 @@ struct Example<'a> {
     color: ColorSRGBA,
     pipeline_cache: PipelineCacheId,
     cache_dir: PathBuf,
-    animation_curve: bezier::AnimationCurve,
     checkbox_checked: bool,
     show_other_window: bool,
     output_image: ImageId,
@@ -64,14 +60,6 @@ impl<'a> Example<'a> {
             color: Default::default(),
             pipeline_cache: Default::default(),
             cache_dir,
-            animation_curve: bezier::AnimationCurve::new(
-                bezier::cubic(
-                    Default::default(),
-                    vec2(0.25, 0.25),
-                    vec2(0.75, 0.25),
-                    vec2(1.0, 0.0),
-                )
-            ),
             checkbox_checked: false,
             show_other_window: false,
             output_image: Default::default(),

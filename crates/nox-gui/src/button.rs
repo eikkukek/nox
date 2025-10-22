@@ -124,20 +124,25 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         style: &Style,
         _hover_style: &HoverStyle,
         _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        _window_width: f32,
+        window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         _window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
-        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
         let title_text = self.title_text.as_ref().unwrap();
-        collect_text(title_text, self.offset + style.item_pad_inner());
+        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
+        collect_text(title_text, self.offset + style.item_pad_inner(), BoundedTextInstance {
+            add_scale: vec2(1.0, 1.0),
+            min_bounds,
+            max_bounds,
+            color: style.text_col(),
+        });
         let rect_size = style.calc_text_box_size(title_text);
         let rect = rect(Default::default(), rect_size, style.rounding());
         let requires_triangulation =

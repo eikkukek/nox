@@ -100,6 +100,11 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
+    fn title_add_scale(&self) -> f32 {
+        1.2
+    }
+
+    #[inline(always)]
     fn rounding(&self) -> f32 {
         0.005
     }
@@ -117,6 +122,11 @@ pub trait WindowStyle<FontHash> {
     #[inline(always)]
     fn focused_outline_width(&self) -> f32 {
         0.0035
+    }
+
+    #[inline(always)]
+    fn plot_line_width(&self) -> f32 {
+        0.002
     }
 
     #[inline(always)]

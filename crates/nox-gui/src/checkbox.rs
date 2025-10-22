@@ -162,15 +162,14 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         style: &Style,
         _hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        _window_width: f32,
+        window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         _window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
-        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
@@ -209,7 +208,14 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                 }
             }
         }
-        collect_text(title_text, self.offset + vec2(0.0, style.item_pad_inner().y));
+        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
+        let bounded_instance = BoundedTextInstance {
+            add_scale: vec2(1.0, 1.0),
+            min_bounds,
+            max_bounds,
+            color: style.text_col(),
+        };
+        collect_text(title_text, self.offset + vec2(0.0, style.item_pad_inner().y), bounded_instance);
         if self.checked() {
             let checkbox_text = self.checkbox_text.as_ref().unwrap();
             let checkbox_pos = self.offset +
@@ -217,6 +223,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             let size = style.calc_text_size(checkbox_text);
             collect_text(checkbox_text,
                 checkbox_pos + rect.max * 0.5 - size * 0.5,
+                bounded_instance,
             );
         }
         UpdateResult {

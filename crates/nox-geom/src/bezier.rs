@@ -175,18 +175,34 @@ impl Cubic {
             current = right;
         }
     }
+
+    #[inline(always)]
+    pub fn min_y(&self) -> f32 {
+        self.start.y
+            .min(self.mid_0.y)
+            .min(self.mid_1.y)
+            .min(self.end.y)
+    }
+
+    #[inline(always)]
+    pub fn max_y(&self) -> f32 {
+        self.start.y
+            .max(self.mid_0.y)
+            .max(self.mid_1.y)
+            .max(self.end.y)
+    }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct AnimationCurve {
     cubics: GlobalVec<Cubic>,
-    min_y: f32,
-    max_y: f32,
+    tolerance: f32,
 }
 
 impl AnimationCurve {
 
-    pub fn new(c: Cubic) -> Self {
+    #[inline(always)]
+    pub fn new(c: Cubic, tolerance: f32) -> Self {
         let c =
             if c.start.x <= c.end.x {
                 let mid_0_x = c.mid_0.x.clamp(c.start.x, c.end.x);
@@ -209,25 +225,47 @@ impl AnimationCurve {
             };
         Self {
             cubics: GlobalVec::with_len(1, c),
-            min_y: c.start.y.min(c.mid_0.y).min(c.mid_1.y).min(c.end.y),
-            max_y: c.start.y.max(c.mid_0.y).max(c.mid_1.y).max(c.end.y),
+            tolerance,
         }
     }
 
     #[inline(always)]
+    pub fn tolerance(&self) -> f32 {
+        self.tolerance
+    }
+
+    #[inline(always)]
+    pub fn set_tolerance(&self) -> f32 {
+        self.tolerance
+    }
+
+    #[inline(always)]
     pub fn min_coords(&self) -> Vec2 {
-        vec2(self.cubics[0].start.x, self.min_y)
+        vec2(
+            self.cubics[0].start.x,
+            self.cubics
+                .iter()
+                .min_by(|&a, &b| a.min_y().total_cmp(&b.min_y()))
+                .map(|&c| c.min_y())
+                .unwrap_or_default()
+        )
     }
 
     #[inline(always)]
     pub fn max_coords(&self) -> Vec2 {
-        vec2(self.cubics.last().unwrap().end.x, self.max_y)
+        vec2(
+            self.cubics.last().unwrap().end.x,
+            self.cubics
+                .iter()
+                .max_by(|&a, &b| a.max_y().total_cmp(&b.max_y()))
+                .map(|&c| c.max_y())
+                .unwrap_or_default()
+        )
     }
 
     pub fn add_point(
         &mut self,
         point: Vec2,
-        tolerance: f32,
     ) -> &mut Self
     {
         let min_x = self.min_coords().x;
@@ -241,16 +279,12 @@ impl AnimationCurve {
             let first = self.cubics[0];
             let d = first.start - point;
             self.cubics.insert(0, cubic(point, d * 0.25, d * 0.75, first.start));
-            self.min_y = self.min_y.min(point.y);
-            self.max_y = self.max_y.max(point.y);
             return self
         }
         if point.x > max_x {
             let last = self.cubics.last().unwrap();
             let d = point - last.end;
             self.cubics.push(cubic(last.end, d * 0.25, d * 0.75, point));
-            self.min_y = self.min_y.min(point.y);
-            self.max_y = self.max_y.max(point.y);
             return self
         }
         let mut idx = None;
@@ -264,8 +298,8 @@ impl AnimationCurve {
         const N_MUL: f32 = 36.0 * 36.0 / 3.0;
         const N_POW: f32 = 1.0 / 6.0;
         let err = c.end - c.mid_1 * 3.0 + c.mid_0 * 3.0 - c.start;
-        let n = (err.sqr_mag() / (N_MUL * tolerance * tolerance)).powf(N_POW) as u32;
-        for i in (1..=n).rev() {
+        let n = (err.sqr_mag() / (N_MUL * self.tolerance * self.tolerance)).powf(N_POW) as u32;
+        for i in (1..n).rev() {
             let t = 1.0 / i as f32;
             if c.eval(t).x > point.x {
                 let (left, right) = c.split(t);
@@ -290,15 +324,11 @@ impl AnimationCurve {
             pos.x = pos.x.clamp(prev.mid_0.x.max(prev.mid_1.x), c.mid_0.x.min(c.mid_1.x));
             prev.end = pos;
             self.cubics[index].start = pos;
-            self.min_y = self.min_y.min(pos.y);
-            self.max_y = self.max_y.max(pos.y);
             pos
         } else {
             let c = &mut self.cubics[index];
             pos.x = pos.x.clamp(f32::MIN, c.mid_0.x.min(c.mid_1.x));
             c.start = pos;
-            self.min_y = self.min_y.min(pos.y);
-            self.max_y = self.max_y.max(pos.y);
             pos
         }
     }
@@ -308,8 +338,6 @@ impl AnimationCurve {
         let c = &mut self.cubics[index];
         pos.x = pos.x.clamp(c.start.x, c.end.x);
         c.mid_0 = pos;
-        self.min_y = self.min_y.min(pos.y);
-        self.max_y = self.max_y.max(pos.y);
         pos
     }
 
@@ -318,8 +346,6 @@ impl AnimationCurve {
         let c = &mut self.cubics[index];
         pos.x = pos.x.clamp(c.start.x, c.end.x);
         c.mid_1 = pos;
-        self.min_y = self.min_y.min(pos.y);
-        self.max_y = self.max_y.max(pos.y);
         pos
     }
 
@@ -331,15 +357,11 @@ impl AnimationCurve {
             pos.x = pos.x.clamp(c.mid_0.x.max(c.mid_1.x), next.mid_0.x.min(next.mid_1.x));
             next.start = pos;
             self.cubics[index].end = pos;
-            self.min_y = self.min_y.min(pos.y);
-            self.max_y = self.max_y.max(pos.y);
             pos
         } else {
             let c = &mut self.cubics[index];
             pos.x = pos.x.clamp(c.mid_0.x.max(c.mid_1.x), f32::MAX);
             c.end = pos;
-            self.min_y = self.min_y.min(pos.y);
-            self.max_y = self.max_y.max(pos.y);
             pos
         }
     }

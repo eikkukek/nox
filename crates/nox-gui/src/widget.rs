@@ -40,8 +40,34 @@ pub trait HoverContents<I, FontHash, HoverStyle: WindowStyle<FontHash>>
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct VertexRange {
-    start: u32,
-    end: u32,
+    pub start: u32,
+    pub end: u32,
+}
+
+impl VertexRange {
+
+    #[inline(always)]
+    pub fn new(range: core::ops::Range<usize>) -> Self {
+        Self {
+            start: range.start as u32,
+            end: range.end as u32,
+        }
+    }
+
+    #[inline(always)]
+    pub fn start(self) -> usize {
+        self.start as usize
+    }
+
+    #[inline(always)]
+    pub fn end(self) -> usize {
+        self.end as usize
+    }
+
+    #[inline(always)]
+    pub fn range(self) -> core::ops::Range<usize> {
+        self.start as usize..self.end as usize
+    }
 }
 
 pub trait Widget<I, FontHash, Style, HoverStyle>
@@ -80,15 +106,14 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
         style: &Style,
         hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        window_width: f32,
+        window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
-        collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult;
 
     fn triangulate(
@@ -122,25 +147,4 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
         &self,
         vertices: &mut [Vertex],
     );
-}
-
-impl VertexRange {
-
-    #[inline(always)]
-    pub fn new(range: core::ops::Range<usize>) -> Self {
-        Self {
-            start: range.start as u32,
-            end: range.end as u32,
-        }
-    }
-
-    #[inline(always)]
-    pub fn start(self) -> usize {
-        self.start as usize
-    }
-
-    #[inline(always)]
-    pub fn range(self) -> core::ops::Range<usize> {
-        self.start as usize..self.end as usize
-    }
 }

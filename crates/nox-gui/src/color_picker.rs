@@ -48,7 +48,7 @@ struct Contents<I, FontHash, HoverStyle> {
     picker_handle_outline_vertex_range: VertexRange,
     hue_picker_handle_vertex_range: VertexRange,
     alpha_picker_handle_vertex_range: VertexRange,
-    combined_bounded_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
+    combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     outline_width: f32,
     focused_outline_width: f32,
     rgba_text_size: Vec2,
@@ -75,7 +75,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
     const ALPHA_CHANGED: u32 = 0x200;
     const HUE_CHANGED: u32 = 0x400;
     const CLICKED: u32 = 0x800;
-    const DRAG_VALUE_HELD: u32 = 0x1000;
+    const DRAG_VALUE_ACTIVE: u32 = 0x1000;
 
     fn new() -> Self {
         let mut points = GlobalVec::new();
@@ -121,7 +121,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
             picker_handle_outline_vertex_range: Default::default(),
             hue_picker_handle_vertex_range: Default::default(),
             alpha_picker_handle_vertex_range: Default::default(),
-            combined_bounded_text: CombinedRenderedText::new(),
+            combined_text: CombinedRenderedText::new(),
             outline_width: 0.0,
             focused_outline_width: 0.0,
             rgba_text_size: Default::default(),
@@ -192,8 +192,8 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
     }
 
     #[inline(always)]
-    fn drag_value_held(&self) -> bool {
-        self.flags & Self::DRAG_VALUE_HELD == Self::DRAG_VALUE_HELD
+    fn drag_value_active(&self) -> bool {
+        self.flags & Self::DRAG_VALUE_ACTIVE == Self::DRAG_VALUE_ACTIVE
     }
 
     #[inline(always)]
@@ -392,7 +392,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         self.alpha_drag_value.set_offset(drag_value_offset);
         drag_value_offset.y = hue_text_box_offset_y;
         self.hue_drag_value.set_offset(drag_value_offset);
-        let cursor_in_drag_value = 
+        let drag_value_active = 
             if self.picker_held() || self.hue_picker_held() || self.alpha_picker_held() {
                 None
             }
@@ -409,9 +409,9 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
             } else {
                 None
             };
-        self.flags &= !Self::DRAG_VALUE_HELD;
-        self.flags |= Self::DRAG_VALUE_HELD * cursor_in_drag_value.is_some() as u32;
-        if style.override_cursor() && cursor_in_drag_value.is_none() {
+        self.flags &= !Self::DRAG_VALUE_ACTIVE;
+        self.flags |= Self::DRAG_VALUE_ACTIVE * drag_value_active.is_some() as u32;
+        if style.override_cursor() && drag_value_active.is_none() {
             nox.set_cursor(CursorIcon::Default);
         }
         self.r_drag_value.set_input_params(
@@ -427,19 +427,19 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         self.r_drag_value.calc_value(style, &mut val, 0, 255, style.default_value_drag_speed() * 255.0);
         self.flags |= Self::R_CHANGED * (self.rgba.r != val) as u32;
         self.rgba.r = val;
-        self.combined_bounded_text.clear();
+        self.combined_text.clear();
+        let font_scale = style.font_scale();
         let mut update_result = self.r_drag_value.update(
             nox, style, style,
-            text_renderer, window_rect_max.x, window_pos,
+            text_renderer, window_rect_max, window_pos,
             cursor_pos, delta_cursor_pos, cursor_in_window,
-            if let Some(cursor_in_drag_value) = cursor_in_drag_value {
+            if let Some(cursor_in_drag_value) = drag_value_active {
                 cursor_in_drag_value != 0
             } else {
                 false
             },
             window_moving,
-            &mut |_, _| {},
-            &mut |text, offset, instance| self.combined_bounded_text.add_text(text, offset, instance).unwrap(),
+            &mut |text, offset, bounded_instance| self.combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap(),
         );
         let mut f = |
                 drag_value: &mut DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>,
@@ -449,16 +449,15 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         {
             drag_value.set_input_params(style, text_box_rect_max.x, true, Some(format_result));
             let res = drag_value.update(nox, style, style,
-                text_renderer, window_rect_max.x, window_pos,
+                text_renderer, window_rect_max, window_pos,
                 cursor_pos, delta_cursor_pos, cursor_in_window,
-                if let Some(cursor_in_drag_value) = cursor_in_drag_value {
+                if let Some(cursor_in_drag_value) = drag_value_active {
                     cursor_in_drag_value != idx
                 } else {
                     false
                 },
                 window_moving,
-                &mut |_, _| {},
-                &mut |text, offset, instance| self.combined_bounded_text.add_text(text, offset, instance).unwrap(),
+                &mut |text, offset, bounded_text_instance| self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap(),
             );
             update_result.min_widget_width = update_result.min_widget_width.max(res.min_widget_width);
             update_result.cursor_in_widget |= res.cursor_in_widget;
@@ -495,7 +494,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         let mut val = hsva.hue;
         self.hue_drag_value.calc_and_map_value(style, &mut val, 0.0, TAU, style.default_value_drag_speed() * TAU,
             |t| (t * 180.0 / PI).round() as u32,
-            |t| t as f32 * PI / 180.0,
+            |t| (t as f32 * PI / 180.0).clamp(0.0, TAU),
         );
         self.flags |= Self::HUE_CHANGED * (hsva.hue != val) as u32;
         hsva.hue = val;
@@ -813,8 +812,18 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
             inv_aspect_ratio,
             unit_scale,
         );
-        render_commands.push_constants(|_| unsafe {
-            pc_vertex.as_bytes()
+        let outline_width = style.outline_width();
+        let min_bounds = window_pos + self.offset;
+        let pc_fragment = base_push_constants_fragment(
+            min_bounds - vec2(outline_width, outline_width),
+            min_bounds + self.window_rect.max + vec2(outline_width, outline_width),
+        );
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
         })?;
         render_commands.draw_indexed(
             self.other_vertices_draw_info_bg,
@@ -942,11 +951,11 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
         let pc_vertex = push_constants_vertex(
             window_pos, vec2(font_scale, font_scale), inv_aspect_ratio, unit_scale
         );
-        render_commands.bind_pipeline(get_custom_pipeline(BOUNDED_TEXT_PIPELINE_HASH).unwrap())?;
-        render_bounded_text(render_commands,
-            self.combined_bounded_text
+        render_commands.bind_pipeline(text_pipeline_id)?;
+        render_text(render_commands,
+            self.combined_text
                 .iter()
-                .map(|(&c, v)| (c, &v.0, v.1.as_slice())),
+                .map(|(&c, (t, b))| (c, t, b.as_slice())),
             pc_vertex, vertex_buffer, index_buffer
         )?;
         Ok(())
@@ -993,7 +1002,7 @@ impl<I, FontHash, Style, HoverStyle> ColorPicker<I, FontHash, Style, HoverStyle>
         self.contents.b_changed() ||
         self.contents.hue_changed() ||
         self.contents.alpha_changed() ||
-        self.contents.drag_value_held()
+        self.contents.drag_value_active()
     }
 
     #[inline(always)]
@@ -1064,18 +1073,17 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         style: &Style,
         hover_style: &HoverStyle,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
-        _window_width: f32,
+        window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         _cursor_in_this_window: bool,
         other_widget_active: bool,
         window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2),
-        _collect_bounded_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult {
         let title_text = self.title_text.as_ref().unwrap();
-        collect_text(title_text, self.offset);
+        let offset = self.offset;
         let text_size = style.calc_text_size(title_text);
         let color_rect_max = vec2(text_size.y, text_size.y);
         let requires_triangulation = self.color_rect.max != color_rect_max;
@@ -1086,7 +1094,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         let error_margin_2 = error_margin + error_margin;
         let cursor_in_color_rect =
             BoundingRect::from_position_size(
-                self.offset + vec2(color_rect_off_x, 0.0) - vec2(error_margin, error_margin),
+                offset + vec2(color_rect_off_x, 0.0) - vec2(error_margin, error_margin),
                 color_rect_max + vec2(error_margin_2, error_margin_2),
             ).is_point_inside(rel_cursor_pos);
         let cursor_in_contents = self.contents
@@ -1126,6 +1134,13 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
                 self.contents.triangulate();
             }
         }
+        let (min_bounds, max_bounds) = calc_bounds(window_pos, offset, window_size);
+        collect_text(title_text, self.offset, BoundedTextInstance {
+            add_scale: vec2(1.0, 1.0),
+            min_bounds,
+            max_bounds,
+            color: style.text_col(),
+        });
         UpdateResult {
             min_widget_width: text_size.x,
             requires_triangulation: requires_triangulation,

@@ -1,5 +1,8 @@
 use core::{
-    ops::{Add, AddAssign, Sub, SubAssign, Mul, MulAssign, Div, DivAssign, Neg},
+    ops::{
+        Add, AddAssign, Sub, SubAssign,
+        Mul, MulAssign, Div, DivAssign, Neg,
+    },
     fmt::Display,
 };
 
@@ -94,6 +97,14 @@ impl Vec2 {
     pub fn eq_epsilon(self, rhs: Self, epsilon: f32) -> bool {
         return (self.x - rhs.x).abs() < epsilon &&
                 (self.y - rhs.y).abs() < epsilon
+    }
+
+    #[inline(always)]
+    pub fn min(self, rhs: Self) -> Self {
+        Self {
+            x: self.x.min(rhs.x),
+            y: self.y.min(rhs.y),
+        }
     }
 }
 
