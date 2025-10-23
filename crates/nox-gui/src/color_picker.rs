@@ -18,12 +18,12 @@ use nox_geom::{
 
 use crate::*;
 
-struct Contents<I, FontHash, HoverStyle> {
-    r_drag_value: DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>,
-    g_drag_value: DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>,
-    b_drag_value: DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>,
-    alpha_drag_value: DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>,
-    hue_drag_value: DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>,
+struct Contents<I, FontHash, Style> {
+    r_drag_value: DragValue<EmptyText, I, FontHash, Style>,
+    g_drag_value: DragValue<EmptyText, I, FontHash, Style>,
+    b_drag_value: DragValue<EmptyText, I, FontHash, Style>,
+    alpha_drag_value: DragValue<EmptyText, I, FontHash, Style>,
+    hue_drag_value: DragValue<EmptyText, I, FontHash, Style>,
     offset: Vec2,
     picker_handle_offset: Vec2,
     hue_picker_offset: Vec2,
@@ -53,14 +53,14 @@ struct Contents<I, FontHash, HoverStyle> {
     focused_outline_width: f32,
     rgba_text_size: Vec2,
     flags: u32,
-    _marker: PhantomData<(I, FontHash, HoverStyle)>,
+    _marker: PhantomData<(I, FontHash, Style)>,
 }
 
-impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
+impl<I, FontHash, Style> Contents<I, FontHash, Style>
     where 
         I: Interface,
         FontHash: Clone + Eq + Hash,
-        HoverStyle: WindowStyle<FontHash>,
+        Style: WindowStyle<FontHash>,
 {
 
     const WIDGET_HELD: u32 = 0x1;
@@ -232,7 +232,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
     fn update(
         &mut self,
         nox: &mut Nox<I>,
-        style: &HoverStyle,
+        style: &Style,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
         window_pos: Vec2,
         cursor_pos: Vec2,
@@ -396,22 +396,22 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
             if self.picker_held() || self.hue_picker_held() || self.alpha_picker_held() {
                 None
             }
-            else if self.r_drag_value.is_active(nox, style, style, window_pos, cursor_pos) {
+            else if self.r_drag_value.is_active(nox, style, window_pos, cursor_pos) {
                 Some(0)
-            } else if self.g_drag_value.is_active(nox, style, style, window_pos, cursor_pos) {
+            } else if self.g_drag_value.is_active(nox, style, window_pos, cursor_pos) {
                 Some(1)
-            } else if self.b_drag_value.is_active(nox, style, style, window_pos, cursor_pos) {
+            } else if self.b_drag_value.is_active(nox, style, window_pos, cursor_pos) {
                 Some(2)
-            } else if self.alpha_drag_value.is_active(nox, style, style, window_pos, cursor_pos) {
+            } else if self.alpha_drag_value.is_active(nox, style, window_pos, cursor_pos) {
                 Some(3)
-            } else if self.hue_drag_value.is_active(nox, style, style, window_pos, cursor_pos) {
+            } else if self.hue_drag_value.is_active(nox, style, window_pos, cursor_pos) {
                 Some(4)
             } else {
                 None
             };
         self.flags &= !Self::DRAG_VALUE_ACTIVE;
         self.flags |= Self::DRAG_VALUE_ACTIVE * drag_value_active.is_some() as u32;
-        if style.override_cursor() && drag_value_active.is_none() {
+        if cursor_in_window && style.override_cursor() && drag_value_active.is_none() {
             nox.set_cursor(CursorIcon::Default);
         }
         self.r_drag_value.set_input_params(
@@ -430,7 +430,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         self.combined_text.clear();
         let font_scale = style.font_scale();
         let mut update_result = self.r_drag_value.update(
-            nox, style, style,
+            nox, style,
             text_renderer, window_rect_max, window_pos,
             cursor_pos, delta_cursor_pos, cursor_in_window,
             if let Some(cursor_in_drag_value) = drag_value_active {
@@ -442,13 +442,13 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
             &mut |text, offset, bounded_instance| self.combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap(),
         );
         let mut f = |
-                drag_value: &mut DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>,
+                drag_value: &mut DragValue<EmptyText, I, FontHash, Style>,
                 idx: usize,
                 format_result: fn(&mut dyn Write, &str) -> core::fmt::Result,
             |
         {
             drag_value.set_input_params(style, text_box_rect_max.x, true, Some(format_result));
-            let res = drag_value.update(nox, style, style,
+            let res = drag_value.update(nox, style,
                 text_renderer, window_rect_max, window_pos,
                 cursor_pos, delta_cursor_pos, cursor_in_window,
                 if let Some(cursor_in_drag_value) = drag_value_active {
@@ -459,7 +459,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
                 window_moving,
                 &mut |text, offset, bounded_text_instance| self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap(),
             );
-            update_result.min_widget_width = update_result.min_widget_width.max(res.min_widget_width);
+            update_result.min_window_width = update_result.min_window_width.max(res.min_window_width);
             update_result.cursor_in_widget |= res.cursor_in_widget;
             update_result.requires_triangulation |= res.requires_triangulation;
         };
@@ -502,8 +502,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
 
         self.hsva = hsva;
 
-        window_rect_max.x =
-            item_pad_outer.x + item_pad_outer.x + item_pad_outer.x + picker_size.x + update_result.min_widget_width;
+        window_rect_max.x = update_result.min_window_width - offset.x;
 
         if mouse_pressed && cursor_in_window
         {
@@ -533,7 +532,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
     }
 
     #[inline(always)]
-    fn calc_color(&mut self, style: &HoverStyle) -> ColorHSVA {
+    fn calc_color(&mut self, style: &Style) -> ColorHSVA {
         let picker_size = style.color_picker_size();
         if self.alpha_changed() {
             let hsva = self.hsva;
@@ -699,7 +698,7 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         };
     }
 
-    fn set_vertex_params(&mut self, style: &HoverStyle) {
+    fn set_vertex_params(&mut self, style: &Style) {
         let hue_picker_black =
             if self.hsva.hue > PI * 0.05 && self.hsva.hue < PI * 1.2 {
                 true
@@ -713,11 +712,11 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
         target_color = style.window_outline_col();
         set_vertex_params(&mut self.other_vertices, self.window_outline_vertex_range, offset, target_color);
         let item_pad_outer = style.item_pad_outer();
-        self.r_drag_value.set_vertex_params(style, style, &mut self.other_vertices);
-        self.g_drag_value.set_vertex_params(style, style, &mut self.other_vertices);
-        self.b_drag_value.set_vertex_params(style, style, &mut self.other_vertices);
-        self.alpha_drag_value.set_vertex_params(style, style, &mut self.other_vertices);
-        self.hue_drag_value.set_vertex_params(style, style, &mut self.other_vertices);
+        self.r_drag_value.set_vertex_params(style, &mut self.other_vertices);
+        self.g_drag_value.set_vertex_params(style, &mut self.other_vertices);
+        self.b_drag_value.set_vertex_params(style, &mut self.other_vertices);
+        self.alpha_drag_value.set_vertex_params(style, &mut self.other_vertices);
+        self.hue_drag_value.set_vertex_params(style, &mut self.other_vertices);
         let hsva = self.hsva;
         let srgba = self.srgba;
         let tmp = hsva.val > 0.5;
@@ -762,17 +761,17 @@ impl<I, FontHash, HoverStyle> Contents<I, FontHash, HoverStyle>
     }
 }
 
-impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Contents<I, FontHash, HoverStyle>
+impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontHash, Style>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
-        HoverStyle: WindowStyle<FontHash>,
+        Style: WindowStyle<FontHash>,
 {
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: &HoverStyle,
+        style: &Style,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -934,7 +933,7 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
                 offset: index_mem.offset,
             },
         )?;
-        let mut f = |drag_value: &DragValue<EmptyText, I, FontHash, HoverStyle, HoverStyle>| -> Result<(), Error> {
+        let mut f = |drag_value: &DragValue<EmptyText, I, FontHash, Style>| -> Result<(), Error> {
             drag_value.render_commands(
                 render_commands, style, base_pipeline_id,
                 text_pipeline_id, vertex_buffer, index_buffer, window_pos,
@@ -962,21 +961,21 @@ impl<I, FontHash, HoverStyle> HoverContents<I, FontHash, HoverStyle> for Content
     }
 }
 
-pub(crate) struct ColorPicker<I, FontHash, Style, HoverStyle> {
+pub(crate) struct ColorPicker<I, FontHash, Style> {
     title: CompactString,
     title_text: Option<RenderedText>,
     color_rect: Rect,
     color_rect_vertex_range: VertexRange,
-    contents: Contents<I, FontHash, HoverStyle>,
+    contents: Contents<I, FontHash, Style>,
     offset: Vec2,
-    _marker: PhantomData<(I, FontHash, Style, HoverStyle)>,
+    _marker: PhantomData<(I, FontHash, Style)>,
 }
 
-impl<I, FontHash, Style, HoverStyle> ColorPicker<I, FontHash, Style, HoverStyle>
+impl<I, FontHash, Style> ColorPicker<I, FontHash, Style>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
-        HoverStyle: WindowStyle<FontHash>,
+        Style: WindowStyle<FontHash>,
 {
 
     #[inline(always)]
@@ -1011,18 +1010,16 @@ impl<I, FontHash, Style, HoverStyle> ColorPicker<I, FontHash, Style, HoverStyle>
     }
 
     #[inline(always)]
-    pub fn calc_color(&mut self, style: &HoverStyle) -> ColorHSVA {
+    pub fn calc_color(&mut self, style: &Style) -> ColorHSVA {
         self.contents.calc_color(style)
     }
 }
 
-impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
-        ColorPicker<I, FontHash, Style, HoverStyle>
+impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash, Style>
     where 
         FontHash: Clone + Eq + Hash,
         I: Interface,
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
 
     #[inline(always)]
@@ -1053,15 +1050,14 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
     fn is_active(
         &self,
         _nox: &Nox<I>,
-        _style: &Style,
-        hover_style: &HoverStyle,
+        style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2
     ) -> bool
     {
-        let error_margin = hover_style.cursor_error_margin();
+        let error_margin = style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
-        self.contents.widget_held() || self.picking() || (self.contents.shown() && BoundingRect::from_position_size(
+        self.contents.widget_held() || self.contents.shown() && (self.picking() || BoundingRect::from_position_size(
             self.contents.offset - vec2(error_margin, error_margin),
             self.contents.window_rect.max + vec2(error_margin_2, error_margin_2)
         ).is_point_inside(cursor_pos - window_pos))
@@ -1071,7 +1067,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        hover_style: &HoverStyle,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
@@ -1124,7 +1119,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             );
             if self.contents.update(
                 nox,
-                hover_style,
+                style,
                 text_renderer,
                 window_pos,
                 cursor_pos,
@@ -1141,9 +1136,10 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             max_bounds,
             color: style.text_col(),
         });
+        let item_pad_outer = style.item_pad_outer();
         UpdateResult {
-            min_widget_width: text_size.x,
-            requires_triangulation: requires_triangulation,
+            min_window_width: offset.x + text_size.x + item_pad_outer.x + color_rect_max.x + item_pad_outer.x,
+            requires_triangulation,
             cursor_in_widget: (shown && cursor_in_contents) || cursor_in_color_rect || self.picking(),
         }
     }
@@ -1161,11 +1157,10 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
     fn set_vertex_params(
         &mut self,
         style: &Style,
-        hover_style: &HoverStyle,
         vertices: &mut [Vertex],
     ) {
         if self.contents.shown() {
-            self.contents.set_vertex_params(hover_style);
+            self.contents.set_vertex_params(style);
         }
         let title_text = self.title_text.as_ref().unwrap();
         let offset = self.offset + vec2(
@@ -1194,7 +1189,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         _inv_aspect_ratio: f32,
         _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
     {
         if self.contents.shown() {
             Ok(Some(&self.contents))

@@ -19,7 +19,7 @@ use nox_geom::{
     *,
 };
 
-pub(crate) struct Checkbox<I, FontHash, Style, HoverStyle> {
+pub(crate) struct Checkbox<I, FontHash, Style> {
     title: CompactString,
     title_text: Option<RenderedText>,
     checkbox_text: Option<RenderedText>,
@@ -29,10 +29,10 @@ pub(crate) struct Checkbox<I, FontHash, Style, HoverStyle> {
     outline_vertex_range: VertexRange,
     focused_outline_width: f32,
     flags: u32,
-    _marker: PhantomData<(I, FontHash, Style, HoverStyle)>
+    _marker: PhantomData<(I, FontHash, Style)>
 }
 
-impl<I, FontHash, Style, HoverStyle> Checkbox<I, FontHash, Style, HoverStyle>
+impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
     where
         Style: WindowStyle<FontHash>,
 {
@@ -114,13 +114,11 @@ impl<I, FontHash, Style, HoverStyle> Checkbox<I, FontHash, Style, HoverStyle>
     }
 }
 
-impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
-        Checkbox<I, FontHash, Style, HoverStyle>
+impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, Style>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
 
     #[inline(always)]
@@ -151,7 +149,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         &self,
         _nox: &Nox<I>,
         _style: &Style,
-        _hover_style: &HoverStyle,
         _window_pos: Vec2, _cursor_pos: Vec2) -> bool {
         self.held()
     }
@@ -160,7 +157,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
@@ -227,7 +223,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
             );
         }
         UpdateResult {
-            min_widget_width: self.calc_size(style, text_renderer).x,
+            min_window_width: self.offset.x + self.calc_size(style, text_renderer).x + style.item_pad_outer().x,
             requires_triangulation,
             cursor_in_widget
         }
@@ -252,7 +248,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
     fn set_vertex_params(
         &mut self,
         style: &Style,
-        _hover_style: &HoverStyle,
         vertices: &mut [Vertex],
     )
     {
@@ -299,7 +294,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         _inv_aspect_ratio: f32,
         _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
     {
         Ok(None)
     }

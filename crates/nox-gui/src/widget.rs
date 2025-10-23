@@ -12,12 +12,12 @@ use nox_geom::Vec2;
 use crate::*;
 
 pub struct UpdateResult {
-    pub min_widget_width: f32,
+    pub min_window_width: f32,
     pub requires_triangulation: bool,
     pub cursor_in_widget: bool,
 }
 
-pub trait HoverContents<I, FontHash, HoverStyle: WindowStyle<FontHash>>
+pub trait HoverContents<I, FontHash, Style: WindowStyle<FontHash>>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
@@ -26,7 +26,7 @@ pub trait HoverContents<I, FontHash, HoverStyle: WindowStyle<FontHash>>
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: &HoverStyle,
+        style: &Style,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -70,12 +70,11 @@ impl VertexRange {
     }
 }
 
-pub trait Widget<I, FontHash, Style, HoverStyle>
+pub trait Widget<I, FontHash, Style>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
-        Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>
+        Style: WindowStyle<FontHash>
 {
 
     fn hover_text(&self) -> Option<&str>;
@@ -95,7 +94,6 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
         &self,
         nox: &Nox<I>,
         style: &Style,
-        hover_style: &HoverStyle,
         window_pos: Vec2,
         cursor_pos: Vec2,
     ) -> bool;
@@ -104,7 +102,6 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
@@ -125,7 +122,6 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
     fn set_vertex_params(
         &mut self,
         style: &Style,
-        hover_style: &HoverStyle,
         vertices: &mut [Vertex],
     );
 
@@ -141,7 +137,7 @@ pub trait Widget<I, FontHash, Style, HoverStyle>
         inv_aspect_ratio: f32,
         unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>;
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>;
 
     fn hide(
         &self,

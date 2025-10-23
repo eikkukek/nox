@@ -36,7 +36,7 @@ pub trait Sliderable: Copy + FromStr {
     ) -> core::fmt::Result;
 }
 
-pub(crate) struct Slider<I, FontHash, Style, HoverStyle>
+pub(crate) struct Slider<I, FontHash, Style>
 {
     title: CompactString,
     title_text: Option<RenderedText>,
@@ -51,10 +51,10 @@ pub(crate) struct Slider<I, FontHash, Style, HoverStyle>
     pub hover_text: CompactString,
     falgs: u32,
     focused_outline_width: f32,
-    _marker: PhantomData<(I, FontHash, Style, HoverStyle)>,
+    _marker: PhantomData<(I, FontHash, Style)>,
 }
 
-impl<I, FontHash, Style, HoverStyle> Slider<I, FontHash, Style, HoverStyle>
+impl<I, FontHash, Style> Slider<I, FontHash, Style>
     where
         Style: WindowStyle<FontHash>,
 {
@@ -133,13 +133,11 @@ impl<I, FontHash, Style, HoverStyle> Slider<I, FontHash, Style, HoverStyle>
     }  
 }
 
-impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
-        Slider<I, FontHash, Style, HoverStyle>
+impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Style>
     where 
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
 
     #[inline(always)]
@@ -173,7 +171,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         &self,
         _nox: &Nox<I>,
         _style: &Style,
-        _hover_style: &HoverStyle,
         _window_pos: Vec2,
         _cursor_pos: Vec2
     ) -> bool
@@ -185,7 +182,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _hover_style: &HoverStyle,
         _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
@@ -203,8 +199,9 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         let title_text = self.title_text.as_ref().unwrap();
         let text_width = style.calc_text_width(title_text);
         let text_box_height = style.calc_text_box_height(title_text);
+        let offset = self.offset;
         let mut width = text_width +
-            style.item_pad_outer().x + style.item_pad_outer().x + style.item_pad_outer().x;
+            offset.x + style.item_pad_outer().x + style.item_pad_outer().x;
         let min_window_width = width + style.min_slider_width();
         if window_size.x < min_window_width {
             width = style.min_slider_width();
@@ -270,7 +267,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         UpdateResult {
             requires_triangulation,
             cursor_in_widget,
-            min_widget_width: min_window_width - style.item_pad_outer().x - style.item_pad_outer().x,
+            min_window_width,
         }
     }
 
@@ -295,7 +292,6 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
     fn set_vertex_params(
         &mut self,
         style: &Style,
-        _hover_style: &HoverStyle,
         vertices: &mut [Vertex],
     )
     {
@@ -353,7 +349,7 @@ impl<I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
         _inv_aspect_ratio: f32,
         _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
     {
         Ok(None)
     }

@@ -48,7 +48,6 @@ pub struct Nox<'a, I>
     window: Option<Arc<Window>>,
     memory: &'a Memory,
     renderer: Option<Renderer<'a>>,
-    error_flag: bool,
     cursor_pos: (f64, f64),
     mouse_scroll_delta: (f64, f64),
     mouse_scroll_delta_lines: (f32, f32),
@@ -60,10 +59,22 @@ pub struct Nox<'a, I>
     delta_time: time::Duration,
     window_size: (u32, u32),
     current_cursor: CursorIcon,
+    flags: u32,
 }
 
 impl<'a, I: Interface> Nox<'a, I>
 {
+
+    const ERROR: u32 = 0x1;
+    const CURSOR_SET: u32 = 0x2;
+
+    fn cursor_set(&self) -> bool {
+        self.flags & Self::CURSOR_SET == Self::CURSOR_SET
+    }
+
+    fn error_set(&self) -> bool {
+        self.flags & Self::ERROR == Self::ERROR
+    }
 
     pub fn new(interface: I, memory: &'a mut Memory) -> Self {
         Nox {
@@ -71,7 +82,6 @@ impl<'a, I: Interface> Nox<'a, I>
             window: None,
             memory,
             renderer: None,
-            error_flag: false,
             cursor_pos: (0.0, 0.0),
             mouse_scroll_delta: Default::default(),
             mouse_scroll_delta_lines: Default::default(),
@@ -83,6 +93,7 @@ impl<'a, I: Interface> Nox<'a, I>
             delta_time: time::Duration::ZERO,
             window_size: Default::default(),
             current_cursor: CursorIcon::Default,
+            flags: 0,
         }
     }
 
@@ -103,7 +114,8 @@ impl<'a, I: Interface> Nox<'a, I>
 
     #[inline(always)]
     pub fn set_cursor(&mut self, cursor: CursorIcon) {
-        self.current_cursor = cursor;            
+        self.current_cursor = cursor;
+        self.flags |= Self::CURSOR_SET;
     }
 
     #[inline(always)]
@@ -285,7 +297,7 @@ impl<'a, I: Interface> Drop for Nox<'a, I> {
 impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
-        if self.error_flag {
+        if self.error_set() {
             return
         }
         match event {
@@ -353,10 +365,13 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         .update(self, &mut renderer_context)
                     {
                         event_loop.exit();
-                        self.error_flag = true;
+                        self.flags |= Self::ERROR;
                         eprintln!("Failed to update: {:?}", e);
                     }
-                    window.set_cursor(self.current_cursor);
+                    if self.cursor_set() {
+                        window.set_cursor(self.current_cursor);
+                    }
+                    self.flags &= !Self::CURSOR_SET;
                     self.input_text.clear();
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
@@ -364,7 +379,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                             Ok(v) => v,
                             Err(e) => {
                                 event_loop.exit();
-                                self.error_flag = true;
+                                self.flags |= Self::ERROR;
                                 eprintln!("Failed to record transfer commands: {:?}", e);
                                 return
                             },
@@ -378,7 +393,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         }
                         if let Err(e) = renderer.render(&window, self.interface.clone(), renderer_allocators) {
                             event_loop.exit();
-                            self.error_flag = true;
+                            self.flags |= Self::ERROR;
                             eprintln!("Nox renderer error: {}", e);
                         }
                     }
@@ -404,7 +419,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 Ok(window) => window,
                 Err(e) => {
                     event_loop.exit();
-                    self.error_flag = true;
+                    self.flags |= Self::ERROR;
                     eprintln!("Nox error: failed to create window ( {} )", e);
                     return
                 },
@@ -428,7 +443,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 Ok(r) => Some(r),
                 Err(e) => {
                     event_loop.exit();
-                    self.error_flag = true;
+                    self.flags |= Self::ERROR;
                     eprintln!("Nox error: failed to create renderer ( {} )", e);
                     return
                 }
@@ -441,7 +456,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 .unwrap()
                 .init_callback(self, &mut renderer_context) {
                 event_loop.exit();
-                self.error_flag = true;
+                self.flags |= Self::ERROR;
                 eprintln!("Nox error: init callback error ( {:?} )", e);
             }
             let mut handles = match self.renderer
@@ -451,7 +466,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 Ok(v) => v,
                 Err(e) => {
                     event_loop.exit();
-                    self.error_flag = true;
+                    self.flags |= Self::ERROR;
                     eprintln!("Failed to record transfer commands: {:?}", e);
                     return
                 },

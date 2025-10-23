@@ -11,16 +11,16 @@ use nox_geom::*;
 
 use crate::*;
 
-pub struct DragValue<TitleText, I, FontHash, Style, HoverStyle> {
-    input_text: InputText<TitleText, I, FontHash, Style, HoverStyle>,
+pub struct DragValue<TitleText, I, FontHash, Style> {
+    input_text: InputText<TitleText, I, FontHash, Style>,
     delta_cursor_x: f32,
     flags: u32,
     focused_outline_vertex_range: VertexRange,
     focused_outline_width: f32,
-    _marker: PhantomData<(FontHash, Style, HoverStyle)>,
+    _marker: PhantomData<(FontHash, Style)>,
 }
 
-impl<TitleText, I, FontHash, Style, HoverStyle> DragValue<TitleText, I, FontHash, Style, HoverStyle>
+impl<TitleText, I, FontHash, Style> DragValue<TitleText, I, FontHash, Style>
     where
         TitleText: Text,
         Style: WindowStyle<FontHash>,
@@ -122,14 +122,12 @@ impl<TitleText, I, FontHash, Style, HoverStyle> DragValue<TitleText, I, FontHash
     }
 }
 
-impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for 
-        DragValue<TitleText, I, FontHash, Style, HoverStyle>
+impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<TitleText, I, FontHash, Style>
     where
         TitleText: Text,
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
     #[inline(always)]
     fn hover_text(&self) -> Option<&str> {
@@ -160,20 +158,18 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         &self,
         nox: &Nox<I>,
         style: &Style,
-        hover_style: &HoverStyle,
         window_pos: Vec2,
         cursor_pos: Vec2,
     ) -> bool
     {
         self.held() ||
-        self.input_text.is_active(nox, style, hover_style, window_pos, cursor_pos)
+        self.input_text.is_active(nox, style, window_pos, cursor_pos)
     }
 
     fn update(
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        hover_style: &HoverStyle,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
@@ -224,7 +220,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             }
         }
         let mut update_results = self.input_text.update(
-            nox, style, hover_style,
+            nox, style,
             text_renderer, window_size, window_pos,
             cursor_pos, delta_cursor_pos, cursor_in_this_window,
             other_widget_active, window_moving, collect_text,
@@ -252,7 +248,6 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
     fn set_vertex_params(
         &mut self,
         style: &Style,
-        hover_style: &HoverStyle,
         vertices: &mut [Vertex],
     ) {
         if !self.input_text.active() && (self.held() || self.hovered()) {
@@ -266,7 +261,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         } else {
             hide_vertices(vertices, self.focused_outline_vertex_range);
         }
-        self.input_text.set_vertex_params(style, hover_style, vertices);
+        self.input_text.set_vertex_params(style, vertices);
     }
 
     #[inline(always)]
@@ -282,7 +277,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         inv_aspect_ratio: f32,
         unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
     {
         self.input_text.render_commands(
             render_commands, style, base_pipeline_id,

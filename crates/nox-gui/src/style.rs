@@ -46,12 +46,12 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn text_col(&self) -> ColorSRGBA {
-        DEFAULT_TEXT_COL
+        DEFAULT_TEXT_COL.with_alpha(0.8)
     }
 
     #[inline(always)]
-    fn separator_col(&self) -> ColorSRGBA {
-        DEFAULT_SEPARATOR_COL
+    fn focused_text_col(&self) -> ColorSRGBA {
+        DEFAULT_TEXT_COL
     }
 
     #[inline(always)]
@@ -81,7 +81,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn pixels_per_unit(&self) -> f32 {
-        1000.0
+        600.0
     }
 
     #[inline(always)]
@@ -130,23 +130,23 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn separator_height(&self) -> f32 {
-        0.0015
-    }
-
-    #[inline(always)]
     fn default_handle_radius(&self) -> f32 {
         0.01
     }
 
     #[inline(always)]
-    fn color_picker_size(&self) -> Vec2 {
-        vec2(0.3, 0.3)
+    fn collapse_symbol_scale(&self) -> f32 {
+        0.01
     }
 
     #[inline(always)]
-    fn animation_curve_size(&self) -> Vec2 {
-        vec2(0.3, 0.2)
+    fn focused_collapse_symbol_scale(&self) -> f32 {
+        0.012
+    }
+
+    #[inline(always)]
+    fn color_picker_size(&self) -> Vec2 {
+        vec2(0.3, 0.3)
     }
 
     #[inline(always)]
@@ -180,6 +180,11 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
+    fn animation_speed(&self) -> f32 {
+        8.0
+    }
+
+    #[inline(always)]
     fn override_cursor(&self) -> bool {
         true
     }
@@ -201,7 +206,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn min_slider_width(&self) -> f32 {
-        0.05
+        0.07
     }
 
     #[inline(always)]
@@ -287,70 +292,28 @@ impl<FontHash> WindowStyle<FontHash> for DefaultStyle<FontHash> {
     }
 }
 
-pub struct DefaultHoverStyle<FontHash>(pub FontHash);
-
-impl<FontHash> DefaultHoverStyle<FontHash> {
-
-    #[inline(always)]
-    pub fn new(font_regular: FontHash) -> Self {
-        Self(font_regular)
-    }
-}
-
-impl<FontHash> WindowStyle<FontHash> for DefaultHoverStyle<FontHash> {
-
-    #[inline(always)]
-    fn font_regular(&self) -> &FontHash {
-        &self.0
-    }
-
-    #[inline(always)]
-    fn window_bg_col(&self) -> ColorSRGBA {
-        DEFAULT_HOVER_CONTENTS_WINDOW_BG_COL
-    }
-
-    #[inline(always)]
-    fn widget_bg_col(&self) -> ColorSRGBA {
-        DEFAULT_HOVER_CONTENTS_WIDGET_BG_COL
-    }
-
-    #[inline(always)]
-    fn focused_widget_outline_col(&self) -> ColorSRGBA {
-        DEFAULT_HOVER_CONTENTS_FOCUSED_WIDGET_OUTLINE_COL
-    }
-
-    #[inline(always)]
-    fn active_widget_outline_col(&self) -> ColorSRGBA {
-        DEFAULT_HOVER_CONTENTS_ACTIVE_WIDGET_OUTLINE_COL
-    }
-}
-
 const DEFAULT_WINDOW_BG_COL: ColorSRGBA =
-    ColorSRGBA::new(31.0 / 255.0, 44.0 / 255.0, 46.0 / 255.0, 1.0);
+    ColorSRGBA::new(10.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 1.0);
 
-const DEFAULT_WINDOW_TITLE_BAR_COL: ColorSRGBA =
-    ColorSRGBA::new(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);
+const DEFAULT_WINDOW_TITLE_BAR_COL: ColorSRGBA = DEFAULT_WINDOW_BG_COL;
 
 const DEFAULT_WINDOW_OUTLINE_COL: ColorSRGBA =
-    ColorSRGBA::new(17.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);
+    ColorSRGBA::new(38.0 / 255.0, 54.0 / 255.0, 54.0 / 255.0, 1.0);
 
 const DEFAULT_FOCUSED_WINDOW_OUTLINE_COL: ColorSRGBA =
     ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0);
 
 const DEFAULT_WIDGET_BG_COL: ColorSRGBA =
-    ColorSRGBA::new(52.0 / 255.0, 74.0 / 255.0, 74.0 / 255.0, 1.0);
+    ColorSRGBA::new(20.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 1.0);
 
 const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA =
-    ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0);
+    ColorSRGBA::new(31.0 / 255.0, 46.0 / 255.0, 46.0 / 255.0, 1.0);
 
 const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA =
-    ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0);
+    ColorSRGBA::new(16.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);
 
 const DEFAULT_TEXT_COL: ColorSRGBA =
     ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 1.0);
-
-const DEFAULT_SEPARATOR_COL: ColorSRGBA =
-    ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0);
 
 const DEFAULT_HANDLE_COL: ColorSRGBA =
     ColorSRGBA::new(83.0 / 255.0, 118.0 / 255.0, 121.0 / 255.0, 1.0);
@@ -363,15 +326,3 @@ const DEFAULT_INPUT_TEXT_ACTIVE_OUTLINE_COL: ColorSRGBA =
 
 const DEFAULT_INPUT_TEXT_SELECTION_BG_COL: ColorSRGBA
     = ColorSRGBA::new(24.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0, 0.7);
-
-const DEFAULT_HOVER_CONTENTS_WINDOW_BG_COL: ColorSRGBA =
-    ColorSRGBA::new(10.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 1.0);
-
-const DEFAULT_HOVER_CONTENTS_WIDGET_BG_COL: ColorSRGBA =
-    ColorSRGBA::new(20.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 1.0);
-
-const DEFAULT_HOVER_CONTENTS_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA =
-    ColorSRGBA::new(31.0 / 255.0, 46.0 / 255.0, 46.0 / 255.0, 1.0);
-
-const DEFAULT_HOVER_CONTENTS_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA =
-    ColorSRGBA::new(16.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);

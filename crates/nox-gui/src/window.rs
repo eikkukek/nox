@@ -2,6 +2,8 @@ use core::{
     hash::Hash,
     str::FromStr,
     marker::PhantomData,
+    f32::consts::FRAC_PI_2,
+    fmt::Write,
 };
 
 use nox::{
@@ -175,16 +177,152 @@ impl HoverWindow {
     }
 }
 
-pub(crate) struct Window<I, FontHash, Style, HoverStyle>
+struct CollapsedWidgets {
+    title: CompactString,
+    title_text: RenderedText,
+    offset: Vec2,
+    symbol_vertex_range: VertexRange,
+    rotation: f32,
+    flags: u32,
+}
+
+impl CollapsedWidgets {
+
+    const COLLAPSED: u32 = 0x1;
+    const HOVERED: u32 = 0x2;
+
+    #[inline(always)]
+    fn new() -> Self {
+        Self {
+            title: Default::default(),
+            title_text: Default::default(),
+            offset: Default::default(),
+            symbol_vertex_range: Default::default(),
+            rotation: 0.0,
+            flags: Self::COLLAPSED,
+        }
+    }
+
+    #[inline(always)]
+    fn collapsed(&self) -> bool {
+        self.flags & Self::COLLAPSED == Self::COLLAPSED
+    }
+
+    #[inline(always)]
+    fn hovered(&self) -> bool {
+        self.flags & Self::HOVERED == Self::HOVERED
+    }
+
+    #[inline(always)]
+    fn set_offset(&mut self, offset: Vec2) {
+        self.offset = offset;
+    }
+
+    #[inline(always)]
+    fn set_title<FontHash>(&mut self, style: &impl WindowStyle<FontHash>, text_renderer: &mut VertexTextRenderer<FontHash>, title: &str)
+        where 
+            FontHash: Clone + Eq + Hash,
+    {
+        if self.title != title {
+            self.title = CompactString::new(title);
+            self.title_text = text_renderer.render(
+                &[text_segment(&self.title, style.font_regular())], false, 0.0 
+            ).unwrap_or_default();
+        }
+    }
+
+    #[inline(always)]
+    fn update<I, FontHash>(
+        &mut self,
+        nox: &Nox<I>,
+        window_pos: Vec2,
+        cursor_pos: Vec2,
+        style: &impl WindowStyle<FontHash>,
+        mut collect_text: impl FnMut(&RenderedText, Vec2, BoundedTextInstance),
+    ) -> f32
+        where
+            I: Interface,
+            FontHash: Clone + Eq + Hash,
+    {
+        let item_pad_outer = style.item_pad_outer();
+        let collapse_scale = style.collapse_symbol_scale();
+        let text_size = style.calc_text_size(&self.title_text);
+        let offset = self.offset;
+        let bounding_rect = BoundingRect::from_position_size(
+            window_pos + offset,
+            vec2(collapse_scale + item_pad_outer.x + text_size.x, text_size.y)
+        );
+        self.flags &= !Self::HOVERED;
+        self.flags |= Self::HOVERED * bounding_rect.is_point_inside(cursor_pos) as u32;
+        if nox.was_mouse_button_pressed(MouseButton::Left) && self.hovered() {
+            self.flags ^= Self::COLLAPSED;
+        }
+        if self.collapsed() {
+            self.rotation = (self.rotation - FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
+        } else {
+            self.rotation = (self.rotation + FRAC_PI_2 * 8.0 * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
+        }
+        collect_text(&self.title_text, offset + vec2(collapse_scale + style.item_pad_inner().x, 0.0), BoundedTextInstance {
+            add_scale: vec2(1.0, 1.0),
+            min_bounds: vec2(f32::MIN, f32::MIN),
+            max_bounds: vec2(f32::MAX, f32::MAX),
+            color: if self.hovered() {
+                style.focused_text_col()
+            } else {
+                style.text_col()
+            }
+        });
+        offset.x + collapse_scale + text_size.x + item_pad_outer.x
+    }
+
+    #[inline(always)]
+    fn set_vertex_params<FontHash>(&self, style: &impl WindowStyle<FontHash>, vertices: &mut [Vertex]) {
+        let rotation = self.rotation;
+        let (scale, color) = 
+            if self.hovered() {
+                (
+                    style.focused_collapse_symbol_scale(),
+                    style.focused_text_col(),
+                )
+            } else {
+                (
+                    style.collapse_symbol_scale(),
+                    style.text_col(),
+                )
+            };
+        let offset = self.offset + vec2(0.0, style.calc_text_height(&self.title_text) * 0.5);
+        vertices[self.symbol_vertex_range.start()] = Vertex {
+            pos: vec2(0.5, 0.0).rotated(rotation) * scale,
+            offset: offset,
+            color,
+        };
+        vertices[self.symbol_vertex_range.start() + 1] = Vertex {
+            pos: vec2(-0.5, 0.5).rotated(rotation) * scale,
+            offset: offset,
+            color,
+        };
+        vertices[self.symbol_vertex_range.start() + 2] = Vertex {
+            pos: vec2(-0.5, -0.5).rotated(rotation) * scale,
+            offset: offset,
+            color,
+        };
+    }
+
+    #[inline(always)]
+    fn hide(&self, vertices: &mut [Vertex]) {
+        hide_vertices(vertices, self.symbol_vertex_range);
+    }
+}
+
+pub(crate) struct Window<I, FontHash, Style>
 {
     main_rect: Rect,
     title_bar_rect: Rect,
-    separator_rect: Rect,
     main_rect_vertex_range: VertexRange,
     title_bar_vertex_range: VertexRange,
-    separator_vertex_range: VertexRange,
+    focused_outline_vertex_range: VertexRange,
     outline_vertex_range: VertexRange,
-    outline_thin_vertex_range: VertexRange,
+    title_outline_vertex_range: VertexRange,
     main_draw_info: DrawInfo,
     position: Vec2,
     title: CompactString,
@@ -192,14 +330,17 @@ pub(crate) struct Window<I, FontHash, Style, HoverStyle>
     combined_text: Option<CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>>,
     vertices: Option<GlobalVec<Vertex>>,
     indices: GlobalVec<u32>,
-    buttons: FxHashMap<u32, (u64, Button<I, FontHash, Style, HoverStyle>)>,
-    sliders: FxHashMap<u32, (u64, Slider<I, FontHash, Style, HoverStyle>)>,
-    checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash, Style, HoverStyle>)>,
-    color_pickers: FxHashMap<u32, (u64, ColorPicker<I, FontHash, Style, HoverStyle>)>,
-    input_texts: FxHashMap<u32, (u64, InputText<DefaultText, I, FontHash, Style, HoverStyle>)>,
-    drag_values: FxHashMap<u32, (u64, DragValue<DefaultText, I, FontHash, Style, HoverStyle>)>,
+    buttons: FxHashMap<u32, (u64, Button<I, FontHash, Style>)>,
+    sliders: FxHashMap<u32, (u64, Slider<I, FontHash, Style>)>,
+    checkboxs: FxHashMap<u32, (u64, Checkbox<I, FontHash, Style>)>,
+    color_pickers: FxHashMap<u32, (u64, ColorPicker<I, FontHash, Style>)>,
+    input_texts: FxHashMap<u32, (u64, InputText<DefaultText, I, FontHash, Style>)>,
+    drag_values: FxHashMap<u32, (u64, DragValue<DefaultText, I, FontHash, Style>)>,
     active_widgets: Option<GlobalVec<ActiveWidget>>,
     prev_active_widgets: Option<GlobalVec<ActiveWidget>>,
+    collapsing_widgets: FxHashMap<u32, (u64, CollapsedWidgets)>,
+    active_collapsing_widgets: GlobalVec<u32>,
+    prev_active_collapsing_widgets: GlobalVec<u32>,
     hover_window: Option<HoverWindow>,
     last_triangulation: u64,
     last_frame: u64,
@@ -209,15 +350,14 @@ pub(crate) struct Window<I, FontHash, Style, HoverStyle>
     outline_width: f32,
     distance_from_edge: Vec2,
     flags: u32,
-    _marker: PhantomData<(Style, HoverStyle)>,
+    _marker: PhantomData<Style>,
 }
 
-impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
+impl<I, FontHash, Style> Window<I, FontHash, Style>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
 
     const RENDERABLE: u32 = 0x1;
@@ -242,12 +382,11 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         Self {
             main_rect: rect(Default::default(), size, 0.0),
             title_bar_rect: Default::default(),
-            separator_rect: Default::default(),
             main_rect_vertex_range: Default::default(),
             title_bar_vertex_range: Default::default(),
-            separator_vertex_range: Default::default(),
+            focused_outline_vertex_range: Default::default(),
+            title_outline_vertex_range: Default::default(),
             outline_vertex_range: Default::default(),
-            outline_thin_vertex_range: Default::default(),
             main_draw_info: Default::default(),
             position: position.into(),
             title: title.into(),
@@ -263,6 +402,9 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             drag_values: FxHashMap::default(),
             active_widgets: Some(Default::default()),
             prev_active_widgets: Some(Default::default()),
+            collapsing_widgets: FxHashMap::default(),
+            active_collapsing_widgets: Default::default(),
+            prev_active_collapsing_widgets: Default::default(),
             hover_window: Some(HoverWindow::new()),
             last_triangulation: 0,
             last_frame: 0,
@@ -365,31 +507,31 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
     }
 
     #[inline(always)]
-    fn get_widget(&self, widget: ActiveWidget) -> (u64, &dyn Widget<I, FontHash, Style, HoverStyle>) {
+    fn get_widget(&self, widget: ActiveWidget) -> (u64, &dyn Widget<I, FontHash, Style>) {
         match widget {
             ActiveWidget::Slider(id) =>
                 self.sliders.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::Button(id) =>
                 self.buttons.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::Checkbox(id) =>
                 self.checkboxs.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::ColorPicker(id) =>
                 self.color_pickers.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::InputText(id) =>
                 self.input_texts.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::DragValue(id) =>
                 self.drag_values.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
         }
     }
@@ -398,32 +540,32 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
     fn get_widget_mut(
         &mut self,
         widget: ActiveWidget
-    ) -> (&mut u64, &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+    ) -> (&mut u64, &mut dyn Widget<I, FontHash, Style>)
     {
         match widget {
             ActiveWidget::Slider(id) =>
                 self.sliders.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::Button(id) =>
                 self.buttons.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::Checkbox(id) =>
                 self.checkboxs.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::ColorPicker(id) =>
                 self.color_pickers.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style,>)
                 ).unwrap(),
             ActiveWidget::InputText(id) =>
                 self.input_texts.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
             ActiveWidget::DragValue(id) =>
                 self.drag_values.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style, HoverStyle>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
                 ).unwrap(),
         }
     }
@@ -454,6 +596,8 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 .as_mut()
                 .unwrap_unchecked()
                 .move_from_vec(self.active_widgets.as_mut().unwrap_unchecked());
+            self.prev_active_collapsing_widgets
+                .move_from_vec(&mut self.active_collapsing_widgets);
         }
     }
 
@@ -461,7 +605,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
@@ -491,13 +634,17 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             self.vertices.take().unwrap_unchecked(),
         )};
         prev_active_widgets.retain(|v| !active_widgets.contains(v));
+        self.prev_active_collapsing_widgets.retain(|v| !self.active_collapsing_widgets.contains(v));
+        for collapsing_widgets in &self.prev_active_collapsing_widgets {
+            let (_, collapsing_widgets) = &self.collapsing_widgets[collapsing_widgets];
+            collapsing_widgets.hide(&mut vertices);
+        }
         for &widget in &prev_active_widgets {
             let (_, widget) = self.get_widget_mut(widget);
             widget.hide(&mut vertices);
         }
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.prev_active_widgets = Some(prev_active_widgets);
-        self.vertices = Some(vertices);
         let item_pad_outer = style.item_pad_outer();
         let item_pad_inner = style.item_pad_inner();
         let font_scale = style.font_scale();
@@ -508,8 +655,8 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         let mut hover_window = self.hover_window.take().unwrap();
         let mut active_widget = None;
         for (i, &widget) in active_widgets.iter().enumerate() {
-            let (_, widget) = self.get_widget_mut(widget);
-            if widget.is_active(nox, style, hover_style, window_pos, cursor_pos) {
+            let (_, widget) = self.get_widget(widget);
+            if widget.is_active(nox, style, window_pos, cursor_pos) {
                 active_widget = Some(i);
                 break
             }
@@ -518,13 +665,12 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         for (i, &widget) in active_widgets.iter().enumerate() {
             let (_, widget) = self.get_widget_mut(widget);
             let UpdateResult {
-                min_widget_width,
+                min_window_width,
                 requires_triangulation,
                 cursor_in_widget,
             } = widget.update(
                 nox,
                 style,
-                hover_style,
                 text_renderer,
                 window_size,
                 window_pos,
@@ -541,11 +687,9 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                     combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap();
                 },
             );
-            min_width = min_width.max(min_widget_width +
-                item_pad_outer.x + item_pad_outer.x
-            );
+            min_width = min_width.max(min_window_width);
             if cursor_in_widget && let Some(hover_text) = widget.hover_text() {
-                hover_window.update(hover_style, text_renderer, cursor_pos, hover_text);
+                hover_window.update(style, text_renderer, cursor_pos, hover_text);
                 self.flags |= Self::HOVER_WINDOW_ACTIVE;
             }
             if requires_triangulation {
@@ -553,6 +697,13 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             }
             cursor_in_some_widget |= cursor_in_widget;
         }
+        for collapsing_widgets in &self.active_collapsing_widgets {
+            let (_, collapsing_widgets) = self.collapsing_widgets.get_mut(collapsing_widgets).unwrap();
+            collapsing_widgets.update(nox, window_pos, cursor_pos, style, |text, offset, bounded_text_instance| {
+                combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
+            });
+        }
+        self.vertices = Some(vertices);
         cursor_in_this_window |= cursor_in_some_widget || active_widget.is_some();
         self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
         self.active_widgets = Some(active_widgets);
@@ -770,16 +921,12 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         if main_rect_max.y < min_height {
             main_rect_max.y = min_height;
         }
-        let mut separator_rect = self.separator_rect;
-        separator_rect.max.x = self.main_rect.max.x;
-        separator_rect.max.y = style.separator_height();
         let requires_triangulation =
             (style.rounding() != self.main_rect.rounding ||
             self.focused_outline_width != style.focused_outline_width() ||
             self.outline_width != style.outline_width() ||
             main_rect_max != self.main_rect.max ||
-            self.title_bar_rect != title_bar_rect ||
-            self.separator_rect != separator_rect
+            self.title_bar_rect != title_bar_rect
         ) as u32;
         self.flags |= Self::REQUIRES_TRIANGULATION * requires_triangulation;
         self.main_rect.rounding = style.rounding();
@@ -788,7 +935,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         self.outline_width = style.outline_width();
         self.focused_outline_width = style.focused_outline_width();
         self.title_bar_rect = title_bar_rect;
-        self.separator_rect = separator_rect;
         cursor_in_this_window || self.any_resize()
     }
 
@@ -851,7 +997,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.outline_vertex_range = VertexRange::new(0..vertices.len());
+            self.focused_outline_vertex_range = VertexRange::new(0..vertices.len());
             outline_points.clear();
             nox_geom::shapes::outline_points(&points,
                 self.outline_width, false, &mut |p| { outline_points.push(p.into()); }
@@ -860,7 +1006,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.outline_thin_vertex_range = VertexRange::new(vertex_begin..vertices.len());
+            self.outline_vertex_range = VertexRange::new(vertex_begin..vertices.len());
             vertex_begin = vertices.len();
             if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
@@ -870,20 +1016,19 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
             self.title_bar_rect.to_points_partial_round(true, true, false, false,
                 &mut |p| { points.push(p.into()); }
             );
+            outline_points.clear();
+            nox_geom::shapes::outline_points(&points,
+                self.outline_width, false, &mut |p| { outline_points.push(p.into()); });
+            vertex_begin = vertices.len();
+            if !earcut::earcut(&outline_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+                self.flags &= !Self::RENDERABLE;
+            }
+            self.title_outline_vertex_range = VertexRange::new(vertex_begin..vertices.len());
             vertex_begin = vertices.len();
             if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
             self.title_bar_vertex_range = VertexRange::new(vertex_begin..vertices.len());
-            points.clear();
-            self.separator_rect.to_points_no_round(
-                &mut |p| { points.push(p.into()); }
-            );
-            vertex_begin = vertices.len();
-            if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
-                self.flags &= !Self::RENDERABLE;
-            }
-            self.separator_vertex_range = VertexRange::new(vertex_begin..vertices.len());
             let active_widgets = self.active_widgets.take().unwrap();
             let mut flags = self.flags;
             for &widget in &active_widgets  {
@@ -899,6 +1044,14 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                         VertexRange::new(vertex_begin..vertices.len())
                     }
                 );
+            }
+            for collapsing_widgets in &mut self.active_collapsing_widgets {
+                let (last_triangulation, collapsing_widgets) = self.collapsing_widgets.get_mut(collapsing_widgets).unwrap();
+                *last_triangulation = new_triangulation;
+                vertices.append(&[Default::default(); 3]);
+                let n = vertices.len();
+                indices_usize.append(&[n - 3, n - 2, n - 1]);
+                collapsing_widgets.symbol_vertex_range = VertexRange::new(n - 3..n);
             }
             self.main_draw_info = DrawInfo {
                 first_index: 0,
@@ -918,7 +1071,6 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         &mut self,
         render_commands: &mut RenderCommands,
         style: &Style,
-        hover_style: &HoverStyle,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
@@ -951,7 +1103,11 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         };
         for &widget in &active_widgets {
             let (_, widget) = self.get_widget_mut(widget);
-            widget.set_vertex_params(style, hover_style, &mut vertices);
+            widget.set_vertex_params(style, &mut vertices);
+        }
+        for collapsing_widgets in &self.active_collapsing_widgets {
+            let (_, collapsing_widgets) = self.collapsing_widgets.get_mut(collapsing_widgets).unwrap();
+            collapsing_widgets.set_vertex_params(style, &mut vertices);
         }
         self.active_widgets = Some(active_widgets);
         let vertex_sample = vertices[self.main_rect_vertex_range.start()];
@@ -968,50 +1124,35 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                 vertex.color = target_color;
             }
         }
-        let vertex_sample = vertices[self.separator_vertex_range.start()];
-        let offset = vec2(0.0, self.title_bar_rect.max.y - self.separator_rect.max.y * 0.5);
-        if vertex_sample.offset != offset || vertex_sample.color != style.separator_col() {
-            let target_color = style.separator_col();
-            for vertex in &mut vertices[self.separator_vertex_range.range()] {
-                vertex.offset = offset;
-                vertex.color = target_color;
-            }
-        }
         let any_resize = self.any_resize();
         if self.cursor_in_window() || any_resize {
-            let vertex_sample = vertices[self.outline_vertex_range.start()];
-            let offset = vec2(0.0, 0.0);
             let target_color = if any_resize || self.held() {
                 style.window_outline_col()
             } else {
                 style.focused_window_outline_col()
             };
-            if vertex_sample.offset != offset || vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_vertex_range.range()] {
-                    vertex.offset = offset;
+            set_vertex_params(&mut vertices, self.focused_outline_vertex_range, vec2(0.0, 0.0), target_color);
+            set_vertex_params(&mut vertices, self.title_outline_vertex_range, vec2(0.0, 0.0), target_color);
+            hide_vertices(&mut vertices, self.outline_vertex_range);
+        } else {
+            let vertex_sample = vertices[self.focused_outline_vertex_range.start()];
+            let target_color = ColorSRGBA::black(0.0);
+            if vertex_sample.color != target_color {
+                for vertex in &mut vertices[self.focused_outline_vertex_range.range()] {
                     vertex.color = target_color;
                 }
             }
-            let vertex_sample = vertices[self.outline_thin_vertex_range.start()];
-            if vertex_sample.color.alpha != 0.0 {
-                for vertex in &mut vertices[self.outline_thin_vertex_range.range()] {
-                    vertex.color = ColorSRGBA::black(0.0);
-                }
-            }
-        } else {
             let vertex_sample = vertices[self.outline_vertex_range.start()];
-            let target_color = ColorSRGBA::black(0.0);
+            let target_color = style.window_outline_col();
             if vertex_sample.color != target_color {
                 for vertex in &mut vertices[self.outline_vertex_range.range()] {
                     vertex.color = target_color;
                 }
             }
-            let vertex_sample = vertices[self.outline_thin_vertex_range.start()];
-            let offset = vec2(0.0, 0.0);
-            let target_color = style.window_outline_col();
-            if vertex_sample.offset != offset || vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_thin_vertex_range.range()] {
-                    vertex.offset = offset;
+            let vertex_sample = vertices[self.title_outline_vertex_range.start()];
+            if vertex_sample.color != style.window_outline_col() {
+                let target_color = style.window_outline_col();
+                for vertex in &mut vertices[self.title_outline_vertex_range.range()] {
                     vertex.color = target_color;
                 }
             }
@@ -1094,7 +1235,7 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
         if let Some(contents) = on_top_contents {
             contents.render_commands(
                 render_commands,
-                hover_style,
+                style,
                 base_pipeline_id,
                 text_pipeline_id,
                 vertex_buffer,
@@ -1110,10 +1251,10 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
                     .as_mut()
                     .unwrap_unchecked()
             };
-            hover_window.set_vertex_params(hover_style);
+            hover_window.set_vertex_params(style);
             hover_window.render_commands(
                 render_commands,
-                hover_style,
+                style,
                 base_pipeline_id,
                 text_pipeline_id,
                 vertex_buffer,
@@ -1126,33 +1267,30 @@ impl<I, FontHash, Style, HoverStyle> Window<I, FontHash, Style, HoverStyle>
     }
 }
 
-pub struct WindowContext<'a, 'b, I, FontHash, Style, HoverStyle>
+pub struct WindowContext<'a, 'b, I, FontHash, Style>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash, 
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
     style: &'a Style,
-    hover_style: &'a HoverStyle,
-    window: &'a mut Window<I, FontHash, Style, HoverStyle>,
+    window: &'a mut Window<I, FontHash, Style>,
     text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
-    widget_y: f32,
+    widget_off: Vec2,
+    collapsed: bool,
 }
 
-impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, Style, HoverStyle>
+impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
     where
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
 
     pub(crate) fn new(
         title: &str,
-        window: &'a mut Window<I, FontHash, Style, HoverStyle>,
+        window: &'a mut Window<I, FontHash, Style>,
         style: &'a Style,
-        hover_style: &'a HoverStyle,
         text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
     ) -> Self {
         if title != window.title {
@@ -1166,14 +1304,56 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             0.0,
         ).unwrap_or_default());
         Self {
-            widget_y:
-                style.calc_text_box_height_from_text_height(title_text.row_height * style.font_scale() * 1.5) +
-                style.item_pad_inner().y,
+            widget_off: vec2(
+                style.item_pad_outer().x,
+                style.calc_text_box_height_from_text_height(title_text.row_height * style.font_scale() * style.title_add_scale()) +
+                    style.item_pad_outer().y,
+            ),
             window,
             style,
-            hover_style,
             text_renderer,
+            collapsed: false,
         }
+    }
+
+    pub(crate) fn new_collapsing(
+        id: u32,
+        title: &str,
+        window: &'a mut Window<I, FontHash, Style>,
+        style: &'a Style,
+        text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
+        widget_off: Vec2,
+    ) -> Self {
+        window.active_collapsing_widgets.push(id);
+        let (last_triangulation, collapsing_widgets) = window.collapsing_widgets.entry(id).or_insert((0, CollapsedWidgets::new()));
+        if *last_triangulation != window.last_triangulation {
+            window.flags |= Window::<I, FontHash, Style>::REQUIRES_TRIANGULATION;
+        }
+        collapsing_widgets.set_title(style, text_renderer, title);
+        collapsing_widgets.set_offset(widget_off);
+        let collapsed = collapsing_widgets.collapsed();
+        Self {
+            widget_off: widget_off + vec2(style.item_pad_outer().x, style.calc_text_height(&collapsing_widgets.title_text) + style.item_pad_outer().y),
+            window,
+            style,
+            text_renderer,
+            collapsed,
+        }
+    }
+
+    pub fn collapsing<F>(&mut self, id: u32, title: &str, mut f: F)
+        where 
+            F: FnMut(&mut WindowContext<I, FontHash, Style>)
+    {
+        if self.collapsed {
+            return
+        }
+        let mut collapsing = WindowContext::new_collapsing(
+            id, title, self.window, self.style, self.text_renderer,
+            self.widget_off
+        );
+        f(&mut collapsing);
+        self.widget_off.y = collapsing.widget_off.y;
     }
 
     pub fn update_button(
@@ -1182,6 +1362,9 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         title: &str,
     ) -> bool
     {
+        if self.collapsed {
+            return false
+        }
         unsafe {
             self.window.active_widgets
                 .as_mut()
@@ -1192,10 +1375,10 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             .entry(id)
             .or_insert((0, Button::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style>::REQUIRES_TRIANGULATION;
         }
-        button.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
-        self.widget_y += button.calc_height(&self.style, self.text_renderer) +
+        button.set_offset(self.widget_off);
+        self.widget_off.y += button.calc_height(&self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
         button.pressed()
     }
@@ -1207,8 +1390,11 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         value: &mut T,
         min: T,
         max: T,
-    ) -> Result<(), Error>
+    )
     { 
+        if self.collapsed {
+            return
+        }
         unsafe {
             self.window.active_widgets
                 .as_mut()
@@ -1219,7 +1405,7 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             .entry(id)
             .or_insert((0, Slider::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style>::REQUIRES_TRIANGULATION;
         }
         if slider.held() {
             slider.quantized_t = value.slide_and_quantize_t(min, max, slider.t);
@@ -1231,12 +1417,12 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         value
             .display(self.style, &mut slider.hover_text)
             .map_err(|e| {
-                Error::UserError(format!("nox_gui: failed to format slider value: {}", e))
-            })?;
-        slider.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
-        self.widget_y += slider.calc_height(&self.style, self.text_renderer) +
+                slider.hover_text.clear();
+                write!(slider.hover_text, "{:?}", e).ok();
+            }).ok();
+        slider.set_offset(self.widget_off);
+        self.widget_off.y += slider.calc_height(&self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
-        Ok(())
     }
 
     pub fn update_checkbox(
@@ -1246,6 +1432,9 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         value: &mut bool,
     ) -> bool
     {
+        if self.collapsed {
+            return false
+        }
         unsafe {
             self.window.active_widgets
                 .as_mut()
@@ -1256,14 +1445,14 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             .entry(id)
             .or_insert((0, Checkbox::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style>::REQUIRES_TRIANGULATION;
         }
         if checkbox.pressed() {
             *value = !*value;
         }
         checkbox.set_checked(*value);
-        checkbox.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
-        self.widget_y += checkbox.calc_height(&self.style, self.text_renderer) +
+        checkbox.set_offset(self.widget_off);
+        self.widget_off.y += checkbox.calc_height(&self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
         *value
     }
@@ -1275,6 +1464,9 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         value: &mut C,
     )
     {
+        if self.collapsed {
+            return
+        }
         unsafe {
             self.window.active_widgets
                 .as_mut()
@@ -1285,16 +1477,16 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             .entry(id)
             .or_insert((0, ColorPicker::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style>::REQUIRES_TRIANGULATION;
         }
         if color_picker.picking() {
-            *value = C::from_hsva(color_picker.calc_color(self.hover_style));
+            *value = C::from_hsva(color_picker.calc_color(self.style));
         }
         else {
             color_picker.set_color(*value);
         }
-        color_picker.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
-        self.widget_y += color_picker.calc_height(self.style, self.text_renderer) +
+        color_picker.set_offset(self.widget_off);
+        self.widget_off.y += color_picker.calc_height(self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
     }
 
@@ -1311,6 +1503,9 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>
     )
     {
+        if self.collapsed {
+            return
+        }
         unsafe {
             self.window.active_widgets
                 .as_mut()
@@ -1321,7 +1516,7 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             .entry(id)
             .or_insert((0, InputText::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style>::REQUIRES_TRIANGULATION;
         }
         input_text.set_params(
             width_override, None, skip_title, center_text,
@@ -1334,8 +1529,8 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         } else {
             input_text.set_input(value);
         }
-        input_text.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
-        self.widget_y += input_text.calc_height(self.style, self.text_renderer) +
+        input_text.set_offset(self.widget_off);
+        self.widget_off.y += input_text.calc_height(self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
     }
 
@@ -1390,6 +1585,9 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
         format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
     )
     {
+        if self.collapsed {
+            return
+        }
         unsafe {
             self.window.active_widgets
                 .as_mut()
@@ -1400,28 +1598,27 @@ impl<'a, 'b, I, FontHash, Style, HoverStyle> WindowContext<'a, 'b, I, FontHash, 
             .entry(id)
             .or_insert((0, DragValue::new(title)));
         if *last_triangulation != self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash, Style, HoverStyle>::REQUIRES_TRIANGULATION;
+            self.window.flags |= Window::<I, FontHash, Style>::REQUIRES_TRIANGULATION;
         }
         drag_value.set_input_params(self.style, min_width, skip_title, format_input);
         drag_value.calc_value(
             self.style, value, min, max,
             drag_speed.unwrap_or(self.style.default_value_drag_speed()),
         );
-        drag_value.set_offset(vec2(self.style.item_pad_outer().x, self.widget_y));
-        self.widget_y += drag_value.calc_height(self.style, self.text_renderer) +
+        drag_value.set_offset(self.widget_off);
+        self.widget_off.y += drag_value.calc_height(self.style, self.text_renderer) +
             self.style.item_pad_outer().y;
     }
 }
 
-impl<'a, 'b, I, FontHash, Style, HoverStyle> Drop for
-        WindowContext<'a, 'b, I, FontHash, Style, HoverStyle>
+impl<'a, 'b, I, FontHash, Style> Drop for
+        WindowContext<'a, 'b, I, FontHash, Style>
     where 
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
     fn drop(&mut self) {
-        self.window.min_height = self.widget_y + self.style.item_pad_outer().y
+        self.window.min_height = self.widget_off.y + self.style.item_pad_outer().y
     }
 }

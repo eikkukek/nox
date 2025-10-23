@@ -18,7 +18,7 @@ use nox_font::{text_segment, RenderedText, VertexTextRenderer};
 
 use crate::*;
 
-pub struct InputText<TitleText, I, FontHash, Style, HoverStyle> {
+pub struct InputText<TitleText, I, FontHash, Style> {
     offset: Vec2,
     title: TitleText,
     input: CompactString,
@@ -42,10 +42,10 @@ pub struct InputText<TitleText, I, FontHash, Style, HoverStyle> {
     outline_width: f32,
     width_override: f32,
     bg_col_override: ColorSRGBA,
-    _marker: PhantomData<(I, FontHash, Style, HoverStyle)>,
+    _marker: PhantomData<(I, FontHash, Style)>,
 }
 
-impl<TitleText, I, FontHash, Style, HoverStyle> InputText<TitleText, I, FontHash, Style, HoverStyle>
+impl<TitleText, I, FontHash, Style> InputText<TitleText, I, FontHash, Style>
     where
         TitleText: Text,
         Style: WindowStyle<FontHash>,
@@ -364,14 +364,12 @@ impl<TitleText, I, FontHash, Style, HoverStyle> InputText<TitleText, I, FontHash
     }
 }
 
-impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, HoverStyle> for
-        InputText<TitleText, I, FontHash, Style, HoverStyle>
+impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for InputText<TitleText, I, FontHash, Style>
     where
         TitleText: Text,
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
-        HoverStyle: WindowStyle<FontHash>,
 {
 
     fn hover_text(&self) -> Option<&str> {
@@ -401,7 +399,6 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         &self,
         _nox: &Nox<I>,
         _style: &Style,
-        _hover_style: &HoverStyle,
         _window_pos: Vec2,
         _cursor_pos: Vec2
     ) -> bool
@@ -413,7 +410,6 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _hover_style: &HoverStyle,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
@@ -959,7 +955,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
             }
         );
         UpdateResult {
-            min_widget_width: width,
+            min_window_width: offset.x + width + item_pad_outer.x,
             requires_triangulation,
             cursor_in_widget,
         }
@@ -986,7 +982,6 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
     fn set_vertex_params(
         &mut self,
         style: &Style,
-        _hover_style: &HoverStyle,
         vertices: &mut [shaders::Vertex],
     )
     {
@@ -1038,7 +1033,7 @@ impl<TitleText, I, FontHash, Style, HoverStyle> Widget<I, FontHash, Style, Hover
         inv_aspect_ratio: f32,
         unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, HoverStyle>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
     {
         if let Some(selection) = self.selection && selection.0 != selection.1 {
             let vert_mem = unsafe {

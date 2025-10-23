@@ -15,7 +15,6 @@ struct Example<'a> {
         Self,
         &'static str,
         DefaultStyle<&'static str>,
-        DefaultHoverStyle<&'static str>,
     >,
     output_format: ColorFormat,
     aspect_ratio: f32,
@@ -26,7 +25,6 @@ struct Example<'a> {
     color: ColorSRGBA,
     pipeline_cache: PipelineCacheId,
     cache_dir: PathBuf,
-    checkbox_checked: bool,
     show_other_window: bool,
     output_image: ImageId,
     output_resolve_image: ImageId,
@@ -40,7 +38,6 @@ impl<'a> Example<'a> {
             Self,
             &'static str,
             DefaultStyle<&'static str>,
-            DefaultHoverStyle<&'static str>,
         >,
     ) -> Self
     {
@@ -60,7 +57,6 @@ impl<'a> Example<'a> {
             color: Default::default(),
             pipeline_cache: Default::default(),
             cache_dir,
-            checkbox_checked: false,
             show_other_window: false,
             output_image: Default::default(),
             output_resolve_image: Default::default(),
@@ -146,12 +142,16 @@ impl<'a> Interface for Example<'a> {
     ) -> Result<(), Error> {
         self.workspace.begin()?;
         self.workspace.update_window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
-            |mut win| {
-                if win.update_checkbox(0, "Show sliders", &mut self.checkbox_checked) {
-                    win.update_slider(0, "Slider 1", &mut self.slider_value, 0.0, 100.0)?;
-                    win.update_slider(1, "Slider 2", &mut self.slider_value, 0.0, 200.0)?;
-                    win.update_slider(2, "Slider 3", &mut self.slider_value_int, 0, 10)?;
-                }
+            |win| {
+                win.collapsing(0, "Sliders", |win| {
+                    win.collapsing(1, "Float", |win| {
+                        win.update_slider(0, "Slider float 1", &mut self.slider_value, 0.0, 100.0);
+                        win.update_slider(1, "Slider float 2", &mut self.slider_value, 0.0, 200.0);
+                    });
+                    win.collapsing(2, "int", |win| {
+                        win.update_slider(2, "Slider int", &mut self.slider_value_int, 0, 10);
+                    });
+                });
                 win.update_checkbox(1, "Show other window", &mut self.show_other_window);
                 win.update_color_picker(0, "Color picker", &mut self.color);
                 if win.update_button(0, "Print \"hello\"") {
@@ -173,7 +173,6 @@ impl<'a> Interface for Example<'a> {
                     false,
                     None,
                 );
-                Ok(())
             }
         )?;
         if self.show_other_window {
@@ -181,7 +180,6 @@ impl<'a> Interface for Example<'a> {
             <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / nox.delta_time_secs_f32())).unwrap();
             self.workspace.update_window(1, fmt.as_str(), [0.25, 0.25], [0.0, 0.0], 
                 |mut _win| {
-                    Ok(())
             })?;
         }
         self.workspace.end(nox)?;
@@ -258,7 +256,6 @@ fn main() {
         Example::new(Workspace::new(
             [("regular", font::Face::parse(&font, 0).unwrap())], 
             DefaultStyle::new("regular"),
-            DefaultHoverStyle::new("regular"),
             0.01,
         ));
     Nox::new(example, &mut Default::default()).run();
