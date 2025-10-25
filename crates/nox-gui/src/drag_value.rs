@@ -11,8 +11,8 @@ use nox_geom::*;
 
 use crate::*;
 
-pub struct DragValue<TitleText, I, FontHash, Style> {
-    input_text: InputText<TitleText, I, FontHash, Style>,
+pub struct DragValue<I, FontHash, Style> {
+    input_text: InputText<I, FontHash, Style>,
     delta_cursor_x: f32,
     flags: u32,
     focused_outline_vertex_range: VertexRange,
@@ -20,9 +20,8 @@ pub struct DragValue<TitleText, I, FontHash, Style> {
     _marker: PhantomData<(FontHash, Style)>,
 }
 
-impl<TitleText, I, FontHash, Style> DragValue<TitleText, I, FontHash, Style>
+impl<I, FontHash, Style> DragValue<I, FontHash, Style>
     where
-        TitleText: Text,
         Style: WindowStyle<FontHash>,
 {
 
@@ -31,9 +30,9 @@ impl<TitleText, I, FontHash, Style> DragValue<TitleText, I, FontHash, Style>
     const HELD_MOVED: u32 = 0x4;
 
     #[inline(always)]
-    pub fn new(title: &str) -> Self {
+    pub fn new() -> Self {
         Self {
-            input_text: InputText::new(title),
+            input_text: InputText::new(),
             delta_cursor_x: 0.0,
             flags: 0,
             focused_outline_vertex_range: Default::default(),
@@ -46,14 +45,13 @@ impl<TitleText, I, FontHash, Style> DragValue<TitleText, I, FontHash, Style>
     pub fn set_input_params(
         &mut self,
         style: &Style,
-        min_width: f32,
-        skip_title: bool,
+        width: f32,
         format_input: Option<fn(&mut dyn Write, &str) -> core::fmt::Result>
     )
     {
         self.input_text.set_params(
-            Some(min_width), Some(style.widget_bg_col()),
-            skip_title, true, "", format_input
+            width, Some(style.widget_bg_col()),
+            true, "", format_input
         );
     }
 
@@ -122,9 +120,8 @@ impl<TitleText, I, FontHash, Style> DragValue<TitleText, I, FontHash, Style>
     }
 }
 
-impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<TitleText, I, FontHash, Style>
+impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, Style>
     where
-        TitleText: Text,
         I: Interface,
         FontHash: Clone + Eq + Hash,
         Style: WindowStyle<FontHash>,
@@ -132,6 +129,11 @@ impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<Tit
     #[inline(always)]
     fn hover_text(&self) -> Option<&str> {
         None
+    }
+
+    #[inline(always)]
+    fn get_offset(&self) -> Vec2 {
+        self.input_text.get_offset()
     }
 
     #[inline(always)]
@@ -144,26 +146,33 @@ impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<Tit
     }
 
     #[inline(always)]
-    fn calc_height(
+    fn calc_size(
         &mut self,
         style: &Style,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
-    ) -> f32
+    ) -> Vec2
     {
-        style.calc_text_box_height_from_text_height(style.calc_font_height(text_renderer))
+        self.input_text.calc_size(style, text_renderer)
     }
 
     #[inline(always)]
-    fn is_active(
+    fn status(
         &self,
         nox: &Nox<I>,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2,
-    ) -> bool
+    ) -> WidgetStatus
     {
-        self.held() ||
-        self.input_text.is_active(nox, style, window_pos, cursor_pos)
+        if self.held() ||
+            matches!(self.input_text.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active)
+        {
+            WidgetStatus::Active
+        } else if self.hovered() {
+            WidgetStatus::Hovered
+        } else {
+            WidgetStatus::Inactive
+        }
     }
 
     fn update(
@@ -177,6 +186,7 @@ impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<Tit
         delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
+        cursor_in_other_widget: bool,
         window_moving: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
@@ -188,8 +198,9 @@ impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<Tit
         let cursor_in_rect = self.input_text
             .rel_bounding_rect(style)
             .is_point_inside(rel_cursor_pos);
-        if cursor_in_rect && !self.input_text.active() {
+        if !other_widget_active && cursor_in_rect && !self.input_text.active() {
             self.flags |= Self::HOVERED;
+            self.input_text.set_hovered(true);
             if self.held() {
                 if nox.was_mouse_button_released(MouseButton::Left) {
                     if !self.held_moved() {
@@ -205,6 +216,7 @@ impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<Tit
         }
         if self.held() {
             self.delta_cursor_x = delta_cursor_pos.x;
+            self.input_text.set_hovered(true);
             if delta_cursor_pos.x.abs() > f32::EPSILON {
                 self.flags |= Self::HELD_MOVED;
             }
@@ -214,7 +226,7 @@ impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<Tit
         } else {
             self.flags &= !Self::HELD_MOVED;
         }
-        if style.override_cursor() && (cursor_in_rect || self.held())  {
+        if style.override_cursor() && !other_widget_active && (cursor_in_rect || self.held())  {
             if style.override_cursor() {
                 nox.set_cursor(CursorIcon::ColResize);
             }
@@ -223,7 +235,7 @@ impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<Tit
             nox, style,
             text_renderer, window_size, window_pos,
             cursor_pos, delta_cursor_pos, cursor_in_this_window,
-            other_widget_active, window_moving, collect_text,
+            other_widget_active, cursor_in_other_widget, window_moving, collect_text,
         );
         update_results.cursor_in_widget |= cursor_in_rect || self.held();
         update_results.requires_triangulation |=
@@ -251,7 +263,7 @@ impl<TitleText, I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<Tit
         vertices: &mut [Vertex],
     ) {
         if !self.input_text.active() && (self.held() || self.hovered()) {
-            let offset = self.input_text.input_offset(style);
+            let offset = self.input_text.offset();
             let target_color = if self.held() {
                 style.active_widget_outline_col()
             } else {

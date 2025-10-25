@@ -17,9 +17,9 @@ mod workspace;
 use ring_buffer::*;
 use shaders::*;
 
-pub use text::*;
 pub use color::*;
 pub use style::*;
+pub use text::*;
 pub use widget::*;
 pub use slider::*;
 pub use drag_value::*;

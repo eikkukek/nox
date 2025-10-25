@@ -12,9 +12,15 @@ use nox_geom::Vec2;
 use crate::*;
 
 pub struct UpdateResult {
-    pub min_window_width: f32,
     pub requires_triangulation: bool,
     pub cursor_in_widget: bool,
+}
+
+#[derive(Clone, Copy)]
+pub enum WidgetStatus {
+    Inactive,
+    Hovered,
+    Active,
 }
 
 pub trait HoverContents<I, FontHash, Style: WindowStyle<FontHash>>
@@ -79,24 +85,26 @@ pub trait Widget<I, FontHash, Style>
 
     fn hover_text(&self) -> Option<&str>;
 
+    fn get_offset(&self) -> Vec2;
+
     fn set_offset(
         &mut self,
         offset: Vec2,
     );
 
-    fn calc_height(
+    fn calc_size(
         &mut self,
         style: &Style,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-    ) -> f32;
+    ) -> Vec2;
 
-    fn is_active(
+    fn status(
         &self,
         nox: &Nox<I>,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2,
-    ) -> bool;
+    ) -> WidgetStatus;
 
     fn update(
         &mut self,
@@ -109,6 +117,7 @@ pub trait Widget<I, FontHash, Style>
         delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
+        cursor_in_other_widget: bool,
         window_moving: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult;

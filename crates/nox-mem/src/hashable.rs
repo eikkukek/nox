@@ -10,7 +10,7 @@ pub use core::{
 ///
 /// Implemented for [`f32`] and [`f64`]
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct Hashable<T>(pub T)
     where
         Self: Hash + PartialEq + Eq;
@@ -19,7 +19,6 @@ impl<T> Hashable<T>
     where
         Self: Hash + PartialEq + Eq
 {
-
     pub fn to_inner(self) -> T {
         self.0
     }

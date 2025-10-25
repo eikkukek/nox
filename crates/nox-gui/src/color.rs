@@ -37,6 +37,16 @@ impl ColorSRGBA {
     }
 
     #[inline(always)]
+    pub const fn red(alpha: f32) -> Self {
+        Self {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            alpha,
+        }
+    }
+
+    #[inline(always)]
     pub const fn white(alpha: f32) -> Self {
         Self {
             r: 1.0,

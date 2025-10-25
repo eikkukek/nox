@@ -2,20 +2,61 @@ use std::collections::hash_map;
 
 use core::marker::PhantomData;
 
+use rustc_hash::FxHashMap;
+use compact_str::CompactString;
+
 use nox::mem::CapacityError;
 use nox_geom::Vec2;
 
-use rustc_hash::FxHashMap;
-
 use super::*;
 
-pub struct TextSegment<'a, H> {
+#[derive(Clone, Copy)]
+pub struct TextSegmentRef<'a, H> {
     pub text: &'a str,
     pub font: &'a H,
 }
 
-pub fn text_segment<'a, H>(text: &'a str, font: &'a H) -> TextSegment<'a, H> {
-    TextSegment { text, font }
+pub fn text_segment<'a, H>(text: &'a str, font: &'a H) -> TextSegmentRef<'a, H> {
+    TextSegmentRef { text, font }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct TextSegmentOwned<H> {
+    pub text: CompactString,
+    pub font: H,
+}
+
+pub fn text_segment_owned<H>(text: &str, font: H) -> TextSegmentOwned<H> {
+    TextSegmentOwned { text: text.into(), font }
+}
+
+pub trait TextSegment<H> {
+
+    fn text(&self) -> &str;
+
+    fn font(&self) -> &H;
+}
+
+impl<'a, H> TextSegment<H> for TextSegmentRef<'a, H> {
+
+    fn text(&self) -> &str {
+        self.text
+    }
+
+    fn font(&self) -> &H {
+        self.font
+    }
+}
+
+impl<H> TextSegment<H> for TextSegmentOwned<H> {
+
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    fn font(&self) -> &H {
+        &self.font
+    }
 }
 
 #[derive(Clone)]
@@ -30,9 +71,19 @@ pub struct RenderedText {
     pub text_width: f32,
     pub row_height: f32,
     pub text_rows: u32,
+    pub last_row_width: f32,
 }
 
 impl RenderedText {
+
+    pub fn get_offset_mut(&mut self, text_offset: TextOffset) -> Option<&mut VertexOffset> {
+        for (c, text) in &mut self.text {
+            if *c == text_offset.char {
+                return Some(text.offsets.get_mut(text_offset.offset_index? as usize)?)
+            }
+        }
+        return None
+    }
 
     pub fn iter(&self) -> slice::Iter<'_, (char, InstancedText)> {
         self.into_iter()

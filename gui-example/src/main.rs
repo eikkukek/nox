@@ -1,7 +1,5 @@
 use std::{
-    fs::{self, File},
-    path::PathBuf,
-    io::Write,
+    fs::{self, File}, io::Write, path::PathBuf
 };
 
 use memmap2::Mmap;
@@ -28,6 +26,7 @@ struct Example<'a> {
     show_other_window: bool,
     output_image: ImageId,
     output_resolve_image: ImageId,
+    tag_color: ColorHSVA,
 }
 
 impl<'a> Example<'a> {
@@ -60,6 +59,7 @@ impl<'a> Example<'a> {
             show_other_window: false,
             output_image: Default::default(),
             output_resolve_image: Default::default(),
+            tag_color: ColorHSVA::new(0.0, 0.53, 1.0, 0.9),
         }
     }
 }
@@ -143,34 +143,46 @@ impl<'a> Interface for Example<'a> {
         self.workspace.begin()?;
         self.workspace.update_window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
             |win| {
-                win.collapsing(0, "Sliders", |win| {
-                    win.collapsing(1, "Float", |win| {
-                        win.update_slider(0, "Slider float 1", &mut self.slider_value, 0.0, 100.0);
-                        win.update_slider(1, "Slider float 2", &mut self.slider_value, 0.0, 200.0);
-                    });
-                    win.collapsing(2, "int", |win| {
-                        win.update_slider(2, "Slider int", &mut self.slider_value_int, 0, 10);
-                    });
-                });
-                win.update_checkbox(1, "Show other window", &mut self.show_other_window);
-                win.update_color_picker(0, "Color picker", &mut self.color);
-                if win.update_button(0, "Print \"hello\"") {
+
+                win.tag("Show other window");
+                win.checkbox(&mut self.show_other_window);
+                win.end_row();
+
+                //win.tag("Color picker");
+                win.color_picker(&mut self.color);
+                win.end_row();
+
+                if win.button("Print \"hello\"") {
                     println!("hello");
                 }
-                win.update_input_text(0,
-                    "Input text", &mut self.input_text,
+                win.end_row();
+
+                win.input_text(
+                    &mut self.input_text,
                     "Input text here",
                     None,
                 );
-                win.update_drag_value(
-                    0,
-                    "Input int",
+
+                win.collapsing("Sliders", |win| {
+                    win.collapsing("Float", |win| {
+                        //win.tag("Float 1");
+                        win.slider(&mut self.slider_value, 0.0, 100.0);
+                        //win.tag("Float 2");
+                        win.slider(&mut self.slider_value, 0.0, 200.0);
+                    });
+                    win.collapsing("Int", |win| {
+                        //win.tag("Int");
+                        win.slider(&mut self.slider_value_int, 0, 10);
+                    });
+                });
+                
+                //win.tag("Drag value");
+                win.drag_value(
                     &mut self.drag_value_int,
                     i8::MIN,
                     i8::MAX,
                     Some(500.0),
                     0.1,
-                    false,
                     None,
                 );
             }
@@ -178,10 +190,35 @@ impl<'a> Interface for Example<'a> {
         if self.show_other_window {
             let mut fmt = String::new();
             <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / nox.delta_time_secs_f32())).unwrap();
-            self.workspace.update_window(1, fmt.as_str(), [0.25, 0.25], [0.0, 0.0], 
-                |mut _win| {
+            self.workspace.update_window(1, fmt.as_str(), [0.25, 0.25], [0.4, 0.4], 
+                |win| {
+                    let mut fmt = String::new();
+                    <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("Hue: {}°", (self.tag_color.hue * 180.0 / core::f32::consts::PI).round())).unwrap();
+                    win.text("Sample text", true, |builder| {
+                        builder
+                            .with_text(None, |builder| {
+                                builder
+                                    .with_segment("This text be copied to ", None);
+                            })
+                            .color(ColorSRGBA::white(1.0))
+                            .with_text(Some("Ctrl+V"), |builder| {
+                                builder
+                                    .with_segment("clipboard", None);
+                            })
+                            .default_color()
+                            .with_text(None, |builder| {
+                                builder
+                                    .with_segment(" and it can have ", None);
+                            })
+                            .color(self.tag_color)
+                            .with_text(Some(&fmt), |builder| {
+                                builder
+                                    .with_segment("tooltips and color", None);
+                            });
+                    });
             })?;
         }
+        self.tag_color.hue = (self.tag_color.hue + core::f32::consts::PI * nox.delta_time_secs_f32()) % core::f32::consts::TAU;
         self.workspace.end(nox)?;
         Ok(())
     }

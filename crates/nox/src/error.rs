@@ -1,3 +1,5 @@
+use core::fmt::Write;
+
 use ash::vk;
 
 use nox_mem::{const_assert, size_of, CapacityError, slot_map::SlotMapError};
@@ -79,5 +81,14 @@ impl From<std::io::Error> for Error {
 
     fn from(value: std::io::Error) -> Self {
         Self::IoError(value.to_string())
+    }
+}
+
+impl ToString for Error {
+
+    fn to_string(&self) -> String {
+        let mut fmt = String::new();
+        write!(fmt, "{:?}", self).ok();
+        fmt
     }
 }

@@ -55,6 +55,7 @@ pub struct Nox<'a, I>
     logical_keys: FxHashMap<Key, InputState>,
     mouse_buttons: FxHashMap<MouseButton, InputState>,
     input_text: GlobalVec<(KeyCode, CompactString)>,
+    clip_board: CompactString,
     delta_counter: time::Instant,
     delta_time: time::Duration,
     window_size: (u32, u32),
@@ -89,6 +90,7 @@ impl<'a, I: Interface> Nox<'a, I>
             logical_keys: Default::default(),
             mouse_buttons: Default::default(),
             input_text: Default::default(),
+            clip_board: Default::default(),
             delta_counter: time::Instant::now(),
             delta_time: time::Duration::ZERO,
             window_size: Default::default(),
@@ -123,6 +125,16 @@ impl<'a, I: Interface> Nox<'a, I>
         if let Some(window) = self.window.as_ref() {
             window.set_cursor_visible(!hide);
         }
+    }
+
+    #[inline(always)]
+    pub fn get_clipboard(&self) -> &str {
+        &self.clip_board
+    }
+
+    #[inline(always)]
+    pub fn set_clipboard(&mut self, text: &str) {
+        self.clip_board = CompactString::new(text);
     }
 
     #[inline(always)]

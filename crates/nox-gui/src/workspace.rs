@@ -121,7 +121,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
     ) -> Self
     {
         let mut text_renderer = VertexTextRenderer::new(fonts, font_curve_tolerance);
-        text_renderer.render(&[text_segment("0123456789", &style.font_regular())], false, 0.0);
+        text_renderer.render(&[text_segment("0123456789", style.font_regular())], false, 0.0);
         Self {
             text_renderer,
             style,
@@ -455,7 +455,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         let aspect_ratio = nox.aspect_ratio() as f32;
         self.inv_aspect_ratio = 1.0 / aspect_ratio;
         let window_size: Vec2 = nox.window_size_f32().into();
-        let unit_scale = window_size.y / self.style.pixels_per_unit();
+        let unit_scale =  self.style.pixels_per_unit() / window_size.y;
         self.unit_scale = unit_scale;
         let mut cursor_pos: Vec2 = nox.normalized_cursor_position_f32().into();
         cursor_pos *= 2.0;

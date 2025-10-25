@@ -19,9 +19,9 @@ use nox_geom::{
     *,
 };
 
-pub(crate) struct Button<I, FontHash, Style> {
-    title: CompactString,
-    title_text: Option<RenderedText>,
+pub struct Button<I, FontHash, Style> {
+    label: CompactString,
+    label_text: Option<RenderedText>,
     rect: Rect,
     rect_vertex_range: VertexRange,
     outline_vertex_range: VertexRange,
@@ -37,13 +37,11 @@ impl<I, FontHash, Style> Button<I, FontHash, Style> {
     const PRESSED: u32 = 0x2;
     const CURSOR_IN_BUTTON: u32 = 0x4;
 
-    pub fn new(
-        title: &str
-    ) -> Self
+    pub fn new() -> Self
     {
         Self {
-            title: title.into(),
-            title_text: Default::default(),
+            label: Default::default(),
+            label_text: Default::default(),
             rect: Default::default(),
             rect_vertex_range: Default::default(),
             outline_vertex_range: Default::default(),
@@ -51,6 +49,14 @@ impl<I, FontHash, Style> Button<I, FontHash, Style> {
             flags: 0,
             focused_outline_width: 0.0,
             _marker: PhantomData,
+        }
+    }
+
+    #[inline(always)]
+    pub fn set_label(&mut self, label: &str) {
+        if self.label != label {
+            self.label = CompactString::new(label);
+            self.label_text = None;
         }
     }
 
@@ -84,6 +90,11 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
     }
 
     #[inline(always)]
+    fn get_offset(&self) -> Vec2 {
+        self.offset
+    }
+
+    #[inline(always)]
     fn set_offset(
         &mut self,
         offset: Vec2,
@@ -93,27 +104,33 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
     }
     
     #[inline(always)]
-    fn calc_height(
+    fn calc_size(
         &mut self,
         style: &Style,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-    ) -> f32 {
-        let title_text = self.title_text.get_or_insert(text_renderer
-                .render(&[text_segment(&self.title, &style.font_regular())], false, 0.0
+    ) -> Vec2 {
+        let label_text = self.label_text.get_or_insert(text_renderer
+                .render(&[text_segment(&self.label, style.font_regular())], false, 0.0
             ).unwrap_or_default()
         );
-        style.calc_text_box_height(title_text)
+        style.calc_text_box_size(label_text)
     }
 
-    fn is_active(
+    fn status(
         &self,
         _nox: &Nox<I>,
         _style: &Style,
         _window_pos: Vec2,
         _cursor_pos: Vec2
-    ) -> bool
+    ) -> WidgetStatus
     {
-        self.held()
+        if self.held() {
+            WidgetStatus::Active
+        } else if self.cursor_in_button() {
+            WidgetStatus::Hovered
+        } else {
+            WidgetStatus::Inactive
+        }
     }
 
     fn update(
@@ -127,20 +144,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
+        _cursor_in_other_widget: bool,
         _window_moving: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
-        let title_text = self.title_text.as_ref().unwrap();
-        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
-        collect_text(title_text, self.offset + style.item_pad_inner(), BoundedTextInstance {
-            add_scale: vec2(1.0, 1.0),
-            min_bounds,
-            max_bounds,
-            color: style.text_col(),
-        });
-        let rect_size = style.calc_text_box_size(title_text);
+        let label_text = self.label_text.as_ref().unwrap();
+        let rect_size = style.calc_text_box_size(label_text);
         let rect = rect(Default::default(), rect_size, style.rounding());
         let requires_triangulation =
             self.rect != rect ||
@@ -169,8 +180,19 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
                 }
             }
         }
+        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
+        collect_text(label_text, self.offset + style.item_pad_inner(), BoundedTextInstance {
+            add_scale: vec2(1.0, 1.0),
+            min_bounds,
+            max_bounds,
+            color:
+                if self.held() || self.cursor_in_button() {
+                    style.focused_text_col()
+                } else {
+                    style.text_col()
+                },
+        });
         UpdateResult {
-            min_window_width: self.offset.x + rect_size.x + style.item_pad_outer().x,
             requires_triangulation,
             cursor_in_widget,
         }

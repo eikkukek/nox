@@ -19,11 +19,11 @@ use nox_geom::{
 use crate::*;
 
 struct Contents<I, FontHash, Style> {
-    r_drag_value: DragValue<EmptyText, I, FontHash, Style>,
-    g_drag_value: DragValue<EmptyText, I, FontHash, Style>,
-    b_drag_value: DragValue<EmptyText, I, FontHash, Style>,
-    alpha_drag_value: DragValue<EmptyText, I, FontHash, Style>,
-    hue_drag_value: DragValue<EmptyText, I, FontHash, Style>,
+    r_drag_value: DragValue<I, FontHash, Style>,
+    g_drag_value: DragValue<I, FontHash, Style>,
+    b_drag_value: DragValue<I, FontHash, Style>,
+    alpha_drag_value: DragValue<I, FontHash, Style>,
+    hue_drag_value: DragValue<I, FontHash, Style>,
     offset: Vec2,
     picker_handle_offset: Vec2,
     hue_picker_offset: Vec2,
@@ -63,19 +63,20 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         Style: WindowStyle<FontHash>,
 {
 
-    const WIDGET_HELD: u32 = 0x1;
-    const SHOWN: u32 = 0x2;
-    const PICKER_HELD: u32 = 0x4;
-    const HUE_PICKER_HELD: u32 = 0x8;
-    const ALPHA_PICKER_HELD: u32 = 0x10;
-    const FONT_CHANGED: u32 = 0x20;
-    const R_CHANGED: u32 = 0x40;
-    const G_CHANGED: u32 = 0x80;
-    const B_CHANGED: u32 = 0x100;
-    const ALPHA_CHANGED: u32 = 0x200;
-    const HUE_CHANGED: u32 = 0x400;
-    const CLICKED: u32 = 0x800;
-    const DRAG_VALUE_ACTIVE: u32 = 0x1000;
+    const WIDGET_HOVERED: u32 = 0x1;
+    const WIDGET_HELD: u32 = 0x2;
+    const SHOWN: u32 = 0x4;
+    const PICKER_HELD: u32 = 0x8;
+    const HUE_PICKER_HELD: u32 = 0x10;
+    const ALPHA_PICKER_HELD: u32 = 0x20;
+    const FONT_CHANGED: u32 = 0x40;
+    const R_CHANGED: u32 = 0x80;
+    const G_CHANGED: u32 = 0x100;
+    const B_CHANGED: u32 = 0x200;
+    const ALPHA_CHANGED: u32 = 0x400;
+    const HUE_CHANGED: u32 = 0x800;
+    const CLICKED: u32 = 0x1000;
+    const DRAG_VALUE_ACTIVE: u32 = 0x2000;
 
     fn new() -> Self {
         let mut points = GlobalVec::new();
@@ -92,11 +93,11 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         };
         indices.append_map(&indices_usize, |&i| i as u32);
         Self {
-            r_drag_value: DragValue::new(""),
-            g_drag_value: DragValue::new(""),
-            b_drag_value: DragValue::new(""),
-            alpha_drag_value: DragValue::new(""),
-            hue_drag_value: DragValue::new(""),
+            r_drag_value: DragValue::new(),
+            g_drag_value: DragValue::new(),
+            b_drag_value: DragValue::new(),
+            alpha_drag_value: DragValue::new(),
+            hue_drag_value: DragValue::new(),
             offset: Default::default(),
             picker_handle_offset: Default::default(),
             hue_picker_offset: Default::default(),
@@ -131,14 +132,14 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
     }
 
     #[inline(always)]
-    fn shown(&self) -> bool {
-        self.flags & Self::SHOWN == Self::SHOWN
+    fn widget_hovered(&self) -> bool {
+        self.flags & Self::WIDGET_HOVERED == Self::WIDGET_HOVERED
     }
 
     #[inline(always)]
-    fn set_shown(&mut self, value: bool) {
-        self.flags &= !Self::SHOWN;
-        self.flags |= Self::SHOWN * value as u32;
+    fn set_widget_hovered(&mut self, value: bool) {
+        self.flags &= !Self::WIDGET_HOVERED;
+        self.flags |= Self::WIDGET_HOVERED * value as u32;
     }
 
     #[inline(always)]
@@ -149,6 +150,17 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
     fn set_widget_held(&mut self, value: bool) {
         self.flags &= !Self::WIDGET_HELD;
         self.flags |= Self::WIDGET_HELD * value as u32;
+    }
+
+    #[inline(always)]
+    fn shown(&self) -> bool {
+        self.flags & Self::SHOWN == Self::SHOWN
+    }
+
+    #[inline(always)]
+    fn set_shown(&mut self, value: bool) {
+        self.flags &= !Self::SHOWN;
+        self.flags |= Self::SHOWN * value as u32;
     }
     
     #[inline(always)]
@@ -244,23 +256,23 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             FontHash: Clone + Eq + Hash,
     {
         let item_pad_outer = style.item_pad_outer();
-        let mut text_box_rect_max = vec2(self.rgba_text_size.x, self.r_drag_value.calc_height(style, text_renderer));
+        let mut text_box_rect_max = vec2(self.rgba_text_size.x, self.r_drag_value.calc_size(style, text_renderer).y);
         if self.font_changed() {
             let samples = (
                 text_renderer.render(
-                    &[text_segment("R 255", &style.font_regular())], false, 0.0
+                    &[text_segment("R 255", style.font_regular())], false, 0.0
                 ).unwrap_or_default(),
                 text_renderer.render(
-                    &[text_segment("G 255", &style.font_regular())], false, 0.0
+                    &[text_segment("G 255", style.font_regular())], false, 0.0
                 ).unwrap_or_default(),
                 text_renderer.render(
-                    &[text_segment("B 255", &style.font_regular())], false, 0.0
+                    &[text_segment("B 255", style.font_regular())], false, 0.0
                 ).unwrap_or_default(),
                 text_renderer.render(
-                    &[text_segment("A 255", &style.font_regular())], false, 0.0
+                    &[text_segment("A 255", style.font_regular())], false, 0.0
                 ).unwrap_or_default(),
                 text_renderer.render(
-                    &[text_segment("H 360°", &style.font_regular())], false, 0.0
+                    &[text_segment("H 360°", style.font_regular())], false, 0.0
                 ).unwrap_or_default(),
             );
             let rgba_text_size_x = style.calc_text_box_width_from_text_width(
@@ -383,28 +395,40 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             window_rect_max,
         ).is_point_inside(rel_cursor_pos);
         let mut drag_value_offset = offset + vec2(item_pad_outer.x + picker_size.x + item_pad_outer.x, item_pad_outer.x);
+        let mut min_width: f32 = 0.0;
         self.r_drag_value.set_offset(drag_value_offset);
-        drag_value_offset.y += self.r_drag_value.calc_height(style, text_renderer) + item_pad_outer.y;
+        let mut size = self.r_drag_value.calc_size(style, text_renderer);
+        min_width = min_width.max(size.x);
+        drag_value_offset.y += size.y + item_pad_outer.y;
         self.g_drag_value.set_offset(drag_value_offset);
-        drag_value_offset.y += self.g_drag_value.calc_height(style, text_renderer) + item_pad_outer.y;
+        size = self.g_drag_value.calc_size(style, text_renderer);
+        min_width = min_width.max(size.x);
+        drag_value_offset.y += size.y + item_pad_outer.y;
         self.b_drag_value.set_offset(drag_value_offset);
-        drag_value_offset.y += self.b_drag_value.calc_height(style, text_renderer) + item_pad_outer.y;
+        size = self.b_drag_value.calc_size(style, text_renderer);
+        min_width = min_width.max(size.x);
+        drag_value_offset.y += size.y + item_pad_outer.y;
         self.alpha_drag_value.set_offset(drag_value_offset);
+        size = self.alpha_drag_value.calc_size(style, text_renderer);
+        min_width = min_width.max(size.x);
         drag_value_offset.y = hue_text_box_offset_y;
         self.hue_drag_value.set_offset(drag_value_offset);
+        size = self.hue_drag_value.calc_size(style, text_renderer);
+        min_width = min_width.max(size.x);
+        min_width = item_pad_outer.x + picker_size.x + item_pad_outer.x + min_width + item_pad_outer.x;
         let drag_value_active = 
             if self.picker_held() || self.hue_picker_held() || self.alpha_picker_held() {
                 None
             }
-            else if self.r_drag_value.is_active(nox, style, window_pos, cursor_pos) {
+            else if matches!(self.r_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(0)
-            } else if self.g_drag_value.is_active(nox, style, window_pos, cursor_pos) {
+            } else if matches!(self.g_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(1)
-            } else if self.b_drag_value.is_active(nox, style, window_pos, cursor_pos) {
+            } else if matches!(self.b_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(2)
-            } else if self.alpha_drag_value.is_active(nox, style, window_pos, cursor_pos) {
+            } else if matches!(self.alpha_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(3)
-            } else if self.hue_drag_value.is_active(nox, style, window_pos, cursor_pos) {
+            } else if matches!(self.hue_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(4)
             } else {
                 None
@@ -416,7 +440,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         }
         self.r_drag_value.set_input_params(
             style,
-            text_box_rect_max.x, true,
+            text_box_rect_max.x,
             Some(
                 |fmt, str| -> core::fmt::Result {
                     write!(fmt, "R {}", str)
@@ -429,37 +453,41 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         self.rgba.r = val;
         self.combined_text.clear();
         let font_scale = style.font_scale();
+        let size = self.window_rect.max;
         let mut update_result = self.r_drag_value.update(
             nox, style,
-            text_renderer, window_rect_max, window_pos,
-            cursor_pos, delta_cursor_pos, cursor_in_window,
+            text_renderer,
+            size,
+            window_pos, cursor_pos, delta_cursor_pos, cursor_in_window,
             if let Some(cursor_in_drag_value) = drag_value_active {
                 cursor_in_drag_value != 0
             } else {
                 false
             },
+            false,
             window_moving,
             &mut |text, offset, bounded_instance| self.combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap(),
         );
         let mut f = |
-                drag_value: &mut DragValue<EmptyText, I, FontHash, Style>,
+                drag_value: &mut DragValue<I, FontHash, Style>,
                 idx: usize,
                 format_result: fn(&mut dyn Write, &str) -> core::fmt::Result,
             |
         {
-            drag_value.set_input_params(style, text_box_rect_max.x, true, Some(format_result));
+            drag_value.set_input_params(style, text_box_rect_max.x, Some(format_result));
             let res = drag_value.update(nox, style,
-                text_renderer, window_rect_max, window_pos,
-                cursor_pos, delta_cursor_pos, cursor_in_window,
+                text_renderer,
+                size,
+                window_pos, cursor_pos, delta_cursor_pos, cursor_in_window,
                 if let Some(cursor_in_drag_value) = drag_value_active {
                     cursor_in_drag_value != idx
                 } else {
                     false
                 },
+                false,
                 window_moving,
                 &mut |text, offset, bounded_text_instance| self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap(),
             );
-            update_result.min_window_width = update_result.min_window_width.max(res.min_window_width);
             update_result.cursor_in_widget |= res.cursor_in_widget;
             update_result.requires_triangulation |= res.requires_triangulation;
         };
@@ -502,7 +530,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
 
         self.hsva = hsva;
 
-        window_rect_max.x = update_result.min_window_width - offset.x;
+        window_rect_max.x = min_width;
 
         if mouse_pressed && cursor_in_window
         {
@@ -642,9 +670,13 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             VertexRange::new(vertex_begin..self.other_vertices.len())
         };
         self.r_drag_value.triangulate(&mut points, &mut tri);
+        points.clear();
         self.g_drag_value.triangulate(&mut points, &mut tri);
+        points.clear();
         self.b_drag_value.triangulate(&mut points, &mut tri);
+        points.clear();
         self.alpha_drag_value.triangulate(&mut points, &mut tri);
+        points.clear();
         self.hue_drag_value.triangulate(&mut points, &mut tri);
         self.indices.append_map(&indices_usize, |&i| i as u32);
         self.other_vertices_draw_info_bg = DrawInfo {
@@ -933,7 +965,7 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
                 offset: index_mem.offset,
             },
         )?;
-        let mut f = |drag_value: &DragValue<EmptyText, I, FontHash, Style>| -> Result<(), Error> {
+        let mut f = |drag_value: &DragValue<I, FontHash, Style>| -> Result<(), Error> {
             drag_value.render_commands(
                 render_commands, style, base_pipeline_id,
                 text_pipeline_id, vertex_buffer, index_buffer, window_pos,
@@ -961,9 +993,7 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
     }
 }
 
-pub(crate) struct ColorPicker<I, FontHash, Style> {
-    title: CompactString,
-    title_text: Option<RenderedText>,
+pub struct ColorPicker<I, FontHash, Style> {
     color_rect: Rect,
     color_rect_vertex_range: VertexRange,
     contents: Contents<I, FontHash, Style>,
@@ -979,10 +1009,8 @@ impl<I, FontHash, Style> ColorPicker<I, FontHash, Style>
 {
 
     #[inline(always)]
-    pub fn new(title: &str) -> Self {
+    pub fn new() -> Self {
         Self {
-            title: CompactString::new(title),
-            title_text: None,
             color_rect: Default::default(),
             color_rect_vertex_range: Default::default(),
             contents: Contents::new(),
@@ -1028,6 +1056,11 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
     }
 
     #[inline(always)]
+    fn get_offset(&self) -> Vec2 {
+        self.offset
+    }
+
+    #[inline(always)]
     fn set_offset(
         &mut self,
         offset: nox_geom::Vec2,
@@ -1036,31 +1069,36 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
     }
 
     #[inline(always)]
-    fn calc_height(
+    fn calc_size(
         &mut self,
         style: &Style,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
-    ) -> f32 {
-        let title_text = self.title_text.get_or_insert(text_renderer
-            .render(&[text_segment(&self.title, &style.font_regular())], false, 0.0).unwrap_or_default()
-        );
-        style.calc_text_height(title_text)
+    ) -> Vec2 {
+        let font_height = style.calc_font_height(text_renderer);
+        vec2(font_height, font_height)
     }
 
-    fn is_active(
+    fn status(
         &self,
         _nox: &Nox<I>,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2
-    ) -> bool
+    ) -> WidgetStatus
     {
         let error_margin = style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
-        self.contents.widget_held() || self.contents.shown() && (self.picking() || BoundingRect::from_position_size(
-            self.contents.offset - vec2(error_margin, error_margin),
-            self.contents.window_rect.max + vec2(error_margin_2, error_margin_2)
-        ).is_point_inside(cursor_pos - window_pos))
+        if self.contents.widget_held() || self.contents.shown() && (self.picking() || BoundingRect::from_position_size(
+                self.contents.offset - vec2(error_margin, error_margin),
+                self.contents.window_rect.max + vec2(error_margin_2, error_margin_2)
+            ).is_point_inside(cursor_pos - window_pos))
+        {
+            WidgetStatus::Active
+        } else if self.contents.widget_hovered() {
+            WidgetStatus::Hovered
+        } else {
+            WidgetStatus::Inactive
+        }
     }
 
     fn update(
@@ -1068,28 +1106,27 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         nox: &mut Nox<I>,
         style: &Style,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
-        window_size: Vec2,
+        _window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         _cursor_in_this_window: bool,
         other_widget_active: bool,
+        _cursor_in_other_widget: bool,
         window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        _collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult {
-        let title_text = self.title_text.as_ref().unwrap();
         let offset = self.offset;
-        let text_size = style.calc_text_size(title_text);
-        let color_rect_max = vec2(text_size.y, text_size.y);
+        let font_height = style.calc_font_height(text_renderer);
+        let color_rect_max = vec2(font_height, font_height);
         let requires_triangulation = self.color_rect.max != color_rect_max;
         self.color_rect.max = color_rect_max;
-        let color_rect_off_x = text_size.x + style.item_pad_outer().x;
         let rel_cursor_pos = cursor_pos - window_pos;
         let error_margin = style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
         let cursor_in_color_rect =
             BoundingRect::from_position_size(
-                offset + vec2(color_rect_off_x, 0.0) - vec2(error_margin, error_margin),
+                offset - vec2(error_margin, error_margin),
                 color_rect_max + vec2(error_margin_2, error_margin_2),
             ).is_point_inside(rel_cursor_pos);
         let cursor_in_contents = self.contents
@@ -1110,12 +1147,15 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         }
         if other_widget_active {
             self.contents.set_shown(false);
+            self.contents.set_widget_hovered(false);
+        } else {
+            self.contents.set_widget_hovered(cursor_in_color_rect);
         }
         let shown = self.contents.shown();
         if shown {
             self.contents.offset = self.offset + vec2(
-                text_size.x + style.item_pad_outer().x,
-                text_size.y + style.item_pad_inner().y,
+                0.0,
+                font_height + style.item_pad_inner().y,
             );
             if self.contents.update(
                 nox,
@@ -1129,16 +1169,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
                 self.contents.triangulate();
             }
         }
-        let (min_bounds, max_bounds) = calc_bounds(window_pos, offset, window_size);
-        collect_text(title_text, self.offset, BoundedTextInstance {
-            add_scale: vec2(1.0, 1.0),
-            min_bounds,
-            max_bounds,
-            color: style.text_col(),
-        });
-        let item_pad_outer = style.item_pad_outer();
         UpdateResult {
-            min_window_width: offset.x + text_size.x + item_pad_outer.x + color_rect_max.x + item_pad_outer.x,
             requires_triangulation,
             cursor_in_widget: (shown && cursor_in_contents) || cursor_in_color_rect || self.picking(),
         }
@@ -1162,11 +1193,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         if self.contents.shown() {
             self.contents.set_vertex_params(style);
         }
-        let title_text = self.title_text.as_ref().unwrap();
-        let offset = self.offset + vec2(
-            style.calc_text_width(title_text) + style.item_pad_outer().x,
-            0.0,
-        );
+        let offset = self.offset;
         let target_color = self.contents.srgba.with_alpha(1.0);
         let vertex_sample = vertices[self.color_rect_vertex_range.start()];
         if vertex_sample.offset != offset || vertex_sample.color != target_color {

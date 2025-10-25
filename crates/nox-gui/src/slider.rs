@@ -12,7 +12,7 @@ use nox::{
     *,
 };
 
-use nox_font::{VertexTextRenderer, text_segment, RenderedText};
+use nox_font::{VertexTextRenderer, RenderedText};
 
 use nox_geom::{
     *,
@@ -36,10 +36,8 @@ pub trait Sliderable: Copy + FromStr {
     ) -> core::fmt::Result;
 }
 
-pub(crate) struct Slider<I, FontHash, Style>
+pub struct Slider<I, FontHash, Style>
 {
-    title: CompactString,
-    title_text: Option<RenderedText>,
     slider_rect: Rect,
     slider_rect_vertex_range: VertexRange,
     handle_rect: Rect,
@@ -49,6 +47,7 @@ pub(crate) struct Slider<I, FontHash, Style>
     pub t: f32,
     pub quantized_t: f32,
     pub hover_text: CompactString,
+    pub width: f32,
     falgs: u32,
     focused_outline_width: f32,
     _marker: PhantomData<(I, FontHash, Style)>,
@@ -63,13 +62,9 @@ impl<I, FontHash, Style> Slider<I, FontHash, Style>
     const CURSOR_IN_SLIDER: u32 = 0x2;
 
     #[inline(always)]
-    pub fn new(
-        title: &str,
-    ) -> Self
+    pub fn new() -> Self
     {
         Self {
-            title: CompactString::new(title),
-            title_text: Default::default(),
             slider_rect: Default::default(),
             slider_rect_vertex_range: Default::default(),
             handle_rect: Default::default(),
@@ -79,6 +74,7 @@ impl<I, FontHash, Style> Slider<I, FontHash, Style>
             t: 1.0,
             quantized_t: 1.0,
             hover_text: Default::default(),
+            width: 0.1,
             falgs: 0,
             focused_outline_width: 0.0,
             _marker: PhantomData,
@@ -86,25 +82,11 @@ impl<I, FontHash, Style> Slider<I, FontHash, Style>
     }
 
     #[inline(always)]
-    fn slider_off(
+    fn handle_off(
         &self,
-        style: &Style,
-        text_width: f32,
     ) -> Vec2
     {
         let mut pos = self.offset;
-        pos.x += text_width + style.item_pad_outer().x;
-        //pos.y += text_box_height / 2.0 - text_box_height / 4.0;
-        pos
-    }
-
-    #[inline(always)]
-    fn handle_off(
-        &self,
-        slider_off: Vec2,
-    ) -> Vec2
-    {
-        let mut pos = slider_off;
         pos.x += (self.slider_rect.max.x - self.handle_rect.max.x) * self.quantized_t;
         pos
     }
@@ -146,6 +128,11 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
     }
 
     #[inline(always)]
+    fn get_offset(&self) -> Vec2 {
+        self.offset
+    }
+
+    #[inline(always)]
     fn set_offset(
         &mut self,
         offset: Vec2,
@@ -154,60 +141,57 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         self.offset = offset;
     }
 
-    fn calc_height(
+    fn calc_size(
         &mut self,
         style: &Style,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-    ) -> f32
+    ) -> Vec2
     {
-        let title_text = self.title_text.get_or_insert(text_renderer
-            .render(
-                &[text_segment(self.title.as_str(), &style.font_regular())], false, 0.0
-        ).unwrap_or_default());
-        style.calc_text_height(title_text)
+        vec2(
+            self.width,
+            style.calc_font_height(text_renderer),
+        )
     }
 
-    fn is_active(
+    fn status(
         &self,
         _nox: &Nox<I>,
         _style: &Style,
         _window_pos: Vec2,
         _cursor_pos: Vec2
-    ) -> bool
+    ) -> WidgetStatus
     {
-        self.held()
+        if self.held() {
+            WidgetStatus::Active
+        } else if self.cursor_in_slider() {
+            WidgetStatus::Hovered
+        } else {
+            WidgetStatus::Inactive
+        }
     }
 
     fn update(
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        window_size: Vec2,
+        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        _window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
+        _cursor_in_other_widget: bool,
         _window_moving: bool,
-        collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
+        _collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
         where
             I: Interface,
             FontHash: Clone + Eq + Hash
     {
-        let title_text = self.title_text.as_ref().unwrap();
-        let text_width = style.calc_text_width(title_text);
-        let text_box_height = style.calc_text_box_height(title_text);
+        let text_box_height = style.calc_text_box_height_from_text_height(style.calc_font_height(text_renderer));
+        let width = self.width;
         let offset = self.offset;
-        let mut width = text_width +
-            offset.x + style.item_pad_outer().x + style.item_pad_outer().x;
-        let min_window_width = width + style.min_slider_width();
-        if window_size.x < min_window_width {
-            width = style.min_slider_width();
-        } else {
-            width = window_size.x - width;
-        }
         let slider_rect = rect(
             Default::default(),
             vec2(
@@ -238,11 +222,11 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.falgs &= !Self::HELD;
             } else {
-                self.t = self.calc_t(cursor_pos, window_pos + self.slider_off(style, text_width));
+                self.t = self.calc_t(cursor_pos, window_pos + offset);
             }
         } else if cursor_in_this_window && !other_widget_active {
             let bounding_rect = BoundingRect::from_position_size(
-                window_pos + self.slider_off(style, text_width),
+                window_pos + offset,
                 self.slider_rect.max,
             );
             cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
@@ -250,24 +234,13 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
                 self.falgs |= Self::CURSOR_IN_SLIDER;
                 if nox.was_mouse_button_pressed(MouseButton::Left) {
                     self.falgs |= Self::HELD;
-                    self.t = self.calc_t(cursor_pos, window_pos + self.slider_off(style, text_width));
+                    self.t = self.calc_t(cursor_pos, window_pos + offset);
                 }
             }
         }
-        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
-        collect_text(title_text,
-            self.offset + vec2(0.0, (self.slider_rect.max.y - style.calc_text_height(title_text)) / 2.0),
-            BoundedTextInstance {
-                add_scale: vec2(1.0, 1.0),
-                min_bounds,
-                max_bounds,
-                color: style.text_col(),
-            }
-        );
         UpdateResult {
             requires_triangulation,
             cursor_in_widget,
-            min_window_width,
         }
     }
 
@@ -295,12 +268,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         vertices: &mut [Vertex],
     )
     {
-        let title_text = self.title_text.as_ref().unwrap();
-        let text_width = style.calc_text_width(title_text);
-        let slider_off = self.slider_off(style, text_width);
+        let mut offset = self.offset;
         let vertex_sample = vertices[self.outline_rect_vertex_range.start()];
         if self.cursor_in_slider() || self.held() {
-            let offset = slider_off;
             let target_color = if self.held() {
                 style.active_widget_outline_col()
             } else {
@@ -319,19 +289,19 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
             }
         }
         let vertex_sample = vertices[self.slider_rect_vertex_range.start()];
-        if vertex_sample.offset != slider_off || vertex_sample.color != style.widget_bg_col() {
+        if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col() {
             let target_color = style.widget_bg_col();
             for vertex in &mut vertices[self.slider_rect_vertex_range.range()] {
-                vertex.offset = slider_off;
+                vertex.offset = offset;
                 vertex.color = target_color;
             }
         }
         let vertex_sample = vertices[self.handle_rect_vertex_range.start()];
-        let handle_off = self.handle_off(slider_off);
-        if vertex_sample.offset != handle_off || vertex_sample.color != style.handle_col() {
+        offset = self.handle_off();
+        if vertex_sample.offset != offset || vertex_sample.color != style.handle_col() {
             let target_color = style.handle_col();
             for vertex in &mut vertices[self.handle_rect_vertex_range.range()] {
-                vertex.offset = handle_off;
+                vertex.offset = offset;
                 vertex.color = target_color;
             }
         }

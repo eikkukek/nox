@@ -46,12 +46,12 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn text_col(&self) -> ColorSRGBA {
-        DEFAULT_TEXT_COL.with_alpha(0.8)
+        DEFAULT_TEXT_COL
     }
 
     #[inline(always)]
     fn focused_text_col(&self) -> ColorSRGBA {
-        DEFAULT_TEXT_COL
+        DEFAULT_FOCUSED_TEXT_COL
     }
 
     #[inline(always)]
@@ -81,7 +81,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn pixels_per_unit(&self) -> f32 {
-        600.0
+        1100.0
     }
 
     #[inline(always)]
@@ -161,7 +161,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn input_text_cursor_width(&self) -> f32 {
-        0.005
+        0.003
     }
 
     #[inline(always)]
@@ -205,8 +205,13 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn min_slider_width(&self) -> f32 {
-        0.07
+    fn default_slider_width(&self) -> f32 {
+        0.2
+    }
+
+    #[inline(always)]
+    fn slider_min_width(&self) -> f32 {
+        0.1
     }
 
     #[inline(always)]
@@ -215,8 +220,8 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn max_input_text_width(&self) -> f32 {
-        0.5
+    fn default_input_text_width(&self) -> f32 {
+        0.2
     }
 
     #[inline(always)]
@@ -313,10 +318,13 @@ const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA =
     ColorSRGBA::new(16.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);
 
 const DEFAULT_TEXT_COL: ColorSRGBA =
-    ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 1.0);
+    ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 0.8);
+
+const DEFAULT_FOCUSED_TEXT_COL: ColorSRGBA =
+    ColorSRGBA::white(1.0);
 
 const DEFAULT_HANDLE_COL: ColorSRGBA =
-    ColorSRGBA::new(83.0 / 255.0, 118.0 / 255.0, 121.0 / 255.0, 1.0);
+    ColorSRGBA::new(52.0 / 255.0, 74.0 / 255.0, 76.0 / 255.0, 1.0);
 
 const DEFAULT_INPUT_TEXT_BG_COL: ColorSRGBA =
     ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0);
