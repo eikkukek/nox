@@ -3,7 +3,10 @@ use std::{
 };
 
 use memmap2::Mmap;
-use nox::*;
+use nox::{
+    linear_device_alloc::LinearDeviceAlloc,
+    *
+};
 
 use nox_gui::*;
 
@@ -18,6 +21,7 @@ struct Example<'a> {
     aspect_ratio: f32,
     slider_value: f32,
     slider_value_int: u32,
+    radio_value: u32,
     drag_value_int: i8,
     input_text: String,
     color: ColorSRGBA,
@@ -27,6 +31,8 @@ struct Example<'a> {
     output_image: ImageId,
     output_resolve_image: ImageId,
     tag_color: ColorHSVA,
+    msaa: MSAA,
+    device_alloc: Option<LinearDeviceAlloc>,
 }
 
 impl<'a> Example<'a> {
@@ -51,6 +57,7 @@ impl<'a> Example<'a> {
             aspect_ratio: 1.0,
             slider_value: 0.0,
             slider_value_int: 0,
+            radio_value: 0,
             drag_value_int: 0,
             input_text: Default::default(),
             color: Default::default(),
@@ -60,6 +67,8 @@ impl<'a> Example<'a> {
             output_image: Default::default(),
             output_resolve_image: Default::default(),
             tag_color: ColorHSVA::new(0.0, 0.53, 1.0, 0.9),
+            msaa: MSAA::X8,
+            device_alloc: None,
         }
     }
 }
@@ -80,8 +89,9 @@ impl<'a> Interface for Example<'a> {
         &mut self,
         _nox: &mut Nox<Self>,
         renderer: &mut RendererContext,
-    ) -> Result<(), Error> {
-
+    ) -> Result<(), Error>
+    {
+        self.device_alloc = Some(LinearDeviceAlloc::default(1 << 28, &renderer)?);
         renderer.edit_resources(|r| {
             self.output_format = r
                 .supported_image_format(
@@ -102,7 +112,7 @@ impl<'a> Interface for Example<'a> {
             Ok(())
         })?;
         self.workspace
-            .create_graphics_pipelines(renderer, MSAA::X8, self.output_format, None, &GlobalAlloc)?;
+            .create_graphics_pipelines(renderer, self.msaa, self.output_format, None, &GlobalAlloc)?;
         Ok(())
     }
 
@@ -113,18 +123,22 @@ impl<'a> Interface for Example<'a> {
     {
         let frame_buffer_size = renderer.frame_buffer_size();
         renderer.edit_resources(|r| {
+            let device_alloc = self.device_alloc.as_mut().unwrap();
+            unsafe {
+                device_alloc.reset();
+            }
             r.destroy_image(self.output_image);
             r.destroy_image(self.output_resolve_image);
             self.output_image = r
-                .create_image(&mut r.default_binder(), |builder| {
+                .create_image(device_alloc, |builder| {
                     builder
                         .with_dimensions(frame_buffer_size)
                         .with_format(self.output_format, false)
-                        .with_samples(MSAA::X8)
+                        .with_samples(self.msaa)
                         .with_usage(ImageUsage::ColorAttachment);
             })?;
             self.output_resolve_image = r
-                .create_image(&mut r.default_binder(), |builder| {
+                .create_image(device_alloc, |builder| {
                     builder
                         .with_dimensions(frame_buffer_size)
                         .with_format(self.output_format, false)
@@ -140,21 +154,26 @@ impl<'a> Interface for Example<'a> {
         nox: &mut Nox<Self>,
         _renderer: &mut RendererContext,
     ) -> Result<(), Error> {
-        self.workspace.begin()?;
-        self.workspace.update_window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
+        self.workspace.begin(nox)?;
+        self.workspace.window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
             |win| {
 
-                win.tag("Show other window");
-                win.checkbox(&mut self.show_other_window);
+                win.checkbox(&mut self.show_other_window, "Show other window");
                 win.end_row();
 
-                //win.tag("Color picker");
+                win.tag("Color picker");
                 win.color_picker(&mut self.color);
                 win.end_row();
 
                 if win.button("Print \"hello\"") {
                     println!("hello");
                 }
+                win.end_row();
+
+                win.radio_button(&mut self.radio_value, 0, "First");
+                win.radio_button(&mut self.radio_value, 1, "Second");
+                win.radio_button(&mut self.radio_value, 2, "Third");
+
                 win.end_row();
 
                 win.input_text(
@@ -165,32 +184,33 @@ impl<'a> Interface for Example<'a> {
 
                 win.collapsing("Sliders", |win| {
                     win.collapsing("Float", |win| {
-                        //win.tag("Float 1");
-                        win.slider(&mut self.slider_value, 0.0, 100.0);
-                        //win.tag("Float 2");
-                        win.slider(&mut self.slider_value, 0.0, 200.0);
+                        win.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
+                        win.tag("Float 1");
+                        win.end_row();
+                        win.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
+                        win.tag("Float 2");
                     });
                     win.collapsing("Int", |win| {
                         //win.tag("Int");
-                        win.slider(&mut self.slider_value_int, 0, 10);
+                        win.slider(&mut self.slider_value_int, 0, 10, 20.0);
                     });
                 });
                 
-                //win.tag("Drag value");
                 win.drag_value(
                     &mut self.drag_value_int,
                     i8::MIN,
                     i8::MAX,
-                    Some(500.0),
-                    0.1,
+                    500.0,
+                    0.01,
                     None,
                 );
+                win.tag("Drag value");
             }
         )?;
         if self.show_other_window {
             let mut fmt = String::new();
             <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / nox.delta_time_secs_f32())).unwrap();
-            self.workspace.update_window(1, fmt.as_str(), [0.25, 0.25], [0.4, 0.4], 
+            self.workspace.window(1, fmt.as_str(), [0.25, 0.25], [0.4, 0.4], 
                 |win| {
                     let mut fmt = String::new();
                     <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("Hue: {}°", (self.tag_color.hue * 180.0 / core::f32::consts::PI).round())).unwrap();
@@ -236,7 +256,7 @@ impl<'a> Interface for Example<'a> {
         frame_graph.add_pass(
             PassInfo {
                 max_color_writes: 1,
-                msaa_samples: MSAA::X8,
+                msaa_samples: self.msaa,
                 ..Default::default()
             },
             &mut |builder| {
