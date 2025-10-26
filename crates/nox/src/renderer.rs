@@ -72,9 +72,9 @@ pub use nox_derive::VertexInput;
 pub use shader::*;
 pub use pipeline::vertex_input::*;
 pub use frame_graph::*;
+use linear_device_alloc::LinearDeviceAlloc;
 
 //use device_allocators::DeviceAllocators;
-use linear_device_alloc::LinearDeviceAlloc;
 use vulkan_context::VulkanContext;
 use swapchain_context::SwapchainContext;
 use physical_device::PhysicalDeviceInfo;
@@ -154,6 +154,18 @@ impl RendererContext {
     #[inline(always)]
     pub fn buffer_size(&self, buffer: BufferId) -> Option<u64> {
         self.global_resources.read().unwrap().buffer_size(buffer)
+    }
+
+    #[inline(always)]
+    pub fn create_linear_device_alloc_mappable(&self, block_size: u64) -> Result<LinearDeviceAlloc, Error> {
+        LinearDeviceAlloc::new(
+            self.device.clone(),
+            block_size,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            &self.physical_device_info,
+            true
+        )
     }
 }
 

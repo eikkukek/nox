@@ -170,6 +170,20 @@ impl LinearDeviceAlloc {
         })
     }
 
+    pub fn default(block_size: u64, context: &RendererContext) -> Result<Self> {
+        if block_size == 0 {
+            return Err(Error::ZeroSizeAlloc)
+        }
+        Self::new(
+            context.device.clone(),
+            block_size,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+            &context.physical_device_info,
+            false,
+        )
+    }
+
     pub fn memory_mappable(block_size: u64, context: &RendererContext) -> Result<Self> {
         if block_size == 0 {
             return Err(Error::ZeroSizeAlloc)
