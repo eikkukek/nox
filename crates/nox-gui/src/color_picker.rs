@@ -50,7 +50,7 @@ struct Contents<I, FontHash, Style> {
     alpha_picker_handle_vertex_range: VertexRange,
     combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     outline_width: f32,
-    focused_outline_width: f32,
+    active_outline_width: f32,
     rgba_text_size: Vec2,
     flags: u32,
     _marker: PhantomData<(I, FontHash, Style)>,
@@ -59,7 +59,7 @@ struct Contents<I, FontHash, Style> {
 impl<I, FontHash, Style> Contents<I, FontHash, Style>
     where 
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
 
@@ -124,7 +124,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             alpha_picker_handle_vertex_range: Default::default(),
             combined_text: CombinedRenderedText::new(),
             outline_width: 0.0,
-            focused_outline_width: 0.0,
+            active_outline_width: 0.0,
             rgba_text_size: Default::default(),
             flags: Self::FONT_CHANGED,
             _marker: PhantomData,
@@ -448,7 +448,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             )
         );
         let mut val = self.rgba.r;
-        self.r_drag_value.calc_value(style, &mut val, 0, 255, style.default_value_drag_speed() * 255.0);
+        self.r_drag_value.calc_value(style, &mut val, 0, 255, 255.0);
         self.flags |= Self::R_CHANGED * (self.rgba.r != val) as u32;
         self.rgba.r = val;
         self.combined_text.clear();
@@ -495,13 +495,13 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         let mut rgba = self.rgba;
 
         let mut val = rgba.g;
-        self.g_drag_value.calc_value(style, &mut val, 0, 255, style.default_value_drag_speed() * 255.0);
+        self.g_drag_value.calc_value(style, &mut val, 0, 255, 255.0);
         self.flags |= Self::G_CHANGED * (rgba.g != val) as u32;
         rgba.g = val;
         f(&mut self.g_drag_value, 1, |fmt, str| { write!(fmt, "G {}", str) });
 
         let mut val = rgba.b;
-        self.b_drag_value.calc_value(style, &mut val, 0, 255, style.default_value_drag_speed() * 255.0);
+        self.b_drag_value.calc_value(style, &mut val, 0, 255, 255.0);
         self.flags |= Self::B_CHANGED * (rgba.b != val) as u32;
         rgba.b = val;
         f(&mut self.b_drag_value, 2, |fmt, str| { write!(fmt, "B {}", str) });
@@ -511,7 +511,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         let mut hsva = self.hsva;
 
         let mut val = hsva.alpha;
-        self.alpha_drag_value.calc_and_map_value(style, &mut val, 0.0, 1.0, style.default_value_drag_speed(),
+        self.alpha_drag_value.calc_and_map_value(style, &mut val, 0.0, 1.0, 1.0,
             |t| (t * 255.0).round() as u8,
             |t| t as f32 / 255.0,
         );
@@ -520,7 +520,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         f(&mut self.alpha_drag_value, 3, |fmt, str| { write!(fmt, "A {}", str) });
 
         let mut val = hsva.hue;
-        self.hue_drag_value.calc_and_map_value(style, &mut val, 0.0, TAU, style.default_value_drag_speed() * TAU,
+        self.hue_drag_value.calc_and_map_value(style, &mut val, 0.0, TAU, TAU,
             |t| (t * 180.0 / PI).round() as u32,
             |t| (t as f32 * PI / 180.0).clamp(0.0, TAU),
         );
@@ -538,20 +538,20 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         }
         let handle_radius = style.default_handle_radius();
         let rounding = style.rounding();
-        let outline_width = style.outline_width();
-        let focused_outline_width = style.focused_outline_width();
+        let outline_width = style.window_outline_width();
+        let active_outline_width = style.active_widget_outline_width();
         let hue_alpha_picker_handle_height = picker_size.y * 0.06;
         let requires_triangulation =
             self.window_rect.max != window_rect_max ||
             self.window_rect.rounding != rounding ||
             self.outline_width != outline_width ||
-            self.focused_outline_width != focused_outline_width ||
+            self.active_outline_width != active_outline_width ||
             self.picker_handle_radius != handle_radius ||
             self.hue_alpha_picker_handle_height != hue_alpha_picker_handle_height;
         self.window_rect.max = window_rect_max;
         self.window_rect.rounding = rounding;
         self.outline_width = outline_width;
-        self.focused_outline_width = focused_outline_width;
+        self.active_outline_width = active_outline_width;
         self.picker_handle_radius = handle_radius;
         self.hue_alpha_picker_handle_height = hue_alpha_picker_handle_height;
         self.hue_picker_offset = hue_picker_offset;
@@ -669,15 +669,19 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             earcut::earcut(points, &[], false, &mut self.other_vertices, &mut indices_usize).unwrap();
             VertexRange::new(vertex_begin..self.other_vertices.len())
         };
-        self.r_drag_value.triangulate(&mut points, &mut tri);
+        self.r_drag_value.triangulate(&mut points, &mut outline_points, &mut tri);
         points.clear();
-        self.g_drag_value.triangulate(&mut points, &mut tri);
+        outline_points.clear();
+        self.g_drag_value.triangulate(&mut points, &mut outline_points, &mut tri);
         points.clear();
-        self.b_drag_value.triangulate(&mut points, &mut tri);
+        outline_points.clear();
+        self.b_drag_value.triangulate(&mut points, &mut outline_points, &mut tri);
         points.clear();
-        self.alpha_drag_value.triangulate(&mut points, &mut tri);
+        outline_points.clear();
+        self.alpha_drag_value.triangulate(&mut points, &mut outline_points, &mut tri);
         points.clear();
-        self.hue_drag_value.triangulate(&mut points, &mut tri);
+        outline_points.clear();
+        self.hue_drag_value.triangulate(&mut points, &mut outline_points, &mut tri);
         self.indices.append_map(&indices_usize, |&i| i as u32);
         self.other_vertices_draw_info_bg = DrawInfo {
             first_index: index_offset,
@@ -691,7 +695,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         circle(vec2(0.0, 0.0), self.picker_handle_radius).to_points(16, &mut |p| { points.push(p.into()); });
         nox_geom::shapes::outline_points(
             &points,
-            self.focused_outline_width,
+            self.active_outline_width,
             false,
             &mut |p| { outline_points.push(p.into()); }
         );
@@ -796,7 +800,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
 impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontHash, Style>
     where
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
 
@@ -843,7 +847,7 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
             inv_aspect_ratio,
             unit_scale,
         );
-        let outline_width = style.outline_width();
+        let outline_width = style.window_outline_width();
         let min_bounds = window_pos + self.offset;
         let pc_fragment = base_push_constants_fragment(
             min_bounds - vec2(outline_width, outline_width),
@@ -997,6 +1001,7 @@ pub struct ColorPicker<I, FontHash, Style> {
     color_rect: Rect,
     color_rect_vertex_range: VertexRange,
     contents: Contents<I, FontHash, Style>,
+    color_fmt: CompactString,
     offset: Vec2,
     _marker: PhantomData<(I, FontHash, Style)>,
 }
@@ -1004,7 +1009,7 @@ pub struct ColorPicker<I, FontHash, Style> {
 impl<I, FontHash, Style> ColorPicker<I, FontHash, Style>
     where
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
 
@@ -1014,6 +1019,7 @@ impl<I, FontHash, Style> ColorPicker<I, FontHash, Style>
             color_rect: Default::default(),
             color_rect_vertex_range: Default::default(),
             contents: Contents::new(),
+            color_fmt: Default::default(),
             offset: Default::default(),
             _marker: PhantomData,
         }
@@ -1035,25 +1041,25 @@ impl<I, FontHash, Style> ColorPicker<I, FontHash, Style>
     #[inline(always)]
     pub fn set_color(&mut self, color: impl Color) {
         self.contents.set_color(color);
+        self.color_fmt.clear();
+        write!(self.color_fmt, "{}", color).ok();
     }
 
     #[inline(always)]
-    pub fn calc_color(&mut self, style: &Style) -> ColorHSVA {
-        self.contents.calc_color(style)
+    pub fn calc_color<C: Color>(&mut self, style: &Style) -> C {
+        let color = C::from_hsva(self.contents.calc_color(style));
+        self.color_fmt.clear();
+        write!(self.color_fmt, "{}", color).ok();
+        color
     }
 }
 
 impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash, Style>
     where 
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         I: Interface,
         Style: WindowStyle<FontHash>,
 {
-
-    #[inline(always)]
-    fn hover_text(&self) -> Option<&str> {
-        None
-    }
 
     #[inline(always)]
     fn get_offset(&self) -> Vec2 {
@@ -1074,17 +1080,17 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         style: &Style,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
     ) -> Vec2 {
-        let font_height = style.calc_font_height(text_renderer);
-        vec2(font_height, font_height)
+        let height = style.calc_font_height(text_renderer);
+        vec2(height, height)
     }
 
-    fn status(
-        &self,
+    fn status<'a>(
+        &'a self,
         _nox: &Nox<I>,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2
-    ) -> WidgetStatus
+    ) -> WidgetStatus<'a>
     {
         let error_margin = style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
@@ -1095,7 +1101,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         {
             WidgetStatus::Active
         } else if self.contents.widget_hovered() {
-            WidgetStatus::Hovered
+            WidgetStatus::Hovered(Some(&self.color_fmt))
         } else {
             WidgetStatus::Inactive
         }
@@ -1178,6 +1184,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
     fn triangulate(
         &mut self,
         points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
+        _helper_points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
         tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     )
     {

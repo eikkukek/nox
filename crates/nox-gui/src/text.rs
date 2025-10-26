@@ -1,9 +1,6 @@
 use std::rc::Rc;
 
-use core::{
-    hash::Hash,
-    marker::PhantomData,
-};
+use core::marker::PhantomData;
 
 use nox_font::{text_segment_owned, RenderedText, TextOffset, TextSegmentOwned, VertexTextRenderer};
 
@@ -93,13 +90,14 @@ pub struct SelectableText<I, FontHash, Style>
 impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
     where 
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
 
     const TRUNC_TO_WINDOW_WIDTH: u32 = 0x1;
     const HELD: u32 = 0x2;
-    const SELECTION_LEFT: u32 = 0x4;
+    const HOVERED: u32 = 0x4;
+    const SELECTION_LEFT: u32 = 0x8;
 
     #[inline(always)]
     pub fn new() -> Self
@@ -169,6 +167,11 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
     }
 
     #[inline(always)]
+    pub fn set_current_height(&mut self, height: f32) {
+        self.current_height = height;
+    }
+
+    #[inline(always)]
     pub fn get_selection(&self) -> CompactString {
         let mut result = CompactString::default();
         let mut i_off = 0;
@@ -197,6 +200,11 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
     #[inline(always)]
     fn held(&self) -> bool {
         self.flags & Self::HELD == Self::HELD
+    }
+
+    #[inline(always)]
+    fn hovered(&self) -> bool {
+        self.flags & Self::HOVERED == Self::HOVERED
     }
 
     #[inline(always)]
@@ -349,7 +357,7 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
 pub struct SelectableTextBuilder<'a, 'b, I, FontHash, Style>
     where 
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
     style: &'a Style,
@@ -363,7 +371,7 @@ pub struct SelectableTextBuilder<'a, 'b, I, FontHash, Style>
 impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Style>
     where 
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
 
@@ -505,7 +513,7 @@ pub struct TextSegmentBuilder<FontHash>
 
 impl<FontHash> TextSegmentBuilder<FontHash>
     where
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
 {
 
     #[inline(always)]
@@ -527,13 +535,9 @@ impl<FontHash> TextSegmentBuilder<FontHash>
 impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHash, Style>
     where 
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
-
-    fn hover_text(&self) -> Option<&str> {
-        self.tool_tip.as_ref().map(|v| v.as_str())
-    }
 
     fn get_offset(&self) -> Vec2 {
         self.offset
@@ -555,14 +559,21 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         Default::default()
     }
 
-    fn status(
-        &self,
+    fn status<'a>(
+        &'a self,
         _nox: &Nox<I>,
         _style: &Style,
         _window_pos: Vec2,
         _cursor_pos: Vec2,
-    ) -> WidgetStatus {
-        WidgetStatus::Inactive
+    ) -> WidgetStatus<'a>
+    {
+        if self.held() {
+            WidgetStatus::Active
+        } else if self.hovered() {
+            WidgetStatus::Hovered(self.tool_tip.as_ref().map(|v| v.as_str()))
+        } else {
+            WidgetStatus::Inactive
+        }
     }
 
     fn update(
@@ -599,6 +610,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         let mut cursor_index = self.calc_cursor_index(style, rel_cursor_pos, self.base_offset);
         let mut cursor_in_widget = false;
         let cursor_in_text = bounding_rect.is_point_inside(rel_cursor_pos);
+        self.flags &= !Self::HOVERED;
         if !other_widget_active && !cursor_in_other_widget {
             if cursor_in_text && mouse_pressed {
                 if let Some(index) = cursor_index {
@@ -609,6 +621,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
             if let Some(index) = cursor_index && cursor_in_text && !self.held() {
                 self.tool_tip = self.get_tooltip(index);
                 cursor_in_widget = true;
+                self.flags |= Self::HOVERED;
             }
         }
         if let Some(mut selection) = self.selection {
@@ -690,6 +703,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
     fn triangulate(
         &mut self,
         _points: &mut GlobalVec<[f32; 2]>,
+        _helper_points: &mut GlobalVec<[f32; 2]>,
         _tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     ) {}
 

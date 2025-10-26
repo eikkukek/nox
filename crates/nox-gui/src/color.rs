@@ -1,9 +1,10 @@
 use core::f32::consts;
 
+use core::fmt::Display;
 
 use nox::VkFormat;
 
-pub trait Color: Copy {
+pub trait Color: Copy + Display {
 
     fn from_srgba(value: ColorSRGBA) -> Self;
 
@@ -147,6 +148,18 @@ impl Color for ColorSRGBA {
     }
 }
 
+impl Display for ColorSRGBA {
+
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "(r: {:.2}, g: {:.2}, b: {:.2}, a: {:.2})",
+            self.r,
+            self.g,
+            self.b,
+            self.alpha,
+        )
+    }
+}
+
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
 pub struct ColorHSVA {
     pub hue: f32,
@@ -254,6 +267,18 @@ impl Color for ColorHSVA {
 
     fn to_hsva(self) -> ColorHSVA {
         self
+    }
+}
+
+impl Display for ColorHSVA {
+
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "(h: {:.2}, s: {:.2}, v: {:.2}, a: {:.2})",
+            self.hue,
+            self.sat,
+            self.val,
+            self.alpha,
+        )
     }
 }
 

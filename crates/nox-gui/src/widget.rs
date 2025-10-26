@@ -17,16 +17,20 @@ pub struct UpdateResult {
 }
 
 #[derive(Clone, Copy)]
-pub enum WidgetStatus {
+pub enum WidgetStatus<'a> {
     Inactive,
-    Hovered,
+    Hovered(Option<&'a str>),
     Active,
 }
+
+pub trait UiFontHash: Default + Clone + Eq + Hash {}
+
+impl<T: Default + Clone + Eq + PartialEq + Hash> UiFontHash for T {}
 
 pub trait HoverContents<I, FontHash, Style: WindowStyle<FontHash>>
     where
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
 {
 
     fn render_commands(
@@ -79,11 +83,9 @@ impl VertexRange {
 pub trait Widget<I, FontHash, Style>
     where
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>
 {
-
-    fn hover_text(&self) -> Option<&str>;
 
     fn get_offset(&self) -> Vec2;
 
@@ -95,16 +97,16 @@ pub trait Widget<I, FontHash, Style>
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut VertexTextRenderer<FontHash>,
     ) -> Vec2;
 
-    fn status(
-        &self,
+    fn status<'a>(
+        &'a self,
         nox: &Nox<I>,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2,
-    ) -> WidgetStatus;
+    ) -> WidgetStatus<'a>;
 
     fn update(
         &mut self,
@@ -125,6 +127,7 @@ pub trait Widget<I, FontHash, Style>
     fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
+        helper_points: &mut GlobalVec<[f32; 2]>,
         tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     );
 

@@ -1,5 +1,4 @@
 use core::{
-    hash::Hash,
     marker::PhantomData,
     fmt::{Display, Write},
     str::FromStr,
@@ -38,7 +37,7 @@ pub struct InputText<I, FontHash, Style> {
     flags: u32,
     cursor_timer: f32,
     double_click_timer: f32,
-    outline_width: f32,
+    focused_outline_width: f32,
     width: f32,
     bg_col_override: ColorSRGBA,
     _marker: PhantomData<(I, FontHash, Style)>,
@@ -93,7 +92,7 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
             flags: Self::MOUSE_VISIBLE | Self::CURSOR_ENABLE,
             cursor_timer: 0.0,
             double_click_timer: 100.0,
-            outline_width: 0.0,
+            focused_outline_width: 0.0,
             width: 0.0,
             bg_col_override: Default::default(),
             _marker: PhantomData,
@@ -145,7 +144,14 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
     }
 
     #[inline(always)]
-    pub fn set_input_sliderable(&mut self, style: &Style, input: &impl Sliderable) {
+    pub fn set_input_sliderable<T>(
+        &mut self,
+        style: &Style,
+        input: &T
+    )
+        where 
+            T: Sliderable,
+    {
         self.flags &= !Self::FORMAT_ERROR;
         let mut fmt = CompactString::default();
         if let Err(_) = input.display(style, &mut fmt) {
@@ -343,13 +349,8 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
 impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, Style>
     where
         I: Interface,
-        FontHash: Clone + Eq + Hash,
-        Style: WindowStyle<FontHash>,
+        FontHash: UiFontHash, Style: WindowStyle<FontHash>,
 {
-
-    fn hover_text(&self) -> Option<&str> {
-        None
-    }
 
     fn get_offset(&self) -> Vec2 {
         self.offset
@@ -368,7 +369,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut VertexTextRenderer<'_, FontHash>
     ) -> Vec2
     {
         let item_pad_inner = style.item_pad_inner();
@@ -390,18 +391,18 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         )
     }
 
-    fn status(
-        &self,
+    fn status<'a>(
+        &'a self,
         _nox: &Nox<I>,
         _style: &Style,
         _window_pos: Vec2,
         _cursor_pos: Vec2
-    ) -> WidgetStatus
+    ) -> WidgetStatus<'a>
     {
         if !self.mouse_visible() || self.held() {
             WidgetStatus::Active
         } else if self.hovered() {
-            WidgetStatus::Hovered
+            WidgetStatus::Hovered(None)
         } else {
             WidgetStatus::Inactive
         }
@@ -887,10 +888,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         let requires_triangulation =
             self.input_rect != input_rect ||
             self.cursor_rect.max != cursor_rect_max ||
-            self.outline_width != style.outline_width();
+            self.focused_outline_width != style.focused_widget_outline_width();
         self.input_rect = input_rect;
         self.cursor_rect.max = cursor_rect_max;
-        self.outline_width = style.outline_width();
+        self.focused_outline_width = style.focused_widget_outline_width();
         if !self.active() {
             self.selection = None;
         }
@@ -961,16 +962,16 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
 
     fn triangulate(
         &mut self,
-        points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
+        points: &mut GlobalVec<[f32; 2]>,
+        helper_points: &mut GlobalVec<[f32; 2]>,
         tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     ) {
         self.input_rect.to_points(&mut |p| { points.push(p.into()); });
-        let mut outline_points = GlobalVec::new();
-        nox_geom::shapes::outline_points(
-            points, self.outline_width, false,
-            &mut |p| { outline_points.push(p.into()); }
+        outline_points(
+            points, self.focused_outline_width, false,
+            &mut |p| { helper_points.push(p.into()); }
         );
-        self.input_rect_outline_vertex_range = tri(&outline_points);
+        self.input_rect_outline_vertex_range = tri(&helper_points);
         self.input_rect_vertex_range = tri(points);
         points.clear();
         self.cursor_rect.to_points(&mut |p| { points.push(p.into()); });

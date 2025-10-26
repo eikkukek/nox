@@ -1,12 +1,9 @@
-use core::{
-    hash::Hash,
-    marker::PhantomData,
-};
+use core::marker::PhantomData;
 
 use compact_str::CompactString;
 
 use nox::{
-    mem::vec_types::GlobalVec,
+    mem::vec_types::{GlobalVec, Vector},
     *,
 };
 
@@ -21,17 +18,23 @@ use nox_geom::{
 
 pub struct Button<I, FontHash, Style> {
     label: CompactString,
-    label_text: Option<RenderedText>,
+    label_text: RenderedText,
+    font: FontHash,
     rect: Rect,
     rect_vertex_range: VertexRange,
-    outline_vertex_range: VertexRange,
+    focused_outline_vertex_range: VertexRange,
+    active_outline_vertex_range: VertexRange,
+    focused_outline_width: f32,
+    active_outline_width: f32,
     offset: Vec2,
     flags: u32,
-    focused_outline_width: f32,
     _marker: PhantomData<(I, FontHash, Style)>,
 }
 
-impl<I, FontHash, Style> Button<I, FontHash, Style> {
+impl<I, FontHash, Style> Button<I, FontHash, Style>
+    where 
+        FontHash: UiFontHash,
+{
 
     const HELD: u32 = 0x1;
     const PRESSED: u32 = 0x2;
@@ -42,21 +45,38 @@ impl<I, FontHash, Style> Button<I, FontHash, Style> {
         Self {
             label: Default::default(),
             label_text: Default::default(),
+            font: Default::default(),
             rect: Default::default(),
             rect_vertex_range: Default::default(),
-            outline_vertex_range: Default::default(),
+            focused_outline_vertex_range: Default::default(),
+            active_outline_vertex_range: Default::default(),
+            focused_outline_width: 0.0,
+            active_outline_width: 0.0,
             offset: Default::default(),
             flags: 0,
-            focused_outline_width: 0.0,
             _marker: PhantomData,
         }
     }
 
     #[inline(always)]
-    pub fn set_label(&mut self, label: &str) {
-        if self.label != label {
+    pub fn set_label(
+        &mut self,
+        label: &str,
+        text_renderer: &mut VertexTextRenderer<FontHash>,
+        style: &Style,
+    ) where 
+        Style: WindowStyle<FontHash>, 
+    {
+        let font_changed = &self.font != style.font_regular();
+        if font_changed {
+            self.font = style.font_regular().clone();
+        }
+        if font_changed || self.label != label {
             self.label = CompactString::new(label);
-            self.label_text = None;
+            self.label_text = text_renderer
+                .render(&[text_segment(&self.label, &self.font)],
+                    false, 0.0
+            ).unwrap_or_default();
         }
     }
 
@@ -80,14 +100,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
         Button<I, FontHash, Style>
     where 
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
-
-    #[inline(always)]
-    fn hover_text(&self) -> Option<&str> {
-        None
-    }
 
     #[inline(always)]
     fn get_offset(&self) -> Vec2 {
@@ -107,27 +122,23 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        _text_renderer: &mut VertexTextRenderer<FontHash>,
     ) -> Vec2 {
-        let label_text = self.label_text.get_or_insert(text_renderer
-                .render(&[text_segment(&self.label, style.font_regular())], false, 0.0
-            ).unwrap_or_default()
-        );
-        style.calc_text_box_size(label_text)
+        style.calc_text_box_size(&self.label_text)
     }
 
-    fn status(
-        &self,
+    fn status<'a>(
+        &'a self,
         _nox: &Nox<I>,
         _style: &Style,
         _window_pos: Vec2,
         _cursor_pos: Vec2
-    ) -> WidgetStatus
+    ) -> WidgetStatus<'a>
     {
         if self.held() {
             WidgetStatus::Active
         } else if self.cursor_in_button() {
-            WidgetStatus::Hovered
+            WidgetStatus::Hovered(None)
         } else {
             WidgetStatus::Inactive
         }
@@ -150,14 +161,15 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
     ) -> UpdateResult
     {
         self.flags &= !Self::PRESSED;
-        let label_text = self.label_text.as_ref().unwrap();
-        let rect_size = style.calc_text_box_size(label_text);
+        let rect_size = style.calc_text_box_size(&self.label_text);
         let rect = rect(Default::default(), rect_size, style.rounding());
         let requires_triangulation =
             self.rect != rect ||
-            self.focused_outline_width != style.focused_outline_width();
+            self.focused_outline_width != style.focused_widget_outline_width() ||
+            self.active_outline_width != style.active_widget_outline_width();
         self.rect = rect;
-        self.focused_outline_width = style.focused_outline_width();
+        self.focused_outline_width = style.focused_widget_outline_width();
+        self.active_outline_width = style.active_widget_outline_width();
         let mut cursor_in_widget = false;
         self.flags &= !Self::CURSOR_IN_BUTTON;
         if self.held() {
@@ -181,7 +193,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
             }
         }
         let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
-        collect_text(label_text, self.offset + style.item_pad_inner(), BoundedTextInstance {
+        collect_text(&self.label_text, self.offset + style.item_pad_inner(), BoundedTextInstance {
             add_scale: vec2(1.0, 1.0),
             min_bounds,
             max_bounds,
@@ -202,15 +214,19 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
     fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
+        helper_points: &mut GlobalVec<[f32; 2]>,
         tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     )
     {
-        let mut outline_points = GlobalVec::new();
         self.rect.to_points(&mut |p| { points.push(p.into()); });
-        nox_geom::shapes::outline_points(points,
-            self.focused_outline_width, false, &mut |p| { outline_points.push(p.into()); }
+        outline_points(points,
+            self.focused_outline_width, false, &mut |p| { helper_points.push(p.into()); }
         );
-        self.outline_vertex_range = tri(&outline_points);
+        self.focused_outline_vertex_range = tri(&helper_points);
+        helper_points.clear();
+        outline_points(points,
+            self.active_outline_width, false, &mut |p| { helper_points.push(p.into()); });
+        self.active_outline_vertex_range = tri(&helper_points);
         self.rect_vertex_range = tri(&points);
     }
 
@@ -221,33 +237,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
     )
     {
         let offset = self.offset;
-        let vertex_sample = vertices[self.outline_vertex_range.start()];
-        if self.cursor_in_button() || self.held() {
-            let target_color = if self.held() {
-                style.active_widget_outline_col()
-            } else {
-                style.focused_widget_outline_col()
-            };
-            if vertex_sample.offset != offset || vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_vertex_range.range()] {
-                    vertex.offset = offset;
-                    vertex.color = target_color;
-                }
-            }
+        if self.held() {
+            let target_color = style.active_widget_outline_col();
+            set_vertex_params(vertices, self.active_outline_vertex_range, offset, target_color);
+        } else {
+            hide_vertices(vertices, self.active_outline_vertex_range);
         }
-        else if vertex_sample.color.alpha != 0.0 {
-            for vertex in &mut vertices[self.outline_vertex_range.range()] {
-                vertex.color = ColorSRGBA::black(0.0);
-            }
+        if self.cursor_in_button() {
+            let target_color = style.focused_widget_outline_col();
+            set_vertex_params(vertices, self.focused_outline_vertex_range, offset, target_color);
+        } else {
+            hide_vertices(vertices, self.focused_outline_vertex_range);
         }
-        let vertex_sample = vertices[self.rect_vertex_range.start()];
-        if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col() {
-            let target_color = style.widget_bg_col();
-            for vertex in &mut vertices[self.rect_vertex_range.range()] {
-                vertex.offset = offset;
-                vertex.color = target_color;
-            }
-        }
+        let target_color = style.widget_bg_col();
+        set_vertex_params(vertices, self.rect_vertex_range, offset, target_color);
     }
 
     fn render_commands(
@@ -271,17 +274,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
         &self,
         vertices: &mut [Vertex],
     ) {
-        let vertex_sample = vertices[self.rect_vertex_range.start()];
-        if vertex_sample.color.alpha != 0.0 {
-            for vertex in &mut vertices[self.rect_vertex_range.range()] {
-                vertex.color = ColorSRGBA::black(0.0);
-            }
-        }
-        let vertex_sample = vertices[self.outline_vertex_range.start()];
-        if vertex_sample.color.alpha != 0.0 {
-            for vertex in &mut vertices[self.outline_vertex_range.range()] {
-                vertex.color = ColorSRGBA::black(0.0);
-            }
-        }
+        hide_vertices(vertices, self.rect_vertex_range);
+        hide_vertices(vertices, self.focused_outline_vertex_range);
+        hide_vertices(vertices, self.active_outline_vertex_range);
     }
 }

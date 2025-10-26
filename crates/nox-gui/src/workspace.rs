@@ -98,7 +98,7 @@ pub struct Workspace<'a, I, FontHash, Style>
 impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
     where
         I: Interface,
-        FontHash: Clone + PartialEq + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
 
@@ -391,13 +391,14 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
     }
 
     #[inline(always)]
-    pub fn begin(&mut self) -> Result<(), Error>
+    pub fn begin(&mut self, nox: &mut Nox<I>) -> Result<(), Error>
     {
         if self.began() {
             return Err(Error::UserError(
                 "nox_gui: attempting to call Workspace::begin twice before calling Workspace::end".into()
             ))
         }
+        self.unit_scale =  self.style.pixels_per_unit() / nox.window_size_f32().1;
         if let Some(buf) = &mut self.vertex_buffer {
             buf.finish_frame();
         }
@@ -409,7 +410,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         Ok(())
     }
 
-    pub fn update_window<F>(
+    pub fn window<F>(
         &mut self,
         id: u32,
         title: &str,
@@ -440,7 +441,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
 
     pub fn end(
         &mut self,
-        nox: &mut Nox<'_, I>,
+        nox: &mut Nox<I>,
     ) -> Result<(), Error>
     {
         if !self.began() {
@@ -455,8 +456,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         let aspect_ratio = nox.aspect_ratio() as f32;
         self.inv_aspect_ratio = 1.0 / aspect_ratio;
         let window_size: Vec2 = nox.window_size_f32().into();
-        let unit_scale =  self.style.pixels_per_unit() / window_size.y;
-        self.unit_scale = unit_scale;
+        let unit_scale = self.unit_scale;
         let mut cursor_pos: Vec2 = nox.normalized_cursor_position_f32().into();
         cursor_pos *= 2.0;
         cursor_pos -= vec2(1.0, 1.0);

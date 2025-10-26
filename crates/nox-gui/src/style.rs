@@ -55,11 +55,6 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn handle_col(&self) -> ColorSRGBA {
-        DEFAULT_HANDLE_COL
-    }
-
-    #[inline(always)]
     fn input_text_bg_col(&self) -> ColorSRGBA {
         DEFAULT_INPUT_TEXT_BG_COL
     }
@@ -81,7 +76,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn pixels_per_unit(&self) -> f32 {
-        1100.0
+        1300.0
     }
 
     #[inline(always)]
@@ -91,12 +86,12 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn item_pad_inner(&self) -> Vec2 {
-        vec2(0.01, 0.01)
+        vec2(0.01, 0.008)
     }
 
     #[inline(always)]
     fn font_scale(&self) -> f32 {
-        0.02
+        0.018
     }
 
     #[inline(always)]
@@ -106,7 +101,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn rounding(&self) -> f32 {
-        0.005
+        0.003
     }
 
     #[inline(always)]
@@ -115,13 +110,23 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn outline_width(&self) -> f32 {
+    fn window_outline_width(&self) -> f32 {
         0.002
     }
 
     #[inline(always)]
-    fn focused_outline_width(&self) -> f32 {
+    fn focused_window_outline_width(&self) -> f32 {
         0.0035
+    }
+
+    #[inline(always)]
+    fn focused_widget_outline_width(&self) -> f32 {
+        0.001
+    }
+
+    #[inline(always)]
+    fn active_widget_outline_width(&self) -> f32 {
+        0.002
     }
 
     #[inline(always)]
@@ -152,11 +157,6 @@ pub trait WindowStyle<FontHash> {
     #[inline(always)]
     fn alpha_tile_width(&self) -> f32 {
         0.3 / 20.0
-    }
-
-    #[inline(always)]
-    fn default_value_drag_speed(&self) -> f32 {
-        5.0
     }
 
     #[inline(always)]
@@ -275,7 +275,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn calc_text_box_height_from_text_height(&self, text_height: f32) -> f32 {
-        self.item_pad_inner().y + self.item_pad_inner().y +  text_height
+        self.item_pad_inner().y + self.item_pad_inner().y + text_height
     }
 }
 
@@ -311,20 +311,15 @@ const DEFAULT_FOCUSED_WINDOW_OUTLINE_COL: ColorSRGBA =
 const DEFAULT_WIDGET_BG_COL: ColorSRGBA =
     ColorSRGBA::new(20.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 1.0);
 
-const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA =
-    ColorSRGBA::new(31.0 / 255.0, 46.0 / 255.0, 46.0 / 255.0, 1.0);
-
-const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA =
-    ColorSRGBA::new(16.0 / 255.0, 24.0 / 255.0, 24.0 / 255.0, 1.0);
-
 const DEFAULT_TEXT_COL: ColorSRGBA =
     ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 0.8);
 
 const DEFAULT_FOCUSED_TEXT_COL: ColorSRGBA =
     ColorSRGBA::white(1.0);
 
-const DEFAULT_HANDLE_COL: ColorSRGBA =
-    ColorSRGBA::new(52.0 / 255.0, 74.0 / 255.0, 76.0 / 255.0, 1.0);
+const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_TEXT_COL;
+
+const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_FOCUSED_TEXT_COL;
 
 const DEFAULT_INPUT_TEXT_BG_COL: ColorSRGBA =
     ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0);

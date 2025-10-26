@@ -1,10 +1,7 @@
-use core::{
-    hash::Hash,
-    marker::PhantomData,
-};
+use core::marker::PhantomData;
 
 use nox::{
-    mem::vec_types::GlobalVec,
+    mem::vec_types::{GlobalVec, Vector},
     *,
 };
 
@@ -18,23 +15,31 @@ use nox_geom::{
 };
 
 pub struct Checkbox<I, FontHash, Style> {
-    checkbox_text: Option<RenderedText>,
-    rect: Rect,
     offset: Vec2,
-    rect_vertex_range: VertexRange,
-    outline_vertex_range: VertexRange,
+    rect: Rect,
+    size: Vec2,
+    checkbox_symbol: char,
+    checkbox_text: RenderedText,
+    label: CompactString,
+    label_text: RenderedText,
     focused_outline_width: f32,
+    active_outline_width: f32,
+    rect_vertex_range: VertexRange,
+    focused_outline_vertex_range: VertexRange,
+    active_outline_vertex_range: VertexRange,
+    font: FontHash,
     flags: u32,
     _marker: PhantomData<(I, FontHash, Style)>
 }
 
 impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
     where
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
 
     const HELD: u32 = 0x1;
-    const PRESSED: u32 = 0x2;
+    const CLICKED: u32 = 0x2;
     const CURSOR_IN_CHECKBOX: u32 = 0x4;
     const CHECKED: u32 = 0x8;
 
@@ -42,55 +47,92 @@ impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
     pub fn new() -> Self
     {
         Self {
-            checkbox_text: Default::default(),
             rect: Default::default(),
+            size: Default::default(),
             offset: Default::default(),
-            rect_vertex_range: Default::default(),
-            outline_vertex_range: Default::default(),
+            checkbox_symbol: Default::default(),
+            checkbox_text: Default::default(),
+            label: Default::default(),
+            label_text: Default::default(),
             focused_outline_width: 0.0,
+            active_outline_width: 0.0,
+            rect_vertex_range: Default::default(),
+            focused_outline_vertex_range: Default::default(),
+            active_outline_vertex_range: Default::default(),
+            font: Default::default(),
             flags: 0,
             _marker: PhantomData,
         }
     }
 
     #[inline(always)]
-    pub fn held(&self) -> bool {
+    fn held(&self) -> bool {
         self.flags & Self::HELD == Self::HELD
     }
 
     #[inline(always)]
-    pub fn pressed(&self) -> bool {
-        self.flags & Self::PRESSED == Self::PRESSED
+    fn clicked(&self) -> bool {
+        self.flags & Self::CLICKED == Self::CLICKED
     }
 
     #[inline(always)]
-    pub fn cursor_in_checkbox(&self) -> bool {
+    fn cursor_in_checkbox(&self) -> bool {
         self.flags & Self::CURSOR_IN_CHECKBOX == Self::CURSOR_IN_CHECKBOX
     }
 
     #[inline(always)]
-    pub fn checked(&self) -> bool {
+    fn checked(&self) -> bool {
         self.flags & Self::CHECKED == Self::CHECKED
     }
 
     #[inline(always)]
-    pub fn set_checked(&mut self, value: bool) {
+    pub fn update_value(&mut self, value: &mut bool) {
+        if self.clicked() {
+            *value = !*value;
+        }
         self.flags &= !Self::CHECKED;
-        self.flags |= Self::CHECKED * value as u32;
+        self.flags |= Self::CHECKED * *value as u32;
+    }
+
+    #[inline(always)]
+    pub fn set_label(
+        &mut self,
+        label: &str,
+        text_renderer: &mut VertexTextRenderer<FontHash>,
+        style: &Style,
+    ) where 
+        FontHash: UiFontHash,
+        Style: WindowStyle<FontHash>,
+    {
+        let font_changed = &self.font != style.font_regular();
+        if font_changed {
+            self.font = style.font_regular().clone();
+        }
+        if font_changed || self.label != label {
+            self.label = CompactString::new(label);
+            self.label_text = text_renderer.render(
+                &[text_segment(label, &self.font)],
+                false,
+                0.0
+            ).unwrap_or_default();
+        }
+        if font_changed || self.checkbox_symbol != style.checkbox_symbol() {
+            self.checkbox_symbol = style.checkbox_symbol();
+            self.checkbox_text = text_renderer.render(
+                &[text_segment(&self.checkbox_symbol.to_string(), &self.font)],
+                false,
+                0.0
+            ).unwrap_or_default();
+        }
     }
 }
 
 impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, Style>
     where
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
-
-    #[inline(always)]
-    fn hover_text(&self) -> Option<&str> {
-        None
-    }
 
     #[inline(always)]
     fn get_offset(&self) -> Vec2
@@ -111,31 +153,28 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        _text_renderer: &mut VertexTextRenderer<FontHash>,
     ) -> Vec2
     {
-        let checkbox_text = self.checkbox_text.get_or_insert(text_renderer
-            .render(
-                &[text_segment(&style.checkbox_symbol().to_string(), style.font_regular())], false, 0.0
-            )
-            .unwrap_or_default()
-        );
-        let checkbox_size = style.calc_text_box_size(checkbox_text);
+        let checkbox_size = style.calc_text_box_size(&self.checkbox_text);
         let max = checkbox_size.x.max(checkbox_size.y);
-        vec2(max, max)
+        let checkbox_size = vec2(max, max);
+        let label_width = style.calc_text_width(&self.label_text);
+        self.size = checkbox_size + vec2(style.item_pad_outer().x + label_width, 0.0);
+        self.size
     }
 
-    fn status(
-        &self,
+    fn status<'a>(
+        &'a self,
         _nox: &Nox<I>,
         _style: &Style,
         _window_pos: Vec2, _cursor_pos: Vec2
-    ) -> WidgetStatus
+    ) -> WidgetStatus<'a>
     {
         if self.held() {
             WidgetStatus::Active
         } else if self.cursor_in_checkbox() {
-            WidgetStatus::Hovered
+            WidgetStatus::Hovered(None)
         } else {
             WidgetStatus::Inactive
         }
@@ -157,33 +196,31 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
-        self.flags &= !Self::PRESSED;
         let offset = self.offset;
-        let checkbox_text = self.checkbox_text.as_ref().unwrap();
-        let rect_size = style.calc_text_box_size(checkbox_text);
+        let rect_size = style.calc_text_box_size(&self.checkbox_text);
         let rect_max_size = rect_size.x.max(rect_size.y);
         let rect_size = vec2(rect_max_size, rect_max_size);
         let rect = rect(Default::default(), rect_size, style.rounding());
         let requires_triangulation =
             self.rect != rect ||
-            self.focused_outline_width != style.focused_outline_width();
+            self.focused_outline_width != style.focused_widget_outline_width() ||
+            self.active_outline_width != style.active_widget_outline_width();
         self.rect = rect;
-        self.focused_outline_width = style.focused_outline_width();
+        self.focused_outline_width = style.focused_widget_outline_width();
+        self.active_outline_width = style.active_widget_outline_width();
         let mut cursor_in_widget = false;
-        self.flags &= !Self::CURSOR_IN_CHECKBOX;
+        self.flags &= !(Self::CLICKED | Self::CURSOR_IN_CHECKBOX);
         let pos = window_pos + offset;
+        let bounding_rect = BoundingRect::from_position_size(
+            pos, self.size
+        );
         if self.held() {
             cursor_in_widget = true;
             if nox.was_mouse_button_released(MouseButton::Left) {
-                let bounding_rect = BoundingRect::from_position_size(pos, self.rect.max);
-                self.flags |= Self::PRESSED * bounding_rect.is_point_inside(cursor_pos) as u32;
+                self.flags |= Self::CLICKED * bounding_rect.is_point_inside(cursor_pos) as u32;
                 self.flags &= !Self::HELD;
             }
         } else if cursor_in_this_window && !other_widget_active {
-            let bounding_rect = BoundingRect::from_position_size(
-                pos,
-                self.rect.max,
-            );
             cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
             if cursor_in_widget {
                 self.flags |= Self::CURSOR_IN_CHECKBOX;
@@ -192,26 +229,29 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
                 }
             }
         }
+        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
+        let bounded_instance = BoundedTextInstance {
+            add_scale: vec2(1.0, 1.0),
+            min_bounds,
+            max_bounds,
+            color:
+                if self.held() || self.cursor_in_checkbox() {
+                    style.focused_text_col()
+                } else {
+                    style.text_col()
+                },
+        };
+        let check_size = style.calc_text_size(&self.checkbox_text);
         if self.checked() {
-            let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
-            let bounded_instance = BoundedTextInstance {
-                add_scale: vec2(1.0, 1.0),
-                min_bounds,
-                max_bounds,
-                color:
-                    if self.held() || self.cursor_in_checkbox() {
-                        style.focused_text_col()
-                    } else {
-                        style.text_col()
-                    },
-            };
-            let checkbox_text = self.checkbox_text.as_ref().unwrap();
-            let size = style.calc_text_size(checkbox_text);
-            collect_text(checkbox_text,
-                offset + rect.max * 0.5 - size * 0.5,
+            collect_text(&self.checkbox_text,
+                offset + rect.max * 0.5 - check_size * 0.5,
                 bounded_instance,
             );
         }
+        collect_text(&self.label_text,
+            offset + vec2(rect.max.x + style.item_pad_outer().x, rect.max.y * 0.5 - check_size.y * 0.5),
+            bounded_instance,
+        );
         UpdateResult {
             requires_triangulation,
             cursor_in_widget
@@ -222,15 +262,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
     fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
+        helper_points: &mut GlobalVec<[f32; 2]>,
         tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     )
     {
         self.rect.to_points(&mut |p| { points.push(p.into()); });
-        let mut outline_points = GlobalVec::new();
-        nox_geom::shapes::outline_points(points,
-            self.focused_outline_width, false, &mut |p| { outline_points.push(p.into()); }
+        outline_points(points,
+            self.focused_outline_width, false, &mut |p| { helper_points.push(p.into()); }
         );
-        self.outline_vertex_range = tri(&outline_points);
+        self.focused_outline_vertex_range = tri(&helper_points);
+        helper_points.clear();
+        outline_points(points,
+            self.active_outline_width, false, &mut |p| { helper_points.push(p.into()); }
+        );
+        self.active_outline_vertex_range = tri(&helper_points);
         self.rect_vertex_range = tri(&points);
     }
 
@@ -241,24 +286,18 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
     )
     {
         let offset = self.offset;
-        let vertex_sample = vertices[self.outline_vertex_range.start()];
-        if self.cursor_in_checkbox() || self.held() {
-            let target_color = if self.held() {
-                style.active_widget_outline_col()
-            } else {
-                style.focused_widget_outline_col()
-            };
-            if vertex_sample.offset != offset || vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_vertex_range.range()] {
-                    vertex.offset = offset;
-                    vertex.color = target_color;
-                }
-            }
+        if self.held() {
+            let target_color = style.active_widget_outline_col();
+            set_vertex_params(vertices, self.active_outline_vertex_range, offset, target_color);
         }
-        else if vertex_sample.color.alpha != 0.0 {
-            for vertex in &mut vertices[self.outline_vertex_range.range()] {
-                vertex.color = ColorSRGBA::black(0.0);
-            }
+        else {
+            hide_vertices(vertices, self.active_outline_vertex_range);
+        }
+        if self.cursor_in_checkbox() {
+            let target_color = style.focused_widget_outline_col();
+            set_vertex_params(vertices, self.focused_outline_vertex_range, offset, target_color);
+        } else {
+            hide_vertices(vertices, self.focused_outline_vertex_range);
         }
         let vertex_sample = vertices[self.rect_vertex_range.start()];
         if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col() {
@@ -291,17 +330,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         &self,
         vertices: &mut [Vertex],
     ) {
-        let vertex_sample = vertices[self.rect_vertex_range.start()];
-        if vertex_sample.color.alpha != 0.0 {
-            for vertex in &mut vertices[self.rect_vertex_range.range()] {
-                vertex.color = ColorSRGBA::black(0.0);
-            }
-        }
-        let vertex_sample = vertices[self.outline_vertex_range.start()];
-        if vertex_sample.color.alpha != 0.0 {
-            for vertex in &mut vertices[self.outline_vertex_range.range()] {
-                vertex.color = ColorSRGBA::black(0.0);
-            }
-        }
+        hide_vertices(vertices, self.rect_vertex_range);
+        hide_vertices(vertices, self.focused_outline_vertex_range);
+        hide_vertices(vertices, self.active_outline_vertex_range);
     }
 }

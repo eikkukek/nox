@@ -1,6 +1,5 @@
 use core::{
     marker::PhantomData,
-    hash::Hash,
     fmt::Write,
 };
 
@@ -14,9 +13,12 @@ use crate::*;
 pub struct DragValue<I, FontHash, Style> {
     input_text: InputText<I, FontHash, Style>,
     delta_cursor_x: f32,
+    amount: f32,
     flags: u32,
-    focused_outline_vertex_range: VertexRange,
     focused_outline_width: f32,
+    active_outline_width: f32,
+    focused_outline_vertex_range: VertexRange,
+    active_outline_vertex_range: VertexRange,
     _marker: PhantomData<(FontHash, Style)>,
 }
 
@@ -34,9 +36,12 @@ impl<I, FontHash, Style> DragValue<I, FontHash, Style>
         Self {
             input_text: InputText::new(),
             delta_cursor_x: 0.0,
+            amount: 0.0,
             flags: 0,
-            focused_outline_vertex_range: Default::default(),
             focused_outline_width: 0.0,
+            active_outline_width: 0.0,
+            focused_outline_vertex_range: Default::default(),
+            active_outline_vertex_range: Default::default(),
             _marker: PhantomData,
         }
     }
@@ -56,12 +61,26 @@ impl<I, FontHash, Style> DragValue<I, FontHash, Style>
     }
 
     #[inline(always)]
-    pub fn calc_value<T>(&mut self, style: &Style, value: &mut T, min: T, max: T, drag_speed: f32)
+    pub fn calc_value<T>(
+        &mut self,
+        style: &Style,
+        value: &mut T,
+        min: T,
+        max: T,
+        drag_speed: f32,
+    )
         where
             T: Sliderable
     {
         if !self.input_text.active() {
-            value.drag(min, max, self.delta_cursor_x * drag_speed);
+            let tmp = *value;
+            let amount = self.delta_cursor_x * drag_speed;
+            value.drag(min, max, amount + self.amount);
+            if value == &tmp {
+                self.amount += amount;
+            } else {
+                self.amount = 0.0;
+            }
             self.input_text.set_input_sliderable(style, value);
         } else {
             if let Some(v) = self.input_text.get_input() {
@@ -86,7 +105,14 @@ impl<I, FontHash, Style> DragValue<I, FontHash, Style>
             U: Sliderable,
     {
         if !self.input_text.active() {
+            let tmp = *value;
+            let amount = self.delta_cursor_x * drag_speed;
             value.drag(min, max, self.delta_cursor_x * drag_speed);
+            if value == &tmp {
+                self.amount += amount;
+            } else {
+                self.amount = 0.0;
+            }
             let mapped = map_to(value);
             self.input_text.set_input_sliderable(style, &mapped);
         } else {
@@ -123,13 +149,9 @@ impl<I, FontHash, Style> DragValue<I, FontHash, Style>
 impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, Style>
     where
         I: Interface,
-        FontHash: Clone + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
-    #[inline(always)]
-    fn hover_text(&self) -> Option<&str> {
-        None
-    }
 
     #[inline(always)]
     fn get_offset(&self) -> Vec2 {
@@ -156,20 +178,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
     }
 
     #[inline(always)]
-    fn status(
-        &self,
+    fn status<'a>(
+        &'a self,
         nox: &Nox<I>,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2,
-    ) -> WidgetStatus
+    ) -> WidgetStatus<'a>
     {
         if self.held() ||
             matches!(self.input_text.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active)
         {
             WidgetStatus::Active
         } else if self.hovered() {
-            WidgetStatus::Hovered
+            WidgetStatus::Hovered(None)
         } else {
             WidgetStatus::Inactive
         }
@@ -239,8 +261,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         );
         update_results.cursor_in_widget |= cursor_in_rect || self.held();
         update_results.requires_triangulation |=
-            self.focused_outline_width != style.focused_outline_width();
-        self.focused_outline_width = style.focused_outline_width();
+            self.focused_outline_width != style.focused_widget_outline_width() ||
+            self.active_outline_width != style.active_widget_outline_width();
+        self.focused_outline_width = style.focused_widget_outline_width();
+        self.active_outline_width = style.active_widget_outline_width();
         update_results
     }
     
@@ -248,12 +272,13 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
     fn triangulate(
         &mut self,
         points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
+        helper_points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
         tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     ) {
         self.input_text.outline_points(self.focused_outline_width, points);
         self.focused_outline_vertex_range = tri(&points);
         points.clear();
-        self.input_text.triangulate(points, tri);
+        self.input_text.triangulate(points, helper_points, tri);
     }
 
     #[inline(always)]
@@ -264,12 +289,15 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
     ) {
         if !self.input_text.active() && (self.held() || self.hovered()) {
             let offset = self.input_text.offset();
-            let target_color = if self.held() {
-                style.active_widget_outline_col()
+            if self.held() {
+                let target_color = style.active_widget_outline_col();
+                set_vertex_params(vertices, self.active_outline_vertex_range, offset, target_color);
+                hide_vertices(vertices, self.focused_outline_vertex_range);
             } else {
-                style.focused_widget_outline_col()
-            };
-            set_vertex_params(vertices, self.focused_outline_vertex_range, offset, target_color);
+                let target_color = style.focused_widget_outline_col();
+                set_vertex_params(vertices, self.focused_outline_vertex_range, offset, target_color);
+                hide_vertices(vertices, self.active_outline_vertex_range);
+            }
         } else {
             hide_vertices(vertices, self.focused_outline_vertex_range);
         }
