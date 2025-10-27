@@ -12,9 +12,9 @@ use nox_geom::{
 use super::*;
 
 #[derive(Debug)]
-struct Outline {
-    vertices: GlobalVec<[f32; 2]>,
-    units_per_em: f32,
+pub struct Outline {
+    pub vertices: GlobalVec<[f32; 2]>,
+    pub units_per_em: f32,
 }
 
 impl Outline {
@@ -49,8 +49,8 @@ impl Outline {
     }
 }
 
-struct OutlineBuilder {
-    outlines: GlobalVec<Outline>,
+pub struct OutlineBuilder {
+    pub outlines: GlobalVec<Outline>,
     current_outline: Option<Outline>,
     curve_tolerance: f32,
     pos: [f32; 2],
@@ -62,7 +62,7 @@ struct OutlineBuilder {
 impl OutlineBuilder {
 
     #[inline(always)]
-    fn new(curve_tolerance: f32, units_per_em: u16, winding_rule: i16) -> Self {
+    pub fn new(curve_tolerance: f32, units_per_em: u16, winding_rule: i16) -> Self {
         Self {
             outlines: GlobalVec::new(),
             current_outline: Some(Outline::new(units_per_em as f32)),
@@ -85,7 +85,7 @@ impl OutlineBuilder {
     }
 
     #[inline(always)]
-    fn finalize(self) -> Option<GlyphTriangles> {
+    pub fn finalize(self) -> Option<GlyphTriangles> {
 
         if self.vertex_count == 0 {
             return None

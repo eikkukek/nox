@@ -39,7 +39,7 @@ pub enum WidgetId {
     ComboBox(Hashable<f64>),
 }
 
-pub struct CollapsedWidgets {
+pub struct CollapsingHeader {
     label: CompactString,
     label_text: RenderedText,
     offset: Vec2,
@@ -51,7 +51,7 @@ pub struct CollapsedWidgets {
     flags: u32,
 }
 
-impl CollapsedWidgets {
+impl CollapsingHeader {
 
     const COLLAPSED: u32 = 0x1;
     const HOVERED: u32 = 0x2;
@@ -374,9 +374,9 @@ pub struct Window<I, FontHash, Style>
     widgets: Option<WidgetTables<I, FontHash, Style>>,
     active_widgets: FxHashSet<WidgetId>,
     prev_active_widgets: GlobalVec<WidgetId>,
-    collapsed_widgets: FxHashMap<Hashable<f64>, (u64, CollapsedWidgets)>,
-    active_collapsed_widgets: FxHashSet<Hashable<f64>>,
-    prev_active_collapsed_widgets: GlobalVec<Hashable<f64>>,
+    collapsing_headers: FxHashMap<Hashable<f64>, (u64, CollapsingHeader)>,
+    active_collapsing_headers: FxHashSet<Hashable<f64>>,
+    prev_active_collapsing_headers: GlobalVec<Hashable<f64>>,
     hover_window: Option<HoverWindow>,
     last_triangulation: u64,
     last_frame: u64,
@@ -434,9 +434,9 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             widgets: Some(WidgetTables::new()),
             active_widgets: Default::default(),
             prev_active_widgets: Default::default(),
-            collapsed_widgets: FxHashMap::default(),
-            active_collapsed_widgets: Default::default(),
-            prev_active_collapsed_widgets: Default::default(),
+            collapsing_headers: FxHashMap::default(),
+            active_collapsing_headers: Default::default(),
+            prev_active_collapsing_headers: Default::default(),
             hover_window: Some(HoverWindow::new()),
             last_triangulation: 0,
             last_frame: 0,
@@ -692,28 +692,28 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     }
 
     #[inline(always)]
-    pub fn activate_collapsed_widgets(
+    pub fn activate_collapsing_headers(
         &mut self,
         label: &str,
-    ) -> (&mut CollapsedWidgets, Hashable<f64>)
+    ) -> (&mut CollapsingHeader, Hashable<f64>)
     {
         let mut id = Hashable((label as *const str).addr() as f64);
-        while !self.active_collapsed_widgets.insert(id) {
+        while !self.active_collapsing_headers.insert(id) {
             id.0 += 0.01;
         }
-        let (last_triangulation, collapsed_widgets) = self.collapsed_widgets.entry(id).or_insert((0, CollapsedWidgets::new()));
+        let (last_triangulation, collapsing_headers) = self.collapsing_headers.entry(id).or_insert((0, CollapsingHeader::new()));
         if *last_triangulation != self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
-        (collapsed_widgets, id)
+        (collapsing_headers, id)
     }
 
     #[inline(always)]
-    pub fn get_collapsed_widgets(
+    pub fn get_collapsing_headers(
         &mut self,
         id: Hashable<f64>,
-    ) -> &mut CollapsedWidgets {
-        self.collapsed_widgets.get_mut(&id).map(|(_, c)| c).unwrap()
+    ) -> &mut CollapsingHeader {
+        self.collapsing_headers.get_mut(&id).map(|(_, c)| c).unwrap()
     }
 
     #[inline(always)]
@@ -835,11 +835,11 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             self.prev_active_widgets.push(widget);
         }
         self.active_widgets.clear();
-        self.prev_active_collapsed_widgets.clear();
-        for &c in &self.active_collapsed_widgets {
-            self.prev_active_collapsed_widgets.push(c);
+        self.prev_active_collapsing_headers.clear();
+        for &c in &self.active_collapsing_headers {
+            self.prev_active_collapsing_headers.push(c);
         }
-        self.active_collapsed_widgets.clear();
+        self.active_collapsing_headers.clear();
     }
 
     pub fn update(
@@ -875,10 +875,10 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             let (_, widget) = widgets.get_widget_mut(widget);
             widget.hide(&mut self.vertices);
         }
-        self.prev_active_collapsed_widgets.retain(|v| !self.active_collapsed_widgets.contains(v));
-        for collapsed_widgets in &self.prev_active_collapsed_widgets {
-            let (_, collapsed_widgets) = &self.collapsed_widgets[collapsed_widgets];
-            collapsed_widgets.hide(&mut self.vertices);
+        self.prev_active_collapsing_headers.retain(|v| !self.active_collapsing_headers.contains(v));
+        for collapsing_headers in &self.prev_active_collapsing_headers {
+            let (_, collapsing_headers) = &self.collapsing_headers[collapsing_headers];
+            collapsing_headers.hide(&mut self.vertices);
         }
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         let item_pad_outer = style.item_pad_outer();
@@ -907,13 +907,13 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 },
             }
         }
-        for collapsed_widgets in &self.active_collapsed_widgets {
-            let (_, collapsed_widgets) = self.collapsed_widgets.get_mut(collapsed_widgets).unwrap();
-            let width = collapsed_widgets.update(nox, window_pos, cursor_pos, style, active_widget.is_some(), |text, offset, bounded_text_instance| {
+        for collapsing_headers in &self.active_collapsing_headers {
+            let (_, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
+            let width = collapsing_headers.update(nox, window_pos, cursor_pos, style, active_widget.is_some(), |text, offset, bounded_text_instance| {
                 self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
             });
             min_width = min_width.max(width);
-            if collapsed_widgets.hovered() && active_widget.is_none() {
+            if collapsing_headers.hovered() && active_widget.is_none() {
                 hovered_widget = Some(self.active_widgets.len());
             }
         }
@@ -1317,20 +1317,20 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                     }
                 );
             }
-            for collapsed_widgets in &self.active_collapsed_widgets {
-                let (last_triangulation, collapsed_widgets) = self.collapsed_widgets.get_mut(collapsed_widgets).unwrap();
+            for collapsing_headers in &self.active_collapsing_headers {
+                let (last_triangulation, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
                 *last_triangulation = new_triangulation;
                 self.vertices.append(&[Default::default(); 3]);
                 let n = self.vertices.len();
                 indices_usize.append(&[n - 3, n - 2, n - 1]);
-                collapsed_widgets.symbol_vertex_range = VertexRange::new(n - 3..n);
+                collapsing_headers.symbol_vertex_range = VertexRange::new(n - 3..n);
                 self.vertices.append(&[Default::default(); 4]);
                 let n = self.vertices.len();
                 indices_usize.append(&[
                     n - 4, n - 1, n - 3,
                     n - 3, n - 1, n - 2,
                 ]);
-                collapsed_widgets.beam_vertex_range = VertexRange::new(n - 4..n);
+                collapsing_headers.beam_vertex_range = VertexRange::new(n - 4..n);
             }
             self.main_draw_info = DrawInfo {
                 first_index: 0,
@@ -1376,9 +1376,9 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             let (_, widget) = widgets.get_widget_mut(widget);
             widget.set_vertex_params(style, &mut self.vertices);
         }
-        for collapsed_widgets in &self.active_collapsed_widgets {
-            let (_, collapsed_widgets) = self.collapsed_widgets.get_mut(collapsed_widgets).unwrap();
-            collapsed_widgets.set_vertex_params(style, &mut self.vertices);
+        for collapsing_headers in &self.active_collapsing_headers {
+            let (_, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
+            collapsing_headers.set_vertex_params(style, &mut self.vertices);
         }
         let vertex_sample = self.vertices[self.main_rect_vertex_range.start()];
         if vertex_sample.color != style.window_bg_col() {
@@ -1543,7 +1543,7 @@ pub struct WindowContext<'a, 'b, I, FontHash, Style>
     text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
     current_row_widgets: GlobalVec<(WidgetId, Vec2)>,
     current_row_text: GlobalVec<(usize, usize, usize, WidgetId)>,
-    collapsed_widgets_id: Hashable<f64>,
+    collapsing_headers_id: Hashable<f64>,
     min_triangulation: u64,
     widget_off: Vec2,
     beam_height: f32,
@@ -1591,7 +1591,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             text_renderer,
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
-            collapsed_widgets_id: Default::default(),
+            collapsing_headers_id: Default::default(),
             min_width: 0.0,
             min_width_sub: 0.0,
             beam_height: 0.0,
@@ -1613,13 +1613,13 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         input_text_width: f32,
         min_triangulation: u64,
     ) -> Self {
-        let (collapsed_widgets, id) = window.activate_collapsed_widgets(label);
-        collapsed_widgets.set_label(style, text_renderer, label);
-        collapsed_widgets.set_offset(widget_off);
-        let collapsed = collapsed_widgets.collapsed();
+        let (collapsing_headers, id) = window.activate_collapsing_headers(label);
+        collapsing_headers.set_label(style, text_renderer, label);
+        collapsing_headers.set_offset(widget_off);
+        let collapsed = collapsing_headers.collapsed();
         let item_pad_outer = style.item_pad_outer();
         let base_off = widget_off +
-            vec2(item_pad_outer.x, style.calc_text_height(&collapsed_widgets.label_text) + style.item_pad_outer().y);
+            vec2(item_pad_outer.x, style.calc_text_height(&collapsing_headers.label_text) + style.item_pad_outer().y);
         Self {
             widget_off: base_off,
             row_widget_off_x: widget_off.x + item_pad_outer.x,
@@ -1628,7 +1628,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             text_renderer,
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
-            collapsed_widgets_id: id,
+            collapsing_headers_id: id,
             min_triangulation,
             min_width: 0.0,
             min_width_sub: 0.0,
@@ -1661,10 +1661,10 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             if collapsing.current_height != 0.0 {
                 collapsing.end_row();
             }
-            let c = collapsing.window.get_collapsed_widgets(collapsing.collapsed_widgets_id);
+            let c = collapsing.window.get_collapsing_headers(collapsing.collapsing_headers_id);
             c.set_beam_height(collapsing.beam_height);
         } else {
-            let c = collapsing.window.get_collapsed_widgets(collapsing.collapsed_widgets_id);
+            let c = collapsing.window.get_collapsing_headers(collapsing.collapsing_headers_id);
             c.set_beam_height(0.0);
         }
         self.min_width = self.min_width.max(collapsing.widget_off.x.max(collapsing.min_width));

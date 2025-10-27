@@ -756,6 +756,20 @@ impl_traits!{
             return true
         }
     ,
+    PartialEq<&[T]> where T: PartialEq =>
+
+        fn eq(&self, other: &&[T]) -> bool {
+            if self.len != other.len() {
+                return false
+            }
+            for (i, value) in self.iter().enumerate() {
+                if value != &other[i] {
+                    return false
+                }
+            }
+            return true
+        }
+    ,
     Eq where T: Eq =>
     ,
     Hash where T: Hash =>

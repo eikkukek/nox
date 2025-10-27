@@ -18,13 +18,13 @@ pub struct Checkbox<I, FontHash, Style> {
     offset: Vec2,
     rect: Rect,
     size: Vec2,
-    checkbox_symbol: char,
-    checkbox_text: RenderedText,
     label: CompactString,
     label_text: RenderedText,
     focused_outline_width: f32,
     active_outline_width: f32,
+    checkmark_points: GlobalVec<[f32; 2]>,
     rect_vertex_range: VertexRange,
+    checkmark_vertex_range: VertexRange,
     focused_outline_vertex_range: VertexRange,
     active_outline_vertex_range: VertexRange,
     font: FontHash,
@@ -50,12 +50,12 @@ impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
             rect: Default::default(),
             size: Default::default(),
             offset: Default::default(),
-            checkbox_symbol: Default::default(),
-            checkbox_text: Default::default(),
             label: Default::default(),
             label_text: Default::default(),
             focused_outline_width: 0.0,
             active_outline_width: 0.0,
+            checkmark_points: Default::default(),
+            checkmark_vertex_range: Default::default(),
             rect_vertex_range: Default::default(),
             focused_outline_vertex_range: Default::default(),
             active_outline_vertex_range: Default::default(),
@@ -116,14 +116,6 @@ impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
                 0.0
             ).unwrap_or_default();
         }
-        if font_changed || self.checkbox_symbol != style.checkbox_symbol() {
-            self.checkbox_symbol = style.checkbox_symbol();
-            self.checkbox_text = text_renderer.render(
-                &[text_segment(&self.checkbox_symbol.to_string(), &self.font)],
-                false,
-                0.0
-            ).unwrap_or_default();
-        }
     }
 }
 
@@ -153,14 +145,13 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
     fn calc_size(
         &mut self,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<FontHash>,
+        text_renderer: &mut VertexTextRenderer<FontHash>,
     ) -> Vec2
     {
-        let checkbox_size = style.calc_text_box_size(&self.checkbox_text);
-        let max = checkbox_size.x.max(checkbox_size.y);
-        let checkbox_size = vec2(max, max);
+        let checkmark_box_max = style.calc_font_height(text_renderer);
+        let checkbox_size = vec2(checkmark_box_max, checkmark_box_max);
         let label_width = style.calc_text_width(&self.label_text);
-        self.size = checkbox_size + vec2(style.item_pad_outer().x + label_width, 0.0);
+        self.size = checkbox_size + vec2(style.item_pad_inner().x + label_width, 0.0);
         self.size
     }
 
@@ -184,7 +175,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
         cursor_pos: Vec2,
@@ -197,9 +188,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
     ) -> UpdateResult
     {
         let offset = self.offset;
-        let rect_size = style.calc_text_box_size(&self.checkbox_text);
-        let rect_max_size = rect_size.x.max(rect_size.y);
-        let rect_size = vec2(rect_max_size, rect_max_size);
+        let rect_max = style.calc_font_height(text_renderer);
+        let rect_size = vec2(rect_max, rect_max);
         let rect = rect(Default::default(), rect_size, style.rounding());
         let requires_triangulation =
             self.rect != rect ||
@@ -243,17 +233,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
                     style.inactive_text_col()
                 },
         };
-        let check_size = style.calc_text_size(&self.checkbox_text);
-        if self.checked() {
-            collect_text(&self.checkbox_text,
-                offset + rect.max * 0.5 - check_size * 0.5,
-                bounded_instance,
-            );
-        }
         collect_text(&self.label_text,
-            offset + vec2(rect.max.x + style.item_pad_outer().x, rect.max.y * 0.5 - check_size.y * 0.5),
+            offset + vec2(rect.max.x + style.item_pad_inner().x, 0.0),
             bounded_instance,
         );
+        if requires_triangulation {
+            self.checkmark_points.clear();
+            style.get_checkmark_points(text_renderer, &mut self.checkmark_points);
+        }
         UpdateResult {
             requires_triangulation,
             cursor_in_widget
@@ -279,6 +266,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         );
         self.active_outline_vertex_range = tri(&helper_points);
         self.rect_vertex_range = tri(&points);
+        points.clear();
+        points.append(&self.checkmark_points);
+        self.checkmark_vertex_range = tri(&points);
     }
 
     fn set_vertex_params(
@@ -300,6 +290,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
             set_vertex_params(vertices, self.focused_outline_vertex_range, offset, target_color);
         } else {
             hide_vertices(vertices, self.focused_outline_vertex_range);
+        }
+        if self.checked() {
+            let offset = offset + self.rect.max * 0.5;
+            let target_color =
+                if self.held() {
+                    style.active_text_col()
+                } else if self.hovered() {
+                    style.focused_text_col()
+                } else {
+                    style.inactive_text_col()
+                };
+            set_vertex_params(vertices, self.checkmark_vertex_range, offset, target_color);
+        } else {
+            hide_vertices(vertices, self.checkmark_vertex_range);
         }
         let vertex_sample = vertices[self.rect_vertex_range.start()];
         if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col() {
@@ -335,5 +339,6 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         hide_vertices(vertices, self.rect_vertex_range);
         hide_vertices(vertices, self.focused_outline_vertex_range);
         hide_vertices(vertices, self.active_outline_vertex_range);
+        hide_vertices(vertices, self.checkmark_vertex_range);
     }
 }

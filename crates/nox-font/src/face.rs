@@ -3,8 +3,8 @@ use core::ops::{Deref, DerefMut};
 use nox::mem::impl_traits;
 
 pub struct Face<'a> {
-    face: ttf_parser::Face<'a>,
-    pub(crate) hb_font: harfbuzz_rs::Owned<harfbuzz_rs::Font<'a>>,
+    pub face: ttf_parser::Face<'a>,
+    pub hb_font: harfbuzz_rs::Owned<harfbuzz_rs::Font<'a>>,
 }
 
 impl<'a> Face<'a> {

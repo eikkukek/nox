@@ -996,14 +996,17 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
     )
     {
         let mut offset = self.offset;
-        let mut target_color = if self.has_bg_col_override() {
+        let target_color = if self.has_bg_col_override() {
             self.bg_col_override
         } else {
             style.input_text_bg_col()
         };
         set_vertex_params(vertices, self.input_rect_vertex_range, offset, target_color);
-        target_color = style.input_text_active_outline_col();
         if self.active() {
+            let target_color = style.input_text_active_outline_col();
+            set_vertex_params(vertices, self.input_rect_outline_vertex_range, offset, target_color);
+        } else if self.hovered() {
+            let target_color = style.focused_widget_outline_col();
             set_vertex_params(vertices, self.input_rect_outline_vertex_range, offset, target_color);
         } else {
             hide_vertices(vertices, self.input_rect_outline_vertex_range);
@@ -1011,7 +1014,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         if self.cursor_visible() {
             offset += style.item_pad_inner() +
                 self.calc_cursor_offset(style.font_scale(), self.text_cursor_pos);
-            target_color = style.focused_text_col();
+            let target_color = style.focused_text_col();
             set_vertex_params(vertices, self.cursor_rect_vertex_range, offset, target_color);
         } else {
             hide_vertices(vertices, self.cursor_rect_vertex_range);

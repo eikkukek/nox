@@ -1,6 +1,11 @@
-use core::fmt::Write;
+use core::{
+    fmt::Write,
+};
+use std::f32::consts::FRAC_PI_2;
 
 use crate::*;
+
+use nox::mem::vec_types::GlobalVec;
 
 use nox_font::VertexTextRenderer;
 use nox_geom::*;
@@ -92,6 +97,30 @@ pub trait WindowStyle<FontHash> {
     #[inline(always)]
     fn input_text_empty_text_color(&self) -> ColorSRGBA {
         DEFAULT_INACTIVE_TEXT_COL.with_alpha(0.4)
+    }
+
+    #[inline(always)]
+    fn get_checkmark_points(
+        &self,
+        text_renderer: &mut VertexTextRenderer<FontHash>,
+        points: &mut GlobalVec<[f32; 2]>,
+    ) where 
+        FontHash: UiFontHash,
+    {
+        let scale = 1.0 / text_renderer.font_height(self.font_regular()).unwrap();
+        let mut checkmark = [Vec2::default(); 6];
+        checkmark[0] = vec2(0.5, -0.75);
+        checkmark[1] = vec2(-0.2, 0.5);
+        checkmark[2] =
+            (checkmark[1] - checkmark[0]).rotated(FRAC_PI_2) * 0.5;
+        checkmark[3] =
+            checkmark[2] + (checkmark[2].normalized().rotated(-FRAC_PI_2) * 0.25);
+        checkmark[4] =
+            checkmark[1] + vec2(0.0, 0.25);
+        checkmark[5] = checkmark[0] +
+            (checkmark[0] - checkmark[1]).normalized().rotated(FRAC_PI_2) * 0.25;
+        checkmark.reverse();
+        points.append_map(&checkmark, |&p| (p * self.font_scale() * scale * 0.7).into());
     }
 
     #[inline(always)]
@@ -210,11 +239,6 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn checkbox_symbol(&self) -> char {
-        '󰄬'
-    }
-
-    #[inline(always)]
     fn f32_format(&self, value: f32, to: &mut impl Write) -> core::fmt::Result {
         write!(to, "{:.2}", value)
     }
@@ -318,7 +342,7 @@ impl<FontHash> WindowStyle<FontHash> for DefaultStyle<FontHash> {
 }
 
 const DEFAULT_WINDOW_BG_COL: ColorSRGBA =
-    ColorSRGBA::new(10.0 / 255.0, 15.0 / 255.0, 15.0 / 255.0, 1.0);
+    ColorSRGBA::new(8.0 / 255.0, 12.0 / 255.0, 12.0 / 255.0, 1.0);
 
 const DEFAULT_WINDOW_TITLE_BAR_COL: ColorSRGBA = DEFAULT_WINDOW_BG_COL;
 
@@ -329,10 +353,10 @@ const DEFAULT_FOCUSED_WINDOW_OUTLINE_COL: ColorSRGBA =
     ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0);
 
 const DEFAULT_WIDGET_BG_COL: ColorSRGBA =
-    ColorSRGBA::new(20.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 1.0);
+    ColorSRGBA::new(16.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0, 1.0);
 
 const DEFAULT_SELECTION_COL: ColorSRGBA =
-    ColorSRGBA::new(24.0 / 255.0, 49.0 / 255.0, 67.0 / 255.0, 1.0);
+    ColorSRGBA::new(20.0 / 255.0, 41.0 / 255.0, 56.0 / 255.0, 1.0);
 
 const DEFAULT_INACTIVE_TEXT_COL: ColorSRGBA =
     ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 0.6);
@@ -350,10 +374,10 @@ const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_FOCUSED_TEXT_COL;
 const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_ACTIVE_TEXT_COL;
 
 const DEFAULT_HOVER_WINDOW_BG_COL: ColorSRGBA =
-    ColorSRGBA::new(8.0 / 255.0, 12.0 / 255.0, 12.0 / 255.0, 1.0);
+    ColorSRGBA::new(6.0 / 255.0, 9.0 / 255.0, 9.0 / 255.0, 1.0);
 
 const DEFAULT_INPUT_TEXT_BG_COL: ColorSRGBA =
-    ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0);
+    ColorSRGBA::new(4.0 / 255.0, 6.0 / 255.0, 6.0 / 255.0, 1.0);
 
 const DEFAULT_INPUT_TEXT_ACTIVE_OUTLINE_COL: ColorSRGBA =
     ColorSRGBA::new(40.0 / 255.0, 215.0 / 255.0, 215.0 / 255.0, 0.7);
