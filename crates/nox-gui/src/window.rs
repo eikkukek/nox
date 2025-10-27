@@ -40,10 +40,13 @@ pub enum WidgetId {
 }
 
 pub struct CollapsedWidgets {
-    title: CompactString,
-    title_text: RenderedText,
+    label: CompactString,
+    label_text: RenderedText,
     offset: Vec2,
     symbol_vertex_range: VertexRange,
+    beam_vertex_range: VertexRange,
+    beam_width: f32,
+    beam_height: f32,
     rotation: f32,
     flags: u32,
 }
@@ -56,10 +59,13 @@ impl CollapsedWidgets {
     #[inline(always)]
     fn new() -> Self {
         Self {
-            title: Default::default(),
-            title_text: Default::default(),
+            label: Default::default(),
+            label_text: Default::default(),
             offset: Default::default(),
             symbol_vertex_range: Default::default(),
+            beam_vertex_range: Default::default(),
+            beam_width: 0.0,
+            beam_height: 0.0,
             rotation: 0.0,
             flags: Self::COLLAPSED,
         }
@@ -81,16 +87,26 @@ impl CollapsedWidgets {
     }
 
     #[inline(always)]
-    fn set_label<FontHash>(&mut self, style: &impl WindowStyle<FontHash>, text_renderer: &mut VertexTextRenderer<FontHash>, title: &str)
+    pub fn set_label<FontHash>(
+        &mut self,
+        style: &impl WindowStyle<FontHash>,
+        text_renderer: &mut VertexTextRenderer<FontHash>,
+        label: &str
+    )
         where 
             FontHash: UiFontHash,
     {
-        if self.title != title {
-            self.title = CompactString::new(title);
-            self.title_text = text_renderer.render(
-                &[text_segment(&self.title, style.font_regular())], false, 0.0 
+        if self.label != label {
+            self.label = CompactString::new(label);
+            self.label_text = text_renderer.render(
+                &[text_segment(&self.label, style.font_regular())], false, 0.0 
             ).unwrap_or_default();
         }
+    }
+
+    #[inline(always)]
+    pub fn set_beam_height(&mut self, height: f32) {
+        self.beam_height = height;
     }
 
     #[inline(always)]
@@ -109,7 +125,7 @@ impl CollapsedWidgets {
     {
         let item_pad_outer = style.item_pad_outer();
         let collapse_scale = style.collapse_symbol_scale();
-        let text_size = style.calc_text_size(&self.title_text);
+        let text_size = style.calc_text_size(&self.label_text);
         let offset = self.offset;
         let bounding_rect = BoundingRect::from_position_size(
             window_pos + offset,
@@ -125,7 +141,7 @@ impl CollapsedWidgets {
         } else {
             self.rotation = (self.rotation + FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
         }
-        collect_text(&self.title_text, offset + vec2(collapse_scale + style.item_pad_inner().x, 0.0), BoundedTextInstance {
+        collect_text(&self.label_text, offset + vec2(collapse_scale + style.item_pad_inner().x, 0.0), BoundedTextInstance {
             add_scale: vec2(1.0, 1.0),
             min_bounds: vec2(f32::MIN, f32::MIN),
             max_bounds: vec2(f32::MAX, f32::MAX),
@@ -135,6 +151,7 @@ impl CollapsedWidgets {
                 style.inactive_text_col()
             }
         });
+        self.beam_width = style.window_outline_width();
         offset.x + collapse_scale + text_size.x + item_pad_outer.x
     }
 
@@ -153,20 +170,47 @@ impl CollapsedWidgets {
                     style.inactive_text_col(),
                 )
             };
-        let offset = self.offset + vec2(scale * 0.5, style.calc_text_height(&self.title_text) * 0.5);
-        vertices[self.symbol_vertex_range.start()] = Vertex {
+        let offset = self.offset + vec2(scale * 0.5, style.calc_text_height(&self.label_text) * 0.5);
+        let start = self.symbol_vertex_range.start();
+        vertices[start] = Vertex {
             pos: vec2(0.5, 0.0).rotated(rotation) * scale,
-            offset: offset,
+            offset,
             color,
         };
-        vertices[self.symbol_vertex_range.start() + 1] = Vertex {
+        vertices[start + 1] = Vertex {
             pos: vec2(-0.5, 0.5).rotated(rotation) * scale,
-            offset: offset,
+            offset,
             color,
         };
-        vertices[self.symbol_vertex_range.start() + 2] = Vertex {
+        vertices[start + 2] = Vertex {
             pos: vec2(-0.5, -0.5).rotated(rotation) * scale,
-            offset: offset,
+            offset,
+            color,
+        };
+        let item_pad_outer = style.item_pad_outer();
+        let beam_width_half = self.beam_width * 0.5;
+        let offset = self.offset + vec2(style.collapse_symbol_scale() * 0.5, item_pad_outer.y + item_pad_outer.y);
+        let beam_height = self.beam_height - item_pad_outer.y;
+        let start = self.beam_vertex_range.start();
+        let color = color.scale_alpha(0.3);
+        vertices[start] = Vertex {
+            pos: vec2(-beam_width_half, 0.0),
+            offset,
+            color,
+        };
+        vertices[start + 1] = Vertex {
+            pos: vec2(-beam_width_half, beam_height),
+            offset,
+            color,
+        };
+        vertices[start + 2] = Vertex {
+            pos: vec2(beam_width_half, beam_height),
+            offset,
+            color,
+        };
+        vertices[start + 3] = Vertex {
+            pos: vec2(beam_width_half, 0.0),
+            offset,
             color,
         };
     }
@@ -174,6 +218,7 @@ impl CollapsedWidgets {
     #[inline(always)]
     fn hide(&self, vertices: &mut [Vertex]) {
         hide_vertices(vertices, self.symbol_vertex_range);
+        hide_vertices(vertices, self.beam_vertex_range);
     }
 }
 
@@ -650,7 +695,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     pub fn activate_collapsed_widgets(
         &mut self,
         label: &str,
-    ) -> &mut CollapsedWidgets
+    ) -> (&mut CollapsedWidgets, Hashable<f64>)
     {
         let mut id = Hashable((label as *const str).addr() as f64);
         while !self.active_collapsed_widgets.insert(id) {
@@ -660,7 +705,15 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         if *last_triangulation != self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
-        collapsed_widgets
+        (collapsed_widgets, id)
+    }
+
+    #[inline(always)]
+    pub fn get_collapsed_widgets(
+        &mut self,
+        id: Hashable<f64>,
+    ) -> &mut CollapsedWidgets {
+        self.collapsed_widgets.get_mut(&id).map(|(_, c)| c).unwrap()
     }
 
     #[inline(always)]
@@ -1271,6 +1324,13 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 let n = self.vertices.len();
                 indices_usize.append(&[n - 3, n - 2, n - 1]);
                 collapsed_widgets.symbol_vertex_range = VertexRange::new(n - 3..n);
+                self.vertices.append(&[Default::default(); 4]);
+                let n = self.vertices.len();
+                indices_usize.append(&[
+                    n - 4, n - 1, n - 3,
+                    n - 3, n - 1, n - 2,
+                ]);
+                collapsed_widgets.beam_vertex_range = VertexRange::new(n - 4..n);
             }
             self.main_draw_info = DrawInfo {
                 first_index: 0,
@@ -1483,8 +1543,10 @@ pub struct WindowContext<'a, 'b, I, FontHash, Style>
     text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
     current_row_widgets: GlobalVec<(WidgetId, Vec2)>,
     current_row_text: GlobalVec<(usize, usize, usize, WidgetId)>,
+    collapsed_widgets_id: Hashable<f64>,
     min_triangulation: u64,
     widget_off: Vec2,
+    beam_height: f32,
     min_width: f32,
     min_width_sub: f32,
     row_widget_off_x: f32,
@@ -1529,8 +1591,10 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             text_renderer,
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
+            collapsed_widgets_id: Default::default(),
             min_width: 0.0,
             min_width_sub: 0.0,
+            beam_height: 0.0,
             slider_width: style.default_slider_width(),
             input_text_width: style.default_input_text_width(),
             current_height: 0.0,
@@ -1549,22 +1613,26 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         input_text_width: f32,
         min_triangulation: u64,
     ) -> Self {
-        let collapsed_widgets = window.activate_collapsed_widgets(label);
+        let (collapsed_widgets, id) = window.activate_collapsed_widgets(label);
         collapsed_widgets.set_label(style, text_renderer, label);
         collapsed_widgets.set_offset(widget_off);
         let collapsed = collapsed_widgets.collapsed();
         let item_pad_outer = style.item_pad_outer();
+        let base_off = widget_off +
+            vec2(item_pad_outer.x, style.calc_text_height(&collapsed_widgets.label_text) + style.item_pad_outer().y);
         Self {
-            widget_off: widget_off + vec2(item_pad_outer.x, style.calc_text_height(&collapsed_widgets.title_text) + style.item_pad_outer().y),
+            widget_off: base_off,
             row_widget_off_x: widget_off.x + item_pad_outer.x,
             window,
             style,
             text_renderer,
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
+            collapsed_widgets_id: id,
             min_triangulation,
             min_width: 0.0,
             min_width_sub: 0.0,
+            beam_height: 0.0,
             slider_width,
             input_text_width,
             current_height: 0.0,
@@ -1583,17 +1651,29 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             self.end_row();
         }
         self.widget_off.x = self.row_widget_off_x;
+        let item_pad_outer = self.style.item_pad_outer();
         let mut collapsing = WindowContext::new_collapsing(
             label, self.window, self.style, self.text_renderer,
             self.widget_off, self.slider_width, self.input_text_width, self.min_triangulation,
         );
         if !collapsing.collapsed {
             f(&mut collapsing);
+            if collapsing.current_height != 0.0 {
+                collapsing.end_row();
+            }
+            let c = collapsing.window.get_collapsed_widgets(collapsing.collapsed_widgets_id);
+            c.set_beam_height(collapsing.beam_height);
+        } else {
+            let c = collapsing.window.get_collapsed_widgets(collapsing.collapsed_widgets_id);
+            c.set_beam_height(0.0);
         }
         self.min_width = self.min_width.max(collapsing.widget_off.x.max(collapsing.min_width));
+        self.beam_height += collapsing.widget_off.y - self.widget_off.y;
         self.widget_off.y = collapsing.widget_off.y;
         if !collapsing.collapsed && collapsing.current_height != 0.0 {
-            self.widget_off.y += collapsing.current_height + self.style.item_pad_outer().y;
+            let height_add = collapsing.current_height + item_pad_outer.y;
+            self.widget_off.y += height_add;
+            self.beam_height += height_add;
         }
     }
 
@@ -1601,7 +1681,9 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         let item_pad_outer = self.style.item_pad_outer();
         self.min_width = (self.widget_off.x - self.min_width_sub).max(self.min_width);
         self.widget_off.x = self.row_widget_off_x;
-        self.widget_off.y += self.current_height + item_pad_outer.y;
+        let height_add = self.current_height + item_pad_outer.y;
+        self.beam_height += height_add;
+        self.widget_off.y += height_add;
         let current_height_half = self.current_height * 0.5;
         let widgets = unsafe {
             self.window.widgets.as_mut().unwrap_unchecked()
@@ -1628,7 +1710,9 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
                 if text.row_offset > row_index as u32 {
                     panic!("should not happen")
                 }
-                else if let Some(RowOffsets { offsets, row_height, max_x: _, min_x: _ }) = &mut text.rows.get_mut(row_index - text.row_offset as usize) {
+                else if let Some(RowOffsets { offsets, row_height, max_x: _, min_x: _ }) =
+                    &mut text.rows.get_mut(row_index - text.row_offset as usize)
+                {
                     let row_height_halved = *row_height * 0.5;
                     for offset in offsets {
                         offset.offset[1] += current_height_half_scaled - row_height_halved;

@@ -332,7 +332,7 @@ const DEFAULT_WIDGET_BG_COL: ColorSRGBA =
     ColorSRGBA::new(20.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 1.0);
 
 const DEFAULT_SELECTION_COL: ColorSRGBA =
-    ColorSRGBA::new(27.0 / 255.0, 54.0 / 255.0, 75.0 / 255.0, 1.0);
+    ColorSRGBA::new(24.0 / 255.0, 49.0 / 255.0, 67.0 / 255.0, 1.0);
 
 const DEFAULT_INACTIVE_TEXT_COL: ColorSRGBA =
     ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 0.6);

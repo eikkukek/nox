@@ -72,6 +72,12 @@ impl ColorSRGBA {
         self.alpha = alpha;
         self
     }
+
+    #[inline(always)]
+    pub const fn scale_alpha(mut self, scale: f32) -> Self {
+        self.alpha *= scale;
+        self
+    }
 }
 
 impl Color for ColorSRGBA {

@@ -1,7 +1,4 @@
-use core::{
-    f32::consts::*,
-    marker::PhantomData
-};
+use core::marker::PhantomData;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -41,7 +38,6 @@ pub struct ComboBox<I, FontHash, Style> {
     content_outline_vertex_range: VertexRange,
     combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     last_triangulation: u64,
-    arrow_rot: f32,
     flags: u32,
     _marker: PhantomData<(I, FontHash, Style)>,
 }
@@ -84,7 +80,6 @@ impl<I, FontHash, Style> ComboBox<I, FontHash, Style>
             content_outline_vertex_range: Default::default(),
             combined_text: Default::default(),
             last_triangulation: 0,
-            arrow_rot: 0.0,
             flags: 0,
             _marker: PhantomData,
         }
@@ -458,11 +453,6 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
         }
         let requires_triangulation = self.widget_requires_triangulation();
         self.flags &= !Self::WIDGET_REQUIRES_TRIANGULATION;
-        if self.contents_shown() {
-            self.arrow_rot = (self.arrow_rot + FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
-        } else {
-            self.arrow_rot = (self.arrow_rot - FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
-        }
         UpdateResult {
             requires_triangulation,
             cursor_in_widget: cursor_in_this_window && !other_widget_active && !cursor_in_other_widget &&
@@ -543,21 +533,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
                     style.inactive_text_col(),
                 )
             };
-        let rot = self.arrow_rot;
         let size = self.widget_size;
         let offset = offset + vec2(size.x - style.item_pad_outer().x, size.y * 0.5);
         vertices[self.arrow_vertex_range.start()] = Vertex {
-            pos: vec2(0.5, 0.0).rotated(rot) * scale,
+            pos: vec2(0.6, -0.5) * scale,
             offset: offset,
             color,
         };
         vertices[self.arrow_vertex_range.start() + 1] = Vertex {
-            pos: vec2(-0.5, 0.5).rotated(rot) * scale,
+            pos: vec2(0.0, 0.5) * scale,
             offset: offset,
             color,
         };
         vertices[self.arrow_vertex_range.start() + 2] = Vertex {
-            pos: vec2(-0.5, -0.5).rotated(rot) * scale,
+            pos: vec2(-0.6, -0.5) * scale,
             offset: offset,
             color,
         };
