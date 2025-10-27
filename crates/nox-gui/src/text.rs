@@ -601,7 +601,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         window_pos: Vec2,
         cursor_pos: Vec2,
         _delta_cursor_pos: Vec2,
-        _cursor_in_this_window: bool,
+        cursor_in_this_window: bool,
         other_widget_active: bool,
         cursor_in_other_widget: bool,
         _window_moving: bool,
@@ -619,7 +619,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         let mut cursor_index = self.calc_cursor_index(style, rel_cursor_pos, self.base_offset);
         let mut cursor_in_widget = false;
         let error_margin = style.cursor_error_margin();
-        let cursor_in_text =
+        let cursor_in_text  =
             if let Some(cursor_index) = cursor_index {
                 if rel_cursor_pos.y <= self.start_offset.y || rel_cursor_pos.y >= self.offset.y + self.current_height {
                     false
@@ -635,7 +635,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
                 false
             };
         self.flags &= !Self::HOVERED;
-        if !other_widget_active && !cursor_in_other_widget {
+        if cursor_in_this_window && !other_widget_active && !cursor_in_other_widget {
             if cursor_in_text {
                 if style.override_cursor() {
                     nox.set_cursor(CursorIcon::Text);
