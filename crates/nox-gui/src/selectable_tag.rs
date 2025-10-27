@@ -1,38 +1,38 @@
 use core::marker::PhantomData;
 
-use nox::{
-    mem::vec_types::{GlobalVec, Vector},
-    *,
-};
+use compact_str::CompactString;
 
-use nox_font::{VertexTextRenderer, text_segment, RenderedText};
+use nox::{mem::vec_types::Vector, *};
+
+use nox_font::{VertexTextRenderer, RenderedText, text_segment};
 
 use nox_geom::{
     shapes::*,
-    *,
+    *
 };
 
 use crate::*;
 
-pub struct RadioButton<I, FontHash, Style> {
+pub struct SelectableTag<I, FontHash, Style> {
     offset: Vec2,
-    diameter: f32,
     size: Vec2,
-    focused_outline_width: f32,
-    active_outline_width: f32,
-    handle_vertex_range: VertexRange,
-    handle_inner_vertex_range: VertexRange,
-    focused_handle_outline_vertex_range: VertexRange,
-    active_handle_outline_vertex_range: VertexRange,
+    rounding: f32,
+    width_override: f32,
     label: CompactString,
     label_text: RenderedText,
+    focused_outline_width: f32,
+    active_outline_width: f32,
+    text_box_vertex_range: VertexRange,
+    focused_outline_vertex_range: VertexRange,
+    active_outline_vertex_range: VertexRange,
     font: FontHash,
     flags: u32,
     _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> RadioButton<I, FontHash, Style>
+impl<I, FontHash, Style> SelectableTag<I, FontHash, Style>
     where 
+        I: Interface,
         FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
@@ -41,21 +41,22 @@ impl<I, FontHash, Style> RadioButton<I, FontHash, Style>
     const HOVERED: u32 = 0x2;
     const SELECTED: u32 = 0x4;
     const CLICKED: u32 = 0x8;
+    const WIDTH_OVERRIDE: u32 = 0x10;
 
     #[inline(always)]
     pub fn new() -> Self {
         Self {
             offset: Default::default(),
-            diameter: 0.0,
             size: Default::default(),
-            focused_outline_width: 0.0,
-            active_outline_width: 0.0,
-            handle_vertex_range: Default::default(),
-            handle_inner_vertex_range: Default::default(),
-            focused_handle_outline_vertex_range: Default::default(),
-            active_handle_outline_vertex_range: Default::default(),
+            rounding: 0.0,
+            width_override: 0.0,
             label: Default::default(),
             label_text: Default::default(),
+            focused_outline_width: 0.0,
+            active_outline_width: 0.0,
+            text_box_vertex_range: Default::default(),
+            focused_outline_vertex_range: Default::default(),
+            active_outline_vertex_range: Default::default(),
             font: Default::default(),
             flags: 0,
             _marker: PhantomData,
@@ -87,15 +88,28 @@ impl<I, FontHash, Style> RadioButton<I, FontHash, Style>
     pub fn update_value<T: Eq>(
         &mut self,
         value: &mut T,
-        radio_value: T
-    ) {
+        target: T
+    ) -> bool {
         self.flags &= !Self::SELECTED;
         if self.clicked() {
-            *value = radio_value;
+            *value = target;
             self.flags |= Self::SELECTED;
-        } else if value == &radio_value {
+        } else if value == &target {
             self.flags |= Self::SELECTED;
         }
+        self.flags &= !Self::WIDTH_OVERRIDE;
+        self.selected()
+    }
+
+    #[inline(always)]
+    pub fn override_width(&mut self, width: f32) {
+        self.width_override = width;
+        self.flags |= Self::WIDTH_OVERRIDE;
+    }
+
+    #[inline(always)]
+    pub fn label_text(&self) -> &RenderedText {
+        &self.label_text
     }
 
     #[inline(always)]
@@ -114,23 +128,31 @@ impl<I, FontHash, Style> RadioButton<I, FontHash, Style>
     }
 
     #[inline(always)]
-    fn clicked(&self) -> bool {
+    pub fn clicked(&self) -> bool {
         self.flags & Self::CLICKED == Self::CLICKED
+    }
+
+    #[inline(always)]
+    fn width_override(&self) -> bool {
+        self.flags & Self::WIDTH_OVERRIDE == Self::WIDTH_OVERRIDE
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash, Style>
-    where 
+impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHash, Style>
+    where
         I: Interface,
         FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
 
-    fn get_offset(&self) -> nox_geom::Vec2 {
+    fn get_offset(&self) -> Vec2 {
         self.offset
     }
 
-    fn set_offset(&mut self, offset: Vec2) {
+    fn set_offset(
+        &mut self,
+        offset: Vec2,
+    ) {
         self.offset = offset;
     }
 
@@ -138,13 +160,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
         &mut self,
         style: &Style,
         _text_renderer: &mut VertexTextRenderer<FontHash>,
-    ) -> Vec2
-    {
-        let text_size = style.calc_text_size(&self.label_text);
-        let diameter = style.default_handle_radius() * 2.0;
-        let max_y = text_size.y.max(diameter);
-        self.size = vec2(diameter + style.item_pad_inner().x + text_size.x, max_y);
-        self.size
+    ) -> Vec2 {
+        style.calc_text_box_size(&self.label_text)
     }
 
     fn status<'a>(
@@ -180,20 +197,24 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
-        let diameter = style.default_handle_radius() * 2.0;
+        let mut size = style.calc_text_box_size(&self.label_text);
+        if self.width_override() {
+            size.x = size.x.max(self.width_override);
+        }
         let requires_triangulation =
-            self.diameter != diameter ||
+            self.size != size ||
+            self.rounding != style.rounding() ||
             self.focused_outline_width != style.focused_widget_outline_width() ||
             self.active_outline_width != style.active_widget_outline_width();
-        self.diameter = diameter;
+        self.size = size;
+        self.rounding = style.rounding();
         self.focused_outline_width = style.focused_widget_outline_width();
         self.active_outline_width = style.active_widget_outline_width();
-        let size = self.size;
         let error_margin = style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
         let bounding_rect = BoundingRect::from_position_size(
-            window_pos + self.offset - vec2(error_margin, error_margin),
-            size + vec2(error_margin_2, error_margin_2),
+            window_pos + self.offset - vec2(error_margin, 0.0),
+            size + vec2(error_margin_2, 0.0),
         );
         let cursor_in_widget = cursor_in_this_window && !other_widget_active && !cursor_in_other_widget && bounding_rect.is_point_inside(cursor_pos);
         self.flags &= !(Self::CLICKED | Self::HOVERED);
@@ -224,10 +245,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
                     style.inactive_text_col()
                 },
         };
-        let text_height = style.calc_text_height(&self.label_text);
         collect_text(
             &self.label_text,
-            self.offset + vec2(diameter + style.item_pad_inner().x, size.y * 0.5 - text_height * 0.5),
+            self.offset + style.item_pad_inner(),
             bounded_instance,
         );
         UpdateResult {
@@ -238,60 +258,45 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
 
     fn triangulate(
         &mut self,
-        points: &mut GlobalVec<[f32; 2]>,
-        helper_points: &mut GlobalVec<[f32; 2]>,
+        points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
+        helper_points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
         tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
     )
     {
-        let radius = self.diameter * 0.5;
-        points.clear();
-        circle(vec2(radius, radius), radius)
-            .to_points(16, &mut |p| { points.push(p.into()); });
-        outline_points(points, self.focused_outline_width, false,
-            &mut |p| { helper_points.push(p.into()); });
-        self.focused_handle_outline_vertex_range = tri(&helper_points);
+        let text_box = rect(Default::default(), self.size, self.rounding);
+        text_box.to_points(&mut |p| { points.push(p.into()); });
+        outline_points(points, self.focused_outline_width,
+            false, &mut |p| { helper_points.push(p.into()); });
+        self.focused_outline_vertex_range = tri(&helper_points);
         helper_points.clear();
-        outline_points(points, self.active_outline_width, false,
-            &mut |p| { helper_points.push(p.into()); });
-        self.active_handle_outline_vertex_range = tri(&helper_points);
-        self.handle_vertex_range = tri(&points);
-        points.clear();
-        let inner_radius = radius * 0.4;
-        circle(vec2(radius, radius), inner_radius)
-            .to_points(16, &mut |p| { points.push(p.into()); });
-        self.handle_inner_vertex_range = tri(&points);
+        outline_points(points, self.active_outline_width,
+            false, &mut |p| { helper_points.push(p.into()); });
+        self.active_outline_vertex_range = tri(&helper_points);
+        self.text_box_vertex_range = tri(&points);
     }
 
     fn set_vertex_params(
         &mut self,
         style: &Style,
         vertices: &mut [Vertex],
-    )
-    {
+    ) {
         let offset = self.offset;
-        set_vertex_params(vertices, self.handle_vertex_range, offset, style.widget_bg_col());
-        if self.held() {
-            set_vertex_params(vertices, self.active_handle_outline_vertex_range, offset, style.active_widget_outline_col());
+        if self.selected() {
+            set_vertex_params(vertices, self.text_box_vertex_range, offset, style.selection_col());
+        } else if self.held() || self.hovered() {
+            set_vertex_params(vertices, self.text_box_vertex_range, offset, style.widget_bg_col());
         } else {
-            hide_vertices(vertices, self.active_handle_outline_vertex_range);
+            hide_vertices(vertices, self.text_box_vertex_range);
+        }
+        if self.held() {
+            set_vertex_params(vertices, self.active_outline_vertex_range, offset, style.active_widget_outline_col());
+        } else {
+            hide_vertices(vertices, self.active_outline_vertex_range);
         }
         if self.hovered() {
-            set_vertex_params(vertices, self.focused_handle_outline_vertex_range, offset, style.focused_widget_outline_col());
+            set_vertex_params(vertices, self.focused_outline_vertex_range, offset, style.focused_widget_outline_col());
         } else {
-            hide_vertices(vertices, self.focused_handle_outline_vertex_range);
-        }
-        if self.selected() {
-            let target_color =
-                if self.held() {
-                    style.active_text_col()
-                } else if self.hovered() {
-                    style.focused_text_col()
-                } else {
-                    style.inactive_text_col()
-                };
-            set_vertex_params(vertices, self.handle_inner_vertex_range, offset, target_color);
-        } else {
-            hide_vertices(vertices, self.handle_inner_vertex_range);
+            hide_vertices(vertices, self.focused_outline_vertex_range);
         }
     }
 
@@ -313,9 +318,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
         &self,
         vertices: &mut [Vertex],
     ) {
-        hide_vertices(vertices, self.handle_vertex_range);
-        hide_vertices(vertices, self.handle_inner_vertex_range);
-        hide_vertices(vertices, self.focused_handle_outline_vertex_range);
-        hide_vertices(vertices, self.active_handle_outline_vertex_range);
+        hide_vertices(vertices, self.text_box_vertex_range);
+        hide_vertices(vertices, self.active_outline_vertex_range);
+        hide_vertices(vertices, self.focused_outline_vertex_range);
     }
 }

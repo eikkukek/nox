@@ -35,6 +35,11 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
+    fn inactive_widget_outline_col(&self) -> ColorSRGBA {
+        DEFAULT_INACTIVE_WIDGET_OUTLINE_COL
+    }
+
+    #[inline(always)]
     fn focused_widget_outline_col(&self) -> ColorSRGBA {
         DEFAULT_FOCUSED_WIDGET_OUTLINE_COL
     }
@@ -45,13 +50,28 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn text_col(&self) -> ColorSRGBA {
-        DEFAULT_TEXT_COL
+    fn inactive_text_col(&self) -> ColorSRGBA {
+        DEFAULT_INACTIVE_TEXT_COL
     }
 
     #[inline(always)]
     fn focused_text_col(&self) -> ColorSRGBA {
         DEFAULT_FOCUSED_TEXT_COL
+    }
+
+    #[inline(always)]
+    fn active_text_col(&self) -> ColorSRGBA {
+        DEFAULT_ACTIVE_TEXT_COL
+    }
+
+    #[inline(always)]
+    fn selection_col(&self) -> ColorSRGBA {
+        DEFAULT_SELECTION_COL
+    }
+
+    #[inline(always)]
+    fn hover_window_bg_col(&self) -> ColorSRGBA {
+        DEFAULT_HOVER_WINDOW_BG_COL
     }
 
     #[inline(always)]
@@ -71,7 +91,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn input_text_empty_text_color(&self) -> ColorSRGBA {
-        DEFAULT_TEXT_COL.with_alpha(0.4)
+        DEFAULT_INACTIVE_TEXT_COL.with_alpha(0.4)
     }
 
     #[inline(always)]
@@ -181,7 +201,7 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn animation_speed(&self) -> f32 {
-        8.0
+        16.0
     }
 
     #[inline(always)]
@@ -311,15 +331,26 @@ const DEFAULT_FOCUSED_WINDOW_OUTLINE_COL: ColorSRGBA =
 const DEFAULT_WIDGET_BG_COL: ColorSRGBA =
     ColorSRGBA::new(20.0 / 255.0, 31.0 / 255.0, 31.0 / 255.0, 1.0);
 
-const DEFAULT_TEXT_COL: ColorSRGBA =
-    ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 0.8);
+const DEFAULT_SELECTION_COL: ColorSRGBA =
+    ColorSRGBA::new(27.0 / 255.0, 54.0 / 255.0, 75.0 / 255.0, 1.0);
+
+const DEFAULT_INACTIVE_TEXT_COL: ColorSRGBA =
+    ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 0.6);
 
 const DEFAULT_FOCUSED_TEXT_COL: ColorSRGBA =
+    DEFAULT_INACTIVE_TEXT_COL.with_alpha(1.0);
+
+const DEFAULT_ACTIVE_TEXT_COL: ColorSRGBA =
     ColorSRGBA::white(1.0);
 
-const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_TEXT_COL;
+const DEFAULT_INACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_INACTIVE_TEXT_COL;
 
-const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_FOCUSED_TEXT_COL;
+const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_FOCUSED_TEXT_COL;
+
+const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_ACTIVE_TEXT_COL;
+
+const DEFAULT_HOVER_WINDOW_BG_COL: ColorSRGBA =
+    ColorSRGBA::new(8.0 / 255.0, 12.0 / 255.0, 12.0 / 255.0, 1.0);
 
 const DEFAULT_INPUT_TEXT_BG_COL: ColorSRGBA =
     ColorSRGBA::new(21.0 / 255.0, 30.0 / 255.0, 30.0 / 255.0, 1.0);

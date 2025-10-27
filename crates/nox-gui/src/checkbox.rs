@@ -76,7 +76,7 @@ impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
     }
 
     #[inline(always)]
-    fn cursor_in_checkbox(&self) -> bool {
+    fn hovered(&self) -> bool {
         self.flags & Self::CURSOR_IN_CHECKBOX == Self::CURSOR_IN_CHECKBOX
     }
 
@@ -173,7 +173,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
     {
         if self.held() {
             WidgetStatus::Active
-        } else if self.cursor_in_checkbox() {
+        } else if self.hovered() {
             WidgetStatus::Hovered(None)
         } else {
             WidgetStatus::Inactive
@@ -235,10 +235,12 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
             min_bounds,
             max_bounds,
             color:
-                if self.held() || self.cursor_in_checkbox() {
+                if self.held() {
+                    style.active_text_col()
+                } else if self.hovered() {
                     style.focused_text_col()
                 } else {
-                    style.text_col()
+                    style.inactive_text_col()
                 },
         };
         let check_size = style.calc_text_size(&self.checkbox_text);
@@ -293,7 +295,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         else {
             hide_vertices(vertices, self.active_outline_vertex_range);
         }
-        if self.cursor_in_checkbox() {
+        if self.hovered() {
             let target_color = style.focused_widget_outline_col();
             set_vertex_params(vertices, self.focused_outline_vertex_range, offset, target_color);
         } else {

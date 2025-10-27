@@ -35,6 +35,7 @@ pub struct Text {
     pub scale: Vec2,
     pub selectable_index: Option<usize>,
     pub row_offset: u32,
+    pub row_count: u32,
     pub tool_tip: Option<Rc<CompactString>>,
 }
 
@@ -49,6 +50,7 @@ impl Text {
         scale: Vec2,
         selectable_index: Option<usize>,
         row_offset: u32,
+        row_count: u32,
         tool_tip: Option<Rc<CompactString>>,
     ) -> Self
     {
@@ -60,6 +62,7 @@ impl Text {
             scale,
             selectable_index,
             row_offset,
+            row_count,
             tool_tip
         }
     }
@@ -76,6 +79,7 @@ pub struct SelectableText<I, FontHash, Style>
     selection_rects: GlobalVec<Rect>,
     prev_selection: Option<(usize, usize)>,
     base_offset: Vec2,
+    start_offset: Vec2,
     offset: Vec2,
     max_width: f32,
     char_count: u32,
@@ -112,6 +116,7 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
             selection_rects: Default::default(),
             prev_selection: None,
             base_offset: Default::default(),
+            start_offset: Default::default(),
             offset: Default::default(),
             max_width: 0.0,
             char_count: 0,
@@ -226,7 +231,7 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
         let mut cursor_in_row = None;
         let mut first_segment = true;
         let mut first_row = true;
-        let last_row = self.current_row + 1;
+        let last_row = self.current_row;
         for (i, text) in self.text.iter().enumerate() {
             let last_segment = i == self.text.len() - 1;
             let rows = &text.rows;
@@ -235,6 +240,7 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
                 if row != 0 {
                     first_row = false;
                 }
+                let last_row = row == last_row;
                 let row_height = row_height * font_scale;
                 let max_x = text_min.x + max_x * font_scale;
                 let min_x = text_min.x + min_x * font_scale;
@@ -245,13 +251,13 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
                     let offset = vec2(text_offset.offset[0] * font_scale, text_offset.offset[1] * font_scale);
                     let min_y = text_min.y + offset.y;
                     let max_y = min_y + row_height;
-                    if (rel_cursor_pos.y >= min_y || first_row) && (rel_cursor_pos.y <= max_y || row == last_row)
+                    if (rel_cursor_pos.y >= min_y || first_row) && (rel_cursor_pos.y <= max_y || last_row)
                     {
                         cursor_in_row = Some(text.row_offset + j as u32);
-                        if last_segment && rel_cursor_pos.x >= max_x {
+                        if last_row && last_segment && rel_cursor_pos.x >= max_x {
                             return Some(cur_k_off + offsets.len());
                         }
-                        if first_segment && rel_cursor_pos.x <= min_x {
+                        if first_segment && first_row && rel_cursor_pos.x <= min_x {
                             return Some(cur_k_off)
                         }
                     }
@@ -387,7 +393,7 @@ impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Styl
             text_renderer,
             text,
             window_width,
-            color: style.text_col(),
+            color: style.inactive_text_col(),
             scale: vec2(1.0, 1.0),
         }
     }
@@ -400,7 +406,7 @@ impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Styl
 
     #[inline(always)]
     pub fn default_color(&mut self) -> &mut Self {
-        self.color = self.style.text_col();
+        self.color = self.style.inactive_text_col();
         self
     }
 
@@ -437,9 +443,10 @@ impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Styl
         let base_to_end = window_width - item_pad_outer.x - self.text.base_offset.x;
         let offset = base_to_end - (window_width - item_pad_outer.x - self.text.offset.x);
         let mut rows: GlobalVec<RowOffsets> = GlobalVec::new();
-        let height_scaled = self.text.current_height / self.style.font_scale();
         let mut current_row = self.text.current_row;
+        let mut row_count = 0;
         let offset_y_scaled = (self.text.offset.y - self.text.base_offset.y) / font_scale;
+        let mut first_word_truncated = false;
         if let Some(mut text) = self.text_renderer.render_and_collect_offsets(
             segments,
             false,
@@ -452,13 +459,18 @@ impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Styl
             |mut offset| {
                 let row = offset.row;
                 if row >= rows.len() as u32 {
-                    rows.resize(row as usize + 1,
+                    rows.resize(row as usize + if !first_word_truncated { 1 } else { 0 },
                         RowOffsets {
                             offsets: GlobalVec::new(),
                             row_height:
                                 if row == 0 {
-                                    height_scaled.max(offset.row_height)
+                                    row_count += 1;
+                                    offset.row_height
                                 } else {
+                                    if offset.first_word {
+                                        first_word_truncated = true;
+                                    }
+                                    row_count += 1;
                                     current_row += 1;
                                     offset.row_height
                                 },
@@ -466,6 +478,9 @@ impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Styl
                             min_x: 0.0,
                         }
                     );
+                }
+                if !offset.first_word {
+                    first_word_truncated = false;
                 }
                 offset.offset[1] += offset_y_scaled;
                 rows[row as usize].offsets.push(offset);
@@ -489,14 +504,15 @@ impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Styl
                 self.text.max_width = self.text.max_width.max(row.max_x * font_scale);
                 row.min_x = row.offsets.first().map(|v| v.offset).unwrap_or_default()[0];
             }
-            self.text.offset.x = rows.last().map(|v| v.max_x * font_scale + item_pad_outer.x).unwrap_or_default();
+            self.text.offset.x = rows.last().map(|v| self.text.base_offset.x +  v.max_x * font_scale).unwrap_or_default();
             self.text.text.push(Text::new(
                 text, rows,
                 self.color,
                 self.text.base_offset,
                 self.scale,
                 Some(self.text.text.len()),
-                current_row,
+                self.text.current_row,
+                row_count,
                 tool_tip.map(|v| Rc::new(CompactString::new(v)))
             ));
         }
@@ -547,8 +563,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         &mut self,
         offset: Vec2,
     ) {
-        self.base_offset = offset;
         self.offset = offset;
+        self.start_offset = offset;
     }
 
     fn calc_size(
@@ -592,13 +608,6 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         _collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
-        let max = vec2(
-            self.max_width,
-            self.offset.y - self.base_offset.y + self.current_height
-        );
-        let bounding_rect = BoundingRect::from_position_size(
-            self.base_offset, max,
-        );
         let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
         if mouse_pressed || self.prev_char_count != self.char_count {
             self.selection = None;
@@ -609,13 +618,33 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         }
         let mut cursor_index = self.calc_cursor_index(style, rel_cursor_pos, self.base_offset);
         let mut cursor_in_widget = false;
-        let cursor_in_text = bounding_rect.is_point_inside(rel_cursor_pos);
+        let error_margin = style.cursor_error_margin();
+        let cursor_in_text =
+            if let Some(cursor_index) = cursor_index {
+                if rel_cursor_pos.y <= self.start_offset.y || rel_cursor_pos.y >= self.offset.y + self.current_height {
+                    false
+                }
+                else if cursor_index == 0 {
+                    rel_cursor_pos.x + error_margin >= self.start_offset.x
+                } else if cursor_index as u32 == self.char_count {
+                    rel_cursor_pos.x - error_margin <= self.offset.x
+                } else {
+                    true
+                }
+            } else {
+                false
+            };
         self.flags &= !Self::HOVERED;
         if !other_widget_active && !cursor_in_other_widget {
-            if cursor_in_text && mouse_pressed {
-                if let Some(index) = cursor_index {
-                    self.selection = Some((index, index));
-                    self.flags |= Self::HELD;
+            if cursor_in_text {
+                if style.override_cursor() {
+                    nox.set_cursor(CursorIcon::Text);
+                }
+                if mouse_pressed {
+                    if let Some(index) = cursor_index {
+                        self.selection = Some((index, index));
+                        self.flags |= Self::HELD;
+                    }
                 }
             }
             if let Some(index) = cursor_index && cursor_in_text && !self.held() {
@@ -687,6 +716,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         } else {
             self.flags &= !Self::SELECTION_LEFT;
         }
+        if self.held() && style.override_cursor() {
+            nox.set_cursor(CursorIcon::Text);
+        }
         self.prev_char_count = self.char_count;
         self.char_count = 0;
         self.paint_selection(style);
@@ -696,6 +728,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         self.next_builder = 0;
         self.text.clear();
         self.current_height = 0.0;
+        self.max_width = 0.0;
         self.current_row = 0;
         UpdateResult { requires_triangulation: false, cursor_in_widget }
     }

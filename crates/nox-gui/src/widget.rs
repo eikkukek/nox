@@ -11,6 +11,7 @@ use nox_geom::Vec2;
 
 use crate::*;
 
+#[derive(Default, Clone, Copy)]
 pub struct UpdateResult {
     pub requires_triangulation: bool,
     pub cursor_in_widget: bool,

@@ -25,6 +25,7 @@ pub struct TextOffset {
     pub row_height: f32,
     pub x_advance: f32,
     pub offset_index: Option<u32>,
+    pub first_word: bool,
 }
 
 pub struct VertexTextRenderer<'a, H: Clone + PartialEq + Eq + Hash> {
@@ -140,7 +141,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
             } else {
                 0
             };
-        for (start, word, font, shape) in &shapes {
+        for (i, (start, word, font, shape)) in shapes.iter().enumerate() {
             let FaceCache { face, trigs, offsets } = faces.get_mut(&font).unwrap();
             let units_per_em = face.units_per_em() as f32;
             if let Some(start) = start {
@@ -149,14 +150,14 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                 rows += 1;
             }
             let positions = shape.get_glyph_positions();
-            for (i, c) in word.chars().enumerate() {
+            for (j, c) in word.chars().enumerate() {
                 let trigs = trigs.entry(c).or_default();
                 if trigs.is_none() {
                     if let Some(trig) = triangulate(c, face, curve_depth) {
                         *trigs = Some(Arc::new(trig));
                     }
                 }
-                let position = positions[i];
+                let position = positions[j];
                 let glyph_x = pen_x + position.x_offset as f32 / units_per_em;
                 let glyph_y = pen_y + position.y_offset as f32 / units_per_em;
                 let mut offset_index = None;
@@ -173,6 +174,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                     offset_index,
                     row_height: height,
                     x_advance,
+                    first_word: i == 0,
                 });
                 pen_x += x_advance;
             }

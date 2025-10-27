@@ -62,6 +62,7 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
     const CLICKED_LAST_FRAME: u32 = 0x800;
     const SELECT_ALL_LAST_FRAME: u32 = 0x1000;
     const ACTIVATED_LAST_FRAME: u32 = 0x2000;
+    const PARENT_ACTIVE: u32 = 0x4000;
 
     const SELECTION_INDICES: [u32; 6] = [
         3, 1, 0,
@@ -123,13 +124,16 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
         center_text: bool,
         empty_input_prompt: &str,
         format_input: Option<fn(&mut dyn Write, &str) -> core::fmt::Result>,
+        parent_active: bool,
     )
     {
         self.flags &= !(
             Self::CENTER_TEXT |
-            Self::BG_COL_OVERRIDE
+            Self::BG_COL_OVERRIDE |
+            Self::PARENT_ACTIVE
         );
         self.flags |= Self::CENTER_TEXT * center_text as u32;
+        self.flags |= Self::PARENT_ACTIVE * parent_active as u32;
         self.width = width;
         if let Some(bg_col_override) = bg_col_override {
             self.bg_col_override = bg_col_override;
@@ -289,6 +293,11 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
     #[inline(always)]
     fn activated_last_frame(&self) -> bool {
         self.flags & Self::ACTIVATED_LAST_FRAME == Self::ACTIVATED_LAST_FRAME
+    }
+
+    #[inline(always)]
+    fn parent_active(&self) -> bool {
+        self.flags & Self::PARENT_ACTIVE == Self::PARENT_ACTIVE
     }
 
     #[inline(always)]
@@ -623,10 +632,12 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         let item_pad_inner = style.item_pad_inner();
         let has_format_error = self.has_format_error();
         let text_col =
-            if self.active() || self.hovered() {
+            if self.active() || self.parent_active() {
+                style.active_text_col()
+            } else if self.hovered() {
                 style.focused_text_col()
             } else {
-                style.text_col()
+                style.inactive_text_col()
             };
         self.input_text.get_or_insert_with(|| {
             if self.input.is_empty() {

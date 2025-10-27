@@ -10,7 +10,6 @@ use nox::{
         vec_types::{GlobalVec, Vector},
         Hashable,
     },
-    alloc::arena_alloc::ArenaAlloc,
     *,
 };
 
@@ -36,178 +35,8 @@ pub enum WidgetId {
     InputText(Hashable<f64>),
     DragValue(Hashable<f64>),
     RadioButton(Hashable<f64>),
-}
-
-struct HoverWindow {
-    text: CompactString,
-    rendered_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
-    rect: Rect,
-    vertices: GlobalVec<Vertex>,
-    rect_vertex_range: VertexRange,
-    rect_outline_vertex_range: VertexRange,
-    indices: GlobalVec<u32>,
-    position: Vec2,
-    outline_width: f32,
-}
-
-impl HoverWindow {
-
-    fn new() -> Self {
-        Self {
-            text: Default::default(),
-            rendered_text: Default::default(),
-            rect: Default::default(),
-            rect_vertex_range: Default::default(),
-            rect_outline_vertex_range: Default::default(),
-            vertices: Default::default(),
-            indices: Default::default(),
-            position: Default::default(),
-            outline_width: 0.0,
-        }
-    }
-
-    fn update<FontHash>(
-        &mut self,
-        style: &impl WindowStyle<FontHash>,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
-        cursor_pos: Vec2,
-        text: &str,
-    )
-        where
-            FontHash: UiFontHash,
-    {
-        let mut rect = self.rect;
-        rect.rounding = style.rounding();
-        if text != self.text {
-            self.rendered_text.clear();
-            let rendered_text = text_renderer.render(
-                &[text_segment(text, style.font_regular())], false, 0.0
-            ).unwrap_or_default();
-            self.rendered_text.add_text(
-                &rendered_text,
-                vec2(0.0, 0.0),
-                BoundedTextInstance {
-                    add_scale: vec2(1.0, 1.0),
-                    min_bounds: vec2(f32::MIN, f32::MIN),
-                    max_bounds: vec2(f32::MAX, f32::MAX),
-                    color: style.focused_text_col(),
-                }
-            ).unwrap();
-            self.text = CompactString::new(text);
-            rect.max = style.calc_text_box_size(&rendered_text);
-        }
-        let requires_triangulation =
-            rect != self.rect ||
-            self.outline_width != style.window_outline_width();
-        self.outline_width = style.window_outline_width();
-        self.rect = rect;
-        self.position = cursor_pos + vec2(-self.rect.max.x, style.item_pad_outer().y);
-        if requires_triangulation {
-            self.triangulate();
-        }
-    }
-
-    fn triangulate(&mut self) {
-        self.vertices.clear();
-        self.indices.clear();
-        let mut points = GlobalVec::new();
-        let mut outline_points = GlobalVec::new();
-        let mut indices_usize = GlobalVec::new();
-        self.rect.to_points(&mut |p| { points.push(p.into()); });
-        nox_geom::shapes::outline_points(
-            &points, self.outline_width * 0.5, false,
-            &mut |p| { outline_points.push(p.into()); }
-        );
-        earcut::earcut(&outline_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap();
-        self.rect_outline_vertex_range = VertexRange::new(0..self.vertices.len());
-        let vertex_off = self.vertices.len();
-        earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap();
-        self.rect_vertex_range = VertexRange::new(vertex_off..self.vertices.len());
-        self.indices.append_map(&indices_usize, |&v| v as u32);
-    }
-
-    fn set_vertex_params<FontHash>(
-        &mut self,
-        style: &impl WindowStyle<FontHash>,
-    ) {
-        let vertex_sample = self.vertices[self.rect_outline_vertex_range.start()];
-        if vertex_sample.color != style.window_outline_col() {
-            let target_color = style.window_outline_col();
-            set_vertex_params(&mut self.vertices,
-                self.rect_outline_vertex_range, vec2(0.0, 0.0), target_color
-            );
-        }
-        let vertex_sample = self.vertices[self.rect_vertex_range.start()];
-        if vertex_sample.color != style.window_bg_col() {
-            let target_color = style.window_bg_col();
-            for vertex in &mut self.vertices[self.rect_vertex_range.range()] {
-                vertex.color = target_color;
-            }
-        }
-    }
-
-    fn render_commands<FontHash>(
-        &self,
-        render_commands: &mut RenderCommands,
-        style: & impl WindowStyle<FontHash>,
-        base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
-    ) -> Result<(), Error>
-    {
-        let vert_count = self.vertices.len();
-        let vert_mem = unsafe {
-            vertex_buffer.allocate(render_commands, vert_count)?
-        };
-        let idx_count = self.indices.len();
-        let idx_mem = unsafe {
-            index_buffer.allocate(render_commands, idx_count)?
-        };
-        unsafe {
-            self.vertices
-                .as_ptr()
-                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count);
-            self.indices
-                .as_ptr()
-                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
-        }
-        render_commands.bind_pipeline(base_pipeline_id)?;
-        let pc_vertex = push_constants_vertex(self.position, vec2(1.0, 1.0), inv_aspect_ratio, unit_scale);
-        let pc_fragment = base_push_constants_fragment(vec2(f32::MIN, f32::MIN), vec2(f32::MAX, f32::MAX));
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_commands.draw_indexed(
-            DrawInfo {
-                index_count: self.indices.len() as u32,
-                ..Default::default()
-            },
-            [
-                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-            ],
-            DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
-        )?;
-        render_commands.bind_pipeline(text_pipeline_id)?;
-        let pc_vertex = push_constants_vertex(
-            self.position + style.item_pad_inner(),
-            vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio,
-            unit_scale,
-        );
-        render_text(
-            render_commands,
-            self.rendered_text.iter().map(|(c, (t, b))| (*c, t, b.as_slice())),
-            pc_vertex, vertex_buffer, index_buffer
-        )?;
-        Ok(())
-    }
+    SelectabelTag(Hashable<f64>),
+    ComboBox(Hashable<f64>),
 }
 
 pub struct CollapsedWidgets {
@@ -271,6 +100,7 @@ impl CollapsedWidgets {
         window_pos: Vec2,
         cursor_pos: Vec2,
         style: &impl WindowStyle<FontHash>,
+        widget_active: bool,
         mut collect_text: impl FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> f32
         where
@@ -286,14 +116,14 @@ impl CollapsedWidgets {
             vec2(collapse_scale + item_pad_outer.x + text_size.x, text_size.y)
         );
         self.flags &= !Self::HOVERED;
-        self.flags |= Self::HOVERED * bounding_rect.is_point_inside(cursor_pos) as u32;
-        if nox.was_mouse_button_pressed(MouseButton::Left) && self.hovered() {
+        self.flags |= Self::HOVERED * bounding_rect.is_point_inside(cursor_pos) as u32 * !widget_active as u32;
+        if !widget_active && nox.was_mouse_button_pressed(MouseButton::Left) && self.hovered() {
             self.flags ^= Self::COLLAPSED;
         }
         if self.collapsed() {
             self.rotation = (self.rotation - FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
         } else {
-            self.rotation = (self.rotation + FRAC_PI_2 * 8.0 * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
+            self.rotation = (self.rotation + FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
         }
         collect_text(&self.title_text, offset + vec2(collapse_scale + style.item_pad_inner().x, 0.0), BoundedTextInstance {
             add_scale: vec2(1.0, 1.0),
@@ -302,7 +132,7 @@ impl CollapsedWidgets {
             color: if self.hovered() {
                 style.focused_text_col()
             } else {
-                style.text_col()
+                style.inactive_text_col()
             }
         });
         offset.x + collapse_scale + text_size.x + item_pad_outer.x
@@ -320,7 +150,7 @@ impl CollapsedWidgets {
             } else {
                 (
                     style.collapse_symbol_scale(),
-                    style.text_col(),
+                    style.inactive_text_col(),
                 )
             };
         let offset = self.offset + vec2(scale * 0.5, style.calc_text_height(&self.title_text) * 0.5);
@@ -347,6 +177,138 @@ impl CollapsedWidgets {
     }
 }
 
+struct WidgetTables<I, FontHash, Style> {
+    selectable_texts: FxHashMap<Hashable<f64>, (u64, SelectableText<I, FontHash, Style>)>,
+    buttons: FxHashMap<Hashable<f64>, (u64, Button<I, FontHash, Style>)>,
+    sliders: FxHashMap<Hashable<f64>, (u64, Slider<I, FontHash, Style>)>,
+    checkboxes: FxHashMap<Hashable<f64>, (u64, Checkbox<I, FontHash, Style>)>,
+    input_texts: FxHashMap<Hashable<f64>, (u64, InputText<I, FontHash, Style>)>,
+    drag_values: FxHashMap<Hashable<f64>, (u64, DragValue<I, FontHash, Style>)>,
+    color_pickers: FxHashMap<Hashable<f64>, (u64, ColorPicker<I, FontHash, Style>)>,
+    radio_buttons: FxHashMap<Hashable<f64>, (u64, RadioButton<I, FontHash, Style>)>,
+    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, FontHash, Style>)>,
+    combo_boxes: FxHashMap<Hashable<f64>, (u64, ComboBox<I, FontHash, Style>)>,
+}
+
+impl<I, FontHash, Style> WidgetTables<I, FontHash, Style>
+    where 
+        I: Interface,
+        FontHash: UiFontHash,
+        Style: WindowStyle<FontHash>,
+{
+
+    fn new() -> Self {
+        Self {
+            selectable_texts: FxHashMap::default(),
+            buttons: FxHashMap::default(),
+            sliders: FxHashMap::default(),
+            checkboxes: FxHashMap::default(),
+            input_texts: FxHashMap::default(),
+            drag_values: FxHashMap::default(),
+            color_pickers: FxHashMap::default(),
+            radio_buttons: FxHashMap::default(),
+            selectable_tags: FxHashMap::default(),
+            combo_boxes: FxHashMap::default(),
+        }
+    }
+
+    #[inline(always)]
+    fn get_widget(&self, widget: WidgetId) -> (u64, &dyn Widget<I, FontHash, Style>) {
+        match widget {
+            WidgetId::Slider(id) =>
+                self.sliders.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::Button(id) =>
+                self.buttons.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::Checkbox(id) =>
+                self.checkboxes.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::ColorPicker(id) =>
+                self.color_pickers.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::InputText(id) =>
+                self.input_texts.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::DragValue(id) =>
+                self.drag_values.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::SelectableText(id) =>
+                 self.selectable_texts.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::RadioButton(id) =>
+                 self.radio_buttons.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::SelectabelTag(id) =>
+                 self.selectable_tags.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::ComboBox(id) =>
+                 self.combo_boxes.get(&id).map(
+                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+        }
+    }
+
+    #[inline(always)]
+    fn get_widget_mut(
+        &mut self,
+        widget: WidgetId
+    ) -> (&mut u64, &mut dyn Widget<I, FontHash, Style>)
+    {
+        match widget {
+            WidgetId::Slider(id) =>
+                self.sliders.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::Button(id) =>
+                self.buttons.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::Checkbox(id) =>
+                self.checkboxes.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::ColorPicker(id) =>
+                self.color_pickers.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style,>)
+                ).unwrap(),
+            WidgetId::InputText(id) =>
+                self.input_texts.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::DragValue(id) =>
+                self.drag_values.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::SelectableText(id) =>
+                 self.selectable_texts.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::RadioButton(id) =>
+                 self.radio_buttons.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::SelectabelTag(id) =>
+                 self.selectable_tags.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+            WidgetId::ComboBox(id) =>
+                 self.combo_boxes.get_mut(&id).map(
+                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                ).unwrap(),
+        }
+    }
+}
+
 pub struct Window<I, FontHash, Style>
 {
     main_rect: Rect,
@@ -360,21 +322,13 @@ pub struct Window<I, FontHash, Style>
     position: Vec2,
     title: CompactString,
     title_text: Option<RenderedText>,
-    combined_text: Option<CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>>,
-    vertices: Option<GlobalVec<Vertex>>,
+    combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
+    vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
-    pub(crate) arena_alloc: Option<ArenaAlloc>,
     text: GlobalVec<Text>,
-    selectable_texts: FxHashMap<Hashable<f64>, (u64, SelectableText<I, FontHash, Style>)>,
-    buttons: FxHashMap<Hashable<f64>, (u64, Button<I, FontHash, Style>)>,
-    sliders: FxHashMap<Hashable<f64>, (u64, Slider<I, FontHash, Style>)>,
-    checkboxs: FxHashMap<Hashable<f64>, (u64, Checkbox<I, FontHash, Style>)>,
-    input_texts: FxHashMap<Hashable<f64>, (u64, InputText<I, FontHash, Style>)>,
-    drag_values: FxHashMap<Hashable<f64>, (u64, DragValue<I, FontHash, Style>)>,
-    color_pickers: FxHashMap<Hashable<f64>, (u64, ColorPicker<I, FontHash, Style>)>,
-    radio_buttons: FxHashMap<Hashable<f64>, (u64, RadioButton<I, FontHash, Style>)>,
-    active_widgets: Option<FxHashSet<WidgetId>>,
-    prev_active_widgets: Option<GlobalVec<WidgetId>>,
+    widgets: Option<WidgetTables<I, FontHash, Style>>,
+    active_widgets: FxHashSet<WidgetId>,
+    prev_active_widgets: GlobalVec<WidgetId>,
     collapsed_widgets: FxHashMap<Hashable<f64>, (u64, CollapsedWidgets)>,
     active_collapsed_widgets: FxHashSet<Hashable<f64>>,
     prev_active_collapsed_widgets: GlobalVec<Hashable<f64>>,
@@ -428,21 +382,13 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             position: position.into(),
             title: title.into(),
             title_text: None,
-            combined_text: Some(CombinedRenderedText::new()),
-            vertices: Some(Default::default()),
+            combined_text: CombinedRenderedText::new(),
+            vertices: Default::default(),
             indices: Default::default(),
-            arena_alloc: ArenaAlloc::new(1 << 16),
             text: Default::default(),
-            selectable_texts: FxHashMap::default(),
-            buttons: FxHashMap::default(),
-            sliders: FxHashMap::default(),
-            checkboxs: FxHashMap::default(),
-            color_pickers: FxHashMap::default(),
-            input_texts: FxHashMap::default(),
-            drag_values: FxHashMap::default(),
-            radio_buttons: FxHashMap::default(),
-            active_widgets: Some(Default::default()),
-            prev_active_widgets: Some(Default::default()),
+            widgets: Some(WidgetTables::new()),
+            active_widgets: Default::default(),
+            prev_active_widgets: Default::default(),
             collapsed_widgets: FxHashMap::default(),
             active_collapsed_widgets: Default::default(),
             prev_active_collapsed_widgets: Default::default(),
@@ -485,9 +431,14 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         mut f: impl FnMut(&mut SelectableText<I, FontHash, Style>)
     )
     {
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
         match id {
             WidgetId::SelectableText(id) => {
-                if let Some((_, text)) = self.selectable_texts.get_mut(&id) {
+                if let Some((_, text)) = widgets.selectable_texts.get_mut(&id) {
                     f(text);
                 }
             }
@@ -501,9 +452,14 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         id: WidgetId,
         mut f: impl FnMut(usize, &Text),
     ) {
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
         match id {
             WidgetId::SelectableText(id) => {
-                let (_, text) = self.selectable_texts.get(&id).unwrap();
+                let (_, text) = widgets.selectable_texts.get(&id).unwrap();
                 for text in text.as_text() {
                     let index = self.text.len();
                     let text = self.text.push(text.clone());
@@ -523,12 +479,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     ) -> (&'a mut W, WidgetId)
     {
         let mut id = Hashable((value as *const T).addr() as f64);
-        let active_widgets = unsafe {
-            self.active_widgets
-                .as_mut()
-                .unwrap_unchecked()
-        };
-        while !active_widgets.insert(make_id(id)) {
+        while !self.active_widgets.insert(make_id(id)) {
             id.0 += 0.01;
         }
         let widget = get_widget(self, id);
@@ -537,7 +488,12 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn get_selectable_text(&mut self, id: Hashable<f64>) -> &mut SelectableText<I, FontHash, Style> {
-        let entry = self.selectable_texts
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.selectable_texts
            .entry(id)
            .or_insert((0, SelectableText::new()));
         if entry.0 < self.last_triangulation {
@@ -548,7 +504,12 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn get_button(&mut self, id: Hashable<f64>) -> &mut Button<I, FontHash, Style> {
-        let entry = self.buttons
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.buttons
            .entry(id)
            .or_insert((0, Button::new()));
         if entry.0 < self.last_triangulation {
@@ -559,7 +520,12 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn get_slider(&mut self, id: Hashable<f64>) -> &mut Slider<I, FontHash, Style> {
-        let entry = self.sliders
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.sliders
            .entry(id)
            .or_insert((0, Slider::new()));
         if entry.0 < self.last_triangulation {
@@ -570,7 +536,12 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn get_checkbox(&mut self, id: Hashable<f64>) -> &mut Checkbox<I, FontHash, Style> {
-        let entry = self.checkboxs
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.checkboxes
            .entry(id)
            .or_insert((0, Checkbox::new()));
         if entry.0 < self.last_triangulation {
@@ -581,7 +552,12 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn get_input_text(&mut self, id: Hashable<f64>) -> &mut InputText<I, FontHash, Style> {
-        let entry = self.input_texts
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.input_texts
            .entry(id)
            .or_insert((0, InputText::new()));
         if entry.0 < self.last_triangulation {
@@ -592,7 +568,12 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn get_drag_value(&mut self, id: Hashable<f64>) -> &mut DragValue<I, FontHash, Style> {
-        let entry = self.drag_values
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.drag_values
            .entry(id)
            .or_insert((0, DragValue::new()));
         if entry.0 < self.last_triangulation {
@@ -603,7 +584,12 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn get_color_picker(&mut self, id: Hashable<f64>) -> &mut ColorPicker<I, FontHash, Style> {
-        let entry = self.color_pickers
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.color_pickers
            .entry(id)
            .or_insert((0, ColorPicker::new()));
         if entry.0 < self.last_triangulation {
@@ -614,9 +600,46 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn get_radio_button(&mut self, id: Hashable<f64>) -> &mut RadioButton<I, FontHash, Style> {
-        let entry = self.radio_buttons
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.radio_buttons
            .entry(id)
            .or_insert((0, RadioButton::new()));
+        if entry.0 < self.last_triangulation {
+            self.flags |= Self::REQUIRES_TRIANGULATION;
+        }
+        &mut entry.1
+    }
+
+    #[inline(always)]
+    pub fn get_selectable_tag(&mut self, id: Hashable<f64>) -> &mut SelectableTag<I, FontHash, Style> {
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.selectable_tags
+            .entry(id)
+            .or_insert((0, SelectableTag::new()));
+        if entry.0 < self.last_triangulation {
+            self.flags |= Self::REQUIRES_TRIANGULATION;
+        }
+        &mut entry.1
+    }
+
+    #[inline(always)]
+    pub fn get_combo_box(&mut self, id: Hashable<f64>) -> &mut ComboBox<I, FontHash, Style> {
+        let widgets = unsafe {
+            self.widgets
+                .as_mut()
+                .unwrap_unchecked()
+        };
+        let entry = widgets.combo_boxes
+            .entry(id)
+            .or_insert((0, ComboBox::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -734,86 +757,6 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     }
 
     #[inline(always)]
-    fn get_widget(&self, widget: WidgetId) -> (u64, &dyn Widget<I, FontHash, Style>) {
-        match widget {
-            WidgetId::Slider(id) =>
-                self.sliders.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::Button(id) =>
-                self.buttons.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::Checkbox(id) =>
-                self.checkboxs.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::ColorPicker(id) =>
-                self.color_pickers.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::InputText(id) =>
-                self.input_texts.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::DragValue(id) =>
-                self.drag_values.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::SelectableText(id) =>
-                 self.selectable_texts.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::RadioButton(id) =>
-                 self.radio_buttons.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-        }
-    }
-
-    #[inline(always)]
-    fn get_widget_mut(
-        &mut self,
-        widget: WidgetId
-    ) -> (&mut u64, &mut dyn Widget<I, FontHash, Style>)
-    {
-        match widget {
-            WidgetId::Slider(id) =>
-                self.sliders.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::Button(id) =>
-                self.buttons.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::Checkbox(id) =>
-                self.checkboxs.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::ColorPicker(id) =>
-                self.color_pickers.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style,>)
-                ).unwrap(),
-            WidgetId::InputText(id) =>
-                self.input_texts.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::DragValue(id) =>
-                self.drag_values.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::SelectableText(id) =>
-                 self.selectable_texts.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-            WidgetId::RadioButton(id) =>
-                 self.radio_buttons.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
-                ).unwrap(),
-        }
-    }
-
-    #[inline(always)]
     pub fn set_last_frame(&mut self, frame: u64) {
         self.last_frame = frame;
     }
@@ -834,22 +777,16 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
 
     #[inline(always)]
     pub fn begin(&mut self) {
-        unsafe {
-            let prev_widgets = self.prev_active_widgets
-                .as_mut()
-                .unwrap_unchecked();
-            prev_widgets.clear();
-            let active_widgets = self.active_widgets.as_mut().unwrap_unchecked();
-            for &widget in &*active_widgets {
-                prev_widgets.push(widget);
-            }
-            active_widgets.clear();
-            self.prev_active_collapsed_widgets.clear();
-            for &c in &self.active_collapsed_widgets {
-                self.prev_active_collapsed_widgets.push(c);
-            }
-            self.active_collapsed_widgets.clear();
+        self.prev_active_widgets.clear();
+        for &widget in &self.active_widgets {
+            self.prev_active_widgets.push(widget);
         }
+        self.active_widgets.clear();
+        self.prev_active_collapsed_widgets.clear();
+        for &c in &self.active_collapsed_widgets {
+            self.prev_active_collapsed_widgets.push(c);
+        }
+        self.active_collapsed_widgets.clear();
     }
 
     pub fn update(
@@ -877,36 +814,30 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         let mut min_width: f32 = self.min_width;
         let min_height = self.min_height;
         let window_pos = self.position;
-        let (active_widgets, mut prev_active_widgets, mut vertices) = unsafe {(
-            self.active_widgets.take().unwrap_unchecked(),
-            self.prev_active_widgets.take().unwrap_unchecked(),
-            self.vertices.take().unwrap_unchecked(),
-        )};
-        prev_active_widgets.retain(|v| !active_widgets.contains(v));
+        self.prev_active_widgets.retain(|v| !self.active_widgets.contains(v));
+        let mut widgets = unsafe {
+            self.widgets.take().unwrap_unchecked()
+        };
+        for &widget in &self.prev_active_widgets {
+            let (_, widget) = widgets.get_widget_mut(widget);
+            widget.hide(&mut self.vertices);
+        }
         self.prev_active_collapsed_widgets.retain(|v| !self.active_collapsed_widgets.contains(v));
         for collapsed_widgets in &self.prev_active_collapsed_widgets {
             let (_, collapsed_widgets) = &self.collapsed_widgets[collapsed_widgets];
-            collapsed_widgets.hide(&mut vertices);
-        }
-        for &widget in &prev_active_widgets {
-            let (_, widget) = self.get_widget_mut(widget);
-            widget.hide(&mut vertices);
+            collapsed_widgets.hide(&mut self.vertices);
         }
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
-        self.prev_active_widgets = Some(prev_active_widgets);
         let item_pad_outer = style.item_pad_outer();
         let item_pad_inner = style.item_pad_inner();
         let font_scale = style.font_scale();
-        let mut combined_text = unsafe {
-            self.combined_text.take().unwrap_unchecked()
-        };
-        combined_text.clear();
+        self.combined_text.clear();
         let mut hover_window = self.hover_window.take().unwrap();
         let mut active_widget = None;
         let mut hovered_widget = None;
         let mut cursor_in_some_widget = false;
-        for (i, &widget) in active_widgets.iter().enumerate() {
-            let (_, widget) = self.get_widget(widget);
+        for (i, &widget) in self.active_widgets.iter().enumerate() {
+            let (_, widget) = widgets.get_widget(widget);
             match widget.status(nox, style, window_pos, cursor_pos) {
                 WidgetStatus::Inactive => {},
                 WidgetStatus::Hovered(text) => {
@@ -925,18 +856,18 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         }
         for collapsed_widgets in &self.active_collapsed_widgets {
             let (_, collapsed_widgets) = self.collapsed_widgets.get_mut(collapsed_widgets).unwrap();
-            let width = collapsed_widgets.update(nox, window_pos, cursor_pos, style, |text, offset, bounded_text_instance| {
-                combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
+            let width = collapsed_widgets.update(nox, window_pos, cursor_pos, style, active_widget.is_some(), |text, offset, bounded_text_instance| {
+                self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
             });
             min_width = min_width.max(width);
-            if collapsed_widgets.hovered() {
-                hovered_widget = Some(active_widgets.len());
+            if collapsed_widgets.hovered() && active_widget.is_none() {
+                hovered_widget = Some(self.active_widgets.len());
             }
         }
         let window_moving = self.held() || self.any_resize();
         let size = self.size();
-        for (i, &widget) in active_widgets.iter().enumerate() {
-            let (_, widget) = self.get_widget_mut(widget);
+        for (i, &widget) in self.active_widgets.iter().enumerate() {
+            let (_, widget) = widgets.get_widget_mut(widget);
             let UpdateResult {
                 requires_triangulation,
                 cursor_in_widget,
@@ -960,7 +891,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                     false
                 }, window_moving,
                 &mut |text, offset, bounded_instance| {
-                    combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap();
+                    self.combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap();
                 },
             );
             if requires_triangulation {
@@ -969,9 +900,8 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             cursor_in_some_widget |= cursor_in_widget;
         }
         cursor_in_this_window |= cursor_in_some_widget;
-        self.vertices = Some(vertices);
+        self.widgets = Some(widgets);
         self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
-        self.active_widgets = Some(active_widgets);
         self.hover_window = Some(hover_window);
         let title_text = self.title_text.as_ref().unwrap();
         let title_add_scale = style.title_add_scale();
@@ -1170,7 +1100,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             title_text.row_height * font_scale * 1.5
         );
         title_bar_rect.rounding = style.rounding();
-        combined_text
+        self.combined_text
             .add_text(
                 self.title_text.as_ref().unwrap(),
                 vec2(item_pad_outer.x, item_pad_inner.y) / (font_scale * title_add_scale),
@@ -1179,10 +1109,13 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                     min_bounds: self.position,
                     max_bounds: self.position + title_bar_rect.max,
                     color:
-                        if self.cursor_in_window() || self.any_resize() {
+                        if self.held() || self.any_resize() {
+                            style.active_text_col()
+                        }
+                        else if self.cursor_in_window() {
                             style.focused_text_col()
                         } else {
-                            style.text_col()
+                            style.inactive_text_col()
                         },
                 }
             )
@@ -1191,7 +1124,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             main_rect_max.y = min_height;
         }
         for text in &self.text {
-            combined_text.add_text(
+            self.combined_text.add_text(
                 &text.text,
                 text.offset / font_scale,
                 BoundedTextInstance {
@@ -1203,7 +1136,6 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             ).unwrap();
         }
         self.text.clear();
-        self.combined_text = Some(combined_text);
         let requires_triangulation =
             (style.rounding() != self.main_rect.rounding ||
             self.focused_outline_width != style.focused_window_outline_width() ||
@@ -1218,7 +1150,6 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         self.outline_width = style.window_outline_width();
         self.focused_outline_width = style.focused_window_outline_width();
         self.title_bar_rect = title_bar_rect;
-        self.arena_alloc.as_mut().unwrap().clear();
         cursor_in_this_window || self.any_resize()
     }
 
@@ -1266,11 +1197,9 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     #[inline(always)]
     pub fn triangulate(&mut self) {
         if self.requires_triangulation() {
-            println!("here");
             let new_triangulation = self.last_triangulation + 1;
             self.flags |= Self::RENDERABLE;
-            let mut vertices = self.vertices.take().unwrap();
-            vertices.clear();
+            self.vertices.clear();
             self.indices.clear();
             let mut points = GlobalVec::new();
             let mut indices_usize = GlobalVec::new();
@@ -1279,24 +1208,24 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             outline_points(&points,
                 self.focused_outline_width, false, &mut |p| { helper_points.push(p.into()); }
             );
-            if !earcut::earcut(&helper_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.focused_outline_vertex_range = VertexRange::new(0..vertices.len());
+            self.focused_outline_vertex_range = VertexRange::new(0..self.vertices.len());
             helper_points.clear();
             outline_points(&points,
                 self.outline_width, false, &mut |p| { helper_points.push(p.into()); }
             );
-            let mut vertex_begin = vertices.len();
-            if !earcut::earcut(&helper_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+            let mut vertex_begin = self.vertices.len();
+            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.outline_vertex_range = VertexRange::new(vertex_begin..vertices.len());
-            vertex_begin = vertices.len();
-            if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+            self.outline_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
+            vertex_begin = self.vertices.len();
+            if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.main_rect_vertex_range = VertexRange::new(vertex_begin..vertices.len());
+            self.main_rect_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
             points.clear();
             self.title_bar_rect.to_points_partial_round(true, true, false, false,
                 &mut |p| { points.push(p.into()); }
@@ -1304,20 +1233,22 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             helper_points.clear();
             outline_points(&points,
                 self.outline_width, false, &mut |p| { helper_points.push(p.into()); });
-            vertex_begin = vertices.len();
-            if !earcut::earcut(&helper_points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+            vertex_begin = self.vertices.len();
+            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.title_outline_vertex_range = VertexRange::new(vertex_begin..vertices.len());
-            vertex_begin = vertices.len();
-            if !earcut::earcut(&points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+            self.title_outline_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
+            vertex_begin = self.vertices.len();
+            if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.title_bar_vertex_range = VertexRange::new(vertex_begin..vertices.len());
-            let active_widgets = self.active_widgets.take().unwrap();
+            self.title_bar_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
             let mut flags = self.flags;
-            for &widget in &active_widgets  {
-                let (last_triangulation, widget) = self.get_widget_mut(widget);
+            let mut widgets = unsafe {
+                self.widgets.take().unwrap_unchecked()
+            };
+            for &widget in &self.active_widgets  {
+                let (last_triangulation, widget) = widgets.get_widget_mut(widget);
                 *last_triangulation = new_triangulation;
                 points.clear();
                 helper_points.clear();
@@ -1325,19 +1256,19 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                     &mut points,
                     &mut helper_points,
                     &mut |points: &[[f32; 2]]| {
-                        let vertex_begin = vertices.len();
-                        if !earcut::earcut(points, &[], false, &mut vertices, &mut indices_usize).unwrap() {
+                        let vertex_begin = self.vertices.len();
+                        if !earcut::earcut(points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                             flags &= !Self::RENDERABLE;
                         }
-                        VertexRange::new(vertex_begin..vertices.len())
+                        VertexRange::new(vertex_begin..self.vertices.len())
                     }
                 );
             }
             for collapsed_widgets in &self.active_collapsed_widgets {
                 let (last_triangulation, collapsed_widgets) = self.collapsed_widgets.get_mut(collapsed_widgets).unwrap();
                 *last_triangulation = new_triangulation;
-                vertices.append(&[Default::default(); 3]);
-                let n = vertices.len();
+                self.vertices.append(&[Default::default(); 3]);
+                let n = self.vertices.len();
                 indices_usize.append(&[n - 3, n - 2, n - 1]);
                 collapsed_widgets.symbol_vertex_range = VertexRange::new(n - 3..n);
             }
@@ -1346,8 +1277,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 index_count: indices_usize.len() as u32,
                 ..Default::default()
             };
-            self.active_widgets = Some(active_widgets);
-            self.vertices = Some(vertices);
+            self.widgets = Some(widgets);
             self.flags = flags;
             self.flags &= !Self::REQUIRES_TRIANGULATION;
             self.indices.append_map(&indices_usize, |&i| i as u32);
@@ -1371,11 +1301,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         if !self.renderable() {
             return Ok(())
         }
-        let vert_total = unsafe {
-            self.vertices
-                .as_ref()
-                .unwrap_unchecked().len()
-        };
+        let vert_total = self.vertices.len();
         let vert_mem = unsafe {
             vertex_buffer.allocate(render_commands, vert_total)?
         };
@@ -1383,32 +1309,28 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         let idx_mem = unsafe {
             index_buffer.allocate(render_commands, idx_total)?
         };
-        let active_widgets = unsafe {
-            self.active_widgets.take().unwrap_unchecked()
+        let mut widgets = unsafe {
+            self.widgets.take().unwrap_unchecked()
         };
-        let mut vertices = unsafe {
-            self.vertices.take().unwrap_unchecked()
-        };
-        for &widget in &active_widgets {
-            let (_, widget) = self.get_widget_mut(widget);
-            widget.set_vertex_params(style, &mut vertices);
+        for &widget in &self.active_widgets {
+            let (_, widget) = widgets.get_widget_mut(widget);
+            widget.set_vertex_params(style, &mut self.vertices);
         }
         for collapsed_widgets in &self.active_collapsed_widgets {
             let (_, collapsed_widgets) = self.collapsed_widgets.get_mut(collapsed_widgets).unwrap();
-            collapsed_widgets.set_vertex_params(style, &mut vertices);
+            collapsed_widgets.set_vertex_params(style, &mut self.vertices);
         }
-        self.active_widgets = Some(active_widgets);
-        let vertex_sample = vertices[self.main_rect_vertex_range.start()];
+        let vertex_sample = self.vertices[self.main_rect_vertex_range.start()];
         if vertex_sample.color != style.window_bg_col() {
             let target_color = style.window_bg_col();
-            for vertex in &mut vertices[self.main_rect_vertex_range.range()] {
+            for vertex in &mut self.vertices[self.main_rect_vertex_range.range()] {
                 vertex.color = target_color;
             }
         }
-        let vertex_sample = vertices[self.title_bar_vertex_range.start()];
+        let vertex_sample = self.vertices[self.title_bar_vertex_range.start()];
         if vertex_sample.color != style.window_title_bar_col() {
             let target_color = style.window_title_bar_col();
-            for vertex in &mut vertices[self.title_bar_vertex_range.range()] {
+            for vertex in &mut self.vertices[self.title_bar_vertex_range.range()] {
                 vertex.color = target_color;
             }
         }
@@ -1419,37 +1341,34 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             } else {
                 style.focused_window_outline_col()
             };
-            set_vertex_params(&mut vertices, self.focused_outline_vertex_range, vec2(0.0, 0.0), target_color);
-            set_vertex_params(&mut vertices, self.title_outline_vertex_range, vec2(0.0, 0.0), target_color);
-            hide_vertices(&mut vertices, self.outline_vertex_range);
+            set_vertex_params(&mut self.vertices, self.focused_outline_vertex_range, vec2(0.0, 0.0), target_color);
+            set_vertex_params(&mut self.vertices, self.title_outline_vertex_range, vec2(0.0, 0.0), target_color);
+            hide_vertices(&mut self.vertices, self.outline_vertex_range);
         } else {
-            let vertex_sample = vertices[self.focused_outline_vertex_range.start()];
+            let vertex_sample = self.vertices[self.focused_outline_vertex_range.start()];
             let target_color = ColorSRGBA::black(0.0);
             if vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.focused_outline_vertex_range.range()] {
+                for vertex in &mut self.vertices[self.focused_outline_vertex_range.range()] {
                     vertex.color = target_color;
                 }
             }
-            let vertex_sample = vertices[self.outline_vertex_range.start()];
+            let vertex_sample = self.vertices[self.outline_vertex_range.start()];
             let target_color = style.window_outline_col();
             if vertex_sample.color != target_color {
-                for vertex in &mut vertices[self.outline_vertex_range.range()] {
+                for vertex in &mut self.vertices[self.outline_vertex_range.range()] {
                     vertex.color = target_color;
                 }
             }
-            let vertex_sample = vertices[self.title_outline_vertex_range.start()];
+            let vertex_sample = self.vertices[self.title_outline_vertex_range.start()];
             if vertex_sample.color != style.window_outline_col() {
                 let target_color = style.window_outline_col();
-                for vertex in &mut vertices[self.title_outline_vertex_range.range()] {
+                for vertex in &mut self.vertices[self.title_outline_vertex_range.range()] {
                     vertex.color = target_color;
                 }
             }
         }
-        self.vertices = Some(vertices);
         unsafe {
             self.vertices
-                .as_ref()
-                .unwrap_unchecked()
                 .as_ptr()
                 .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_total);
             self.indices
@@ -1487,8 +1406,8 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         )?;
         let mut on_top_contents = None;
         let window_pos = self.position;
-        for &widget in unsafe { self.active_widgets.as_ref().unwrap_unchecked() } {
-            let (_, widget) = self.get_widget(widget);
+        for &widget in &self.active_widgets {
+            let (_, widget) = widgets.get_widget(widget);
             if let Some(contents) = widget.render_commands(
                 render_commands,
                 style,
@@ -1512,12 +1431,9 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             unit_scale,
         );
         render_text(render_commands,
-            unsafe { self.combined_text
-                .as_ref()
-                .unwrap_unchecked()
+            self.combined_text
                 .iter()
-                .map(|(&c, (t, b))| (c, t, b.as_slice()))
-            },
+                .map(|(&c, (t, b))| (c, t, b.as_slice())),
             pc_vertex, vertex_buffer, index_buffer
         )?;
         if let Some(contents) = on_top_contents {
@@ -1531,7 +1447,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 window_pos,
                 inv_aspect_ratio,
                 unit_scale,
-                get_custom_pipeline,
+                get_custom_pipeline
             )?;
         }
         if self.hover_window_active() {
@@ -1551,6 +1467,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 unit_scale,
             )?;
         }
+        self.widgets = Some(widgets);
         Ok(())
     }
 }
@@ -1686,8 +1603,11 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         self.widget_off.x = self.row_widget_off_x;
         self.widget_off.y += self.current_height + item_pad_outer.y;
         let current_height_half = self.current_height * 0.5;
+        let widgets = unsafe {
+            self.window.widgets.as_mut().unwrap_unchecked()
+        };
         for &(widget, size) in &self.current_row_widgets {
-            let (_, widget) = self.window.get_widget_mut(widget);
+            let (_, widget) = widgets.get_widget_mut(widget);
             let offset = widget.get_offset();
             widget.set_offset(vec2(offset.x, offset.y + current_height_half - size.y * 0.5));
         }
@@ -1730,6 +1650,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
                 |id| WidgetId::SelectableText(id),
                 |win, id| win.get_selectable_text(id)
             );
+        selectable_text.set_base_offset(vec2(self.row_widget_off_x, self.widget_off.y));
         selectable_text.set_offset(self.widget_off);
         selectable_text.set_current_height(self.current_height);
         let mut builder = selectable_text.as_builder(window_width, self.style, self.text_renderer);
@@ -1751,7 +1672,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
     #[inline(always)]
     pub fn tag(&mut self, tag: &str)
     {
-        self.tag_internal(tag, self.style.text_col(), None);
+        self.tag_internal(tag, self.style.inactive_text_col(), None);
     }
 
     #[inline(always)]
@@ -1763,7 +1684,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
     #[inline(always)]
     pub fn tag_with_tooltip(&mut self, tag: &str, tool_tip: &str)
     {
-        self.tag_internal(tag, self.style.text_col(), Some(tool_tip));
+        self.tag_internal(tag, self.style.inactive_text_col(), Some(tool_tip));
     }
 
     #[inline(always)]
@@ -1782,6 +1703,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         );
         selectable_text.set_trunc_to_window_width(truncate);
         selectable_text.set_offset(self.widget_off);
+        selectable_text.set_current_height(self.current_height);
         selectable_text.set_base_offset(vec2(self.row_widget_off_x, self.widget_off.y));
         let mut builder = selectable_text.as_builder(window_width, self.style, self.text_renderer);
         f(&mut builder);
@@ -1904,7 +1826,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         let size = input_text.calc_size(self.style, self.text_renderer);
         input_text.set_params(
             width, None, center_text,
-            empty_input_prompt, format_input
+            empty_input_prompt, format_input, false
         );
         if input_text.active() {
             if let Some(v) = input_text.get_input() {
@@ -1965,7 +1887,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             |win, id| win.get_drag_value(id)
         );
         let size = drag_value.calc_size(self.style, self.text_renderer);
-        drag_value.set_input_params(self.style, min_width, format_input);
+        drag_value.set_input_params(self.style, min_width, format_input, false);
         drag_value.calc_value(
             self.style, value, min, max,
             drag_speed,
@@ -1989,10 +1911,51 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             |id| WidgetId::RadioButton(id),
             |win, id| win.get_radio_button(id)
         );
+        radio_button.set_label(label, self.text_renderer, self.style);
         let size = radio_button.calc_size(self.style, self.text_renderer);
         radio_button.update_value(value, radio_value);
-        radio_button.set_label(label, self.text_renderer, self.style);
         radio_button.set_offset(self.widget_off);
+        self.current_height = self.current_height.max(size.y);
+        self.widget_off.x += size.x + self.style.item_pad_outer().x;
+        self.current_row_widgets.push((id, size));
+    }
+
+    #[inline(always)]
+    pub fn selectable_tag<T: Clone + Eq>(
+        &mut self,
+        value: &mut T,
+        target: T,
+        label: &str,
+    )
+    {
+        let (selectable_tag, id) = self.window.activate_widget(
+            label,
+            |id| WidgetId::SelectabelTag(id),
+            |win, id| win.get_selectable_tag(id)
+        );
+        selectable_tag.set_label(label, self.text_renderer, self.style);
+        let size = selectable_tag.calc_size(self.style, self.text_renderer);
+        selectable_tag.update_value(value, target);
+        selectable_tag.set_offset(self.widget_off);
+        self.current_height = self.current_height.max(size.y);
+        self.widget_off.x += size.x + self.style.item_pad_outer().x;
+        self.current_row_widgets.push((id, size));
+    }
+
+    #[inline(always)]
+    pub fn combo_box<T: Clone + Eq>(
+        &mut self,
+        label: &str,
+        f: impl FnMut(&mut ComboBoxBuilder<T, I, FontHash, Style>)
+    ) {
+        let (combo_box, id) = self.window.activate_widget(
+            label,
+            |id| WidgetId::ComboBox(id),
+            |win, id| win.get_combo_box(id)
+        );
+        combo_box.update_values::<T>(self.style, self.text_renderer, f);
+        let size = combo_box.calc_size(self.style, self.text_renderer);
+        combo_box.set_offset(self.widget_off);
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_widgets.push((id, size));

@@ -30,6 +30,7 @@ impl<I, FontHash, Style> DragValue<I, FontHash, Style>
     const HOVERED: u32 = 0x1;
     const HELD: u32 = 0x2;
     const HELD_MOVED: u32 = 0x4;
+    const TRANSPARENT_INACTIVE_BG: u32 = 0x8;
 
     #[inline(always)]
     pub fn new() -> Self {
@@ -51,12 +52,21 @@ impl<I, FontHash, Style> DragValue<I, FontHash, Style>
         &mut self,
         style: &Style,
         width: f32,
-        format_input: Option<fn(&mut dyn Write, &str) -> core::fmt::Result>
+        format_input: Option<fn(&mut dyn Write, &str) -> core::fmt::Result>,
+        transparent_inactive_bg: bool,
     )
     {
+        self.flags &= !Self::TRANSPARENT_INACTIVE_BG;
         self.input_text.set_params(
-            width, Some(style.widget_bg_col()),
-            true, "", format_input
+            width, Some(
+                if transparent_inactive_bg && (!self.held() && !self.hovered() && !self.input_text.active()) {
+                    self.flags |= Self::TRANSPARENT_INACTIVE_BG;
+                    ColorSRGBA::black(0.0)
+                } else {
+                    style.widget_bg_col()
+                }
+            ),
+            true, "", format_input, self.held()
         );
     }
 
@@ -278,6 +288,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         self.input_text.outline_points(self.focused_outline_width, points);
         self.focused_outline_vertex_range = tri(&points);
         points.clear();
+        self.input_text.outline_points(self.active_outline_width, points);
+        self.active_outline_vertex_range = tri(&points);
+        points.clear();
         self.input_text.triangulate(points, helper_points, tri);
     }
 
@@ -300,6 +313,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
             }
         } else {
             hide_vertices(vertices, self.focused_outline_vertex_range);
+            hide_vertices(vertices, self.active_outline_vertex_range);
         }
         self.input_text.set_vertex_params(style, vertices);
     }
@@ -332,6 +346,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         vertices: &mut [Vertex],
     ) {
         hide_vertices(vertices, self.focused_outline_vertex_range);
+        hide_vertices(vertices, self.active_outline_vertex_range);
         self.input_text.hide(vertices);
     }
 }

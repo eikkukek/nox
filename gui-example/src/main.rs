@@ -10,6 +10,13 @@ use nox::{
 
 use nox_gui::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MyEnum {
+    First,
+    Second,
+    Third,
+}
+
 struct Example<'a> {
     workspace: Workspace<
         'a,
@@ -21,7 +28,7 @@ struct Example<'a> {
     aspect_ratio: f32,
     slider_value: f32,
     slider_value_int: u32,
-    radio_value: u32,
+    radio_value: MyEnum,
     drag_value_int: i8,
     input_text: String,
     color: ColorSRGBA,
@@ -57,7 +64,7 @@ impl<'a> Example<'a> {
             aspect_ratio: 1.0,
             slider_value: 0.0,
             slider_value_int: 0,
-            radio_value: 0,
+            radio_value: MyEnum::First,
             drag_value_int: 0,
             input_text: Default::default(),
             color: Default::default(),
@@ -158,53 +165,70 @@ impl<'a> Interface for Example<'a> {
         self.workspace.window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
             |win| {
 
-                win.checkbox(&mut self.show_other_window, "Show other window");
-                win.end_row();
+                win.collapsing("Show/hide widgets", |win| {
 
-                win.tag("Color picker");
-                win.color_picker(&mut self.color);
-                win.end_row();
+                    win.checkbox(&mut self.show_other_window, "Show other window");
+                    win.end_row();
 
-                if win.button("Print \"hello\"") {
-                    println!("hello");
-                }
-                win.end_row();
+                    win.color_picker(&mut self.color);
+                    win.tag("Color picker");
+                    win.end_row();
 
-                win.radio_button(&mut self.radio_value, 0, "First");
-                win.radio_button(&mut self.radio_value, 1, "Second");
-                win.radio_button(&mut self.radio_value, 2, "Third");
+                    if win.button("Print \"hello\"") {
+                        println!("hello");
+                    }
+                    win.end_row();
 
-                win.end_row();
+                    win.radio_button(&mut self.radio_value, MyEnum::First, "First");
+                    win.radio_button(&mut self.radio_value, MyEnum::Second, "Second");
+                    win.radio_button(&mut self.radio_value, MyEnum::Third, "Third");
 
-                win.input_text(
-                    &mut self.input_text,
-                    "Input text here",
-                    None,
-                );
+                    win.end_row();
 
-                win.collapsing("Sliders", |win| {
-                    win.collapsing("Float", |win| {
-                        win.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
-                        win.tag("Float 1");
-                        win.end_row();
-                        win.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
-                        win.tag("Float 2");
+                    win.selectable_tag(&mut self.radio_value, MyEnum::First, "First");
+                    win.selectable_tag(&mut self.radio_value, MyEnum::Second, "Second");
+                    win.selectable_tag(&mut self.radio_value, MyEnum::Third, "Third");
+
+                    win.end_row();
+
+                    win.combo_box("My Combo", |builder| {
+                        builder.item(&mut self.radio_value, MyEnum::First, "First");
+                        builder.item(&mut self.radio_value, MyEnum::Second, "Second");
+                        builder.item(&mut self.radio_value, MyEnum::Third, "Third");
                     });
-                    win.collapsing("Int", |win| {
-                        //win.tag("Int");
-                        win.slider(&mut self.slider_value_int, 0, 10, 20.0);
+
+                    win.end_row();
+
+                    win.input_text(
+                        &mut self.input_text,
+                        "Input text here",
+                        None,
+                    );
+
+                    win.collapsing("Sliders", |win| {
+                        win.collapsing("Float", |win| {
+                            win.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
+                            win.tag("Float 1");
+                            win.end_row();
+                            win.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
+                            win.tag("Float 2");
+                        });
+                        win.collapsing("Int", |win| {
+                            //win.tag("Int");
+                            win.slider(&mut self.slider_value_int, 0, 10, 20.0);
+                        });
                     });
+                  
+                    win.drag_value(
+                        &mut self.drag_value_int,
+                        i8::MIN,
+                        i8::MAX,
+                        500.0,
+                        0.01,
+                        None,
+                    );
+                    win.tag("Drag value");
                 });
-                
-                win.drag_value(
-                    &mut self.drag_value_int,
-                    i8::MIN,
-                    i8::MAX,
-                    500.0,
-                    0.01,
-                    None,
-                );
-                win.tag("Drag value");
             }
         )?;
         if self.show_other_window {

@@ -445,7 +445,8 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
                 |fmt, str| -> core::fmt::Result {
                     write!(fmt, "R {}", str)
                 }
-            )
+            ),
+            true,
         );
         let mut val = self.rgba.r;
         self.r_drag_value.calc_value(style, &mut val, 0, 255, 255.0);
@@ -474,7 +475,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
                 format_result: fn(&mut dyn Write, &str) -> core::fmt::Result,
             |
         {
-            drag_value.set_input_params(style, text_box_rect_max.x, Some(format_result));
+            drag_value.set_input_params(style, text_box_rect_max.x, Some(format_result), true);
             let res = drag_value.update(nox, style,
                 text_renderer,
                 size,
@@ -743,7 +744,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             };
         let picker_size = style.color_picker_size();
         let mut offset = self.offset;
-        let mut target_color = style.window_bg_col();
+        let mut target_color = style.hover_window_bg_col();
         set_vertex_params(&mut self.other_vertices, self.window_vertex_range, offset, target_color);
         target_color = style.window_outline_col();
         set_vertex_params(&mut self.other_vertices, self.window_outline_vertex_range, offset, target_color);

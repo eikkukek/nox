@@ -12,6 +12,9 @@ mod checkbox;
 mod color_picker;
 mod input_text;
 mod radio_button;
+mod selectable_tag;
+mod combo_box;
+mod hover_window;
 mod window;
 mod workspace;
 
@@ -25,6 +28,7 @@ pub use widget::*;
 pub use slider::*;
 pub use drag_value::*;
 pub use window::*;
+pub use hover_window::*;
 pub use workspace::*;
 
 pub use nox_font as font;
@@ -37,4 +41,6 @@ pub use checkbox::Checkbox;
 pub use input_text::InputText;
 pub use color_picker::ColorPicker;
 pub use radio_button::RadioButton;
+pub use selectable_tag::SelectableTag;
+pub use combo_box::{ComboBox, ComboBoxBuilder};
 pub use helpers::*;

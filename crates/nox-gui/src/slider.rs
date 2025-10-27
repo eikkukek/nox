@@ -135,7 +135,7 @@ impl<I, FontHash, Style> Slider<I, FontHash, Style>
         drag_speed: f32,
     )
     {
-        self.drag_value.set_input_params(style, style.min_input_text_width(), None);
+        self.drag_value.set_input_params(style, style.min_input_text_width(), None, false);
         self.width = slider_width;
         self.drag_value.calc_value(style, value, T::MIN, T::MAX, drag_speed);
         if self.held() {
@@ -345,7 +345,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
             set_vertex_params(vertices, self.active_handle_outline_vertex_range, offset, target_color);
             hide_vertices(vertices, self.regular_handle_outline_vertex_range);
         } else {
-            target_color = style.focused_widget_outline_col();
+            target_color = style.inactive_widget_outline_col();
             set_vertex_params(vertices, self.regular_handle_outline_vertex_range, offset, target_color);
             hide_vertices(vertices, self.active_handle_outline_vertex_range);
         }
