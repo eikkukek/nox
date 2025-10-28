@@ -214,12 +214,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
+        content_offset: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         cursor_in_other_widget: bool,
         window_moving: bool,
+        hover_blocked: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
@@ -265,9 +267,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         }
         let mut update_results = self.input_text.update(
             nox, style,
-            text_renderer, window_size, window_pos,
+            text_renderer, window_size, window_pos, content_offset,
             cursor_pos, delta_cursor_pos, cursor_in_this_window,
-            other_widget_active, cursor_in_other_widget, window_moving, collect_text,
+            other_widget_active, cursor_in_other_widget, window_moving,
+            hover_blocked, collect_text,
         );
         update_results.cursor_in_widget |= cursor_in_rect || self.held();
         update_results.requires_triangulation |=

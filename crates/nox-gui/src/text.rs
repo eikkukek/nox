@@ -132,7 +132,7 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
     #[inline(always)]
     pub fn set_trunc_to_window_width(&mut self, value: bool) {
         self.flags &= !Self::TRUNC_TO_WINDOW_WIDTH;
-        self.flags |= Self::TRUNC_TO_WINDOW_WIDTH * value as u32;
+        or_flag!(self.flags, Self::TRUNC_TO_WINDOW_WIDTH, value);
     }
 
     #[inline(always)]
@@ -599,12 +599,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         _window_size: Vec2,
         window_pos: Vec2,
+        _content_offset: Vec2,
         cursor_pos: Vec2,
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         cursor_in_other_widget: bool,
         _window_moving: bool,
+        hover_blocked: bool,
         _collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
@@ -617,11 +619,11 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
             self.flags &= !Self::HELD;
         }
         let mut cursor_index = self.calc_cursor_index(style, rel_cursor_pos, self.base_offset);
-        let mut cursor_in_widget = false;
         let error_margin = style.cursor_error_margin();
         let cursor_in_text  =
             if let Some(cursor_index) = cursor_index {
-                if rel_cursor_pos.y <= self.start_offset.y || rel_cursor_pos.y >= self.offset.y + self.current_height {
+                if rel_cursor_pos.y <= self.start_offset.y ||
+                    rel_cursor_pos.y >= self.offset.y + self.current_height {
                     false
                 }
                 else if cursor_index == 0 {
@@ -635,7 +637,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
                 false
             };
         self.flags &= !Self::HOVERED;
-        if cursor_in_this_window && !other_widget_active && !cursor_in_other_widget {
+        let mut cursor_in_widget = false;
+        if cursor_in_this_window && !other_widget_active && !cursor_in_other_widget && !hover_blocked {
             if cursor_in_text {
                 if style.override_cursor() {
                     nox.set_cursor(CursorIcon::Text);

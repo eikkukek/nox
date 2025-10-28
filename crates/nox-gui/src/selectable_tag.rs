@@ -188,12 +188,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHas
         _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
+        content_offset: Vec2,
         cursor_pos: Vec2,
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         cursor_in_other_widget: bool,
         _window_moving: bool,
+        hover_blocked: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
@@ -216,7 +218,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHas
             window_pos + self.offset - vec2(error_margin, 0.0),
             size + vec2(error_margin_2, 0.0),
         );
-        let cursor_in_widget = cursor_in_this_window && !other_widget_active && !cursor_in_other_widget && bounding_rect.is_point_inside(cursor_pos);
+        let cursor_in_widget =
+            cursor_in_this_window && !hover_blocked &&
+            !other_widget_active && !cursor_in_other_widget &&
+            bounding_rect.is_point_inside(cursor_pos);
         self.flags &= !(Self::CLICKED | Self::HOVERED);
         if self.held() {
             if nox.was_mouse_button_released(MouseButton::Left) {
@@ -231,7 +236,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHas
                 self.flags |= Self::HELD;
             }
         }
-        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
+        let (min_bounds, max_bounds) = calc_bounds(
+            window_pos, content_offset,
+            self.offset, window_size
+        );
         let bounded_instance = BoundedTextInstance {
             add_scale: vec2(1.0, 1.0),
             min_bounds,

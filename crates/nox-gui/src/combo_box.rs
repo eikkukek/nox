@@ -126,7 +126,7 @@ impl<I, FontHash, Style> ComboBox<I, FontHash, Style>
         self.widget_size = widget_size;
         self.focused_outline_width = style.focused_widget_outline_width();
         self.active_outline_width = style.active_widget_outline_width();
-        self.flags |= Self::WIDGET_REQUIRES_TRIANGULATION * widget_requires_triangulation as u32;
+        or_flag!(self.flags, Self::WIDGET_REQUIRES_TRIANGULATION, widget_requires_triangulation);
         let content_offset = self.offset + vec2(0.0, widget_size.y + item_pad_outer.y);
         let content_size = vec2(min_width, widget_off.y - content_offset.y + item_pad_outer.y);
         let content_requires_triangulation =
@@ -136,7 +136,7 @@ impl<I, FontHash, Style> ComboBox<I, FontHash, Style>
         self.rounding = style.rounding();
         self.window_outline_width = style.window_outline_width();
         self.content_size = content_size;
-        self.flags |= Self::CONTENT_REQUIRES_TRIANGULATION * content_requires_triangulation as u32;
+        or_flag!(self.flags, Self::CONTENT_REQUIRES_TRIANGULATION, content_requires_triangulation);
         let min_width = min_width - style.collapse_symbol_scale() - item_pad_inner.x;
         for tag in &self.active_tags {
             let (_, tag) = self.selectable_tags.get_mut(tag).unwrap();
@@ -287,12 +287,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
+        content_offset: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         cursor_in_other_widget: bool,
         window_moving: bool,
+        hover_blocked: bool,
         collect_text: &mut dyn FnMut(&nox_font::RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
@@ -303,7 +305,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
             widget.hide(&mut self.content_vertices);
         }
         let item_pad_inner = style.item_pad_inner();
-        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
+        let (min_bounds, max_bounds) = calc_bounds(
+            window_pos, content_offset,
+            self.offset, window_size
+        );
         let bounded_instance = BoundedTextInstance {
             add_scale: vec2(1.0, 1.0),
             min_bounds,
@@ -341,15 +346,15 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
                     self.flags ^= Self::CONTENTS_SHOWN;
                 }
             }
-        } else if cursor_in_widget {
+        } else if !other_widget_active && !hover_blocked && cursor_in_widget {
             self.flags |= Self::WIDGET_HOVERED;
             if mouse_pressed {
                 self.flags |= Self::WIDGET_HELD;
             }
         }
-        let content_offset = self.offset + vec2(0.0, self.widget_size.y);
+        let hover_content_offset = self.offset + vec2(0.0, self.widget_size.y);
         let cursor_in_contents = BoundingRect::from_position_size(
-            window_pos + content_offset,
+            window_pos + hover_content_offset,
             self.content_size,
         ).is_point_inside(cursor_pos);
         if !window_moving && self.clicked() && !self.widget_held() && !cursor_in_contents {
@@ -371,11 +376,12 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
             }
         }
         let font_scale = style.font_scale();
+        let size = hover_content_offset + self.content_size;
         for (i, tag) in self.active_tags.iter().enumerate() {
             let tag = self.selectable_tags.get_mut(tag).unwrap();
             let result = tag.1.update(
-                nox, style, text_renderer, window_size,
-                window_pos, cursor_pos, delta_cursor_pos, contents_shown,
+                nox, style, text_renderer, size,
+                window_pos, content_offset, cursor_pos, delta_cursor_pos, contents_shown,
                 if let Some(idx) = active_widget {
                     idx != i
                 } else {
@@ -387,6 +393,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
                     cursor_in_other_widget
                 },
                 window_moving,
+                false,
                 &mut |text, offset, bounded_instance| {
                     self.combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap();
                 }
@@ -394,7 +401,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
             if tag.1.clicked() {
                 self.flags &= !Self::CONTENTS_SHOWN;
             }
-            self.flags |= Self::CONTENT_REQUIRES_TRIANGULATION * result.requires_triangulation as u32;
+            or_flag!(self.flags, Self::CONTENT_REQUIRES_TRIANGULATION, result.requires_triangulation);
         }
         if self.content_requires_triangulation() {
             self.last_triangulation += 1;
@@ -439,7 +446,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
             self.flags &= !Self::CONTENT_REQUIRES_TRIANGULATION;
         }
         if contents_shown {
-            let offset = content_offset;
+            let offset = hover_content_offset;
             set_vertex_params(&mut self.content_vertices, self.content_outline_vertex_range,
                 offset, style.window_outline_col(),
             );

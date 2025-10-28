@@ -459,7 +459,8 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             nox, style,
             text_renderer,
             size,
-            window_pos, cursor_pos, delta_cursor_pos, cursor_in_window,
+            window_pos, vec2(0.0, 0.0),
+            cursor_pos, delta_cursor_pos, cursor_in_window,
             if let Some(cursor_in_drag_value) = drag_value_active {
                 cursor_in_drag_value != 0
             } else {
@@ -467,7 +468,10 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             },
             false,
             window_moving,
-            &mut |text, offset, bounded_instance| self.combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap(),
+            false,
+            &mut |text, offset, bounded_instance|
+                self.combined_text
+                    .add_text(text, offset / font_scale, bounded_instance).unwrap(),
         );
         let mut f = |
                 drag_value: &mut DragValue<I, FontHash, Style>,
@@ -479,7 +483,8 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             let res = drag_value.update(nox, style,
                 text_renderer,
                 size,
-                window_pos, cursor_pos, delta_cursor_pos, cursor_in_window,
+                window_pos, vec2(0.0, 0.0),
+                cursor_pos, delta_cursor_pos, cursor_in_window,
                 if let Some(cursor_in_drag_value) = drag_value_active {
                     cursor_in_drag_value != idx
                 } else {
@@ -487,7 +492,10 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
                 },
                 false,
                 window_moving,
-                &mut |text, offset, bounded_text_instance| self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap(),
+                false,
+                &mut |text, offset, bounded_text_instance|
+                    self.combined_text
+                        .add_text(text, offset / font_scale, bounded_text_instance).unwrap(),
             );
             update_result.cursor_in_widget |= res.cursor_in_widget;
             update_result.requires_triangulation |= res.requires_triangulation;
@@ -1115,12 +1123,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
         _window_size: Vec2,
         window_pos: Vec2,
+        _content_offset: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         _cursor_in_this_window: bool,
         other_widget_active: bool,
         _cursor_in_other_widget: bool,
         window_moving: bool,
+        hover_blocked: bool,
         _collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult {
         let offset = self.offset;
@@ -1132,11 +1142,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         let error_margin = style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
         let cursor_in_color_rect =
+            !other_widget_active &&
+            !hover_blocked &&
             BoundingRect::from_position_size(
                 offset - vec2(error_margin, error_margin),
                 color_rect_max + vec2(error_margin_2, error_margin_2),
             ).is_point_inside(rel_cursor_pos);
-        let cursor_in_contents = self.contents
+        let cursor_in_contents =
+            self.contents
             .bounding_rect(error_margin)
             .is_point_inside(rel_cursor_pos);
         if nox.was_mouse_button_released(MouseButton::Left) {

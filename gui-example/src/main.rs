@@ -38,6 +38,8 @@ struct Example<'a> {
     output_image: ImageId,
     output_resolve_image: ImageId,
     tag_color: ColorHSVA,
+    resizeable: bool,
+    clamp_height: bool,
     msaa: MSAA,
     device_alloc: Option<LinearDeviceAlloc>,
 }
@@ -74,6 +76,8 @@ impl<'a> Example<'a> {
             output_image: Default::default(),
             output_resolve_image: Default::default(),
             tag_color: ColorHSVA::new(0.0, 0.53, 1.0, 0.9),
+            resizeable: true,
+            clamp_height: true,
             msaa: MSAA::X8,
             device_alloc: None,
         }
@@ -164,7 +168,10 @@ impl<'a> Interface for Example<'a> {
         self.workspace.begin(nox)?;
         self.workspace.window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
             |win| {
-
+                win.checkbox(&mut self.resizeable, "Resizeable");
+                win.checkbox(&mut self.clamp_height, "Clamp height");
+                win.resizeable(self.resizeable);
+                win.clamp_height(self.clamp_height);
                 win.collapsing("Show/hide widgets", |win| {
 
                     win.checkbox(&mut self.show_other_window, "Show other window");

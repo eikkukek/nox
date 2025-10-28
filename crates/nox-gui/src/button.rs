@@ -151,12 +151,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
         _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
+        content_offset: Vec2,
         cursor_pos: Vec2,
         _delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         _cursor_in_other_widget: bool,
         _window_moving: bool,
+        hover_blocked: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
@@ -179,7 +181,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
                 self.flags |= Self::PRESSED * bounding_rect.is_point_inside(cursor_pos) as u32;
                 self.flags &= !Self::HELD;
             }
-        } else if cursor_in_this_window && !other_widget_active {
+        } else if cursor_in_this_window && !other_widget_active && !hover_blocked {
             let bounding_rect = BoundingRect::from_position_size(
                 window_pos + self.offset,
                 self.rect.max
@@ -192,7 +194,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
                 }
             }
         }
-        let (min_bounds, max_bounds) = calc_bounds(window_pos, self.offset, window_size);
+        let (min_bounds, max_bounds) = calc_bounds(
+            window_pos, content_offset,
+            self.offset, window_size
+        );
         collect_text(&self.label_text, self.offset + style.item_pad_inner(), BoundedTextInstance {
             add_scale: vec2(1.0, 1.0),
             min_bounds,

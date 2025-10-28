@@ -116,12 +116,14 @@ pub trait Widget<I, FontHash, Style>
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
         window_size: Vec2,
         window_pos: Vec2,
+        content_offset: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         cursor_in_this_window: bool,
         other_widget_active: bool,
         cursor_in_other_widget: bool,
         window_moving: bool,
+        hover_blocked: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult;
 

@@ -106,6 +106,14 @@ impl Vec2 {
             y: self.y.min(rhs.y),
         }
     }
+
+    #[inline(always)]
+    pub fn max(self, rhs: Self) -> Self {
+        Self {
+            x: self.x.max(rhs.x),
+            y: self.y.max(rhs.y),
+        }
+    }
 }
 
 impl Add for Vec2 {

@@ -118,8 +118,20 @@ pub fn norm_pos_to_pos(norm_pos: Vec2, unit_scale: f32, aspect_ratio: f32) -> Ve
 }
 
 #[inline(always)]
-pub fn calc_bounds(window_pos: Vec2, widget_offset: Vec2, window_size: Vec2) -> (Vec2, Vec2) {
-    let min_bounds = window_pos + widget_offset.min(window_size);
-    let max_bounds = min_bounds + window_size - widget_offset;
+pub fn calc_bounds(
+    window_pos: Vec2, content_off: Vec2,
+    widget_offset: Vec2, window_size: Vec2
+) -> (Vec2, Vec2)
+{
+    let offset = widget_offset.max(content_off);
+    let min_bounds = window_pos + offset.min(window_size);
+    let max_bounds = min_bounds + window_size - offset;
     (min_bounds, max_bounds)
+}
+
+#[macro_export]
+macro_rules! or_flag {
+    ($flags:expr, $flag:expr, $value:expr) => {
+        $flags |= $flag & ($value as u32) << $flag.trailing_zeros();
+    };
 }

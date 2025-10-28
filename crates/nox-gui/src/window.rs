@@ -114,6 +114,7 @@ impl CollapsingHeader {
         &mut self,
         nox: &Nox<I>,
         window_pos: Vec2,
+        window_size: Vec2,
         cursor_pos: Vec2,
         style: &impl WindowStyle<FontHash>,
         widget_active: bool,
@@ -132,25 +133,31 @@ impl CollapsingHeader {
             vec2(collapse_scale + item_pad_outer.x + text_size.x, text_size.y)
         );
         self.flags &= !Self::HOVERED;
-        self.flags |= Self::HOVERED * bounding_rect.is_point_inside(cursor_pos) as u32 * !widget_active as u32;
+        or_flag!(self.flags, Self::HOVERED, bounding_rect.is_point_inside(cursor_pos) && !widget_active);
         if !widget_active && nox.was_mouse_button_pressed(MouseButton::Left) && self.hovered() {
             self.flags ^= Self::COLLAPSED;
         }
         if self.collapsed() {
-            self.rotation = (self.rotation - FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
+            self.rotation =
+                (self.rotation - FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32())
+                .clamp(0.0, FRAC_PI_2);
         } else {
-            self.rotation = (self.rotation + FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, FRAC_PI_2);
+            self.rotation =
+                (self.rotation + FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32())
+                .clamp(0.0, FRAC_PI_2);
         }
-        collect_text(&self.label_text, offset + vec2(collapse_scale + style.item_pad_inner().x, 0.0), BoundedTextInstance {
-            add_scale: vec2(1.0, 1.0),
-            min_bounds: vec2(f32::MIN, f32::MIN),
-            max_bounds: vec2(f32::MAX, f32::MAX),
-            color: if self.hovered() {
-                style.focused_text_col()
-            } else {
-                style.inactive_text_col()
+        collect_text(&self.label_text, offset + vec2(collapse_scale + style.item_pad_inner().x, 0.0),
+            BoundedTextInstance {
+                add_scale: vec2(1.0, 1.0),
+                min_bounds: window_pos,
+                max_bounds: window_pos + window_size,
+                color: if self.hovered() {
+                    style.focused_text_col()
+                } else {
+                    style.inactive_text_col()
+                }
             }
-        });
+        );
         self.beam_width = style.window_outline_width();
         offset.x + collapse_scale + text_size.x + item_pad_outer.x
     }
@@ -408,6 +415,8 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     const RESIZE_BLOCKED_ROW: u32 = 0x200;
     const HOVER_WINDOW_ACTIVE: u32 = 0x400;
     const APPEARING: u32 = 0x800;
+    const RESIZEABLE: u32 = 0x1000;
+    const CLAMP_HEIGHT: u32 = 0x2000;
 
     pub(crate) fn new(
         title: &str,
@@ -445,7 +454,11 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             focused_outline_width: 0.0,
             outline_width: 0.0,
             distance_from_edge: Default::default(),
-            flags: Self::REQUIRES_TRIANGULATION | Self::APPEARING,
+            flags:
+                Self::REQUIRES_TRIANGULATION |
+                Self::APPEARING |
+                Self::RESIZEABLE |
+                Self::CLAMP_HEIGHT,
             _marker: PhantomData,
         }
     }
@@ -722,6 +735,28 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     }
 
     #[inline(always)]
+    pub fn is_resizeable(&self) -> bool {
+        self.flags & Self::RESIZEABLE == Self::RESIZEABLE
+    }
+
+    #[inline(always)]
+    pub fn set_resizeable(&mut self, value: bool) {
+        self.flags &= !Self::RESIZEABLE;
+        or_flag!(self.flags, Self::RESIZEABLE, value);
+    }
+
+    #[inline(always)]
+    pub fn clamping_height(&self) -> bool {
+        self.flags & Self::CLAMP_HEIGHT == Self::CLAMP_HEIGHT
+    }
+
+    #[inline(always)]
+    pub fn set_clamp_height(&mut self, value: bool) {
+        self.flags &= !Self::CLAMP_HEIGHT;
+        or_flag!(self.flags, Self::CLAMP_HEIGHT, value);
+    }
+
+    #[inline(always)]
     fn renderable(&self) -> bool {
         self.flags & Self::RENDERABLE == Self::RENDERABLE
     }
@@ -858,15 +893,23 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             I: Interface,
             FontHash: UiFontHash,
     {
+        let override_cursor = style.override_cursor();
         let mut cursor_in_this_window =
             !cursor_in_other_window &&
             self.bounding_rect(style.cursor_error_margin()).is_point_inside(cursor_pos);
-        if cursor_in_this_window && style.override_cursor() && !self.any_resize() {
+        if cursor_in_this_window && override_cursor && !self.any_resize() {
             nox.set_cursor(CursorIcon::Default);
         }
+        let mut title_bar_rect = self.title_bar_rect;
+        title_bar_rect.max.y = style.calc_text_box_height_from_text_height(
+            style.calc_font_height(text_renderer) * style.title_add_scale()
+        );
         let mut min_width: f32 = self.min_width;
-        let min_height = self.min_height;
-        let window_pos = self.position;
+        let min_height = self.min_height.max(
+            title_bar_rect.max.y + style.item_pad_outer().y
+        );
+        let pos = self.position;
+        let size = self.size();
         self.prev_active_widgets.retain(|v| !self.active_widgets.contains(v));
         let mut widgets = unsafe {
             self.widgets.take().unwrap_unchecked()
@@ -891,7 +934,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         let mut cursor_in_some_widget = false;
         for (i, &widget) in self.active_widgets.iter().enumerate() {
             let (_, widget) = widgets.get_widget(widget);
-            match widget.status(nox, style, window_pos, cursor_pos) {
+            match widget.status(nox, style, pos, cursor_pos) {
                 WidgetStatus::Inactive => {},
                 WidgetStatus::Hovered(text) => {
                     if let Some(text) = text {
@@ -907,18 +950,108 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 },
             }
         }
+        let mut hover_blocked = !cursor_in_this_window;
+        if !self.held() && !self.any_resize() {
+            if cursor_in_this_window && active_widget.is_none() {
+                let mut flags = self.flags;
+                flags &= !Self::RESIZE_BLOCKED_COL;
+                flags &= !Self::RESIZE_BLOCKED_ROW;
+                let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
+                let error_margin = style.cursor_error_margin();
+                if self.is_resizeable() {
+                    if  cursor_pos.x >= self.position.x - error_margin &&
+                        cursor_pos.x <= self.position.x + error_margin
+                    {
+                        flags |= Self::RESIZE_LEFT;
+                    }
+                    if cursor_pos.x >= self.position.x + self.main_rect.max.x - error_margin &&
+                        cursor_pos.x <= self.position.x + self.main_rect.max.x + error_margin
+                    {
+                        flags |= Self::RESIZE_RIGHT;
+                    }
+                    if cursor_pos.y >= self.position.y - error_margin * 0.5 &&
+                        cursor_pos.y <= self.position.y + error_margin * 0.5
+                    {
+                        flags |= Self::RESIZE_TOP;
+                    }
+                    if cursor_pos.y >= self.position.y + self.main_rect.max.y - error_margin &&
+                        cursor_pos.y <= self.position.y + self.main_rect.max.y + error_margin
+                    {
+                        flags |= Self::RESIZE_BOTTOM;
+                    }
+                }
+                self.flags = flags;
+                if !self.any_resize()
+                {
+                    if BoundingRect
+                        ::from_position_size(self.position, self.title_bar_rect.max)
+                        .is_point_inside(cursor_pos)
+                    {
+                        hovered_widget = Some(self.active_widgets.len());
+                        hover_blocked = true;
+                        or_flag!(self.flags, Self::HELD, mouse_pressed);
+                    }
+                    if override_cursor {
+                        nox.set_cursor(CursorIcon::Default);
+                    }
+                }
+                else {
+                    hovered_widget = Some(self.active_widgets.len());
+                    hover_blocked = true;
+                    if override_cursor {
+                        if self.resize_nw() {
+                            nox.set_cursor(CursorIcon::NwResize);
+                        }
+                        else if self.resize_ne() {
+                            nox.set_cursor(CursorIcon::NeResize);
+                        }
+                        else if self.resize_sw() {
+                            nox.set_cursor(CursorIcon::SwResize);
+                        }
+                        else if self.resize_se() {
+                            nox.set_cursor(CursorIcon::SeResize);
+                        }
+                        else {
+                            if self.resize_left() {
+                                nox.set_cursor(CursorIcon::WResize);
+                            }
+                            if self.resize_right() {
+                                nox.set_cursor(CursorIcon::EResize);
+                            }
+                            if self.resize_top() {
+                                nox.set_cursor(CursorIcon::NResize);
+                            }
+                            if self.resize_bottom() {
+                                nox.set_cursor(CursorIcon::SResize);
+                            }
+                        }
+                    }
+                }
+                self.flags &=
+                    !((Self::RESIZE_LEFT | Self::RESIZE_RIGHT | Self::RESIZE_TOP | Self::RESIZE_BOTTOM) *
+                        !mouse_pressed as u32
+                    );
+            }
+        } else {
+            hovered_widget = Some(self.active_widgets.len());
+            active_widget = Some(self.active_widgets.len());
+            hover_blocked = true;
+        }
+        let window_moving = self.held() || self.any_resize();
         for collapsing_headers in &self.active_collapsing_headers {
             let (_, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
-            let width = collapsing_headers.update(nox, window_pos, cursor_pos, style, active_widget.is_some(), |text, offset, bounded_text_instance| {
-                self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
-            });
+            let width = collapsing_headers.update(
+                nox, pos, size,
+                cursor_pos, style, active_widget.is_some() || window_moving,
+                |text, offset, bounded_text_instance| {
+                    self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
+                }
+            );
             min_width = min_width.max(width);
             if collapsing_headers.hovered() && active_widget.is_none() {
                 hovered_widget = Some(self.active_widgets.len());
             }
         }
-        let window_moving = self.held() || self.any_resize();
-        let size = self.size();
         for (i, &widget) in self.active_widgets.iter().enumerate() {
             let (_, widget) = widgets.get_widget_mut(widget);
             let UpdateResult {
@@ -929,7 +1062,8 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 style,
                 text_renderer,
                 size,
-                window_pos,
+                pos,
+                vec2(0.0, title_bar_rect.max.y),
                 cursor_pos,
                 delta_cursor_pos,
                 cursor_in_this_window,
@@ -942,7 +1076,9 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                     w != i
                 } else {
                     false
-                }, window_moving,
+                },
+                window_moving,
+                hover_blocked,
                 &mut |text, offset, bounded_instance| {
                     self.combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap();
                 },
@@ -954,7 +1090,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         }
         cursor_in_this_window |= cursor_in_some_widget;
         self.widgets = Some(widgets);
-        self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_this_window as u32;
+        or_flag!(self.flags, Self::CURSOR_IN_WINDOW, cursor_in_this_window);
         self.hover_window = Some(hover_window);
         let title_text = self.title_text.as_ref().unwrap();
         let title_add_scale = style.title_add_scale();
@@ -967,13 +1103,15 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             self.main_rect.max.x = min_width;
         }
         let mut main_rect_max = self.main_rect.max;
-        let override_cursor = style.override_cursor();
         if self.held() {
             if !nox.is_mouse_button_held(MouseButton::Left) {
                 self.flags &= !Self::HELD;
             } else {
                 self.position += delta_cursor_pos;
             }
+        }
+        if !self.is_resizeable() {
+            self.flags &= !(Self::RESIZE_LEFT | Self::RESIZE_RIGHT | Self::RESIZE_TOP | Self::RESIZE_BOTTOM);
         }
         if self.held() || self.appearing() {
             let norm_pos = pos_to_norm_pos(self.position, unit_scale, aspect_ratio);
@@ -1075,83 +1213,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 }
             }
         }
-        if !self.held() && !self.any_resize() && cursor_in_this_window && !cursor_in_some_widget {
-            let mut flags = self.flags;
-            flags &= !Self::RESIZE_BLOCKED_COL;
-            flags &= !Self::RESIZE_BLOCKED_ROW;
-            let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
-            let error_margin = style.cursor_error_margin();
-            if cursor_pos.x >= self.position.x - error_margin &&
-                cursor_pos.x <= self.position.x + error_margin
-            {
-                flags |= Self::RESIZE_LEFT;
-            }
-            if cursor_pos.x >= self.position.x + self.main_rect.max.x - error_margin &&
-                cursor_pos.x <= self.position.x + self.main_rect.max.x + error_margin
-            {
-                flags |= Self::RESIZE_RIGHT;
-            }
-            if cursor_pos.y >= self.position.y - error_margin * 0.5 &&
-                cursor_pos.y <= self.position.y + error_margin * 0.5
-            {
-                flags |= Self::RESIZE_TOP;
-            }
-            if cursor_pos.y >= self.position.y + self.main_rect.max.y - error_margin &&
-                cursor_pos.y <= self.position.y + self.main_rect.max.y + error_margin
-            {
-                flags |= Self::RESIZE_BOTTOM;
-            }
-            self.flags = flags;
-            if !self.any_resize()
-            {
-                if BoundingRect
-                    ::from_position_size(self.position, self.title_bar_rect.max)
-                    .is_point_inside(cursor_pos)
-                {
-                    self.flags |= Self::HELD * mouse_pressed as u32;
-                }
-                if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
-                }
-            }
-            else if override_cursor {
-                if self.resize_nw() {
-                    nox.set_cursor(CursorIcon::NwResize);
-                }
-                else if self.resize_ne() {
-                    nox.set_cursor(CursorIcon::NeResize);
-                }
-                else if self.resize_sw() {
-                    nox.set_cursor(CursorIcon::SwResize);
-                }
-                else if self.resize_se() {
-                    nox.set_cursor(CursorIcon::SeResize);
-                }
-                else {
-                    if self.resize_left() {
-                        nox.set_cursor(CursorIcon::WResize);
-                    }
-                    if self.resize_right() {
-                        nox.set_cursor(CursorIcon::EResize);
-                    }
-                    if self.resize_top() {
-                        nox.set_cursor(CursorIcon::NResize);
-                    }
-                    if self.resize_bottom() {
-                        nox.set_cursor(CursorIcon::SResize);
-                    }
-                }
-            }
-            self.flags &=
-                !((Self::RESIZE_LEFT | Self::RESIZE_RIGHT | Self::RESIZE_TOP | Self::RESIZE_BOTTOM) *
-                    !mouse_pressed as u32
-                );
-        }
-        let mut title_bar_rect = self.title_bar_rect;
-        title_bar_rect.max.x = self.main_rect.max.x;
-        title_bar_rect.max.y = style.calc_text_box_height_from_text_height(
-            title_text.row_height * font_scale * 1.5
-        );
+        title_bar_rect.max.x = self.main_rect.max.x; 
         title_bar_rect.rounding = style.rounding();
         self.combined_text
             .add_text(
@@ -1544,7 +1606,6 @@ pub struct WindowContext<'a, 'b, I, FontHash, Style>
     current_row_widgets: GlobalVec<(WidgetId, Vec2)>,
     current_row_text: GlobalVec<(usize, usize, usize, WidgetId)>,
     collapsing_headers_id: Hashable<f64>,
-    min_triangulation: u64,
     widget_off: Vec2,
     beam_height: f32,
     min_width: f32,
@@ -1580,10 +1641,10 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             0.0,
         ).unwrap_or_default());
         Self {
-            min_triangulation: window.last_triangulation,
             widget_off: vec2(
                 style.item_pad_outer().x,
-                style.calc_text_box_height_from_text_height(title_text.row_height * style.font_scale() * style.title_add_scale()) +
+                style.calc_text_box_height_from_text_height(
+                    title_text.row_height * style.font_scale() * style.title_add_scale()) +
                     style.item_pad_outer().y,
             ),
             window,
@@ -1611,7 +1672,6 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         widget_off: Vec2,
         slider_width: f32,
         input_text_width: f32,
-        min_triangulation: u64,
     ) -> Self {
         let (collapsing_headers, id) = window.activate_collapsing_headers(label);
         collapsing_headers.set_label(style, text_renderer, label);
@@ -1629,7 +1689,6 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
             collapsing_headers_id: id,
-            min_triangulation,
             min_width: 0.0,
             min_width_sub: 0.0,
             beam_height: 0.0,
@@ -1638,6 +1697,16 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             current_height: 0.0,
             collapsed,
         }
+    }
+
+    #[inline(always)]
+    pub fn resizeable(&mut self, value: bool) {
+        self.window.set_resizeable(value);
+    }
+
+    #[inline(always)]
+    pub fn clamp_height(&mut self, value: bool) {
+        self.window.set_clamp_height(value);
     }
 
     pub fn collapsing<F>(&mut self, label: &str, mut f: F)
@@ -1654,7 +1723,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         let item_pad_outer = self.style.item_pad_outer();
         let mut collapsing = WindowContext::new_collapsing(
             label, self.window, self.style, self.text_renderer,
-            self.widget_off, self.slider_width, self.input_text_width, self.min_triangulation,
+            self.widget_off, self.slider_width, self.input_text_width,
         );
         if !collapsing.collapsed {
             f(&mut collapsing);
@@ -2055,10 +2124,11 @@ impl<'a, 'b, I, FontHash, Style> Drop for
 {
     fn drop(&mut self) {
         self.end_row();
-        if self.min_triangulation < self.window.last_triangulation {
-            self.window.flags |= Window::<I, FontHash, Style>::REQUIRES_TRIANGULATION;
-        }
         self.window.min_width = self.min_width;
-        self.window.min_height = self.widget_off.y;
+        if self.window.clamping_height() {
+            self.window.min_height = self.widget_off.y;
+        } else {
+            self.window.min_height = 0.0;
+        }
     }
 }

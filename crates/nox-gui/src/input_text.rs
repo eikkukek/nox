@@ -132,8 +132,8 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
             Self::BG_COL_OVERRIDE |
             Self::PARENT_ACTIVE
         );
-        self.flags |= Self::CENTER_TEXT * center_text as u32;
-        self.flags |= Self::PARENT_ACTIVE * parent_active as u32;
+        or_flag!(self.flags, Self::CENTER_TEXT, center_text);
+        or_flag!(self.flags, Self::PARENT_ACTIVE, parent_active);
         self.width = width;
         if let Some(bg_col_override) = bg_col_override {
             self.bg_col_override = bg_col_override;
@@ -211,13 +211,13 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
     #[inline(always)]
     pub fn set_hovered(&mut self, value: bool) {
         self.flags &= !Self::HOVERED;
-        self.flags |= Self::HOVERED * value as u32;
+        or_flag!(self.flags, Self::HOVERED, value);
     }
 
     #[inline(always)]
     pub fn set_cursor_enable(&mut self, value: bool) {
         self.flags &= !Self::CURSOR_ENABLE;
-        self.flags |= Self::CURSOR_ENABLE * value as u32;
+        or_flag!(self.flags, Self::CURSOR_ENABLE, value);
     }
 
     #[inline(always)]
@@ -422,14 +422,16 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         nox: &mut Nox<I>,
         style: &Style,
         text_renderer: &mut VertexTextRenderer<'_, FontHash>,
-        _window_size: Vec2,
+        window_size: Vec2,
         window_pos: Vec2,
+        content_offset: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         _cursor_in_this_window: bool,
         other_widget_active: bool,
         _cursor_in_other_widget: bool,
         window_moving: bool,
+        hover_blocked: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult {
         enum CursorMove {
@@ -460,26 +462,57 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
                     self.text_cursor_pos = selection.1;
                 }
                 let input = nox.get_input_text();
-                if nox.is_key_held(KeyCode::ControlLeft) && nox.was_key_pressed(KeyCode::KeyV) {
-                    for i in (selection.0..selection.1).rev() {
-                        let (index, _) = self.input.char_indices().skip(i).next().unwrap();
-                        self.input.remove(index); 
+                if nox.is_key_held(KeyCode::ControlLeft) {
+                    if nox.was_key_pressed(KeyCode::KeyV) && let Some(text) = nox.get_clipboard() {
+                        let start_count = self.input.char_indices().count();
+                        for i in (selection.0..selection.1).rev() {
+                            let (index, _) = self.input.char_indices().skip(i).next().unwrap();
+                            self.input.remove(index); 
+                        }
+                        let mut text_cursor_pos = selection.0;
+                        self.input.insert_str(
+                            self.input
+                                .char_indices()
+                                .skip(text_cursor_pos)
+                                .next()
+                                .map(|(i, _)| i)
+                                .unwrap_or_else(|| self.input.len()),
+                            &text,
+                        );
+                        text_cursor_pos += text.char_indices().count();
+                        self.text_cursor_pos = text_cursor_pos;
+                        self.input_text = None;
+                        let end_count = self.input.char_indices().count();
+                        if start_count > end_count {
+                            cursor_move = CursorMove::Backspace;
+                        } else {
+                            cursor_move = CursorMove::Right;
+                        }
+                    } else if nox.was_key_pressed(KeyCode::KeyC) {
+                        let mut text = CompactString::default();
+                        let mut iter = self.input.char_indices().skip(selection.0);
+                        for _ in selection.0..selection.1  {
+                            text.push(iter.next().unwrap().1);
+                        }
+                        nox.set_clipboard(&text);
+                        self.selection = Some(selection);
+                    } else if nox.was_key_pressed(KeyCode::KeyX) {
+                        let mut text = CompactString::default();
+                        let mut iter = self.input.char_indices().skip(selection.0);
+                        for _ in selection.0..selection.1  {
+                            text.push(iter.next().unwrap().1);
+                        }
+                        nox.set_clipboard(&text);
+                        for i in (selection.0..selection.1).rev() {
+                            let (index, _) = self.input.char_indices().skip(i).next().unwrap();
+                            self.input.remove(index);
+                        }
+                        self.text_cursor_pos = selection.0;
+                        self.input_text = None;
+                        cursor_move = CursorMove::Backspace;
+                    } else {
+                        self.selection = Some(selection);
                     }
-                    let mut text_cursor_pos = selection.0;
-                    let text = nox.get_clipboard();
-                    self.input.insert_str(
-                        self.input
-                            .char_indices()
-                            .skip(text_cursor_pos)
-                            .next()
-                            .map(|(i, _)| i)
-                            .unwrap_or_else(|| self.input.len()),
-                        text,
-                    );
-                    text_cursor_pos += text.char_indices().count();
-                    self.text_cursor_pos = text_cursor_pos;
-                    self.input_text = None;
-                    cursor_move = CursorMove::Right;
                 }
                 else if nox.was_key_pressed(KeyCode::Backspace) || !input.is_empty() {
                     let start_count = self.input.char_indices().count();
@@ -508,6 +541,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
                     let end_count = self.input.char_indices().count();
                     if start_count > end_count {
                         cursor_move = CursorMove::Backspace;
+                    } else {
+                        cursor_move = CursorMove::Right;
                     }
                     self.input_text = None;
                 } else if nox.was_key_pressed(KeyCode::ArrowLeft) {
@@ -572,19 +607,21 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
                         self.flags |= Self::CURSOR_VISIBLE;
                     }
                 }
-                if nox.is_key_held(KeyCode::ControlLeft) && nox.was_key_pressed(KeyCode::KeyV) {
-                    let text = nox.get_clipboard();
-                    self.input.insert_str(
-                        self.input
-                            .char_indices()
-                            .skip(text_cursor_pos)
-                            .next()
-                            .map(|(i, _)| i)
-                            .unwrap_or_else(|| self.input.len()),
-                        text,
-                    );
-                    text_cursor_pos += text.char_indices().count();
-                    self.input_text = None;
+                if nox.is_key_held(KeyCode::ControlLeft)
+                {
+                    if nox.was_key_pressed(KeyCode::KeyV) && let Some(text) = nox.get_clipboard() {
+                        self.input.insert_str(
+                            self.input
+                                .char_indices()
+                                .skip(text_cursor_pos)
+                                .next()
+                                .map(|(i, _)| i)
+                                .unwrap_or_else(|| self.input.len()),
+                            &text,
+                        );
+                        text_cursor_pos += text.char_indices().count();
+                        self.input_text = None;
+                    }
                 } else {
                     let input = nox.get_input_text();
                     if !input.is_empty() {
@@ -741,16 +778,16 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
         let rel_cursor_pos = cursor_pos - window_pos;
         let error_margin = style.cursor_error_margin();
-        if !other_widget_active {
+        if !other_widget_active && !hover_blocked {
             if override_cursor {
                 nox.set_cursor_hide(!mouse_visible);
             }
             if mouse_visible && self.cursor_enabled() {
-                self.flags |= Self::HOVERED *
-                    BoundingRect::from_position_size(
-                        offset - vec2(error_margin, 0.0),
-                        input_rect.max + vec2(error_margin + error_margin, 0.0)
-                    ).is_point_inside(rel_cursor_pos) as u32;
+                let cursor_in_input = BoundingRect::from_position_size(
+                    offset - vec2(error_margin, 0.0),
+                    input_rect.max + vec2(error_margin + error_margin, 0.0)
+                ).is_point_inside(rel_cursor_pos);
+                or_flag!(self.flags, Self::HOVERED, cursor_in_input);
                 let input_min = offset.x + item_pad_inner.x - self.input_text_offset_x;
                 let input_min_max = (input_min, input_min + input_width);
                 let input_box_min_max =
@@ -866,10 +903,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
                     }
                 }
                 self.flags &= !Self::SELECT_ALL_LAST_FRAME;
-                self.flags |= Self::SELECT_ALL_LAST_FRAME * (select_all || self.select_all()) as u32;
+                or_flag!(self.flags, Self::SELECT_ALL_LAST_FRAME, select_all || self.select_all());
                 self.flags &= !Self::SELECT_ALL;
                 self.flags &= !Self::CLICKED_LAST_FRAME;
-                self.flags |= Self::CLICKED_LAST_FRAME * mouse_pressed as u32;
+                or_flag!(self.flags, Self::CLICKED_LAST_FRAME, mouse_pressed);
             }
             let deactivate =
                 nox.was_key_pressed(KeyCode::Enter) |
@@ -941,7 +978,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         }
         self.double_click_timer += nox.delta_time_secs_f32();
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
-        self.flags |= Self::ACTIVATED_LAST_FRAME * (!active_this_frame && self.active()) as u32;
+        or_flag!(self.flags, Self::ACTIVATED_LAST_FRAME, !active_this_frame && self.active());
         let input_bounding_rect = BoundingRect::from_position_size(
             window_pos + self.offset + vec2(item_pad_inner.x, 0.0),
             self.input_rect.max - vec2(item_pad_inner.x + item_pad_inner.x, 0.0),
@@ -955,8 +992,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
             self.offset + item_pad_inner - vec2(self.input_text_offset_x, 0.0), 
             BoundedTextInstance {
                 add_scale: vec2(1.0, 1.0),
-                min_bounds: input_bounding_rect.min,
-                max_bounds: input_bounding_rect.max,
+                min_bounds: input_bounding_rect.min.max(window_pos + content_offset),
+                max_bounds: input_bounding_rect.max.min(window_pos + window_size),
                 color:
                     if self.input.is_empty() {
                         style.input_text_empty_text_color()
