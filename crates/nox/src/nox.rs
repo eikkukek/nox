@@ -28,6 +28,7 @@ use super::{
     interface::Interface,
     memory::Memory,
     renderer::*,
+    clipboard::Clipboard,
 };
 
 pub type AppName = ArrayString<128>;
@@ -55,7 +56,7 @@ pub struct Nox<'a, I>
     logical_keys: FxHashMap<Key, InputState>,
     mouse_buttons: FxHashMap<MouseButton, InputState>,
     input_text: GlobalVec<(KeyCode, CompactString)>,
-    clip_board: CompactString,
+    clipboard: Clipboard,
     delta_counter: time::Instant,
     delta_time: time::Duration,
     window_size: (u32, u32),
@@ -90,7 +91,7 @@ impl<'a, I: Interface> Nox<'a, I>
             logical_keys: Default::default(),
             mouse_buttons: Default::default(),
             input_text: Default::default(),
-            clip_board: Default::default(),
+            clipboard: Clipboard::None,
             delta_counter: time::Instant::now(),
             delta_time: time::Duration::ZERO,
             window_size: Default::default(),
@@ -128,13 +129,13 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn get_clipboard(&self) -> &str {
-        &self.clip_board
+    pub fn get_clipboard(&self) -> Option<String> {
+        self.clipboard.get()
     }
 
     #[inline(always)]
     pub fn set_clipboard(&mut self, text: &str) {
-        self.clip_board = CompactString::new(text);
+        self.clipboard.set(text);
     }
 
     #[inline(always)]
@@ -458,6 +459,15 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     self.flags |= Self::ERROR;
                     eprintln!("Nox error: failed to create renderer ( {} )", e);
                     return
+                }
+            };
+            self.clipboard = match Clipboard::new(&window) {
+                Ok(cb) => cb,
+                Err(e) => {
+                    event_loop.exit();
+                    self.flags |= Self::ERROR;
+                    eprintln!("Nox error: failed to create clibboard ( {:?} )", e);
+                    Clipboard::None
                 }
             };
             self.window = Some(Arc::new(window));

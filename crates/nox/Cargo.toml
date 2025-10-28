@@ -18,3 +18,4 @@ memmap2 = "0.9.7"
 rustc-hash = "2.1.1"
 compact_str = { version = "0.9.0" }
 token-cell = "2.0.0"
+smithay-clipboard = "0.7.2"

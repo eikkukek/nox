@@ -10,6 +10,7 @@ pub mod utility;
 mod memory;
 mod error;
 mod init_settings;
+mod clipboard;
 
 pub use nox_mem as mem;
 pub use nox_alloc as alloc;
