@@ -1365,7 +1365,11 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         let mut triangulate_scroll_bars = false;
         if self.ver_scroll_bar_visible() {
             let offset = vec2(title_bar_rect.max.x - item_pad_outer.x - ver_scroll_bar_width, title_bar_rect.max.y + item_pad_outer.y);
-            let height = main_rect_max.y - offset.y - item_pad_outer.y;
+            let height = main_rect_max.y - offset.y - item_pad_outer.y - if self.hor_scroll_bar_visible() {
+                hor_scroll_bar_height + item_pad_outer.y
+            } else {
+                0.0
+            };
             let res = self.ver_scroll_bar.update(
                 nox, style,
                 self.scroll_y, offset,
@@ -1380,7 +1384,11 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         }
         if self.hor_scroll_bar_visible() {
             let offset = vec2(item_pad_outer.x, main_rect_max.y - item_pad_outer.y - hor_scroll_bar_height);
-            let width = main_rect_max.x - offset.x - item_pad_outer.x;
+            let width = main_rect_max.x - offset.x - item_pad_outer.x - if self.ver_scroll_bar_visible() {
+                ver_scroll_bar_width + item_pad_outer.x
+            } else {
+                0.0
+            };
             let res = self.hor_scroll_bar.update(
                 nox, style,
                 self.scroll_x, offset,
@@ -1392,6 +1400,17 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             );
             triangulate_scroll_bars |= res.requires_triangulation;
             self.scroll_x = res.new_t;
+        }
+        let bg_held =
+            !hover_blocked &&
+            active_widget.is_none() &&
+            hovered_widget.is_none() &&
+            nox.is_mouse_button_held(MouseButton::Left);
+        if self.ver_scroll_bar_visible() && bg_held  {
+            self.scroll_y -= delta_cursor_pos.y / self.widget_rect_max.y;
+        }
+        if self.hor_scroll_bar_visible() && bg_held {
+            self.scroll_x -= delta_cursor_pos.x / self.widget_rect_max.x;
         }
         if triangulate_scroll_bars {
             let mut points = GlobalVec::new();
