@@ -169,12 +169,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
     }
 
     #[inline(always)]
-    fn set_offset(
-        &mut self,
-        offset: Vec2,
-    )
+    fn set_offset(&mut self, offset: Vec2)
     {
         self.input_text.set_offset(offset);
+    }
+
+    #[inline(always)]
+    fn set_scroll_offset(&mut self, offset: Vec2) {
+        self.input_text.set_scroll_offset(offset);
     }
 
     #[inline(always)]
@@ -331,6 +333,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
+        content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
@@ -339,7 +342,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         self.input_text.render_commands(
             render_commands, style, base_pipeline_id,
             text_pipeline_id, vertex_buffer, index_buffer,
-            window_pos, inv_aspect_ratio, unit_scale, get_custom_pipeline
+            window_pos, content_area, inv_aspect_ratio, unit_scale, get_custom_pipeline
         )
     }
 

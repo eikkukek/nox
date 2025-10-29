@@ -366,12 +366,13 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
     }
 
     #[inline(always)]
-    fn set_offset(
-        &mut self,
-        offset: Vec2,
-    )
+    fn set_offset(&mut self, offset: Vec2)
     {
         self.offset = offset;
+    }
+
+    fn set_scroll_offset(&mut self, offset: Vec2) {
+        self.offset += offset;
     }
 
     #[inline(always)]
@@ -778,7 +779,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
         let rel_cursor_pos = cursor_pos - window_pos;
         let error_margin = style.cursor_error_margin();
-        if !other_widget_active && !hover_blocked {
+        if !other_widget_active {
             if override_cursor {
                 nox.set_cursor_hide(!mouse_visible);
             }
@@ -787,7 +788,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
                     offset - vec2(error_margin, 0.0),
                     input_rect.max + vec2(error_margin + error_margin, 0.0)
                 ).is_point_inside(rel_cursor_pos);
-                or_flag!(self.flags, Self::HOVERED, cursor_in_input);
+                or_flag!(self.flags, Self::HOVERED, cursor_in_input && !hover_blocked);
                 let input_min = offset.x + item_pad_inner.x - self.input_text_offset_x;
                 let input_min_max = (input_min, input_min + input_width);
                 let input_box_min_max =
@@ -1075,6 +1076,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
+        content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
@@ -1097,8 +1099,16 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
             }
             render_commands.bind_pipeline(base_pipeline_id)?;
             let pc_vertex = push_constants_vertex(window_pos, vec2(1.0, 1.0), inv_aspect_ratio, unit_scale);
-            render_commands.push_constants(|_| unsafe {
-                pc_vertex.as_bytes()
+            let pc_fragment = base_push_constants_fragment(
+                content_area.min,
+                content_area.max,
+            );
+            render_commands.push_constants(|pc| unsafe {
+                if pc.stage == ShaderStage::Vertex {
+                    pc_vertex.as_bytes()
+                } else {
+                    pc_fragment.as_bytes()
+                }
             })?;
             render_commands.draw_indexed(
                 DrawInfo {

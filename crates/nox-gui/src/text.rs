@@ -80,6 +80,7 @@ pub struct SelectableText<I, FontHash, Style>
     prev_selection: Option<(usize, usize)>,
     base_offset: Vec2,
     start_offset: Vec2,
+    scroll_offset: Vec2,
     offset: Vec2,
     max_width: f32,
     char_count: u32,
@@ -118,6 +119,7 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
             base_offset: Default::default(),
             start_offset: Default::default(),
             offset: Default::default(),
+            scroll_offset: vec2(0.0, 0.0),
             max_width: 0.0,
             char_count: 0,
             prev_char_count: 0,
@@ -167,8 +169,14 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
     }
 
     #[inline(always)]
-    pub fn set_base_offset(&mut self, offset: Vec2) {
-        self.base_offset = offset;
+    pub fn set_base_and_start_offset(
+        &mut self,
+        base_offset: Vec2,
+        start_offset: Vec2,
+    ) {
+        self.base_offset = base_offset;
+        self.start_offset = start_offset;
+        self.offset = start_offset;
     }
 
     #[inline(always)]
@@ -348,13 +356,10 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
         }
         let mut points = GlobalVec::new();
         let mut indices_usize = GlobalVec::new();
-        let base_offset = self.base_offset;
         for rect in &mut self.selection_rects {
             rect.to_points(&mut |p| { points.push(p.into()); });
             earcut::earcut(&points, &[], false, &mut self.selection_vertices, &mut indices_usize).unwrap();
             points.clear();
-            rect.min += base_offset;
-            rect.max += base_offset;
         }
         self.selection_indices.append_map(&indices_usize, |&i| i as u32);
     }
@@ -555,18 +560,22 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         Style: WindowStyle<FontHash>,
 {
 
+    #[inline(always)]
     fn get_offset(&self) -> Vec2 {
         self.offset
     }
 
-    fn set_offset(
-        &mut self,
-        offset: Vec2,
-    ) {
+    #[inline(always)]
+    fn set_offset(&mut self, offset: Vec2) {
         self.offset = offset;
-        self.start_offset = offset;
     }
 
+    #[inline(always)]
+    fn set_scroll_offset(&mut self, offset: Vec2) {
+        self.scroll_offset = offset;
+    }
+
+    #[inline(always)]
     fn calc_size(
         &mut self,
         _style: &Style,
@@ -614,7 +623,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         if mouse_pressed || self.prev_char_count != self.char_count {
             self.selection = None;
         }
-        let rel_cursor_pos = cursor_pos - window_pos;
+        let rel_cursor_pos = cursor_pos - window_pos - self.scroll_offset;
         if nox.was_mouse_button_released(MouseButton::Left) {
             self.flags &= !Self::HELD;
         }
@@ -752,9 +761,11 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
             return
         }
         let vertex_sample = self.selection_vertices[0];
-        if vertex_sample.color != style.input_text_selection_bg_col() {
+        let offset = self.scroll_offset;
+        if vertex_sample.offset != offset || vertex_sample.color != style.input_text_selection_bg_col() {
             let target_color = style.input_text_selection_bg_col();
             for vertex in &mut self.selection_vertices {
+                vertex.offset = offset;
                 vertex.color = target_color;
             }
         }
@@ -769,6 +780,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
+        content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
@@ -800,7 +812,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
             vec2(1.0, 1.0), inv_aspect_ratio, unit_scale
         );
         let pc_fragment = base_push_constants_fragment(
-            vec2(f32::MIN, f32::MIN), vec2(f32::MAX, f32::MAX)
+            content_area.min,
+            content_area.max,
         );
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {

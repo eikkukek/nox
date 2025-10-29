@@ -50,8 +50,8 @@ pub struct Nox<'a, I>
     memory: &'a Memory,
     renderer: Option<Renderer<'a>>,
     cursor_pos: (f64, f64),
-    mouse_scroll_delta: (f64, f64),
-    mouse_scroll_delta_lines: (f32, f32),
+    mouse_scroll_pixel_delta: (f64, f64),
+    mouse_scroll_line_delta: (f32, f32),
     physical_keys: FxHashMap<PhysicalKey, InputState>,
     logical_keys: FxHashMap<Key, InputState>,
     mouse_buttons: FxHashMap<MouseButton, InputState>,
@@ -85,8 +85,8 @@ impl<'a, I: Interface> Nox<'a, I>
             memory,
             renderer: None,
             cursor_pos: (0.0, 0.0),
-            mouse_scroll_delta: Default::default(),
-            mouse_scroll_delta_lines: Default::default(),
+            mouse_scroll_pixel_delta: Default::default(),
+            mouse_scroll_line_delta: Default::default(),
             physical_keys: Default::default(),
             logical_keys: Default::default(),
             mouse_buttons: Default::default(),
@@ -186,13 +186,13 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn mouse_scroll_delta(&self) -> (f64, f64) {
-        self.mouse_scroll_delta
+    pub fn mouse_scroll_pixel_delta(&self) -> (f64, f64) {
+        self.mouse_scroll_pixel_delta
     }
 
     #[inline(always)]
     pub fn mouse_scroll_delta_lines(&self) -> (f32, f32) {
-        self.mouse_scroll_delta_lines
+        self.mouse_scroll_line_delta
     }
 
     #[inline(always)]
@@ -274,8 +274,8 @@ impl<'a, I: Interface> Nox<'a, I>
 
     #[inline(always)]
     fn reset_input(&mut self) {
-        self.mouse_scroll_delta = Default::default();
-        self.mouse_scroll_delta_lines = Default::default();
+        self.mouse_scroll_pixel_delta = Default::default();
+        self.mouse_scroll_line_delta = Default::default();
         self.physical_keys.retain(|_, v| {
             v.pressed = false;
             v.released = false;
@@ -320,10 +320,10 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
             WindowEvent::MouseWheel { device_id: _, delta, phase: _ } => {
                match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
-                        self.mouse_scroll_delta_lines = (x, y);
+                        self.mouse_scroll_line_delta = (x, y);
                     },
                     MouseScrollDelta::PixelDelta(d) => {
-                        self.mouse_scroll_delta = (d.x, d.y);
+                        self.mouse_scroll_pixel_delta = (d.x, d.y);
                     }
                 };
             },

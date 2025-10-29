@@ -53,7 +53,7 @@ pub struct Slider<I, FontHash, Style>
     t: f32,
     quantized_t: f32,
     width: f32,
-    falgs: u32,
+    flags: u32,
     _marker: PhantomData<(I, FontHash, Style)>,
 }
 
@@ -85,7 +85,7 @@ impl<I, FontHash, Style> Slider<I, FontHash, Style>
             t: 1.0,
             quantized_t: 1.0,
             width: 0.1,
-            falgs: 0,
+            flags: 0,
             _marker: PhantomData,
         }
     }
@@ -104,24 +104,24 @@ impl<I, FontHash, Style> Slider<I, FontHash, Style>
     #[inline(always)]
     fn calc_t(
         &self,
-        mut cursor_position: Vec2,
+        mut cursor_pos: Vec2,
         slider_pos: Vec2,
     ) -> f32
     {
-        cursor_position.x -= self.handle_rect.max.x * 0.5;
+        cursor_pos.x -= self.handle_rect.max.x * 0.5;
         // handle_pos solved for t
-        let t = (cursor_position.x - slider_pos.x) / (self.slider_rect.max.x - self.handle_rect.max.x);
+        let t = (cursor_pos.x - slider_pos.x) / (self.slider_rect.max.x - self.handle_rect.max.x);
         t.clamp(0.0, 1.0)
     }
 
     #[inline(always)]
     fn held(&self) -> bool {
-        self.falgs & Self::HELD == Self::HELD
+        self.flags & Self::HELD == Self::HELD
     }
 
     #[inline(always)]
     fn cursor_in_slider(&self) -> bool {
-        self.falgs & Self::CURSOR_IN_SLIDER == Self::CURSOR_IN_SLIDER
+        self.flags & Self::CURSOR_IN_SLIDER == Self::CURSOR_IN_SLIDER
     }  
 
     #[inline(always)]
@@ -159,14 +159,17 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
     }
 
     #[inline(always)]
-    fn set_offset(
-        &mut self,
-        offset: Vec2,
-    )
+    fn set_offset(&mut self, offset: Vec2)
     {
         self.offset = offset;
     }
 
+    #[inline(always)]
+    fn set_scroll_offset(&mut self, offset: Vec2) {
+        self.offset += offset;
+    }
+
+    #[inline(always)]
     fn calc_size(
         &mut self,
         style: &Style,
@@ -263,7 +266,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         self.slider_rect = slider_rect;
         self.handle_rect = handle_rect;
         let mut cursor_in_widget = false;
-        self.falgs &= !Self::CURSOR_IN_SLIDER;
+        self.flags &= !Self::CURSOR_IN_SLIDER;
         self.drag_value.set_offset(self.offset + vec2(width + style.item_pad_outer().x, 0.0));
         let drag_result = self.drag_value.update(
             nox,
@@ -279,7 +282,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         if self.held() {
             cursor_in_widget = true;
             if !nox.is_mouse_button_held(MouseButton::Left) {
-                self.falgs &= !Self::HELD;
+                self.flags &= !Self::HELD;
             } else {
                 self.t = self.calc_t(cursor_pos, window_pos + offset);
             }
@@ -290,9 +293,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
             );
             cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
             if cursor_in_widget {
-                self.falgs |= Self::CURSOR_IN_SLIDER;
+                self.flags |= Self::CURSOR_IN_SLIDER;
                 if nox.was_mouse_button_pressed(MouseButton::Left) {
-                    self.falgs |= Self::HELD;
+                    self.flags |= Self::HELD;
                     self.t = self.calc_t(cursor_pos, window_pos + offset);
                 }
             }
@@ -364,6 +367,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
+        content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
@@ -372,7 +376,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         self.drag_value.render_commands(
             render_commands, style, base_pipeline_id, text_pipeline_id,
             vertex_buffer, index_buffer,
-            window_pos, inv_aspect_ratio, unit_scale, get_custom_pipeline
+            window_pos, content_area,
+            inv_aspect_ratio, unit_scale, get_custom_pipeline,
         )
     }
 

@@ -7,7 +7,7 @@ use nox::{
 
 use nox_font::{RenderedText, VertexTextRenderer};
 
-use nox_geom::Vec2;
+use nox_geom::*;
 
 use crate::*;
 
@@ -90,10 +90,9 @@ pub trait Widget<I, FontHash, Style>
 
     fn get_offset(&self) -> Vec2;
 
-    fn set_offset(
-        &mut self,
-        offset: Vec2,
-    );
+    fn set_offset(&mut self, offset: Vec2);
+
+    fn set_scroll_offset(&mut self, offset: Vec2);
 
     fn calc_size(
         &mut self,
@@ -149,6 +148,7 @@ pub trait Widget<I, FontHash, Style>
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
+        content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,

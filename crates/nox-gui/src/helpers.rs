@@ -74,6 +74,9 @@ pub fn set_vertex_params(
     offset: Vec2,
     target_color: ColorSRGBA,
 ) {
+    if range.start() >= vertices.len() {
+        return
+    }
     let vertex_sample = vertices[range.start()];
     if vertex_sample.offset != offset || vertex_sample.color != target_color {
         for vertex in &mut vertices[range.range()] {

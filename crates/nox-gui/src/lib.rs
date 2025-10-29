@@ -15,6 +15,7 @@ mod radio_button;
 mod selectable_tag;
 mod combo_box;
 mod hover_window;
+mod scroll_bar;
 mod window;
 mod workspace;
 
@@ -27,6 +28,7 @@ pub use text::*;
 pub use widget::*;
 pub use slider::*;
 pub use drag_value::*;
+pub use scroll_bar::*;
 pub use window::*;
 pub use hover_window::*;
 pub use workspace::*;

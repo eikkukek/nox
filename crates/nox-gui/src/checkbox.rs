@@ -133,12 +133,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
     }
 
     #[inline(always)]
-    fn set_offset(
-        &mut self,
-        offset: Vec2,
-    )
+    fn set_offset(&mut self, offset: Vec2)
     {
         self.offset = offset;
+    }
+
+    #[inline(always)]
+    fn set_scroll_offset(&mut self, offset: Vec2) {
+        self.offset += offset;
     }
 
     #[inline(always)]
@@ -329,6 +331,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
         _window_pos: Vec2,
+        _content_area: BoundingRect,
         _inv_aspect_ratio: f32,
         _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,

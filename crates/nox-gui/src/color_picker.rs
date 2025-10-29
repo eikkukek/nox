@@ -978,10 +978,12 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
                 offset: index_mem.offset,
             },
         )?;
+        let content_area = BoundingRect::from_min_max(vec2(f32::MIN, f32::MIN), vec2(f32::MAX, f32::MAX));
         let mut f = |drag_value: &DragValue<I, FontHash, Style>| -> Result<(), Error> {
             drag_value.render_commands(
                 render_commands, style, base_pipeline_id,
-                text_pipeline_id, vertex_buffer, index_buffer, window_pos,
+                text_pipeline_id, vertex_buffer, index_buffer,
+                window_pos, content_area,
                 inv_aspect_ratio, unit_scale, get_custom_pipeline,
             )?;
             Ok(())
@@ -1076,11 +1078,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
     }
 
     #[inline(always)]
-    fn set_offset(
-        &mut self,
-        offset: nox_geom::Vec2,
-    ) {
+    fn set_offset(&mut self, offset: Vec2)
+    {
         self.offset = offset;
+    }
+
+    #[inline(always)]
+    fn set_scroll_offset(&mut self, offset: Vec2) {
+        self.offset += offset;
     }
 
     #[inline(always)]
@@ -1234,6 +1239,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
         _window_pos: Vec2,
+        _content_area: BoundingRect,
         _inv_aspect_ratio: f32,
         _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,

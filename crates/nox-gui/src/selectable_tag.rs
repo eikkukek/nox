@@ -145,17 +145,23 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHas
         Style: WindowStyle<FontHash>,
 {
 
+    #[inline(always)]
     fn get_offset(&self) -> Vec2 {
         self.offset
     }
 
-    fn set_offset(
-        &mut self,
-        offset: Vec2,
-    ) {
+    #[inline(always)]
+    fn set_offset(&mut self, offset: Vec2)
+    {
         self.offset = offset;
     }
 
+    #[inline(always)]
+    fn set_scroll_offset(&mut self, offset: Vec2) {
+        self.offset += offset;
+    }
+
+    #[inline(always)]
     fn calc_size(
         &mut self,
         style: &Style,
@@ -317,6 +323,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHas
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
         _window_pos: Vec2,
+        _content_area: BoundingRect,
         _inv_aspect_ratio: f32,
         _unit_scale: f32,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,

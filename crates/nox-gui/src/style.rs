@@ -80,6 +80,16 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
+    fn scroll_bar_col(&self) -> ColorSRGBA {
+        DEFAULT_SCROLL_BAR_COL
+    }
+
+    #[inline(always)]
+    fn scroll_bar_handle_col(&self) -> ColorSRGBA {
+        DEFAULT_SCROLL_BAR_HANDLE_COL
+    }
+
+    #[inline(always)]
     fn input_text_bg_col(&self) -> ColorSRGBA {
         DEFAULT_INPUT_TEXT_BG_COL
     }
@@ -155,6 +165,26 @@ pub trait WindowStyle<FontHash> {
 
     #[inline(always)]
     fn cursor_error_margin(&self) -> f32 {
+        0.02
+    }
+
+    #[inline(always)]
+    fn scroll_speed(&self) -> f32 {
+        2.0
+    }
+
+    #[inline(always)]
+    fn natural_scroll(&self) -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn scroll_bar_width(&self) -> f32 {
+        0.01
+    }
+
+    #[inline(always)]
+    fn scroll_bar_fat_width(&self) -> f32 {
         0.02
     }
 
@@ -375,6 +405,12 @@ const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_ACTIVE_TEXT_COL;
 
 const DEFAULT_HOVER_WINDOW_BG_COL: ColorSRGBA =
     ColorSRGBA::new(6.0 / 255.0, 9.0 / 255.0, 9.0 / 255.0, 1.0);
+
+const DEFAULT_SCROLL_BAR_COL: ColorSRGBA =
+    DEFAULT_INPUT_TEXT_BG_COL;
+
+const DEFAULT_SCROLL_BAR_HANDLE_COL: ColorSRGBA =
+    DEFAULT_FOCUSED_TEXT_COL;
 
 const DEFAULT_INPUT_TEXT_BG_COL: ColorSRGBA =
     ColorSRGBA::new(4.0 / 255.0, 6.0 / 255.0, 6.0 / 255.0, 1.0);
