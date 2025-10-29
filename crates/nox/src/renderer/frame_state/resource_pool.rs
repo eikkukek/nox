@@ -87,6 +87,7 @@ impl ResourcePool
                     state,
                     command_buffer,
                     Some(subresource),
+                    false,
                 )
                 .unwrap();
             self.render_image_reset = None;
@@ -196,13 +197,15 @@ impl ResourcePool
                     dst_state,
                     command_buffer,
                     None,
+                    false,
                 ).unwrap();
             }
             else {
                 image.cmd_memory_barrier(
                     dst_state,
                     command_buffer,
-                    range_info.map(|v| v.subresource_info)
+                    range_info.map(|v| v.subresource_info),
+                    false,
                 ).unwrap();
                 if let Some(info) = range_info {
                     self.render_image_reset = Some((state, info.subresource_info));
@@ -243,7 +246,7 @@ impl ResourcePool
     {
         let g = self.global_resources.write().unwrap();
         let image = g.get_image(id.image_id)?;
-        image.cmd_memory_barrier(state, command_buffer, subresource_info)?;
+        image.cmd_memory_barrier(state, command_buffer, subresource_info, false)?;
         Ok(())
     }
 

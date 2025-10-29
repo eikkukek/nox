@@ -63,7 +63,8 @@ impl<'a> ComputeCommands<'a> {
                 pipeline_stage: vk::PipelineStageFlags::COMPUTE_SHADER,
             },
             self.command_buffer,
-            None
+            None,
+            false,
         )?;
         Ok(())
     }

@@ -21,26 +21,36 @@ pub struct TransferRequests {
 
 impl TransferRequests {
 
+    #[inline(always)]
     pub(crate) fn new() -> Self {
         TransferRequests {
             transfer_requests: AllocVec::new(&GlobalAlloc).unwrap(),
         }
     }
 
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.transfer_requests.is_empty()
+    }
+
+    #[inline(always)]
     pub fn task_count(&self) -> usize {
         self.transfer_requests.len()
     }
 
+    #[inline(always)]
     pub fn reserve_transfer_requests(&mut self, capacity: u32) {
         self.transfer_requests.reserve(capacity as usize).unwrap();
     }
 
+    #[inline(always)]
     pub fn add_request(&mut self, staging_block_size: u64) -> CommandRequestId {
         let index = self.transfer_requests.len() as u32;
         self.transfer_requests.push(staging_block_size).unwrap();
         CommandRequestId(index)
     }
 
+    #[inline(always)]
     pub(crate) fn transfer_iter(&self) -> impl Iterator<Item = (CommandRequestId, u64)> {
         self.transfer_requests
             .iter()

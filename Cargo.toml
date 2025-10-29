@@ -15,4 +15,5 @@ exclude = [
 	"font-example",
 	"shape-example",
 	"gui-example",
+	"triangle_rasterization",
 ]

@@ -405,10 +405,13 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                                 }
                             }
                         }
-                        if let Err(e) = renderer.render(&window, self.interface.clone(), renderer_allocators) {
-                            event_loop.exit();
-                            self.flags |= Self::ERROR;
-                            eprintln!("Nox renderer error: {}", e);
+                        match renderer.render(&window, self.interface.clone(), renderer_allocators) {
+                            Ok(()) => {},
+                            Err(e) => {
+                                event_loop.exit();
+                                self.flags |= Self::ERROR;
+                                eprintln!("Nox renderer error: {}", e);
+                            }
                         }
                     }
                 }

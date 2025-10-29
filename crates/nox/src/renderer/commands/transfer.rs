@@ -128,6 +128,7 @@ impl TransferCommands {
             ),
             self.command_buffer,
             None,
+            false,
         )?;
         let mut ranges = FixedVec::with_capacity(
             subresources.map(|v| v.len()).unwrap_or(1),
@@ -155,7 +156,7 @@ impl TransferCommands {
         }
         if state.queue_family_index != dst_state.queue_family_index {
             dst_state.queue_family_index = state.queue_family_index;
-            image.cmd_memory_barrier(dst_state, self.command_buffer, None).unwrap();
+            image.cmd_memory_barrier(dst_state, self.command_buffer, None, true).unwrap();
         }
         Ok(())
     }
@@ -190,6 +191,7 @@ impl TransferCommands {
             dst_state,
             self.command_buffer,
             None,
+            true,
         )?;
         let mut ranges = FixedVec::with_capacity(
             subresources.map(|v| v.len()).unwrap_or(1),
@@ -217,7 +219,7 @@ impl TransferCommands {
         }
         if state.queue_family_index != dst_state.queue_family_index {
             dst_state.queue_family_index = state.queue_family_index;
-            image.cmd_memory_barrier(dst_state, self.command_buffer, None).unwrap();
+            image.cmd_memory_barrier(dst_state, self.command_buffer, None, true).unwrap();
         }
         Ok(())
     }
@@ -321,7 +323,7 @@ impl TransferCommands {
         let mut dst_state = ImageState::new(
             vk::AccessFlags::TRANSFER_WRITE,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            self.transfer_queue_index,
+            vk::QUEUE_FAMILY_IGNORED,
             vk::PipelineStageFlags::TRANSFER
         );
         let state = image.state();
@@ -329,6 +331,7 @@ impl TransferCommands {
             dst_state,
             self.command_buffer,
             None,
+            true,
         ).unwrap();
         let mut subresource_layers = properties.all_layers(0);
         if let Some(layers) = layers {
@@ -401,7 +404,7 @@ impl TransferCommands {
 
         if dst_state.queue_family_index != state.queue_family_index {
             dst_state.queue_family_index = state.queue_family_index;
-            image.cmd_memory_barrier(dst_state, self.command_buffer, None).unwrap();
+            image.cmd_memory_barrier(dst_state, self.command_buffer, None, true).unwrap();
         }
 
         Ok(())

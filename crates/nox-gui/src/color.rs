@@ -80,6 +80,15 @@ impl ColorSRGBA {
         self.alpha *= scale;
         self
     }
+
+    #[inline(always)]
+    pub const fn flatten_to_u32(self) -> u32 {
+        let r = (self.r * 255.0) as u8;
+        let g = (self.g * 255.0) as u8;
+        let b = (self.b * 255.0) as u8;
+        let alpha = (self.alpha * 255.0) as u8;
+        u32::from_le_bytes([r, g, b, alpha])
+    }
 }
 
 impl Color for ColorSRGBA {

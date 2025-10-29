@@ -178,6 +178,7 @@ pub struct ComputeState {
 
 pub(crate) struct Renderer<'a> {
     transfer_commands: GlobalVec<TransferCommands>,
+    queued_transfer_requests: GlobalVec<TransferRequests>,
     main_thread_context: ThreadContext,
     frame_states: ArrayVec<Rc<TokenCell<FrameState, FrameToken>>, {MAX_BUFFERED_FRAMES as usize}>,
     compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
@@ -255,6 +256,7 @@ impl<'a> Renderer<'a> {
             tmp_alloc,
             frame_buffer_size: image::Dimensions::new(1, 1, 1),
             frame_token: FrameToken::new().unwrap(),
+            queued_transfer_requests: Default::default(),
         };
         let mut frame_states = ArrayVec::new();
         let mut i = 0;
@@ -354,65 +356,76 @@ impl<'a> Renderer<'a> {
     pub(crate) fn transfer_requests<I: Interface>(
         &mut self,
         interface: Arc<RwLock<I>>,
-        command_requests: TransferRequests,
+        transfer_requests: TransferRequests,
     ) -> Result<GlobalVec<Option<JoinHandle<()>>>, Error>
     {
 
-        let mut handles = GlobalVec::with_capacity(command_requests.task_count());
+        let mut all_requests = GlobalVec::new();
 
-        let device = self.device.clone();
-        let transfer_commands = &mut self.transfer_commands;
-        let queue_families = self.vulkan_context.queue_family_indices();
-        let interface = interface.clone();
-        let global_resources = self.global_resources.clone();
+        all_requests.move_from_vec(&mut self.queued_transfer_requests);
 
-        for (id, staging_block_size) in command_requests.transfer_iter() {
+        let mut handles = GlobalVec::with_capacity(transfer_requests.task_count());
 
-            let command_pool = helpers::create_command_pool(
-                &device,
-                vk::CommandPoolCreateFlags::TRANSIENT,
-                queue_families.transfer_index(),
-            )?;
+        all_requests.push(transfer_requests);
 
-            let mut vk_cmd_buffer = vk::CommandBuffer::null();
-            let info = vk::CommandBufferAllocateInfo {
-                s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                command_pool,
-                level: vk::CommandBufferLevel::PRIMARY,
-                command_buffer_count: 1,
-                ..Default::default()
-            };
-            helpers
-                ::allocate_command_buffers(&device, &info, core::slice::from_mut(&mut vk_cmd_buffer))?;
-            helpers
-                ::begin_command_buffer(&device, vk_cmd_buffer)?;
+        for transfer_requests in &all_requests {
 
-            let alloc = LinearDeviceAlloc::new(
-                self.device.clone(),
-                staging_block_size,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                vk::MemoryPropertyFlags::from_raw(0),
-                self.vulkan_context.physical_device_info(),
-                true,
-            ).unwrap();
 
-            let mut commands = transfer_commands.push(TransferCommands::new(
-                device.clone(),
-                vk_cmd_buffer,
-                command_pool,
-                global_resources.clone(),
-                alloc,
-                queue_families.transfer_index(),
-                id,
-            ).unwrap());
+            let device = self.device.clone();
+            let transfer_commands = &mut self.transfer_commands;
+            let queue_families = self.vulkan_context.queue_family_indices();
+            let interface = interface.clone();
+            let global_resources = self.global_resources.clone();
 
-            let handle = interface
-                .write()
-                .unwrap()
-                .transfer_commands(id, &mut commands)
-                .unwrap();
+            for (id, staging_block_size) in transfer_requests.transfer_iter() {
 
-            handles.push(handle);
+                let command_pool = helpers::create_command_pool(
+                    &device,
+                    vk::CommandPoolCreateFlags::TRANSIENT,
+                    queue_families.transfer_index(),
+                )?;
+
+                let mut vk_cmd_buffer = vk::CommandBuffer::null();
+                let info = vk::CommandBufferAllocateInfo {
+                    s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                    command_pool,
+                    level: vk::CommandBufferLevel::PRIMARY,
+                    command_buffer_count: 1,
+                    ..Default::default()
+                };
+                helpers
+                    ::allocate_command_buffers(&device, &info, core::slice::from_mut(&mut vk_cmd_buffer))?;
+                helpers
+                    ::begin_command_buffer(&device, vk_cmd_buffer)?;
+
+                let alloc = LinearDeviceAlloc::new(
+                    self.device.clone(),
+                    staging_block_size,
+                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                    vk::MemoryPropertyFlags::from_raw(0),
+                    self.vulkan_context.physical_device_info(),
+                    true,
+                ).unwrap();
+
+                let mut commands = transfer_commands.push(TransferCommands::new(
+                    device.clone(),
+                    vk_cmd_buffer,
+                    command_pool,
+                    global_resources.clone(),
+                    alloc,
+                    queue_families.transfer_index(),
+                    id,
+                ).unwrap());
+
+                let handle = interface
+                    .write()
+                    .unwrap()
+                    .transfer_commands(id, &mut commands)
+                    .unwrap();
+
+                handles.push(handle);
+            }
+
         }
 
         Ok(handles)
@@ -737,6 +750,10 @@ impl<'a> Renderer<'a> {
             self.vulkan_context.request_swapchain_update(self.buffered_frames, window.inner_size());
         }
         self.compute_states[frame_data.frame_index as usize].timeline_value += 2;
+        if !render_context.transfer_requests.is_empty() {
+            self.queued_transfer_requests.push(render_context.transfer_requests);
+            self.wait_idle();
+        }
         Ok(())
     }
 

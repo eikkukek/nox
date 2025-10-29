@@ -290,16 +290,19 @@ impl GlobalResources {
     {
         let mut sets = FixedVec::with_capacity(resources.len(), alloc)?;
         for id in resources {
-            let resource = self.shader_resources.get(id.0)?;
-            for (image, index) in &resource.image_views {
-                if let Ok(image) = self.get_image(*image) {
-                    image.destroy_subview(*index).unwrap();
+            if let Ok(resource) = self.shader_resources.get(id.0) {
+                for (image, index) in &resource.image_views {
+                    if let Ok(image) = self.get_image(*image) {
+                        image.destroy_subview(*index).unwrap();
+                    }
                 }
+                sets.push(resource.descriptor_set).unwrap();
+                self.shader_resources.remove(id.0).unwrap();
             }
-            sets.push(resource.descriptor_set).unwrap();
-            self.shader_resources.remove(id.0).unwrap();
         }
-        self.descriptor_pool.free(&sets)?;
+        if !sets.is_empty() {
+            self.descriptor_pool.free(&sets)?;
+        }
         Ok(())
     }
 

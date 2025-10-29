@@ -73,3 +73,8 @@ pub fn point_in_circumcircle(a: Vec2, b: Vec2, c: Vec2, p: Vec2) -> bool {
         det < 0.0
     }
 }
+
+#[inline(always)]
+pub fn centroid(a: Vec2, b: Vec2, c: Vec2) -> Vec2 {
+    vec2((a.x + b.x + c.x) / 3.0, (a.y + b.y + c.y) / 3.0)
+}

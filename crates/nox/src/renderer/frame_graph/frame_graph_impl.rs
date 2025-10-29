@@ -142,6 +142,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                     self.old_state,
                     self.command_buffer,
                     Some(self.subresource),
+                    false,
                 ).unwrap();
             }
         }

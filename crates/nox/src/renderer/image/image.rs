@@ -183,6 +183,7 @@ impl Image {
         state: ImageState,
         command_buffer: vk::CommandBuffer,
         subresource_info: Option<ImageSubresourceRangeInfo>,
+        is_transfer_barrier: bool,
     ) -> Result<(), ImageError>
     {
         let mut write = self.state.write().unwrap();
@@ -201,10 +202,14 @@ impl Image {
             state,
             subresource,
         );
+        let mut pipeline_stage = write.pipeline_stage;
+        if is_transfer_barrier {
+            pipeline_stage = vk::PipelineStageFlags::ALL_COMMANDS;
+        }
         unsafe {
             device.cmd_pipeline_barrier(
                 command_buffer,
-                write.pipeline_stage,
+                pipeline_stage,
                 state.pipeline_stage,
                 Default::default(),
                 Default::default(),

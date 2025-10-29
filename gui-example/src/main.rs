@@ -94,7 +94,7 @@ impl<'a> Interface for Example<'a> {
             Default::default(),
             [540, 540],
             true,
-            true,
+            false,
         )
     }
 
@@ -353,7 +353,7 @@ fn main() {
         Example::new(Workspace::new(
             [("regular", font::Face::parse(&font, 0).unwrap())], 
             DefaultStyle::new("regular"),
-            0.01,
+            0.1,
         ));
     Nox::new(example, &mut Default::default()).run();
 }
