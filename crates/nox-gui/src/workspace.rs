@@ -1,5 +1,3 @@
-use core::hash::Hash;
-
 use rustc_hash::FxHashMap;
 
 use nox::{
@@ -73,7 +71,7 @@ impl CustomPipeline {
 pub struct Workspace<'a, I, FontHash, Style>
     where
         I: Interface,
-        FontHash: Clone + PartialEq + Eq + Hash,
+        FontHash: UiFontHash,
         Style: WindowStyle<FontHash>,
 {
     text_renderer: VertexTextRenderer<'a, FontHash>,
@@ -426,7 +424,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 "nox_gui: attempting to update window before calling Workspace::begin".into()
             ));
         }
-        let window = self.windows.entry(id).or_insert(Window::new(
+        let window = self.windows.entry(id).or_insert_with(|| Window::new(
             title,
             initial_position,
             initial_size,

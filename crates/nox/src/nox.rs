@@ -46,6 +46,7 @@ pub struct Nox<'a, I>
         I: Interface,
 {
     interface: Arc<RwLock<I>>,
+    clipboard: Clipboard,
     window: Option<Arc<Window>>,
     memory: &'a Memory,
     renderer: Option<Renderer<'a>>,
@@ -56,7 +57,6 @@ pub struct Nox<'a, I>
     logical_keys: FxHashMap<Key, InputState>,
     mouse_buttons: FxHashMap<MouseButton, InputState>,
     input_text: GlobalVec<(KeyCode, CompactString)>,
-    clipboard: Clipboard,
     delta_counter: time::Instant,
     delta_time: time::Duration,
     window_size: (u32, u32),
@@ -298,6 +298,7 @@ impl<'a, I: Interface> Drop for Nox<'a, I> {
 
     fn drop(&mut self) {
         if let Some(mut renderer) = self.renderer.take() {
+            renderer.wait_idle();
             self.interface
                 .write()
                 .unwrap()

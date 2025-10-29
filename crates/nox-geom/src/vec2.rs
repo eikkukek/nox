@@ -100,6 +100,12 @@ impl Vec2 {
     }
 
     #[inline(always)]
+    pub fn is_zero(&self) -> bool {
+        self.x == 0.0 &&
+        self.y == 0.0
+    }
+
+    #[inline(always)]
     #[must_use]
     pub fn min(self, rhs: Self) -> Self {
         Self {

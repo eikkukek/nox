@@ -94,7 +94,7 @@ impl<'a> Interface for Example<'a> {
             Default::default(),
             [540, 540],
             true,
-            false,
+            true,
         )
     }
 
@@ -138,7 +138,7 @@ impl<'a> Interface for Example<'a> {
         renderer.edit_resources(|r| {
             let device_alloc = self.device_alloc.as_mut().unwrap();
             unsafe {
-                device_alloc.reset();
+               device_alloc.reset();
             }
             r.destroy_image(self.output_image);
             r.destroy_image(self.output_resolve_image);
@@ -334,6 +334,10 @@ impl<'a> Interface for Example<'a> {
             println!("cache written");
             Ok(())
         }).ok();
+        self.workspace.clean_up(&renderer);
+        unsafe {
+            self.device_alloc.take().unwrap().clean_up();
+        }
     }
 }
 

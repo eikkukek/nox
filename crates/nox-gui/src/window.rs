@@ -430,6 +430,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     const HOR_SCROLL_BAR_VISIBLE: u32 = 0x1000_0;
     const VER_SCROLL_BAR_RENDERABLE: u32 = 0x2000_0;
     const HOR_SCROLL_BAR_RENDERABLE: u32 = 0x4000_0;
+    const CONTENT_HELD: u32 = 0x8000_0;
 
     pub(crate) fn new(
         title: &str,
@@ -574,7 +575,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.selectable_texts
            .entry(id)
-           .or_insert((0, SelectableText::new()));
+           .or_insert_with(|| (0, SelectableText::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -590,7 +591,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.buttons
            .entry(id)
-           .or_insert((0, Button::new()));
+           .or_insert_with(|| (0, Button::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -606,7 +607,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.sliders
            .entry(id)
-           .or_insert((0, Slider::new()));
+           .or_insert_with(|| (0, Slider::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -622,7 +623,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.checkboxes
            .entry(id)
-           .or_insert((0, Checkbox::new()));
+           .or_insert_with(|| (0, Checkbox::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -638,7 +639,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.input_texts
            .entry(id)
-           .or_insert((0, InputText::new()));
+           .or_insert_with(|| (0, InputText::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -654,7 +655,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.drag_values
            .entry(id)
-           .or_insert((0, DragValue::new()));
+           .or_insert_with(|| (0, DragValue::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -670,7 +671,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.color_pickers
            .entry(id)
-           .or_insert((0, ColorPicker::new()));
+           .or_insert_with(|| (0, ColorPicker::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -686,7 +687,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.radio_buttons
            .entry(id)
-           .or_insert((0, RadioButton::new()));
+           .or_insert_with(|| (0, RadioButton::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -702,7 +703,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.selectable_tags
             .entry(id)
-            .or_insert((0, SelectableTag::new()));
+            .or_insert_with(|| (0, SelectableTag::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -718,7 +719,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         };
         let entry = widgets.combo_boxes
             .entry(id)
-            .or_insert((0, ComboBox::new()));
+            .or_insert_with(|| (0, ComboBox::new()));
         if entry.0 < self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -735,7 +736,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         while !self.active_collapsing_headers.insert(id) {
             id.0 += 0.01;
         }
-        let (last_triangulation, collapsing_headers) = self.collapsing_headers.entry(id).or_insert((0, CollapsingHeader::new()));
+        let (last_triangulation, collapsing_headers) = self.collapsing_headers.entry(id).or_insert_with(|| (0, CollapsingHeader::new()));
         if *last_triangulation != self.last_triangulation {
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
@@ -886,6 +887,11 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     #[inline(always)]
     fn hor_scroll_bar_renderable(&self) -> bool {
         self.flags & Self::HOR_SCROLL_BAR_RENDERABLE == Self::HOR_SCROLL_BAR_RENDERABLE
+    }
+
+    #[inline(always)]
+    fn content_held(&self) -> bool {
+        self.flags & Self::CONTENT_HELD == Self::CONTENT_HELD
     }
 
     #[inline(always)]
@@ -1401,16 +1407,31 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             triangulate_scroll_bars |= res.requires_triangulation;
             self.scroll_x = res.new_t;
         }
-        let bg_held =
+        if self.content_held() {
+            if nox.was_mouse_button_released(MouseButton::Left) {
+                self.flags &= !Self::CONTENT_HELD;
+            } else if
+                !self.ver_scroll_bar_visible() &&
+                !self.hor_scroll_bar_visible() &&
+                !delta_cursor_pos.is_zero()
+            {
+                self.flags |= Self::HELD;
+            } else {
+                if self.ver_scroll_bar_visible()  {
+                    self.scroll_y -= delta_cursor_pos.y / self.widget_rect_max.y;
+                }
+                if self.hor_scroll_bar_visible() {
+                    self.scroll_x -= delta_cursor_pos.x / self.widget_rect_max.x;
+                }
+            }
+        } else if
             !hover_blocked &&
             active_widget.is_none() &&
             hovered_widget.is_none() &&
-            nox.is_mouse_button_held(MouseButton::Left);
-        if self.ver_scroll_bar_visible() && bg_held  {
-            self.scroll_y -= delta_cursor_pos.y / self.widget_rect_max.y;
-        }
-        if self.hor_scroll_bar_visible() && bg_held {
-            self.scroll_x -= delta_cursor_pos.x / self.widget_rect_max.x;
+            cursor_in_this_window &&
+            nox.was_mouse_button_pressed(MouseButton::Left)
+        {
+            self.flags |= Self::CONTENT_HELD;
         }
         if triangulate_scroll_bars {
             let mut points = GlobalVec::new();
@@ -1914,7 +1935,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             window.title_text = None;
         }
         window.begin();
-        let title_text = window.title_text.get_or_insert(text_renderer.render(
+        let title_text = window.title_text.get_or_insert_with(|| text_renderer.render(
             &[text_segment(window.title.as_str(), style.font_regular())],
             false,
             0.0,

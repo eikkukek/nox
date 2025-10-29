@@ -329,13 +329,20 @@ impl<'a> Renderer<'a> {
     }
 
     #[inline(always)]
-    pub(crate) fn renderer_context(&mut self) -> RendererContext {
+    pub fn renderer_context(&mut self) -> RendererContext {
         RendererContext {
             global_resources: self.global_resources.clone(),
             transfer_requests: TransferRequests::new(),
             frame_buffer_size: self.frame_buffer_size,
             device: self.device.clone(),
             physical_device_info: self.vulkan_context.physical_device_info_owned(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn wait_idle(&self) {
+        unsafe {
+            self.device.device_wait_idle().ok();
         }
     }
 

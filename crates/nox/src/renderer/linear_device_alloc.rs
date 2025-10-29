@@ -214,9 +214,10 @@ impl LinearDeviceAlloc {
             for (blocks, _, i) in self.blocks.iter_mut() {
                 *i = 0;
                 for block in blocks.iter_mut() {
-                    block.reset();
+                    block.free_memory(&self.device);
                 }
             }
+            self.blocks.clear();
         }
     }
 }

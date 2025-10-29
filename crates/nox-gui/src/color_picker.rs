@@ -469,9 +469,11 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             false,
             window_moving,
             false,
-            &mut |text, offset, bounded_instance|
+            &mut |text, offset, mut bounded_text_instance| {
+                bounded_text_instance.max_bounds += offset;
                 self.combined_text
-                    .add_text(text, offset / font_scale, bounded_instance).unwrap(),
+                    .add_text(text, offset / font_scale, bounded_text_instance).unwrap()
+            },
         );
         let mut f = |
                 drag_value: &mut DragValue<I, FontHash, Style>,
@@ -493,9 +495,11 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
                 false,
                 window_moving,
                 false,
-                &mut |text, offset, bounded_text_instance|
+                &mut |text, offset, mut bounded_text_instance| {
+                    bounded_text_instance.max_bounds += offset;
                     self.combined_text
-                        .add_text(text, offset / font_scale, bounded_text_instance).unwrap(),
+                        .add_text(text, offset / font_scale, bounded_text_instance).unwrap()
+                },
             );
             update_result.cursor_in_widget |= res.cursor_in_widget;
             update_result.requires_triangulation |= res.requires_triangulation;
@@ -1170,7 +1174,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         if cursor_in_color_rect && mouse_pressed {
             self.contents.set_widget_held(true);
         }
-        if other_widget_active {
+        if other_widget_active && !window_moving {
             self.contents.set_shown(false);
             self.contents.set_widget_hovered(false);
         } else {
