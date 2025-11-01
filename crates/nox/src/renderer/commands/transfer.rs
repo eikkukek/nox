@@ -272,9 +272,9 @@ impl TransferCommands {
         let staging_buffer = unsafe {
             device.create_buffer(&buffer_info, None)?
         };
-        let memory = self.linear_device_alloc
-            .bind_buffer_memory(staging_buffer)?;
-        let ptr = unsafe { memory.get_mapped_memory() }.unwrap();
+        let mut memory = self.linear_device_alloc
+            .bind_buffer_memory(staging_buffer, None)?;
+        let ptr = unsafe { memory.map_memory() }.unwrap();
 
         let region = vk::BufferCopy {
             src_offset: 0,
@@ -376,9 +376,9 @@ impl TransferCommands {
         let staging_buffer = unsafe {
             device.create_buffer(&buffer_info, None)?
         };
-        let memory = self.linear_device_alloc
-            .bind_buffer_memory(staging_buffer)?;
-        let ptr = unsafe { memory.get_mapped_memory() }.unwrap();
+        let mut memory = self.linear_device_alloc
+            .bind_buffer_memory(staging_buffer, None)?;
+        let ptr = unsafe { memory.map_memory() }.unwrap();
 
         let region = vk::BufferImageCopy {
             buffer_offset: 0,

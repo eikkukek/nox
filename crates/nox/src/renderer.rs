@@ -43,7 +43,7 @@ use token_cell::{
 
 use nox_mem::{
     string_types::*,
-    vec_types::{ArrayVec, GlobalVec, Vector},
+    vec_types::{ArrayVec, FixedVec, GlobalVec, Vector},
 };
 
 use nox_alloc::arena_alloc::*;
@@ -234,7 +234,7 @@ impl<'a> Renderer<'a> {
                     device.clone(),
                     Arc::new(vulkan_context.instance().clone()),
                     vulkan_context.physical_device(),
-                    &physical_device_info,
+                    physical_device_info.clone(),
                     memory_layout
                 )
                 .map_err(|e| format!("failed to create global resources ( {:?} ) ", e))?
@@ -583,6 +583,7 @@ impl<'a> Renderer<'a> {
         unsafe {
             alloc.force_clear();
         }
+        let (mut signal_semaphores, mut signal_values) =
         {
             let mut frame_graph = FrameGraphImpl::new(
                 self.frame_states[frame_data.frame_index as usize].clone(),
@@ -611,7 +612,22 @@ impl<'a> Renderer<'a> {
             frame_graph
                 .render(&mut *interface.write().unwrap(), &mut render_commands)
                 .map_err(|e| format!("frame graph failed to render ( {:?} )", e))?;
-        }
+            let signal_count = frame_graph.signal_semaphore_count() as usize;
+            let mut signal_semaphores = FixedVec
+                ::with_capacity(signal_count + 2, alloc)
+                .map_err(|e| format!("failed to allocate signal semaphores ( {:?} )", e))?;
+            let mut signal_values = FixedVec
+                ::with_capacity(signal_count + 2, alloc)
+                .map_err(|e| format!("failed to allocate signal semaphore values ( {:?} )", e))?;
+            let g = self.global_resources.read().unwrap();
+            frame_graph.collect_signal_semaphores(|id, value| {
+                let handle = g.get_timeline_semaphore(id)?;
+                signal_semaphores.push(handle)?;
+                signal_values.push(value)?;
+                Ok(())
+            }).map_err(|e| format!("failed to collect signal semaphores ( {:?} )", e))?;
+            (signal_semaphores, signal_values)
+        };
         let frame_state = self.frame_states[frame_data.frame_index as usize].borrow_mut(&mut self.frame_token);
         let mut image_state = frame_data.image_state;
         let graphics_queue_index = queue_family_indices.graphics_index();
@@ -716,15 +732,16 @@ impl<'a> Renderer<'a> {
             return Err(format!("failed to end command buffer {:?}", e))
         }
         let wait_values = [0, compute_state.timeline_value + 1];
-        let signal_values = [0, compute_state.timeline_value + 2];
         let wait_semaphores = [semaphores.wait_semaphore, compute_state.semaphore];
         let wait_stages = [semaphores.wait_stage, vk::PipelineStageFlags::COMPUTE_SHADER];
-        let signal_semaphores = [semaphores.signal_semaphore, compute_state.semaphore];
+        signal_semaphores.append(&[semaphores.signal_semaphore, compute_state.semaphore]).unwrap();
+        signal_values.append(&[0, compute_state.timeline_value + 2]).unwrap();
+        let signal_count = signal_semaphores.len() as u32;
         let mut timeline_submit = vk::TimelineSemaphoreSubmitInfo {
             s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
             wait_semaphore_value_count: 2,
             p_wait_semaphore_values: wait_values.as_ptr(),
-            signal_semaphore_value_count: 2,
+            signal_semaphore_value_count: signal_count,
             p_signal_semaphore_values: signal_values.as_ptr(),
             ..Default::default()
         };
@@ -733,7 +750,7 @@ impl<'a> Renderer<'a> {
             wait_semaphore_count: 2,
             p_wait_semaphores: wait_semaphores.as_ptr(),
             p_wait_dst_stage_mask: wait_stages.as_ptr(),
-            signal_semaphore_count: 2,
+            signal_semaphore_count: signal_count,
             p_signal_semaphores: signal_semaphores.as_ptr(),
             command_buffer_count: 1,
             p_command_buffers: &frame_data.command_buffer,
@@ -760,7 +777,7 @@ impl<'a> Renderer<'a> {
     pub(crate) fn clean_up(&mut self, allocators: &'a Allocators) {
         println!("Nox renderer message: terminating renderer");
         unsafe {
-            self.device.device_wait_idle().unwrap();
+            self.device.device_wait_idle().ok();
         }
         for state in &self.frame_states {
             unsafe {

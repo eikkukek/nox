@@ -8,12 +8,8 @@ use nox_mem::{
 };
 
 use crate::{
-    has_bits, renderer::{
-        global_resources::*,
-        image::{Image, ImageBuilder, ImageRangeInfo, ImageSubresourceRangeInfo},
-        linear_device_alloc::LinearDeviceAlloc,
-        Error, 
-        ImageState,
+    has_bits, memory_binder::MemoryBinder, renderer::{
+        Error, ImageState, global_resources::*, image::{Image, ImageBuilder, ImageRangeInfo, ImageSubresourceRangeInfo}, linear_device_alloc::LinearDeviceAlloc
     }
 };
 
@@ -135,8 +131,12 @@ impl ResourcePool
     ) -> Result<ResourceId, Error>
     {
         let mut g = self.global_resources.write().unwrap();
+        let mut default_binder = g.default_memory_binder();
         let index = self.transient_images
-            .insert(g.create_image(&mut self.device_alloc, f)?);
+            .insert(g.create_image(
+                ResourceBinderImage::Owned(&mut self.device_alloc, Some(&mut |image| default_binder.bind_image_memory(image, None))),
+                f,
+            )?);
         let image_id = self.transient_images[index];
         let image = g.get_image(image_id).unwrap();
         let mut flags = ResourceFlags::Transient.into();

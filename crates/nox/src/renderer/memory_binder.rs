@@ -19,9 +19,16 @@ pub trait DeviceMemory: 'static + Send + Sync {
 
 pub trait MemoryBinder {
 
-    type Memory: DeviceMemory;
 
-    fn bind_image_memory(&mut self, image: vk::Image) -> Result<Self::Memory, Error>;
+    fn bind_image_memory(
+        &mut self,
+        image: vk::Image,
+        fall_back: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error>>,
+    ) -> Result<Box<dyn DeviceMemory>, Error>;
 
-    fn bind_buffer_memory(&mut self, buffer: vk::Buffer) -> Result<Self::Memory, Error>;
+    fn bind_buffer_memory(
+        &mut self,
+        buffer: vk::Buffer,
+        fall_back: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error>>,
+    ) -> Result<Box<dyn DeviceMemory>, Error>;
 }

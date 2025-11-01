@@ -34,7 +34,7 @@ impl From<AttachmentStoreOp> for vk::AttachmentStoreOp {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
 pub enum ResolveMode {
     FirstSample = vk::ResolveModeFlags::SAMPLE_ZERO.as_raw(),
     Average = vk::ResolveModeFlags::AVERAGE.as_raw(),

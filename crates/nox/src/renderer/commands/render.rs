@@ -127,6 +127,14 @@ impl<'a> RenderCommands<'a> {
     }
 
     #[inline(always)]
+    pub fn wait_idle(&self) -> Result<(), Error> {
+        unsafe {
+            self.device.device_wait_idle()?;
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
     pub(crate) fn set_current_sample_count(&mut self, samples: MSAA) {
         self.current_sample_count = samples;
         self.current_pipeline = None;

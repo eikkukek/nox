@@ -18,9 +18,16 @@ pub trait PassAttachmentBuilder<'a> {
     fn with_depth_stencil_write(&mut self, write: WriteInfo) -> &mut dyn PassAttachmentBuilder<'a>;
 
     fn with_render_area(&mut self, render_area: RenderArea) -> &mut dyn PassAttachmentBuilder<'a>;
+
+    fn with_signal_semaphore(&mut self, id: TimelineSemaphoreId, value: u64);
 }
 
 pub trait FrameGraph<'a> {
+
+    fn edit_resources(
+        &mut self,
+        f: &mut dyn FnMut(&mut GlobalResources) -> Result<(), Error>
+    ) -> Result<(), Error>;
 
     fn frame_index(&self) -> u32;
 
@@ -40,9 +47,4 @@ pub trait FrameGraph<'a> {
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder),
     ) -> Result<PassId, Error>;
-}
-
-pub trait FrameGraphInit<'a> {
-    
-    fn init(&mut self, max_passes: u32) -> Result<&mut dyn FrameGraph<'a>, Error>;
 }

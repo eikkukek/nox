@@ -6,7 +6,11 @@ use ash::vk;
 
 use nox_mem::{vec_types::{GlobalVec, Vector}};
 
-use crate::{has_bits, renderer::memory_binder::DeviceMemory, RendererContext};
+use crate::{
+        has_bits,
+        memory_binder::DeviceMemory,
+        RendererContext
+};
 
 use super::{
     PhysicalDeviceInfo,
@@ -166,7 +170,7 @@ impl LinearDeviceAlloc {
             blocks,
             block_size,
             granularity: physical_device_info.properties().limits.buffer_image_granularity,
-            map_memory,
+           map_memory,
         })
     }
 
@@ -196,6 +200,16 @@ impl LinearDeviceAlloc {
             &context.physical_device_info,
             true,
         )
+    }
+
+    #[inline(always)]
+    pub fn mappable(&self) -> bool {
+        self.map_memory
+    }
+
+    #[inline(always)]
+    pub fn block_size(&self) -> u64 {
+        self.block_size
     }
 
     pub unsafe fn reset(&mut self) {
@@ -281,13 +295,28 @@ impl DeviceMemory for Memory {
 
 impl MemoryBinder for LinearDeviceAlloc {
 
-    type Memory = Memory;
-
-    fn bind_image_memory(&mut self, image: vk::Image) -> Result<Memory> {
+    fn bind_image_memory(
+        &mut self,
+        image: vk::Image,
+        fall_back: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>>>,
+    ) -> Result<Box<dyn DeviceMemory>>
+    {
         let device = &self.device;
         let memory_requirements = unsafe { device.get_image_memory_requirements(image) };
+        let block_size = self.block_size;
         for (blocks, type_index, free_index) in self.blocks.iter_mut() {
             if memory_requirements.memory_type_bits & (1 << *type_index) != 0 {
+                if block_size < memory_requirements.size {
+                    if let Some(fall_back) = fall_back {
+                        return fall_back(image);
+                    } else {
+                        return Err(Error::OutOfDeviceMemory {
+                            size: memory_requirements.size,
+                            align: memory_requirements.alignment,
+                            avail: block_size,
+                        })
+                    }
+                }
                 let mut res = blocks[*free_index]
                     .bind_image_memory(device, image, memory_requirements, self.block_size, *type_index, self.granularity,);
                 if let Err(err) = &res {
@@ -301,20 +330,37 @@ impl MemoryBinder for LinearDeviceAlloc {
                         );
                     }
                 }
-                return res
+                return Ok(Box::new(res.unwrap()))
             }
         }
         Err(IncompatibleMemoryRequirements)
     }
 
-    fn bind_buffer_memory(&mut self, buffer: vk::Buffer) -> Result<Self::Memory> {
+    fn bind_buffer_memory(
+        &mut self,
+        buffer: vk::Buffer,
+        fall_back: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>>>,
+    ) -> Result<Box<dyn DeviceMemory>>
+    {
         let device = &self.device;
         let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+        let block_size = self.block_size();
         for (blocks, type_index, free_index) in self.blocks.iter_mut() {
             if memory_requirements.memory_type_bits & (1 << *type_index) != 0 {
+                if block_size < memory_requirements.size {
+                    if let Some(fall_back) = fall_back {
+                        return fall_back(buffer);
+                    } else {
+                        return Err(Error::OutOfDeviceMemory {
+                            size: memory_requirements.size,
+                            align: memory_requirements.alignment,
+                            avail: block_size,
+                        })
+                    }
+                }
                 let mut res = blocks[*free_index]
                     .bind_buffer_memory(
-                        device, buffer, memory_requirements, self.block_size, *type_index, self.granularity, self.map_memory
+                        device, buffer, memory_requirements, block_size, *type_index, self.granularity, self.map_memory
                     );
                 if let Err(err) = &res {
                     if let Error::OutOfDeviceMemory { size: _, align: _, avail: _ } = err {
@@ -325,9 +371,11 @@ impl MemoryBinder for LinearDeviceAlloc {
                         res = blocks[*free_index].bind_buffer_memory(
                             device, buffer, memory_requirements, self.block_size, *type_index, self.granularity, self.map_memory
                         );
+                    } else {
+                        return Err(err.clone())
                     }
                 }
-                return res
+                return Ok(Box::new(res.unwrap()))
             }
         }
         return Err(IncompatibleMemoryRequirements)

@@ -21,6 +21,7 @@ use nox_mem::string_types::ArrayString;
 pub use winit::keyboard::KeyCode;
 pub use winit::event::MouseButton;
 pub use winit::window::CursorIcon;
+pub use winit::monitor::MonitorHandle;
 
 pub use crate::renderer;
 
@@ -57,6 +58,7 @@ pub struct Nox<'a, I>
     logical_keys: FxHashMap<Key, InputState>,
     mouse_buttons: FxHashMap<MouseButton, InputState>,
     input_text: GlobalVec<(KeyCode, CompactString)>,
+    monitors: GlobalVec<MonitorHandle>,
     delta_counter: time::Instant,
     delta_time: time::Duration,
     window_size: (u32, u32),
@@ -92,6 +94,7 @@ impl<'a, I: Interface> Nox<'a, I>
             mouse_buttons: Default::default(),
             input_text: Default::default(),
             clipboard: Clipboard::None,
+            monitors: Default::default(),
             delta_counter: time::Instant::now(),
             delta_time: time::Duration::ZERO,
             window_size: Default::default(),
@@ -273,6 +276,11 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
+    pub fn monitors(&self) -> &[MonitorHandle] {
+        &self.monitors
+    }
+
+    #[inline(always)]
     fn reset_input(&mut self) {
         self.mouse_scroll_pixel_delta = Default::default();
         self.mouse_scroll_line_delta = Default::default();
@@ -381,6 +389,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         event_loop.exit();
                         self.flags |= Self::ERROR;
                         eprintln!("Failed to update: {:?}", e);
+                        return
                     }
                     if self.cursor_set() {
                         window.set_cursor(self.current_cursor);
@@ -423,6 +432,10 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let init_settings = self.interface.read().unwrap().init_settings();
+        self.monitors.clear();
+        for handle in event_loop.available_monitors() {
+            self.monitors.push(handle);
+        }
         if self.window.is_none() {
             let window_attributes = Window::default_attributes()
                 .with_title(init_settings.app_name.as_str())

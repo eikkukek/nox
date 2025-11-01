@@ -17,6 +17,7 @@ pub(crate) struct Pass<'alloc, Alloc: Allocator> {
     pub id: PassId,
     pub reads: FixedVec<'alloc, ReadInfo, Alloc>,
     pub writes: FixedVec<'alloc, WriteInfo, Alloc>,
+    pub signal_semaphores: FixedVec<'alloc, (TimelineSemaphoreId, u64), Alloc>,
     pub depth_write: Option<(bool, WriteInfo)>,
     pub render_area: Option<vk::Rect2D>,
     pub msaa_samples: MSAA,
@@ -31,10 +32,12 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
     ) -> Result<Self, CapacityError> {
         let reads = FixedVec::with_capacity(info.max_reads as usize, alloc)?;
         let writes = FixedVec::with_capacity(info.max_color_writes as usize, alloc)?;
+        let signal_semaphores = FixedVec::with_capacity(info.signal_semaphores as usize, alloc)?;
         Ok(Self {
             id,
             reads,
             writes,
+            signal_semaphores,
             depth_write: None,
             render_area: None,
             msaa_samples: info.msaa_samples,
@@ -187,5 +190,11 @@ impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
     fn with_render_area(&mut self, render_area: RenderArea) -> &mut dyn PassAttachmentBuilder<'a> {
         self.render_area = Some(render_area.into());
         self
+    }
+
+    fn with_signal_semaphore(&mut self, id: TimelineSemaphoreId, value: u64) {
+        self.signal_semaphores
+            .push((id, value))
+            .expect("signal semaphore capacity exceeded");
     }
 }

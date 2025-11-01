@@ -4,7 +4,7 @@ use ash::vk;
 
 use token_cell::prelude::TokenCell;
 
-use nox_mem::{Allocator, vec_types::{FixedVec, Vector}};
+use nox_mem::{Allocator, vec_types::{GlobalVec, FixedVec, Vector}};
 
 use crate::{
     has_bits, renderer::{
@@ -23,7 +23,8 @@ pub(crate) struct FrameGraphImpl<'a, Alloc: Allocator> {
     frame_state: Rc<TokenCell<FrameState, FrameToken>>,
     frame_buffer_size: image::Dimensions,
     command_buffer: vk::CommandBuffer,
-    passes: FixedVec<'a, Pass<'a, Alloc>, Alloc>,
+    passes: GlobalVec<Pass<'a, Alloc>>,
+    signal_semaphore_count: u32,
     queue_family_indices: QueueFamilyIndices,
     next_pass_id: u32,
     alloc: &'a Alloc,
@@ -43,11 +44,13 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
         token: &'a mut FrameToken,
     ) -> FrameGraphImpl<'a, Alloc>
     {
+        frame_state.borrow_mut(token).init(command_buffer);
         FrameGraphImpl {
             frame_state,
             frame_buffer_size,
             command_buffer,
-            passes: FixedVec::with_no_alloc(),
+            passes: GlobalVec::with_capacity(4),
+            signal_semaphore_count: 0,
             queue_family_indices,
             next_pass_id: 0,
             alloc,
@@ -57,23 +60,18 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
     }
 }
 
-impl<'a, Alloc: Allocator> FrameGraphInit<'a> for FrameGraphImpl<'a, Alloc> {
-
-    fn init(
-        &mut self,
-        max_passes: u32,
-    ) -> Result<&mut dyn FrameGraph<'a>, Error>
-    {
-        if max_passes != 0 {
-            self.passes = FixedVec::with_capacity(max_passes as usize, self.alloc)?;
-        }
-        let command_buffer = self.command_buffer;
-        self.frame_state.borrow_mut(self.token).init(command_buffer);
-        Ok(self)
-    }
-}
-
 impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
+
+    fn edit_resources(
+        &mut self,
+        f: &mut dyn FnMut(&mut GlobalResources) -> Result<(), Error>
+    ) -> Result<(), Error> {
+        f(&mut self.frame_state
+            .borrow_mut(self.token).resource_pool.global_resources
+            .write()
+            .unwrap()
+        )
+    }
 
     fn frame_index(&self) -> u32 {
         self.frame_index
@@ -110,9 +108,10 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
             PassId(self.next_pass_id),
             info,
             alloc
-        )?).expect("pass capacity exceeded");
+        )?);
         self.next_pass_id += 1;
         f(pass);
+        self.signal_semaphore_count += pass.signal_semaphores.len() as u32;
         assert!(pass.validate(alloc)?, "pass valiation error (Image subresource write overlaps)");
         Ok(pass.id)
     }
@@ -399,6 +398,23 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             render_commands.set_current_sample_count(pass.msaa_samples);
             interface.render_commands(pass.id, render_commands)?;
             unsafe { device.cmd_end_rendering(command_buffer); }
+        }
+        Ok(())
+    }
+
+    pub fn signal_semaphore_count(&self) -> u32 {
+        self.signal_semaphore_count
+    }
+
+    pub fn collect_signal_semaphores(
+        &self,
+        mut collect: impl FnMut(TimelineSemaphoreId, u64) -> Result<(), Error>
+    ) -> Result<(), Error>
+    {
+        for pass in &self.passes {
+            for &(id, value) in &pass.signal_semaphores {
+                collect(id, value)?;
+            }
         }
         Ok(())
     }

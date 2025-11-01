@@ -14,7 +14,7 @@ use nox_mem::{
 };
 
 use crate::{
-    has_bits, renderer::{
+    has_bits, memory_binder::DeviceMemory, renderer::{
         buffer::BufferUsage, image::{Format, SamplerBuilder}, pipeline::PipelineLayout, *
     }
 };
@@ -39,6 +39,7 @@ pub struct GlobalResources {
     device: Arc<ash::Device>,
     instance: Arc<ash::Instance>,
     physical_device: vk::PhysicalDevice,
+    physical_device_info: Arc<PhysicalDeviceInfo>,
     shaders: GlobalSlotMap<Shader>,
     pipeline_layouts: GlobalSlotMap<pipeline::PipelineLayout>,
     pipeline_caches: GlobalSlotMap<PipelineCache>,
@@ -48,6 +49,8 @@ pub struct GlobalResources {
     images: GlobalSlotMap<Arc<Image>>,
     buffers: GlobalSlotMap<Buffer>,
     samplers: GlobalSlotMap<Sampler>,
+    linear_device_allocs: GlobalSlotMap<LinearDeviceAlloc>,
+    timeline_semaphores: GlobalSlotMap<vk::Semaphore>,
     default_binder: DefaultBinder,
     default_binder_mappable: DefaultBinder,
     descriptor_pool: DescriptorPool,
@@ -64,7 +67,7 @@ impl GlobalResources {
         device: Arc<ash::Device>,
         instance: Arc<ash::Instance>,
         physical_device: vk::PhysicalDevice,
-        physical_device_info: &PhysicalDeviceInfo,
+        physical_device_info: PhysicalDeviceInfo,
         memory_layout: MemoryLayout,
     ) -> Result<Self, Error>
     {
@@ -72,13 +75,13 @@ impl GlobalResources {
             device.clone(),
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             vk::MemoryPropertyFlags::from_raw(0),
-            physical_device_info,
+            &physical_device_info,
         );
         let default_binder_mappable = DefaultBinder::new(
             device.clone(),
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             vk::MemoryPropertyFlags::from_raw(0),
-            physical_device_info,
+            &physical_device_info,
         );
         let dummy_layout_info = vk::DescriptorSetLayoutCreateInfo {
             s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -112,11 +115,13 @@ impl GlobalResources {
             return Err(res.into())
         }
         Ok(Self {
+            api_version: physical_device_info.api_version(),
             dummy_descriptor_set_layout: dummy_layout.into_inner(),
             dummy_descriptor_pool: dummy_descriptor_pool.into_inner(),
             descriptor_pool: DescriptorPool::new(device.clone(), memory_layout)?,
             device,
             physical_device,
+            physical_device_info: Arc::new(physical_device_info),
             instance,
             shaders: GlobalSlotMap::with_capacity(16),
             pipeline_layouts: GlobalSlotMap::with_capacity(16),
@@ -127,20 +132,21 @@ impl GlobalResources {
             images: GlobalSlotMap::with_capacity(16),
             buffers: GlobalSlotMap::with_capacity(16),
             samplers: GlobalSlotMap::with_capacity(4),
+            linear_device_allocs: GlobalSlotMap::with_capacity(4),
+            timeline_semaphores: GlobalSlotMap::with_capacity(4),
             default_binder,
             default_binder_mappable,
             dummy_descriptor_set,
-            api_version: physical_device_info.api_version(),
         })
     }
 
     #[inline(always)]
-    pub fn default_binder(&self) -> DefaultBinder {
+    pub fn default_memory_binder(&self) -> DefaultBinder {
         self.default_binder.clone()
     }
 
     #[inline(always)]
-    pub fn default_binder_mappable(&self) -> DefaultBinder {
+    pub fn default_memory_binder_mappable(&self) -> DefaultBinder {
         self.default_binder_mappable.clone()
     }
 
@@ -710,11 +716,11 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn create_buffer<Binder: MemoryBinder>(
+    pub fn create_buffer(
         &mut self,
         size: u64,
         usage: &[BufferUsage],
-        binder: &mut Binder,
+        binder: ResourceBinderBuffer,
     ) -> Result<BufferId, Error>
     {
         if size == 0 {
@@ -731,7 +737,29 @@ impl GlobalResources {
         };
         let mut buffer = Buffer::new(self.device.clone(), properties)?;
         unsafe {
-            buffer.set_memory(Box::new(binder.bind_buffer_memory(buffer.handle())?));
+            match binder {
+                ResourceBinderBuffer::DefaultBinder => {
+                    buffer.set_memory(self.default_binder.bind_buffer_memory(buffer.handle(), None)?);
+                },
+                ResourceBinderBuffer::DefaultBinderMappable => {
+                    buffer.set_memory(self.default_binder_mappable.bind_buffer_memory(buffer.handle(), None)?);
+                },
+                ResourceBinderBuffer::LinearDeviceAlloc(id) => {
+                    let alloc = self.linear_device_allocs.get_mut(id.0)?;
+                    let mut default_callback = |buffer| self.default_binder.bind_buffer_memory(buffer, None);
+                    let mut mappable_callback = |buffer| self.default_binder_mappable.bind_buffer_memory(buffer, None);
+                    let fallback: &mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error> =
+                        if alloc.mappable() {
+                            &mut default_callback
+                        } else {
+                            &mut mappable_callback
+                        };
+                    buffer.set_memory(alloc.bind_buffer_memory(buffer.handle(), Some(fallback))?);
+                },
+                ResourceBinderBuffer::Owned(b, fallback) => {
+                    buffer.set_memory(b.bind_buffer_memory(buffer.handle(), fallback)?);
+                },
+            }
         }
         Ok(BufferId(
             self.buffers.insert(buffer)
@@ -793,9 +821,9 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn create_image<F, Binder: MemoryBinder>(
+    pub fn create_image<F>(
         &mut self,
-        binder: &mut Binder,
+        binder: ResourceBinderImage,
         mut f: F,
     ) -> Result<ImageId, Error>
         where
@@ -805,7 +833,34 @@ impl GlobalResources {
         f(&mut builder);
         let mut image = builder.build()?;
         unsafe {
-            image.set_memory(Box::new(binder.bind_image_memory(image.handle())?));
+            match binder {
+                ResourceBinderImage::DefaultBinder => {
+                    image.set_memory(self.default_binder.bind_image_memory(image.handle(), None)?);
+                },
+                ResourceBinderImage::DefaultBinderMappable => {
+                    image.set_memory(self.default_binder_mappable.bind_image_memory(image.handle(), None)?);
+                }
+                ResourceBinderImage::LinearDeviceAlloc(id) => {
+                    let alloc = self.linear_device_allocs.get_mut(id.0)?;
+                    let mut default_callback = |image| self.default_binder.bind_image_memory(image, None);
+                    let mut mappable_callback = |image| self.default_binder_mappable.bind_image_memory(image, None);
+                    let fallback: &mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error> =
+                        if alloc.mappable() {
+                            &mut default_callback
+                        } else {
+                            &mut mappable_callback
+                        };
+                    image.set_memory(
+                        alloc.bind_image_memory(
+                            image.handle(),
+                            Some(fallback),
+                        )?,
+                    );
+                }
+                ResourceBinderImage::Owned(b, fallback) => {
+                    image.set_memory(b.bind_image_memory(image.handle(), fallback)?);
+                },
+            };
         }
         Ok(ImageId(
             self.images.insert(Arc::new(image))
@@ -831,6 +886,99 @@ impl GlobalResources {
         self.images.get(id.0).map(|v| v.clone())
     }
 
+    #[inline(always)]
+    #[must_use]
+    pub fn create_default_linear_device_alloc(&mut self, block_size: u64) -> Result<LinearDeviceAllocId, Error> {
+        Ok(LinearDeviceAllocId(self.linear_device_allocs.insert(LinearDeviceAlloc::new(
+            self.device.clone(),
+            block_size,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+            &self.physical_device_info,
+            false,
+        )?)))
+    }
+
+    #[inline(always)]
+    pub fn destroy_linear_device_alloc(&mut self, id: LinearDeviceAllocId) {
+        self.linear_device_allocs.remove(id.0).ok();
+    }
+
+    #[inline(always)]
+    pub fn get_linear_device_alloc_mut(&mut self, id: LinearDeviceAllocId) -> Result<&mut LinearDeviceAlloc, Error> {
+        self.linear_device_allocs.get_mut(id.0).map_err(|e| e.into())
+    }
+
+    #[inline(always)]
+    pub fn create_timeline_semaphore(&mut self, initial_value: u64) -> Result<TimelineSemaphoreId, Error> {
+        let mut type_info = vk::SemaphoreTypeCreateInfo {
+            s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
+            semaphore_type: vk::SemaphoreType::TIMELINE,
+            initial_value,
+            ..Default::default()
+        };
+        let semaphore_info = vk::SemaphoreCreateInfo {
+            s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
+            ..Default::default()
+        }.push_next(&mut type_info);
+        let handle = unsafe {
+            self.device.create_semaphore(&semaphore_info, None)?
+        };
+        Ok(TimelineSemaphoreId(self.timeline_semaphores.insert(handle)))
+    }
+
+    #[inline(always)]
+    pub fn wait_for_semaphores_and_then(
+        &mut self,
+        semaphores: &[(TimelineSemaphoreId, u64)],
+        timeout: u64,
+        alloc: &impl Allocator,
+        mut f: impl FnMut(&mut Self) -> Result<(), Error>,
+    ) -> Result<bool, Error> {
+        let mut handles = FixedVec::with_capacity(semaphores.len(), alloc)?;
+        let mut values = FixedVec::with_capacity(semaphores.len(), alloc)?;
+        for &(id, value) in semaphores {
+            let &handle = self.timeline_semaphores.get(id.0)?;
+            handles.push(handle).ok();
+            values.push(value).ok();
+        }
+        let wait_info = vk::SemaphoreWaitInfo {
+            s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
+            semaphore_count: semaphores.len() as u32,
+            p_semaphores: handles.as_ptr(),
+            p_values: values.as_ptr(),
+            ..Default::default()
+        };
+        let res = unsafe {
+            self.device.wait_semaphores(
+                &wait_info,
+                timeout,
+            )
+        };
+        if let Err(err) = res {
+            if err == vk::Result::TIMEOUT {
+                return Ok(false)
+            }
+            return Err(err.into())
+        }
+        f(self)?;
+        Ok(true)
+    }
+
+    #[inline(always)]
+    pub fn destroy_timeline_semaphore(&mut self, id: TimelineSemaphoreId) {
+        if let Ok(handle) = self.timeline_semaphores.remove(id.0) {
+            unsafe {
+                self.device.destroy_semaphore(handle, None);
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_timeline_semaphore(&self, id: TimelineSemaphoreId) -> Result<vk::Semaphore, Error> {
+        self.timeline_semaphores.get(id.0).cloned().map_err(|e| e.into())
+    }
+
     pub(crate) fn clean_up(&mut self) {
         unsafe {
             self.device.destroy_descriptor_set_layout(self.dummy_descriptor_set_layout, None);
@@ -841,7 +989,12 @@ impl GlobalResources {
             self.graphics_pipelines.clear();
             self.pipeline_layouts.clear();
             self.shaders.clear();
+            self.linear_device_allocs.clear();
             self.descriptor_pool.clean_up();
+            for &handle in &self.timeline_semaphores {
+                self.device.destroy_semaphore(handle, None);
+            }
+            self.timeline_semaphores.clear();
         }
     }
 }

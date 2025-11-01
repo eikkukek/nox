@@ -53,7 +53,7 @@ pub trait Interface
     /// The resources used by any pending transfers *must* not be used by the frame graph.
     fn render<'a>(
         &mut self,
-        frame_graph: &'a mut dyn FrameGraphInit,
+        frame_graph: &'a mut dyn FrameGraph,
         pending_transfers: &[CommandRequestId],
     ) -> Result<(), Error>;
 

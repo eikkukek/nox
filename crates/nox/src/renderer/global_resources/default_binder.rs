@@ -91,9 +91,12 @@ impl DeviceMemory for Memory {
 
 impl MemoryBinder for DefaultBinder {
 
-    type Memory = Memory;
-
-    fn bind_image_memory(&mut self, image: vk::Image) -> Result<Self::Memory, Error> {
+    fn bind_image_memory(
+        &mut self,
+        image: vk::Image,
+        _: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error>>
+    ) -> Result<Box<dyn DeviceMemory>, Error>
+    {
         let device = &self.device;
         let memory_requirements = unsafe { device.get_image_memory_requirements(image) };
         let memory_type_bits = self.memory_type_bits & memory_requirements.memory_type_bits;
@@ -113,16 +116,20 @@ impl MemoryBinder for DefaultBinder {
         unsafe {
             device.bind_image_memory(image, memory, 0)?;
         }
-        Ok(Memory {
+        Ok(Box::new(Memory {
             device: self.device.clone(),
             memory,
             size: memory_requirements.size,
             map: None,
             mappable: self.mappable,
-        })
+        }))
     }
 
-    fn bind_buffer_memory(&mut self, buffer: vk::Buffer) -> Result<Self::Memory, Error> {
+    fn bind_buffer_memory(
+        &mut self,
+        buffer: vk::Buffer,
+        _: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error>>
+    ) -> Result<Box<dyn DeviceMemory>, Error> {
         let device = &self.device;
         let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
         let memory_type_bits = self.memory_type_bits & memory_requirements.memory_type_bits;
@@ -142,12 +149,12 @@ impl MemoryBinder for DefaultBinder {
         unsafe {
             device.bind_buffer_memory(buffer, memory, 0)?;
         }
-        Ok(Memory {
+        Ok(Box::new(Memory {
             device: self.device.clone(),
             memory,
             size: memory_requirements.size,
             map: None,
             mappable: self.mappable,
-        })
+        }))
     }
 }

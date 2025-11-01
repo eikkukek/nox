@@ -9,7 +9,7 @@ use crate::renderer::{
 
 use super::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PassId(pub(crate) u32);
 
 impl Default for PassId {
@@ -24,6 +24,7 @@ pub struct PassInfo {
     pub max_reads: u32,
     pub max_color_writes: u32,
     pub msaa_samples: MSAA,
+    pub signal_semaphores: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -106,13 +107,20 @@ impl From<ClearColorValue> for vk::ClearValue {
 #[derive(Clone, Copy, PartialEq)]
 pub enum ClearValue {
     Color(ClearColorValue),
-    DepthStencil{ depth: f32, stencil: u32 },
+    DepthStencil { depth: f32, stencil: u32 },
 }
 
 impl Default for ClearValue {
 
     fn default() -> Self {
         Self::Color(Default::default())
+    }
+}
+
+impl From<ClearColorValue> for ClearValue {
+
+    fn from(value: ClearColorValue) -> Self {
+        Self::Color(value)
     }
 }
 
@@ -137,6 +145,7 @@ impl From<ClearValue> for vk::ClearValue {
     }
 }
 
+#[must_use]
 #[derive(Clone, Copy)]
 pub struct ReadInfo {
     pub resource_id: ResourceId,

@@ -1,20 +1,35 @@
-use crate::renderer::image::ImageRangeInfo;
+use crate::{memory_binder::DeviceMemory, renderer::image::ImageRangeInfo};
 
 use super::*;
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShaderId(pub(super) SlotIndex<Shader>);
 
+#[must_use]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PipelineLayoutId(pub(super) SlotIndex<pipeline::PipelineLayout>);
 
+#[must_use]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct BufferId(pub(super) SlotIndex<Buffer>);
 
+#[must_use]
 #[derive(Default, Clone, Copy)]
 pub struct ShaderResourceInfo {
     pub layout_id: PipelineLayoutId,
     pub set: u32,
+}
+
+impl ShaderResourceInfo {
+    
+    #[inline(always)]
+    pub fn new(layout_id: PipelineLayoutId, set: u32) -> Self {
+        Self {
+            layout_id,
+            set,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -26,7 +41,7 @@ pub(super) struct ShaderResource {
     pub image_views: GlobalVec<(ImageId, SlotIndex<vk::ImageView>)>,
 }
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ShaderResourceId(pub(super) SlotIndex<ShaderResource>);
 
 #[derive(Default, Clone, Copy)]
@@ -91,7 +106,7 @@ impl Drop for GraphicsPipeline {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GraphicsPipelineId(pub(super) SlotIndex<GraphicsPipeline>);
 
 pub(crate) struct ComputePipeline {
@@ -109,7 +124,7 @@ impl Drop for ComputePipeline {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComputePipelineId(pub(super) SlotIndex<ComputePipeline>);
 
 pub(crate) struct PipelineCache {
@@ -126,10 +141,12 @@ impl Drop for PipelineCache {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PipelineCacheId(pub(super) SlotIndex<PipelineCache>);
 
-#[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageId(pub(super) SlotIndex<Arc<Image>>);
 
 #[derive(Clone)]
@@ -148,5 +165,28 @@ impl Drop for Sampler {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SamplerId(pub(super) SlotIndex<Sampler>);
+
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LinearDeviceAllocId(pub(super) SlotIndex<LinearDeviceAlloc>);
+
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TimelineSemaphoreId(pub(super) SlotIndex<vk::Semaphore>);
+
+pub enum ResourceBinderImage<'a> {
+    DefaultBinder,
+    DefaultBinderMappable,
+    LinearDeviceAlloc(LinearDeviceAllocId),
+    Owned(&'a mut dyn MemoryBinder, Option<&'a mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error>>)
+}
+
+pub enum ResourceBinderBuffer<'a> {
+    DefaultBinder,
+    DefaultBinderMappable,
+    LinearDeviceAlloc(LinearDeviceAllocId),
+    Owned(&'a mut dyn MemoryBinder, Option<&'a mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error>>)
+}
