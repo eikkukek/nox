@@ -200,19 +200,23 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
             window_pos, content_offset,
             self.offset, window_size
         );
-        collect_text(&self.label_text, self.offset + style.item_pad_inner(), BoundedTextInstance {
-            add_scale: vec2(1.0, 1.0),
-            min_bounds,
-            max_bounds,
-            color:
-                if self.held() {
-                    style.active_text_col()
-                } else if self.hovered() {
-                    style.focused_text_col()
-                } else {
-                    style.inactive_text_col()
-                },
-        });
+        collect_text(
+            &self.label_text,
+            self.offset + style.item_pad_inner(),
+            BoundedTextInstance {
+                add_scale: vec2(1.0, 1.0),
+                min_bounds,
+                max_bounds,
+                color:
+                    if self.held() {
+                        style.active_text_col()
+                    } else if self.hovered() {
+                        style.focused_text_col()
+                    } else {
+                        style.inactive_text_col()
+                    },
+            },
+        );
         UpdateResult {
             requires_triangulation,
             cursor_in_widget,

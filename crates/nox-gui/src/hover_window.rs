@@ -104,6 +104,9 @@ impl HoverWindow {
         &mut self,
         style: &impl WindowStyle<FontHash>,
     ) {
+        if self.rect_outline_vertex_range.start() >= self.vertices.len() {
+            return
+        }
         let vertex_sample = self.vertices[self.rect_outline_vertex_range.start()];
         if vertex_sample.color != style.window_outline_col() {
             let target_color = style.window_outline_col();

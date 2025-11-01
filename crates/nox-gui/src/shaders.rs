@@ -44,7 +44,7 @@ impl From<[f32; 2]> for ColorPickerVertex {
 }
 
 #[repr(C)]
-#[derive(Default, Clone, Copy, VertexInput)]
+#[derive(Default, Clone, Copy, VertexInput, PartialEq)]
 pub struct BoundedTextInstance {
     pub add_scale: Vec2,
     pub min_bounds: Vec2,
@@ -221,6 +221,64 @@ pub const BASE_FRAGMENT_SHADER: &'static str = "
         } else {
             out_color = vec4(0.0);
         }
+    }
+";
+
+pub const TEXTURE_VERTEX_SHADER: &'static str = "
+    #version 450
+
+    layout(location = 0) out vec2 out_uv;
+
+    layout(push_constant) uniform PushConstant {
+        vec2 vert_off;
+        vec2 scale;
+        float inv_aspect_ratio;
+        float unit_scale;
+    } pc;
+
+    vec2 positions[6] = vec2[](
+        vec2(1.0, 1.0),
+        vec2(-1.0, 1.0),
+        vec2(-1.0, -1.0),
+        vec2(1.0, -1.0),
+        vec2(1.0, 1.0),
+        vec2(-1.0, -1.0)
+
+    );
+
+    vec2 uvs[6] = vec2[](
+        vec2(1.0, 1.0),
+        vec2(0.0, 1.0),
+        vec2(0.0, 0.0),
+        vec2(1.0, 0.0),
+        vec2(1.0, 1.0),
+        vec2(0.0, 0.0)
+    );
+
+    void main() {
+        int vertex_index = gl_VertexIndex;
+        vec2 pos = positions[vertex_index];
+        //pos.x *= pc.scale.x;
+        //pos.y *= pc.scale.y;
+        //pos *= pc.unit_scale;
+        //pos += pc.vert_off;
+        //pos.x *= pc.inv_aspect_ratio;
+        gl_Position = vec4(pos, 0.0, 1.0);
+        out_uv = uvs[vertex_index];
+    }
+";
+
+pub const TEXTURE_FRAGMENT_SHADER: &'static str = "
+    #version 450
+
+    layout(location = 0) in vec2 in_uv;
+
+    layout(location = 0) out vec4 out_color;
+
+    layout(set = 0, binding = 0) uniform sampler2D render_image;
+
+    void main() {
+        out_color = texture(render_image, in_uv);
     }
 ";
 

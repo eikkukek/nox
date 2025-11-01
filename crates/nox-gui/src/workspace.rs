@@ -24,8 +24,11 @@ struct BasePipelines {
     base_pipeline: Option<GraphicsPipelineId>,
     text_pipeline_layout: Option<PipelineLayoutId>,
     text_pipeline: Option<GraphicsPipelineId>,
+    texture_pipeline_layout: Option<PipelineLayoutId>,
+    texture_pipeline: Option<GraphicsPipelineId>,
     base_shaders: Option<[ShaderId; 2]>,
     text_shaders: Option<[ShaderId; 2]>,
+    texture_shaders: Option<[ShaderId; 2]>
 }
 
 pub struct CustomPipelineInfo<'a> {
@@ -77,6 +80,8 @@ pub struct Workspace<'a, I, FontHash, Style>
     text_renderer: VertexTextRenderer<'a, FontHash>,
     style: Style,
     windows: FxHashMap<u32, Window<I, FontHash, Style>>,
+    main_pass_id: PassId,
+    window_passes: FxHashMap<PassId, u32>,
     active_windows: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
@@ -124,6 +129,8 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
             text_renderer,
             style,
             windows: Default::default(),
+            main_pass_id: Default::default(),
+            window_passes: FxHashMap::default(),
             active_windows: Default::default(),
             vertex_buffer: None,
             index_buffer: None,
@@ -228,25 +235,51 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
             if let Some(pipeline) = self.base_pipelines.text_pipeline.take() {
                 r.destroy_graphics_pipeline(pipeline);
             }
-
-            let &mut base_shaders = self.base_pipelines.base_shaders
-                .get_or_insert([
-                    r.create_shader(BASE_VERTEX_SHADER, "nox_gui base vertex shader", ShaderStage::Vertex)?,
-                    r.create_shader(BASE_FRAGMENT_SHADER, "nox_gui base fragment shader", ShaderStage::Fragment)?,
-                ]
-            );
-            let &mut text_shaders = self.base_pipelines.text_shaders
-                .get_or_insert([
-                    r.create_shader(TEXT_VERTEX_SHADER, "nox_gui text vertex shader", ShaderStage::Vertex)?,
-                    r.create_shader(TEXT_FRAGMENT_SHADER, "nox_gui text fragment shader", ShaderStage::Fragment)?,
-                ]
-            );
-            let &mut base_layout = self.base_pipelines.base_pipeline_layout.get_or_insert(
-                r.create_pipeline_layout(base_shaders)?
-            );
-            let &mut text_layout = self.base_pipelines.text_pipeline_layout.get_or_insert(
-                r.create_pipeline_layout(text_shaders)?
-            );
+            let base_shaders =
+                if let Some(shaders) = self.base_pipelines.base_shaders {
+                    shaders
+                } else {
+                    *self.base_pipelines.base_shaders.insert([
+                        r.create_shader(BASE_VERTEX_SHADER, "nox_gui base vertex shader", ShaderStage::Vertex)?,
+                        r.create_shader(BASE_FRAGMENT_SHADER, "nox_gui base fragment shader", ShaderStage::Fragment)?,
+                    ])
+                };
+            let text_shaders =
+                if let Some(shaders) = self.base_pipelines.text_shaders {
+                    shaders
+                } else {
+                    *self.base_pipelines.text_shaders.insert([
+                        r.create_shader(TEXT_VERTEX_SHADER, "nox_gui text vertex shader", ShaderStage::Vertex)?,
+                        r.create_shader(TEXT_FRAGMENT_SHADER, "nox_gui text fragment shader", ShaderStage::Fragment)?,
+                    ])
+                };
+            let texture_shaders =
+                if let Some(shaders) = self.base_pipelines.texture_shaders {
+                    shaders
+                } else {
+                    *self.base_pipelines.texture_shaders.insert([
+                        r.create_shader(TEXTURE_VERTEX_SHADER, "nox_gui texture vertex shader", ShaderStage::Vertex)?,
+                        r.create_shader(TEXTURE_FRAGMENT_SHADER, "nox_gui texture fragment shader", ShaderStage::Fragment)?
+                    ])
+                };
+            let base_layout =
+                if let Some(layout) = self.base_pipelines.base_pipeline_layout {
+                    layout
+                } else {
+                    *self.base_pipelines.base_pipeline_layout.insert(r.create_pipeline_layout(base_shaders)?)
+                };
+            let text_layout = 
+                if let Some(layout) = self.base_pipelines.text_pipeline_layout {
+                    layout
+                } else {
+                    *self.base_pipelines.text_pipeline_layout.insert(r.create_pipeline_layout(text_shaders)?)
+                };
+            let texture_layout =
+                if let Some(layout) = self.base_pipelines.texture_pipeline_layout {
+                    layout
+                } else {
+                    *self.base_pipelines.texture_pipeline_layout.insert(r.create_pipeline_layout(texture_shaders)?)
+                };
             let mut base_info = GraphicsPipelineInfo::new(base_layout);
             let min_sample_shading = self.min_sample_shading;
             base_info
@@ -270,8 +303,12 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 )
                 .with_sample_shading(SampleShadingInfo::new(output_samples, min_sample_shading, false, false))
                 .with_color_output(output_format, WriteMask::all(), Some(Self::BLEND_STATE));
+            let mut texture_info = GraphicsPipelineInfo::new(texture_layout);
+            texture_info
+                .with_sample_shading(SampleShadingInfo::new(output_samples, min_sample_shading, false, false))
+                .with_color_output(output_format, WriteMask::all(), Some(Self::BLEND_STATE));
             let mut custom_pipelines = GlobalVec::new();
-            let mut pipeline_infos = GlobalVec::from(mem::slice![base_info, text_info]);
+            let mut pipeline_infos = GlobalVec::from(mem::slice![base_info, text_info, texture_info]);
             for (_, pipeline) in &mut self.custom_pipelines {
                 r.destroy_graphics_pipeline(pipeline.pipeline);
                 let mut pipeline_info = GraphicsPipelineInfo::new(pipeline.pipeline_layout);
@@ -298,8 +335,10 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                         self.base_pipelines.base_pipeline = Some(p)
                     } else if i == 1 {
                         self.base_pipelines.text_pipeline = Some(p);
+                    } else if i == 2 {
+                        self.base_pipelines.texture_pipeline = Some(p);
                     } else {
-                        custom_pipelines[i - 2].pipeline = p;
+                        custom_pipelines[i - 3].pipeline = p;
                     }
                 }
             )?;
@@ -396,7 +435,8 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 "nox_gui: attempting to call Workspace::begin twice before calling Workspace::end".into()
             ))
         }
-        self.unit_scale =  self.style.pixels_per_unit() / nox.window_size_f32().1;
+        self.window_passes.clear();
+        self.unit_scale = self.style.pixels_per_unit() / nox.window_size_f32().1;
         if let Some(buf) = &mut self.vertex_buffer {
             buf.finish_frame();
         }
@@ -476,7 +516,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 window_size,
                 aspect_ratio,
                 unit_scale,
-            );
+            )?;
             if cursor_in_window && nox.was_mouse_button_pressed(MouseButton::Left) {
                 window_pressed = Some(i);
             }
@@ -496,9 +536,80 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         Ok(())
     }
 
+    pub fn render(
+        &mut self,
+        frame_graph: &mut dyn FrameGraph,
+        output_image: (ResourceId, Option<ImageRangeInfo>),
+        resolve_image: (Option<(ResourceId, ResolveMode)>, Option<ImageRangeInfo>),
+        load_op: AttachmentLoadOp,
+        clear_value: ClearColorValue,
+        sampler: SamplerId,
+    ) -> Result<(), Error>
+    {
+        let Some(texture_pipeline_layout) = self.base_pipelines.texture_pipeline_layout else {
+            return Err(Error::UserError(
+                "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
+            ))
+        };
+        let mut reads = GlobalVec::new();
+        let mut signal_semaphores = GlobalVec::new();
+        let output_samples = self.output_samples;
+        let output_format = self.output_format;
+        for &id in &self.active_windows {
+            self.windows    
+                .get_mut(&id)
+                .unwrap()
+                .render(
+                    frame_graph,
+                    output_samples,
+                    output_format,
+                    texture_pipeline_layout,
+                    sampler,
+                    resolve_image.0.map(|v| v.1),
+                    &GlobalAlloc,
+                    |read| {
+                        reads.push(read);
+                    },
+                    |id, value| {
+                        signal_semaphores.push((id, value));
+                    },
+                    |pass| {
+                        self.window_passes.insert(pass, id);
+                    },
+                )?;
+        }
+        self.main_pass_id = frame_graph.add_pass(
+            PassInfo {
+                max_reads: reads.len() as u32,
+                max_color_writes: 1,
+                msaa_samples: output_samples,
+                signal_semaphores: signal_semaphores.len() as u32,
+            },
+            &mut |pass| {
+                for &read in &reads {
+                    pass
+                        .with_read(read);
+                }
+                for &(id, value) in &signal_semaphores {
+                    pass
+                        .with_signal_semaphore(id, value);
+                }
+                pass
+                    .with_write(WriteInfo {
+                        main_id: output_image.0, range_info: output_image.1,
+                        resolve: resolve_image.0, resolve_range_info: resolve_image.1,
+                        load_op, store_op: AttachmentStoreOp::Store,
+                        clear_value: clear_value.into(),
+                    });
+            }
+        )?;
+        Ok(())
+    }
+
     pub fn render_commands(
         &mut self,
         render_commands: &mut RenderCommands,
+        pass_id: PassId,
     ) -> Result<(), Error>
     {
         if self.vertex_buffer.is_none() {
@@ -509,21 +620,40 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
             ))
         };
-        let Some(text_pipeline) = self.base_pipelines.text_pipeline else {
-            return Err(Error::UserError(
-                "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
-            ))
-        };
+        let text_pipeline = self.base_pipelines.text_pipeline.unwrap();
+        let texture_pipeline = self.base_pipelines.texture_pipeline.unwrap();
         let inv_aspect_ratio = self.inv_aspect_ratio;
         let unit_scale = self.unit_scale;
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
-        for id in &self.active_windows {
+        if pass_id == self.main_pass_id {
+            for id in &self.active_windows {
+                self.windows.get_mut(id).unwrap().render_commands(
+                    render_commands,
+                    &self.style,
+                    pass_id,
+                    base_pipeline,
+                    text_pipeline,
+                    texture_pipeline,
+                    vertex_buffer,
+                    index_buffer,
+                    inv_aspect_ratio,
+                    unit_scale,
+                    &mut |hash| {
+                        self.custom_pipelines
+                            .get(&CompactString::new(hash))
+                            .map(|v| v.pipeline)
+                    }
+                )?;
+            }
+        } else if let Some(id) = self.window_passes.get_mut(&pass_id) {
             self.windows.get_mut(id).unwrap().render_commands(
                 render_commands,
-                &self.style,
+                &mut self.style,
+                pass_id,
                 base_pipeline,
                 text_pipeline,
+                texture_pipeline,
                 vertex_buffer,
                 index_buffer,
                 inv_aspect_ratio,
@@ -544,7 +674,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
             let vertex_buffer = r.create_buffer(
                 self.ring_buffer_size as u64,
                 &[BufferUsage::VertexBuffer],
-                &mut r.default_binder_mappable()
+                ResourceBinderBuffer::DefaultBinderMappable,
             )?;
             let vertex_buffer_map = unsafe {
                 r.map_buffer(vertex_buffer).unwrap()
@@ -558,7 +688,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
             let index_buffer = r.create_buffer(
                 self.ring_buffer_size as u64,
                 &[BufferUsage::IndexBuffer],
-                &mut r.default_binder_mappable()
+                ResourceBinderBuffer::DefaultBinderMappable,
             )?;
             let index_buffer_map = unsafe {
                 r.map_buffer(index_buffer).unwrap()
@@ -574,7 +704,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         Ok(())
     }
 
-    pub fn clean_up(&mut self, context: &RendererContext) {
+    pub unsafe fn clean_up(&mut self, context: &RendererContext) {
         context.edit_resources(|r| {
             if let Some(buf) = self.vertex_buffer.take() {
                 r.destroy_buffer(buf.id());

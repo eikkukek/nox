@@ -7,8 +7,7 @@ use core::{
 
 use nox::{
     mem::{
-        vec_types::{GlobalVec, Vector},
-        Hashable,
+        Allocator, Hashable, vec_types::{GlobalVec, Vector}
     },
     *,
 };
@@ -147,7 +146,8 @@ impl CollapsingHeader {
                 (self.rotation + FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32())
                 .clamp(0.0, FRAC_PI_2);
         }
-        collect_text(&self.label_text, offset + vec2(collapse_scale + style.item_pad_inner().x, 0.0),
+        collect_text(
+            &self.label_text, offset + vec2(collapse_scale + style.item_pad_inner().x, 0.0),
             BoundedTextInstance {
                 add_scale: vec2(1.0, 1.0),
                 min_bounds,
@@ -400,6 +400,8 @@ pub struct Window<I, FontHash, Style>
     focused_outline_width: f32,
     outline_width: f32,
     distance_from_edge: Vec2,
+    signal_semaphore: Option<TimelineSemaphoreId>,
+    signal_semaphore_value: u64,
     flags: u32,
     _marker: PhantomData<Style>,
 }
@@ -475,6 +477,8 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             focused_outline_width: 0.0,
             outline_width: 0.0,
             distance_from_edge: Default::default(),
+            signal_semaphore: None,
+            signal_semaphore_value: 0,
             flags:
                 Self::REQUIRES_TRIANGULATION |
                 Self::APPEARING |
@@ -905,7 +909,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     #[inline(always)]
     fn hover_window_active(&self) -> bool {
         self.flags & Self::HOVER_WINDOW_ACTIVE == Self::HOVER_WINDOW_ACTIVE
-    }
+    } 
 
     #[inline(always)]
     pub fn set_last_frame(&mut self, frame: u64) {
@@ -951,12 +955,11 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         win_size: Vec2,
         aspect_ratio: f32,
         unit_scale: f32,
-    ) -> bool
+    ) -> Result<bool, Error>
         where 
             I: Interface,
             FontHash: UiFontHash,
     {
-
         let override_cursor = style.override_cursor();
         let mut cursor_in_this_window =
             !cursor_in_other_window &&
@@ -965,22 +968,25 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             nox.set_cursor(CursorIcon::Default);
         }
         let mut title_bar_rect = self.title_bar_rect;
-        title_bar_rect.max.y = style.calc_text_box_height_from_text_height(
-            style.calc_font_height(text_renderer) * style.title_add_scale()
-        );
+
         let title_text = self.title_text.as_ref().unwrap();
+        let font_scale = style.font_scale();
+        let title_text_box_size = style.calc_text_box_size_from_text_size(vec2(
+            title_text.text_width * font_scale * style.title_add_scale(),
+            title_text.row_height * font_scale * style.title_add_scale(),
+        ));
+        title_bar_rect.max.y = title_text_box_size.y;
         let title_add_scale = style.title_add_scale();
         let size = self.size();
-        let mut min_size = self.widget_rect_max;
+        let item_pad_outer = style.item_pad_outer();
+        let item_pad_inner = style.item_pad_inner();
+        let mut min_size = self.widget_rect_max.max(title_text_box_size + item_pad_outer);
         let mut widget_off = vec2(0.0, 0.0);
         self.flags &= !(Self::VER_SCROLL_BAR_VISIBLE | Self::HOR_SCROLL_BAR_VISIBLE);
         let mut delta_lines = nox.mouse_scroll_delta_lines();
         if !style.natural_scroll() {
             delta_lines = (-delta_lines.0, -delta_lines.1);
         }
-        let item_pad_outer = style.item_pad_outer();
-        let item_pad_inner = style.item_pad_inner();
-        let font_scale = style.font_scale();
         if !self.clamping_height() {
             if min_size.y > size.y {
                 self.flags |= Self::VER_SCROLL_BAR_VISIBLE;
@@ -1206,10 +1212,10 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 },
                 window_moving,
                 hover_blocked || scroll_bar_hovered,
-                &mut |text, offset, mut bounded_instance| {
-                    bounded_instance.min_bounds = bounded_instance.min_bounds.max(content_area.0);
-                    bounded_instance.max_bounds = bounded_instance.max_bounds.min(content_area.1);
-                    self.combined_text.add_text(text, offset / font_scale, bounded_instance).unwrap();
+                &mut |text, offset, mut bounded_text_instance| {
+                    bounded_text_instance.min_bounds = bounded_text_instance.min_bounds.max(content_area.0);
+                    bounded_text_instance.max_bounds = bounded_text_instance.max_bounds.min(content_area.1);
+                    self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
                 },
             );
             if requires_triangulation {
@@ -1344,9 +1350,10 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         }
         title_bar_rect.max.x = self.main_rect.max.x; 
         title_bar_rect.rounding = style.rounding(); 
+        let title_text = self.title_text.as_ref().unwrap();
         self.combined_text
             .add_text(
-                self.title_text.as_ref().unwrap(),
+                title_text,
                 vec2(item_pad_outer.x, item_pad_inner.y) / (font_scale * title_add_scale),
                 BoundedTextInstance {
                     add_scale: vec2(title_add_scale, title_add_scale),
@@ -1361,7 +1368,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                         } else {
                             style.inactive_text_col()
                         },
-                }
+                },
             )
             .unwrap();
         if main_rect_max.y < min_size.y {
@@ -1484,7 +1491,10 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         self.outline_width = style.window_outline_width();
         self.focused_outline_width = style.focused_window_outline_width();
         self.title_bar_rect = title_bar_rect;
-        cursor_in_this_window || self.any_resize()
+        let mut norm_size = self.main_rect.max * unit_scale;
+        norm_size.x /= aspect_ratio;
+        norm_size *= 0.5;
+        Ok(cursor_in_this_window || self.any_resize())
     }
 
     #[inline(always)]
@@ -1504,7 +1514,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         norm_pos = (norm_pos + vec2(1.0, 1.0)) * 0.5;
         let mut norm_size = self.main_rect.max * unit_scale;
         norm_size.x /= aspect_ratio;
-        norm_size = norm_size * 0.5;
+        norm_size *= 0.5;
         if norm_size.x >= 1.0 || norm_size.y >= 1.0 {
             let mut new_size = norm_size.clamp(vec2(0.0, 0.0), vec2(1.0, 1.0));
             new_size *= 2.0;
@@ -1632,12 +1642,43 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         }
     }
 
+    pub fn render(
+        &mut self,
+        frame_graph: &mut dyn FrameGraph,
+        _msaa_samples: MSAA, 
+        _render_format: ColorFormat,
+        _text_pipeline_layout_id: PipelineLayoutId,
+        _sampler: SamplerId,
+        _resolve_mode: Option<ResolveMode>,
+        _alloc: &impl Allocator,
+        mut _add_read: impl FnMut(ReadInfo),
+        mut add_signal_semaphore: impl FnMut(TimelineSemaphoreId, u64),
+        mut _collect_pass: impl FnMut(PassId),
+    ) -> Result<(), Error>
+    {
+        let mut signal_semaphore = Default::default();
+        frame_graph.edit_resources(&mut |r| {
+            signal_semaphore =
+                if let Some(id) = self.signal_semaphore {
+                    id
+                } else {
+                    *self.signal_semaphore.insert(r.create_timeline_semaphore(0)?)
+                };
+            Ok(())
+        })?;
+        self.signal_semaphore_value += 1;
+        add_signal_semaphore(unsafe { self.signal_semaphore.unwrap_unchecked() }, self.signal_semaphore_value);
+        Ok(())
+    }
+
     pub fn render_commands(
         &mut self,
         render_commands: &mut RenderCommands,
         style: &Style,
+        _pass_id: PassId,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
+        _texture_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
@@ -1782,9 +1823,8 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 offset: idx_mem.offset,
             },
         )?;
-        let mut on_top_contents = None;
         let size = self.size();
-        let pos = self.position;
+        let mut on_top_contents = None;
         let content_area = BoundingRect::from_min_max(
             pos + vec2(0.0, self.title_bar_rect.max.y + item_pad_inner.y),
             pos + size - vec2(0.0, item_pad_inner.y),
@@ -1807,10 +1847,30 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 on_top_contents = Some(contents);
             }
         }
+        render_commands.bind_pipeline(text_pipeline_id)?;
+        let font_scale = style.font_scale();
+        let pc_vertex = push_constants_vertex(
+            pos,
+            vec2(font_scale, font_scale),
+            inv_aspect_ratio, unit_scale
+        );
+        render_text(
+            render_commands,
+            self.combined_text.iter().map(|(&c, (i, b))| (c, i, b.as_slice())),
+            pc_vertex,
+            vertex_buffer,
+            index_buffer,
+        )?;
         if (self.ver_scroll_bar_visible() && self.ver_scroll_bar_renderable()) ||
             (self.hor_scroll_bar_visible() && self.hor_scroll_bar_renderable())
         {
             render_commands.bind_pipeline(base_pipeline_id)?;
+            let pc_vertex = push_constants_vertex(
+                pos,
+                vec2(1.0, 1.0),
+                inv_aspect_ratio,
+                unit_scale,
+            );
             render_commands.push_constants(|pc| unsafe {
                 if pc.stage == ShaderStage::Vertex {
                     pc_vertex.as_bytes()
@@ -1846,19 +1906,6 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                 DrawBufferInfo::new(idx_id, idx_mem.offset)
             )?;
         }
-        render_commands.bind_pipeline(text_pipeline_id)?;
-        let pc_vertex = push_constants_vertex(
-            self.position,
-            vec2(style.font_scale(), style.font_scale()),
-            inv_aspect_ratio,
-            unit_scale,
-        );
-        render_text(render_commands,
-            self.combined_text
-                .iter()
-                .map(|(&c, (t, b))| (c, t, b.as_slice())),
-            pc_vertex, vertex_buffer, index_buffer
-        )?;
         if let Some(contents) = on_top_contents {
             contents.render_commands(
                 render_commands,

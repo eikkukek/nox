@@ -74,9 +74,6 @@ pub fn set_vertex_params(
     offset: Vec2,
     target_color: ColorSRGBA,
 ) {
-    if range.start() >= vertices.len() {
-        return
-    }
     let vertex_sample = vertices[range.start()];
     if vertex_sample.offset != offset || vertex_sample.color != target_color {
         for vertex in &mut vertices[range.range()] {
@@ -121,6 +118,21 @@ pub fn norm_pos_to_pos(norm_pos: Vec2, unit_scale: f32, aspect_ratio: f32) -> Ve
 }
 
 #[inline(always)]
+pub fn off_to_norm_off(off: Vec2, unit_scale: f32, aspect_ratio: f32) -> Vec2 {
+    let mut norm_off = off * unit_scale;
+    norm_off.x /= aspect_ratio;
+    norm_off * 0.5
+}
+
+#[inline(always)]
+pub fn norm_off_to_off(norm_off: Vec2, unit_scale: f32, aspect_ratio: f32) -> Vec2 {
+    let mut off = norm_off;
+    off *= 2.0;
+    off.x *= aspect_ratio;
+    off / unit_scale
+}
+
+#[inline(always)]
 pub fn calc_bounds(
     window_pos: Vec2, content_off: Vec2,
     widget_offset: Vec2, window_size: Vec2
@@ -134,7 +146,7 @@ pub fn calc_bounds(
 
 #[macro_export]
 macro_rules! or_flag {
-    ($flags:expr, $flag:expr, $value:expr) => {
+    ($flags:expr, $flag:expr, $value:expr $(,)?) => {
         $flags |= $flag & ($value as u32) << $flag.trailing_zeros();
     };
 }

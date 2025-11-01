@@ -1,9 +1,0 @@
-[package]
-name = "triangle_rasterization"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-nox = { path = "../crates/nox" }
-nox-geom = { path = "../crates/nox-geom" }
-nox-gui = { path = "../crates/nox-gui" }

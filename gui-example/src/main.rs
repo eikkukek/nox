@@ -33,6 +33,7 @@ struct Example<'a> {
     input_text: String,
     color: ColorSRGBA,
     pipeline_cache: PipelineCacheId,
+    sampler: SamplerId,
     cache_dir: PathBuf,
     show_other_window: bool,
     output_image: ImageId,
@@ -72,6 +73,7 @@ impl<'a> Example<'a> {
             input_text: Default::default(),
             color: Default::default(),
             pipeline_cache: Default::default(),
+            sampler: Default::default(),
             cache_dir,
             show_other_window: false,
             output_image: Default::default(),
@@ -122,6 +124,7 @@ impl<'a> Interface for Example<'a> {
                     File::create_new(&self.cache_dir)?;
                     r.create_pipeline_cache(None)?
                 };
+            self.sampler = r.create_sampler(|_| {})?;
             Ok(())
         })?;
         self.workspace
@@ -143,7 +146,7 @@ impl<'a> Interface for Example<'a> {
             r.destroy_image(self.output_image);
             r.destroy_image(self.output_resolve_image);
             self.output_image = r
-                .create_image(device_alloc, |builder| {
+                .create_image(ResourceBinderImage::Owned(device_alloc, None), |builder| {
                     builder
                         .with_dimensions(frame_buffer_size)
                         .with_format(self.output_format, false)
@@ -151,7 +154,7 @@ impl<'a> Interface for Example<'a> {
                         .with_usage(ImageUsage::ColorAttachment);
             })?;
             self.output_resolve_image = r
-                .create_image(device_alloc, |builder| {
+                .create_image(ResourceBinderImage::Owned(device_alloc, None), |builder| {
                     builder
                         .with_dimensions(frame_buffer_size)
                         .with_format(self.output_format, false)
@@ -281,43 +284,32 @@ impl<'a> Interface for Example<'a> {
 
     fn render<'b>(
         &mut self,
-        frame_graph: &'b mut dyn frame_graph::FrameGraphInit,
+        frame_graph: &'b mut dyn frame_graph::FrameGraph,
         _pending_transfers: &[CommandRequestId],
     ) -> Result<(), Error> {
-        let frame_graph = frame_graph.init(1)?;
         let frame_buffer_size = frame_graph.frame_buffer_size();
         self.aspect_ratio = frame_buffer_size.width as f32 / frame_buffer_size.height as f32;
         let output = frame_graph.add_image(self.output_image)?;
         let output_resolve = frame_graph.add_image(self.output_resolve_image)?;
-        frame_graph.add_pass(
-            PassInfo {
-                max_color_writes: 1,
-                msaa_samples: self.msaa,
-                ..Default::default()
-            },
-            &mut |builder| {
-                builder
-                    .with_write(WriteInfo::new(
-                        output,
-                        None,
-                        Some((output_resolve, ResolveMode::Average)),
-                        None,
-                        AttachmentLoadOp::Clear,
-                        AttachmentStoreOp::Store,
-                        ClearValue::Color([0.05, 0.01, 0.01, 1.0].into()),
-                    ));
-            })?;
+        self.workspace.render(
+            frame_graph,
+            (output, None), (Some((output_resolve, ResolveMode::Average)), None),
+            AttachmentLoadOp::Clear,
+            Default::default(),
+            self.sampler,
+        )?;
         frame_graph.set_render_image(output_resolve, None)?;
         Ok(())
     }
 
     fn render_commands(
         &mut self,
-        _pass_id: frame_graph::PassId,
+        pass_id: frame_graph::PassId,
         commands:&mut RenderCommands,
     ) -> Result<(), Error> {
         self.workspace.render_commands(
             commands,
+            pass_id,
         )?;
         Ok(())
     }
@@ -334,8 +326,8 @@ impl<'a> Interface for Example<'a> {
             println!("cache written");
             Ok(())
         }).ok();
-        self.workspace.clean_up(&renderer);
         unsafe {
+            self.workspace.clean_up(&renderer);
             self.device_alloc.take().unwrap().clean_up();
         }
     }

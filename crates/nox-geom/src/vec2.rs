@@ -122,6 +122,15 @@ impl Vec2 {
             y: self.y.max(rhs.y),
         }
     }
+
+    #[inline(always)]
+    #[must_use]
+    pub fn round(self) -> Self {
+        Self {
+            x: self.x.round(),
+            y: self.y.round(),
+        }
+    }
 }
 
 impl Add for Vec2 {

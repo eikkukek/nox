@@ -240,7 +240,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
                     style.inactive_text_col()
                 },
         };
-        collect_text(&self.label_text,
+        collect_text(
+            &self.label_text,
             offset + vec2(rect.max.x + style.item_pad_inner().x, 0.0),
             bounded_instance,
         );

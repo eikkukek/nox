@@ -710,7 +710,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
                 .unwrap_or_default()
         });
         let input_text = unsafe {
-            self.input_text.as_ref().unwrap_unchecked()
+            self.input_text
+                .as_ref()
+                .unwrap_unchecked()
         };
         let text_height = style.calc_font_height(text_renderer);
         let offset = self.offset;
