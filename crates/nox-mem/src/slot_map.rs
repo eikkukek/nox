@@ -52,7 +52,7 @@ use crate::{
 
 #[derive(Clone, Copy, Debug)]
 pub enum SlotMapError {
-    StaleIndex { slot_version: u32, index_version: u32 },
+    StaleIndex { index: u32, slot_version: u32, index_version: u32 },
     CapacityError(CapacityError),
 }
 
@@ -469,6 +469,11 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
     }
 
     #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[inline(always)]
     pub fn capacity(&self) -> u32 {
         self.capacity
     }
@@ -552,7 +557,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
         let mut slot = unsafe { ptr.read() };
         let index_version = index.version.get();
         if slot.version != index_version {
-            return Err(StaleIndex { slot_version: slot.version, index_version: index_version })
+            return Err(StaleIndex { index: index.index, slot_version: slot.version, index_version: index_version })
         }
         let value = unsafe { slot.value.assume_init() };
         slot.version += 1;
@@ -587,7 +592,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
         let index_version = index.version.get();
         let slot = unsafe { self.data.add(index.index as usize).as_ref() };
         if slot.version != index_version {
-            return Err(StaleIndex { slot_version: slot.version, index_version: index_version })
+            return Err(StaleIndex { index: index.index, slot_version: slot.version, index_version: index_version })
         }
         assert!(slot.next_free_index.is_none(), "invalid index");
         unsafe {
@@ -603,7 +608,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
         let index_version = index.version.get();
         let slot = unsafe { self.data.add(index.index as usize).as_mut() };
         if slot.version != index_version {
-            return Err(StaleIndex { slot_version: slot.version, index_version: index_version })
+            return Err(StaleIndex { index: index.index, slot_version: slot.version, index_version: index_version })
         }
         assert!(slot.next_free_index.is_none(), "invalid index");
         unsafe {
@@ -666,6 +671,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
 pub struct IterBase<'a, T, IsMut: Conditional> {
     ptr: Pointer<Slot<T>>,
     end: Pointer<Slot<T>>,
+    index: u32,
     _marker: PhantomData<(&'a T, IsMut)>
 }
 
@@ -673,17 +679,20 @@ impl<'a, T, IsMut: Conditional> IterBase<'a, T, IsMut> {
 
     #[inline(always)]
     unsafe fn new(mut ptr: Pointer<Slot<T>>, end: Pointer<Slot<T>>) ->  Self {
+        let mut index = 0;
         unsafe {
             while ptr != end {
                 if ptr.as_ref().next_free_index.is_none() {
                     break
                 }
                 ptr = ptr.add(1);
+                index += 1;
             }
         }
         Self {
             ptr,
             end,
+            index,
             _marker: PhantomData,
         }
     }
@@ -694,7 +703,7 @@ pub type IterMut<'a, T> = IterBase<'a, T, True>;
 
 impl<'a, T> Iterator for Iter<'a, T> {
 
-    type Item = &'a T;
+    type Item = (SlotIndex<T>, &'a T);
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -705,13 +714,23 @@ impl<'a, T> Iterator for Iter<'a, T> {
             unsafe {
                 let item = self.ptr.as_ref();
                 self.ptr = self.ptr.add(1);
+                let mut index = self.index + 1;
                 while self.ptr != self.end {
                     if self.ptr.as_ref().next_free_index.is_none() {
                         break
                     }
                     self.ptr = self.ptr.add(1);
+                    index += 1;
                 }
-                Some(item.value.assume_init_ref())
+                self.index = index;
+                Some((
+                    SlotIndex {
+                        version: NonZeroU32::new_unchecked(item.version),
+                        index: self.index,
+                        _marker: PhantomData,
+                    },
+                    item.value.assume_init_ref(),
+                ))
             }
         }
     }
@@ -719,7 +738,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
 impl<'a, T> Iterator for IterMut<'a, T> {
 
-    type Item = &'a mut T;
+    type Item = (SlotIndex<T>, &'a mut T);
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -730,13 +749,23 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             unsafe {
                 let item = self.ptr.as_mut();
                 self.ptr = self.ptr.add(1);
+                let mut index = self.index + 1;
                 while self.ptr != self.end {
                     if self.ptr.as_ref().next_free_index.is_none() {
                         break
                     }
                     self.ptr = self.ptr.add(1);
+                    index += 1;
                 }
-                Some(item.value.assume_init_mut())
+                self.index = index;
+                Some((
+                    SlotIndex {
+                        version: NonZeroU32::new_unchecked(item.version),
+                        index: self.index,
+                        _marker: PhantomData,
+                    },
+                    item.value.assume_init_mut(),
+                ))
             }
         }
     }
@@ -784,7 +813,7 @@ impl_traits!(
     ,
     IntoIterator for &'map =>
 
-        type Item = &'map T;
+        type Item = (SlotIndex<T>, &'map T);
         type IntoIter = Iter<'map, T>;
 
         #[inline(always)]
@@ -794,7 +823,7 @@ impl_traits!(
     ,
     IntoIterator for mut &'map =>
 
-        type Item = &'map mut T;
+        type Item = (SlotIndex<T>, &'map mut T);
         type IntoIter = IterMut<'map, T>;
 
         #[inline(always)]
