@@ -54,7 +54,7 @@ impl ResourcePool
     pub fn reset(&mut self) {
         let mut g = self.global_resources.write().unwrap();
         assert!(self.render_image == None);
-        for resource in &self.transient_images {
+        for (_, resource) in &self.transient_images {
             g.destroy_image(*resource);
         }
         self.transient_images.clear_elements();

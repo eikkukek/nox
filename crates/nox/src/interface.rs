@@ -67,9 +67,9 @@ pub trait Interface
         &mut self,
         id: CommandRequestId,
         commands: &mut TransferCommands,
-    ) -> Result<Option<std::thread::JoinHandle<()>>, Error>
+    ) -> Result<(), Error>
     {
-        Ok(None)
+        Ok(())
     }
 
     /// Gets called after frame graph construction in `render` 

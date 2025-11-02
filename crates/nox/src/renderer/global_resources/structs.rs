@@ -3,11 +3,11 @@ use crate::{memory_binder::DeviceMemory, renderer::image::ImageRangeInfo};
 use super::*;
 
 #[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ShaderId(pub(super) SlotIndex<Shader>);
 
 #[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PipelineLayoutId(pub(super) SlotIndex<pipeline::PipelineLayout>);
 
 #[must_use]
@@ -106,7 +106,7 @@ impl Drop for GraphicsPipeline {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct GraphicsPipelineId(pub(super) SlotIndex<GraphicsPipeline>);
 
 pub(crate) struct ComputePipeline {
@@ -146,7 +146,7 @@ impl Drop for PipelineCache {
 pub struct PipelineCacheId(pub(super) SlotIndex<PipelineCache>);
 
 #[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ImageId(pub(super) SlotIndex<Arc<Image>>);
 
 #[derive(Clone)]
@@ -166,15 +166,71 @@ impl Drop for Sampler {
 }
 
 #[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SamplerId(pub(super) SlotIndex<Sampler>);
 
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LinearDeviceAllocId(pub(super) SlotIndex<LinearDeviceAlloc>);
+pub(super) struct LinearDeviceAllocResource {
+    pub alloc: LinearDeviceAlloc,
+    pub locked: bool,
+}
 
 #[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct LinearDeviceAllocId(pub(super) SlotIndex<Arc<RwLock<LinearDeviceAllocResource>>>);
+
+pub struct LinearDeviceAllocLock {
+    pub(super) alloc: Arc<RwLock<LinearDeviceAllocResource>>,
+}
+
+impl LinearDeviceAllocLock {
+
+    pub unsafe fn reset(&mut self) {
+        unsafe {
+            self.alloc
+                .write()
+                .unwrap()
+                .alloc
+                .reset();
+        }
+    }
+}
+
+impl MemoryBinder for LinearDeviceAllocLock {
+
+    fn bind_image_memory(
+        &mut self,
+        image: vk::Image,
+        fall_back: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error>>,
+    ) -> Result<Box<dyn DeviceMemory>, Error> {
+        self.alloc
+            .write()
+            .unwrap()
+            .alloc.bind_image_memory(image, fall_back)
+    }
+
+    fn bind_buffer_memory(
+        &mut self,
+        buffer: vk::Buffer,
+        fall_back: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error>>,
+    ) -> Result<Box<dyn DeviceMemory>, Error> {
+        self.alloc
+            .write()
+            .unwrap()
+            .alloc.bind_buffer_memory(buffer, fall_back)
+    }
+}
+
+impl Drop for LinearDeviceAllocLock {
+
+    fn drop(&mut self) {
+        self.alloc
+            .write()
+            .unwrap().locked = false;
+    }
+}
+
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TimelineSemaphoreId(pub(super) SlotIndex<vk::Semaphore>);
 
 pub enum ResourceBinderImage<'a> {

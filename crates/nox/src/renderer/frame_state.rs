@@ -9,10 +9,9 @@ use std::sync::{Arc, RwLock};
 use ash::vk;
 
 use crate::renderer::{
-    global_resources::{GlobalResources, ImageId},
-    image::*,
     linear_device_alloc::LinearDeviceAlloc,
     Error,
+    *,
 };
 
 pub(crate) struct FrameState {

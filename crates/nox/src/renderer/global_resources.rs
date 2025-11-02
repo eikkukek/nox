@@ -49,7 +49,7 @@ pub struct GlobalResources {
     images: GlobalSlotMap<Arc<Image>>,
     buffers: GlobalSlotMap<Buffer>,
     samplers: GlobalSlotMap<Sampler>,
-    linear_device_allocs: GlobalSlotMap<LinearDeviceAlloc>,
+    linear_device_allocs: GlobalSlotMap<Arc<RwLock<LinearDeviceAllocResource>>>,
     timeline_semaphores: GlobalSlotMap<vk::Semaphore>,
     default_binder: DefaultBinder,
     default_binder_mappable: DefaultBinder,
@@ -132,7 +132,7 @@ impl GlobalResources {
             images: GlobalSlotMap::with_capacity(16),
             buffers: GlobalSlotMap::with_capacity(16),
             samplers: GlobalSlotMap::with_capacity(4),
-            linear_device_allocs: GlobalSlotMap::with_capacity(4),
+            linear_device_allocs: GlobalSlotMap::new(),
             timeline_semaphores: GlobalSlotMap::with_capacity(4),
             default_binder,
             default_binder_mappable,
@@ -527,7 +527,7 @@ impl GlobalResources {
     #[inline(always)]
     pub fn create_graphics_pipelines(
         &mut self,
-        infos: &[pipeline::GraphicsPipelineInfo],
+        infos: &[GraphicsPipelineInfo],
         cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
         mut collect: impl FnMut(usize, GraphicsPipelineId),
@@ -611,7 +611,7 @@ impl GlobalResources {
 
     pub fn create_compute_pipelines(
         &mut self,
-        infos: &[pipeline::ComputePipelineInfo],
+        infos: &[ComputePipelineInfo],
         cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
         mut collect: impl FnMut(usize, ComputePipelineId),
@@ -745,16 +745,16 @@ impl GlobalResources {
                     buffer.set_memory(self.default_binder_mappable.bind_buffer_memory(buffer.handle(), None)?);
                 },
                 ResourceBinderBuffer::LinearDeviceAlloc(id) => {
-                    let alloc = self.linear_device_allocs.get_mut(id.0)?;
+                    let mut alloc = self.linear_device_allocs.get_mut(id.0)?.write().unwrap();
                     let mut default_callback = |buffer| self.default_binder.bind_buffer_memory(buffer, None);
                     let mut mappable_callback = |buffer| self.default_binder_mappable.bind_buffer_memory(buffer, None);
                     let fallback: &mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error> =
-                        if alloc.mappable() {
+                        if alloc.alloc.mappable() {
                             &mut default_callback
                         } else {
                             &mut mappable_callback
                         };
-                    buffer.set_memory(alloc.bind_buffer_memory(buffer.handle(), Some(fallback))?);
+                    buffer.set_memory(alloc.alloc.bind_buffer_memory(buffer.handle(), Some(fallback))?);
                 },
                 ResourceBinderBuffer::Owned(b, fallback) => {
                     buffer.set_memory(b.bind_buffer_memory(buffer.handle(), fallback)?);
@@ -841,17 +841,17 @@ impl GlobalResources {
                     image.set_memory(self.default_binder_mappable.bind_image_memory(image.handle(), None)?);
                 }
                 ResourceBinderImage::LinearDeviceAlloc(id) => {
-                    let alloc = self.linear_device_allocs.get_mut(id.0)?;
+                    let mut alloc = self.linear_device_allocs.get_mut(id.0)?.write().unwrap();
                     let mut default_callback = |image| self.default_binder.bind_image_memory(image, None);
                     let mut mappable_callback = |image| self.default_binder_mappable.bind_image_memory(image, None);
                     let fallback: &mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error> =
-                        if alloc.mappable() {
+                        if alloc.alloc.mappable() {
                             &mut default_callback
                         } else {
                             &mut mappable_callback
                         };
                     image.set_memory(
-                        alloc.bind_image_memory(
+                        alloc.alloc.bind_image_memory(
                             image.handle(),
                             Some(fallback),
                         )?,
@@ -878,6 +878,12 @@ impl GlobalResources {
     }
 
     #[inline(always)]
+    pub fn image_mip_levels(&self, id: ImageId) -> Option<(u32, Dimensions)> {
+        let image = self.images.get(id.0).ok()?;
+        Some((image.properties.mip_levels, image.properties.dimensions))
+    }
+
+    #[inline(always)]
     pub(crate) fn get_image(
         &self,
         id: ImageId,
@@ -886,17 +892,36 @@ impl GlobalResources {
         self.images.get(id.0).map(|v| v.clone())
     }
 
-    #[inline(always)]
     #[must_use]
+    #[inline(always)]
     pub fn create_default_linear_device_alloc(&mut self, block_size: u64) -> Result<LinearDeviceAllocId, Error> {
-        Ok(LinearDeviceAllocId(self.linear_device_allocs.insert(LinearDeviceAlloc::new(
-            self.device.clone(),
-            block_size,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            vk::MemoryPropertyFlags::HOST_VISIBLE,
-            &self.physical_device_info,
-            false,
-        )?)))
+        Ok(LinearDeviceAllocId(self.linear_device_allocs.insert(Arc::new(RwLock::new(LinearDeviceAllocResource {
+            alloc: LinearDeviceAlloc::new(
+                    self.device.clone(),
+                    block_size,
+                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                    vk::MemoryPropertyFlags::HOST_VISIBLE,
+                    &self.physical_device_info,
+                    false,
+                )?,
+            locked: false,
+        })))))
+    }
+
+    #[must_use]
+    #[inline(always)]
+    pub fn create_default_linear_device_alloc_mappable(&mut self, block_size: u64) -> Result<LinearDeviceAllocId, Error> {
+        Ok(LinearDeviceAllocId(self.linear_device_allocs.insert(Arc::new(RwLock::new(LinearDeviceAllocResource {
+            alloc: LinearDeviceAlloc::new(
+                    self.device.clone(),
+                    block_size,
+                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                    &self.physical_device_info,
+                    true,
+                )?,
+            locked: false,
+        })))))
     }
 
     #[inline(always)]
@@ -905,8 +930,17 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn get_linear_device_alloc_mut(&mut self, id: LinearDeviceAllocId) -> Result<&mut LinearDeviceAlloc, Error> {
-        self.linear_device_allocs.get_mut(id.0).map_err(|e| e.into())
+    pub fn lock_linear_device_alloc(
+        &mut self,
+        id: LinearDeviceAllocId
+    ) -> Result<LinearDeviceAllocLock, Error> {
+        let alloc = self.linear_device_allocs.get_mut(id.0)?;
+        let mut write = alloc.write().unwrap();
+        if write.locked {
+            return Err(Error::ResourceLocked)
+        }
+        write.locked = true;
+        Ok(LinearDeviceAllocLock { alloc: alloc.clone() })
     }
 
     #[inline(always)]
@@ -966,6 +1000,42 @@ impl GlobalResources {
     }
 
     #[inline(always)]
+    pub fn wait_for_semaphores(
+        &mut self,
+        semaphores: &[(TimelineSemaphoreId, u64)],
+        timeout: u64,
+        alloc: &impl Allocator,
+    ) -> Result<bool, Error> {
+        let mut handles = FixedVec::with_capacity(semaphores.len(), alloc)?;
+        let mut values = FixedVec::with_capacity(semaphores.len(), alloc)?;
+        for &(id, value) in semaphores {
+            let &handle = self.timeline_semaphores.get(id.0)?;
+            handles.push(handle).ok();
+            values.push(value).ok();
+        }
+        let wait_info = vk::SemaphoreWaitInfo {
+            s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
+            semaphore_count: semaphores.len() as u32,
+            p_semaphores: handles.as_ptr(),
+            p_values: values.as_ptr(),
+            ..Default::default()
+        };
+        let res = unsafe {
+            self.device.wait_semaphores(
+                &wait_info,
+                timeout,
+            )
+        };
+        if let Err(err) = res {
+            if err == vk::Result::TIMEOUT {
+                return Ok(false)
+            }
+            return Err(err.into())
+        }
+        Ok(true)
+    }
+
+    #[inline(always)]
     pub fn destroy_timeline_semaphore(&mut self, id: TimelineSemaphoreId) {
         if let Ok(handle) = self.timeline_semaphores.remove(id.0) {
             unsafe {
@@ -991,7 +1061,7 @@ impl GlobalResources {
             self.shaders.clear();
             self.linear_device_allocs.clear();
             self.descriptor_pool.clean_up();
-            for &handle in &self.timeline_semaphores {
+            for (_, &handle) in &self.timeline_semaphores {
                 self.device.destroy_semaphore(handle, None);
             }
             self.timeline_semaphores.clear();

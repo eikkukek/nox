@@ -53,6 +53,9 @@ impl Default for DrawInfo {
 pub struct RenderCommands<'a>{
     device: Arc<ash::Device>,
     command_buffer: vk::CommandBuffer,
+    transfer_command_pool: Arc<TransientCommandPool>,
+    graphics_command_pool: Arc<TransientCommandPool>,
+    pub(crate) transfer_commands: GlobalVec<TransferCommands>,
     global_resources: Arc<RwLock<GlobalResources>>,
     current_pipeline: Option<GraphicsPipelineId>,
     current_sample_count: MSAA,
@@ -69,17 +72,21 @@ impl<'a> RenderCommands<'a> {
     pub(crate) fn new(
         device: Arc<ash::Device>,
         command_buffer: vk::CommandBuffer,
+        queue_family_indices: QueueFamilyIndices,
         global_resources: Arc<RwLock<GlobalResources>>,
         semaphore: vk::Semaphore,
         semaphore_value: u64,
         tmp_alloc: &'a ArenaAlloc,
         frame_buffer_size: Dimensions,
         buffered_frames: u32,
-    ) -> Self
+    ) -> Result<Self, Error>
     {
-        Self {
+        Ok(Self {
+            transfer_command_pool: Arc::new(TransientCommandPool::new(device.clone(), queue_family_indices.transfer_index())?),
+            graphics_command_pool: Arc::new(TransientCommandPool::new(device.clone(), queue_family_indices.graphics_index())?),
             device,
             command_buffer,
+            transfer_commands: Default::default(),
             global_resources,
             current_pipeline: None,
             current_sample_count: MSAA::X1,
@@ -88,7 +95,7 @@ impl<'a> RenderCommands<'a> {
             tmp_alloc,
             frame_buffer_size,
             buffered_frames,
-        }
+        })
     }
 
     #[inline(always)]
@@ -97,6 +104,63 @@ impl<'a> RenderCommands<'a> {
         mut f: impl FnMut(&mut GlobalResources) -> Result<(), Error>
     ) -> Result<(), Error> {
         f(&mut *self.global_resources.write().unwrap())
+    }
+
+    #[inline(always)]
+    pub unsafe fn reset_linear_device_alloc(&mut self, id: LinearDeviceAllocId) -> Result<(), Error> {
+        unsafe {
+            self.global_resources
+                .write()
+                .unwrap()
+                .lock_linear_device_alloc(id)?
+                .reset();
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn synced_transfer_commands(
+        &mut self,
+        alloc: LinearDeviceAllocId,
+        mut f: impl FnMut(&mut TransferCommands) -> Result<(), Error>
+    ) -> Result<(), Error>
+    {
+        let alloc = self.global_resources
+            .write()
+            .unwrap()
+            .lock_linear_device_alloc(alloc)?;
+        let mut alloc_info = vk::CommandBufferAllocateInfo {
+            s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+            command_pool: self.transfer_command_pool.handle(),
+            level: vk::CommandBufferLevel::PRIMARY,
+            command_buffer_count: 1,
+            ..Default::default()
+        };
+        let mut transfer_command_buffer = Default::default();
+        helpers::allocate_command_buffers(
+            &self.device,
+            &alloc_info,
+            core::slice::from_mut(&mut transfer_command_buffer),
+        )?;
+        helpers::begin_command_buffer(&self.device, transfer_command_buffer)?;
+        alloc_info.command_pool = self.graphics_command_pool.handle();
+        let mut graphics_command_buffer = Default::default();
+        helpers::allocate_command_buffers(
+            &self.device,
+            &alloc_info,
+            core::slice::from_mut(&mut graphics_command_buffer),
+        )?;
+        helpers::begin_command_buffer(&self.device, graphics_command_buffer)?;
+        let commands = self.transfer_commands.push(TransferCommands::new(
+            self.transfer_command_pool.clone(),
+            transfer_command_buffer,
+            self.graphics_command_pool.clone(),
+            graphics_command_buffer,
+            self.global_resources.clone(),
+            alloc,
+            Default::default()
+        )?);
+        f(commands)
     }
 
     #[inline(always)]
@@ -176,6 +240,9 @@ impl<'a> RenderCommands<'a> {
             &guard,
             f,
         )?;
+        if sets.is_empty() {
+            return Ok(())
+        }
         unsafe {
             self.device.cmd_bind_descriptor_sets(
                 self.command_buffer,
@@ -330,5 +397,5 @@ impl<'a> RenderCommands<'a> {
         unsafe {
             self.device.cmd_draw(self.command_buffer, vertex_count, instance_count, 0, 0);
         }
-    }
+    } 
 }

@@ -12,7 +12,7 @@ pub struct ImageBuilder {
     pub(crate) usage: vk::ImageUsageFlags,
     pub(crate) samples: MSAA,
     array_layers: u32,
-    mip_levels: u32,
+    pub(crate) mip_levels: u32,
     cube_map: bool,
     always_cube: bool,
     mutable_format: bool,

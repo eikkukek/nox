@@ -398,29 +398,11 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     self.input_text.clear();
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
-                        let mut handles = match renderer.transfer_requests(self.interface.clone(), renderer_context.transfer_requests) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                event_loop.exit();
-                                self.flags |= Self::ERROR;
-                                eprintln!("Failed to record transfer commands: {:?}", e);
-                                return
-                            },
-                        };
-                        for handle in &mut handles {
-                            if let Some(handle) = handle.take() {
-                                if let Err(e) = handle.join() {
-                                    panic!("thread poisoned during transfer commands: {:?}", e)
-                                }
-                            }
-                        }
-                        match renderer.render(&window, self.interface.clone(), renderer_allocators) {
-                            Ok(()) => {},
-                            Err(e) => {
-                                event_loop.exit();
-                                self.flags |= Self::ERROR;
-                                eprintln!("Nox renderer error: {}", e);
-                            }
+                        if let Err(err) = renderer.render(&window, self.interface.clone(), renderer_allocators) {
+                            event_loop.exit();
+                            self.flags |= Self::ERROR;
+                            eprintln!("Nox renderer error: {}", err);
+                            return
                         }
                     }
                 }
@@ -497,25 +479,6 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 event_loop.exit();
                 self.flags |= Self::ERROR;
                 eprintln!("Nox error: init callback error ( {:?} )", e);
-            }
-            let mut handles = match self.renderer
-                .as_mut()
-                .unwrap()
-                .transfer_requests(self.interface.clone(), renderer_context.transfer_requests) {
-                Ok(v) => v,
-                Err(e) => {
-                    event_loop.exit();
-                    self.flags |= Self::ERROR;
-                    eprintln!("Failed to record transfer commands: {:?}", e);
-                    return
-                },
-            };
-            for handle in &mut handles {
-                if let Some(handle) = handle.take() {
-                    if let Err(e) = handle.join() {
-                        panic!("thread poisoned during transfer commands: {:?}", e)
-                    }
-                }
             }
         }
     }

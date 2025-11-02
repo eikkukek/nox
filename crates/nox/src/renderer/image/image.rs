@@ -234,8 +234,8 @@ impl Drop for Image {
     fn drop(&mut self) {
         let device = &self.device;
         unsafe {
-            for subview in self.subviews.read().unwrap().iter() {
-                device.destroy_image_view(*subview, None);
+            for (_, &subview) in self.subviews.read().unwrap().iter() {
+                device.destroy_image_view(subview, None);
             }
             if let Some(view) = *self.view.read().unwrap() {
                 device.destroy_image_view(vk::Handle::from_raw(view.get()), None);

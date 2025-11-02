@@ -1,60 +1,43 @@
-use nox_mem::{
-    GlobalAlloc,
-    vec_types::{Vector, AllocVec},
-    slot_map,
-    OptionAlloc,
-};
+use nox_mem::slot_map::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct CommandRequestId(u32);
+use crate::*;
 
-impl Default for CommandRequestId {
-
-    fn default() -> Self {
-        Self(u32::MAX)
-    }
-}
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CommandRequestId(SlotIndex<LinearDeviceAllocId>);
 
 pub struct TransferRequests {
-    pub(crate) transfer_requests: AllocVec<u64, OptionAlloc<'static, GlobalAlloc>, slot_map::Dyn>,
+    pub(crate) async_requests: GlobalSlotMap<LinearDeviceAllocId>,
 }
 
 impl TransferRequests {
 
     #[inline(always)]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         TransferRequests {
-            transfer_requests: AllocVec::new(&GlobalAlloc).unwrap(),
+            async_requests: GlobalSlotMap::new(),
         }
     }
 
     #[inline(always)]
-    pub fn is_empty(&self) -> bool {
-        self.transfer_requests.is_empty()
+    pub fn async_request_count(&self) -> u32 {
+        self.async_requests.len()
     }
 
     #[inline(always)]
-    pub fn task_count(&self) -> usize {
-        self.transfer_requests.len()
-    }
-
-    #[inline(always)]
-    pub fn reserve_transfer_requests(&mut self, capacity: u32) {
-        self.transfer_requests.reserve(capacity as usize).unwrap();
-    }
-
-    #[inline(always)]
-    pub fn add_request(&mut self, staging_block_size: u64) -> CommandRequestId {
-        let index = self.transfer_requests.len() as u32;
-        self.transfer_requests.push(staging_block_size).unwrap();
+    pub fn add_async_request(&mut self, staging_alloc: LinearDeviceAllocId) -> CommandRequestId {
+        let index = self.async_requests.insert(staging_alloc);
         CommandRequestId(index)
     }
 
     #[inline(always)]
-    pub(crate) fn transfer_iter(&self) -> impl Iterator<Item = (CommandRequestId, u64)> {
-        self.transfer_requests
+    pub(crate) fn clear(&mut self) {
+        self.async_requests.clear();
+    }
+
+    #[inline(always)]
+    pub(crate) fn async_transfer_iter(&self) -> impl Iterator<Item = (CommandRequestId, LinearDeviceAllocId)> {
+        self.async_requests
             .iter()
-            .enumerate()
-            .map(|(i, v)| (CommandRequestId(i as u32), *v))
+            .map(|(i, &v)| (CommandRequestId(i), v))
     }
 }

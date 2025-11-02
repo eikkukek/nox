@@ -41,6 +41,36 @@ impl SamplerBuilder {
         }
     }
 
+    #[inline(always)]
+    pub fn with_mag_filter(&mut self, filter: Filter) -> &mut Self {
+        self.mag_filter = filter;
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_min_filter(&mut self, filter: Filter) -> &mut Self {
+        self.min_filter = filter;
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_min_lod(&mut self, lod: f32) -> &mut Self {
+        self.min_lod = lod;
+        self
+    }
+
+
+    pub fn with_max_lod(&mut self, lod: f32) -> &mut Self {
+        self.max_lod = lod;
+        self
+    }
+
+    #[inline(always)]
+    pub fn max_lod_clamp_none(&mut self) -> &mut Self {
+        self.max_lod = vk::LOD_CLAMP_NONE;
+        self
+    }
+
     pub(crate) fn build(self, device: &ash::Device) -> Result<vk::Sampler, Error> {
         let info = vk::SamplerCreateInfo {
             s_type: vk::StructureType::SAMPLER_CREATE_INFO,

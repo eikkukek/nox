@@ -23,7 +23,7 @@ mod commands;
 mod swapchain_pass;
 
 use std::{
-    rc::Rc, sync::{Arc, RwLock}, thread::{JoinHandle}
+    rc::Rc, sync::{Arc, RwLock},
 };
 
 use core::{
@@ -124,7 +124,7 @@ impl Allocators {
 
 pub struct RendererContext {
     global_resources: Arc<RwLock<GlobalResources>>,
-    pub(crate) transfer_requests: TransferRequests,
+    transfer_requests: Rc<UnsafeCell<TransferRequests>>,
     frame_buffer_size: image::Dimensions,
     pub(crate) device: Arc<ash::Device>,
     physical_device_info: Arc<PhysicalDeviceInfo>,
@@ -133,17 +133,25 @@ pub struct RendererContext {
 impl RendererContext {
 
     #[inline(always)]
-    pub fn edit_resources<F>(&self, mut f: F) -> Result<(), Error>
-        where
-            F: FnMut(&mut GlobalResources) -> Result<(), Error>
+    pub fn edit_resources(
+        &self,
+        mut f: impl FnMut(&mut GlobalResources) -> Result<(), Error>,
+    ) -> Result<(), Error>
     {
         let mut resources = self.global_resources.write().unwrap();
         f(&mut resources)
     }
 
     #[inline(always)]
-    pub fn transfer_requests(&mut self) -> &mut TransferRequests {
-        &mut self.transfer_requests
+    pub fn edit_transfer_requests(
+        &mut self,
+        mut f: impl FnMut(&mut TransferRequests),
+    )
+    {
+        let requests = unsafe {
+            &mut *self.transfer_requests.get()
+        };
+        f(requests)
     }
 
     #[inline(always)]
@@ -178,7 +186,10 @@ pub struct ComputeState {
 
 pub(crate) struct Renderer<'a> {
     transfer_commands: GlobalVec<TransferCommands>,
-    queued_transfer_requests: GlobalVec<TransferRequests>,
+    transfer_requests: Rc<UnsafeCell<TransferRequests>>,
+    sync_transfer_semaphore: vk::Semaphore,
+    sync_transfer_timeline_value: u64,
+    sync_transfer_commands: GlobalVec<TransferCommands>,
     main_thread_context: ThreadContext,
     frame_states: ArrayVec<Rc<TokenCell<FrameState, FrameToken>>, {MAX_BUFFERED_FRAMES as usize}>,
     compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
@@ -253,10 +264,13 @@ impl<'a> Renderer<'a> {
             _memory_layout: memory_layout,
             buffered_frames,
             transfer_commands: Default::default(),
+            sync_transfer_semaphore: Default::default(),
+            sync_transfer_timeline_value: 0,
+            sync_transfer_commands: Default::default(),
             tmp_alloc,
             frame_buffer_size: image::Dimensions::new(1, 1, 1),
             frame_token: FrameToken::new().unwrap(),
-            queued_transfer_requests: Default::default(),
+            transfer_requests: Rc::new(UnsafeCell::new(TransferRequests::new())),
         };
         let mut frame_states = ArrayVec::new();
         let mut i = 0;
@@ -280,8 +294,18 @@ impl<'a> Renderer<'a> {
             }
         ).unwrap();
         let mut compute_command_buffers = ArrayVec::<vk::CommandBuffer, {MAX_BUFFERED_FRAMES as usize}>::new();
-        let mut compute_semaphores = ArrayVec::<vk::Semaphore, {MAX_BUFFERED_FRAMES as usize}>::new();
+        let mut compute_semaphores = ArrayVec::<vk::Semaphore, {MAX_BUFFERED_FRAMES as usize}>::new(); 
         unsafe {
+            let mut timeline_info = vk::SemaphoreTypeCreateInfo {
+                s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
+                semaphore_type: vk::SemaphoreType::TIMELINE,
+                initial_value: 0,
+                ..Default::default()
+            };
+            let semaphore_info = vk::SemaphoreCreateInfo {
+                s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
+                ..Default::default()
+            }.push_next(&mut timeline_info);
             let alloc_info = vk::CommandBufferAllocateInfo {
                 s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 command_pool: s.main_thread_context.compute_pool(),
@@ -298,21 +322,11 @@ impl<'a> Renderer<'a> {
                 return Err(format!("failed to allocate compute command buffers {:?}", result))
             }
             compute_command_buffers.set_len(buffered_frames as usize);
-            let mut timeline_info = vk::SemaphoreTypeCreateInfo {
-                s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
-                semaphore_type: vk::SemaphoreType::TIMELINE,
-                initial_value: 0,
-                ..Default::default()
-            };
-            let mut semaphore_info = vk::SemaphoreCreateInfo {
-                s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
-                ..Default::default()
-            };
-            semaphore_info = semaphore_info.push_next(&mut timeline_info);
             for _ in 0..buffered_frames {
                 let fence = device.create_semaphore(&semaphore_info, None).unwrap();
                 compute_semaphores.push(fence).unwrap();
             }
+            s.sync_transfer_semaphore = device.create_semaphore(&semaphore_info, None).unwrap();
         }
         for (i, buffer) in compute_command_buffers.iter().enumerate() {
             s.compute_states.push(ComputeState {
@@ -334,7 +348,7 @@ impl<'a> Renderer<'a> {
     pub fn renderer_context(&mut self) -> RendererContext {
         RendererContext {
             global_resources: self.global_resources.clone(),
-            transfer_requests: TransferRequests::new(),
+            transfer_requests: self.transfer_requests.clone(),
             frame_buffer_size: self.frame_buffer_size,
             device: self.device.clone(),
             physical_device_info: self.vulkan_context.physical_device_info_owned(),
@@ -353,82 +367,75 @@ impl<'a> Renderer<'a> {
         self.vulkan_context.request_swapchain_update(self.buffered_frames, size);
     }
 
-    pub(crate) fn transfer_requests<I: Interface>(
+    fn async_transfer_requests<I: Interface>(
         &mut self,
         interface: Arc<RwLock<I>>,
-        transfer_requests: TransferRequests,
-    ) -> Result<GlobalVec<Option<JoinHandle<()>>>, Error>
+    ) -> Result<(), Error>
     {
+        let requests = unsafe {
+            &mut * self.transfer_requests.get()
+        };
+        let count = requests.async_request_count();
 
-        let mut all_requests = GlobalVec::new();
-
-        all_requests.move_from_vec(&mut self.queued_transfer_requests);
-
-        let mut handles = GlobalVec::with_capacity(transfer_requests.task_count());
-
-        all_requests.push(transfer_requests);
-
-        for transfer_requests in &all_requests {
-
-
-            let device = self.device.clone();
-            let transfer_commands = &mut self.transfer_commands;
-            let queue_families = self.vulkan_context.queue_family_indices();
-            let interface = interface.clone();
-            let global_resources = self.global_resources.clone();
-
-            for (id, staging_block_size) in transfer_requests.transfer_iter() {
-
-                let command_pool = helpers::create_command_pool(
-                    &device,
-                    vk::CommandPoolCreateFlags::TRANSIENT,
-                    queue_families.transfer_index(),
-                )?;
-
-                let mut vk_cmd_buffer = vk::CommandBuffer::null();
-                let info = vk::CommandBufferAllocateInfo {
-                    s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                    command_pool,
-                    level: vk::CommandBufferLevel::PRIMARY,
-                    command_buffer_count: 1,
-                    ..Default::default()
-                };
-                helpers
-                    ::allocate_command_buffers(&device, &info, core::slice::from_mut(&mut vk_cmd_buffer))?;
-                helpers
-                    ::begin_command_buffer(&device, vk_cmd_buffer)?;
-
-                let alloc = LinearDeviceAlloc::new(
-                    self.device.clone(),
-                    staging_block_size,
-                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                    vk::MemoryPropertyFlags::from_raw(0),
-                    self.vulkan_context.physical_device_info(),
-                    true,
-                ).unwrap();
-
-                let mut commands = transfer_commands.push(TransferCommands::new(
-                    device.clone(),
-                    vk_cmd_buffer,
-                    command_pool,
-                    global_resources.clone(),
-                    alloc,
-                    queue_families.transfer_index(),
-                    id,
-                ).unwrap());
-
-                let handle = interface
-                    .write()
-                    .unwrap()
-                    .transfer_commands(id, &mut commands)
-                    .unwrap();
-
-                handles.push(handle);
-            }
-
+        if count == 0 {
+            return Ok(())
         }
 
-        Ok(handles)
+        let device = self.device.clone();
+        let transfer_commands = &mut self.transfer_commands;
+        let queue_families = self.vulkan_context.queue_family_indices();
+        let interface = interface.clone();
+        let global_resources = self.global_resources.clone();
+
+        let transfer_command_pool = Arc::new(TransientCommandPool::new(device.clone(), queue_families.transfer_index())?);
+        let graphics_command_pool = Arc::new(TransientCommandPool::new(device.clone(), queue_families.graphics_index())?);
+
+        let arena_guard = ArenaGuard::new(&self.tmp_alloc);
+
+        let mut transfer_command_buffers = FixedVec::with_len(count as usize, Default::default(), &arena_guard)?;
+
+        let mut alloc_info = vk::CommandBufferAllocateInfo {
+            s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+            command_pool: transfer_command_pool.handle(),
+            level: vk::CommandBufferLevel::PRIMARY,
+            command_buffer_count: count,
+            ..Default::default()
+        };
+
+        helpers::allocate_command_buffers(&device, &alloc_info, &mut transfer_command_buffers)?;
+
+        let mut graphics_command_buffers = FixedVec::with_len(count as usize, Default::default(), &arena_guard)?;
+
+        alloc_info.command_pool = graphics_command_pool.handle();
+
+        helpers::allocate_command_buffers(&device, &alloc_info, &mut graphics_command_buffers)?;
+
+        for (i, (id, staging_alloc)) in requests.async_transfer_iter().enumerate() {
+
+            let alloc = global_resources
+                .write()
+                .unwrap()
+                .lock_linear_device_alloc(staging_alloc)?;
+
+            let mut commands = transfer_commands.push(TransferCommands::new(
+                transfer_command_pool.clone(),
+                transfer_command_buffers[i],
+                graphics_command_pool.clone(),
+                graphics_command_buffers[i],
+                global_resources.clone(),
+                alloc,
+                id
+            )?);
+
+            interface
+                .write()
+                .unwrap()
+                .transfer_commands(id, &mut commands)?;
+        }
+
+        requests.clear();
+
+        Ok(())
     }
 
     pub(crate) fn render<I: Interface>(
@@ -438,6 +445,11 @@ impl<'a> Renderer<'a> {
         allocators: &'a Allocators,
     ) -> Result<(), String>
     {
+        self
+            .async_transfer_requests(interface.clone())
+            .map_err(|e| format!("failed to record async transfer requests: {:?}", e))?;
+        let transfer_queue = self.vulkan_context.transfer_queue();
+        let graphics_queue = self.vulkan_context.graphics_queue();
         let device = self.device.clone();
         let mut pending_transfers = Default::default();
         if !self.transfer_commands.is_empty() {
@@ -446,10 +458,10 @@ impl<'a> Renderer<'a> {
             let mut ready_transfers = GlobalVec::with_capacity(transfer_commands.len());
             for (i, command) in transfer_commands.iter_mut().enumerate() {
                 let (new, fence) = command
-                    .get_fence()
+                    .get_transfer_fence()
                     .map_err(|e| format!("failed to create fence: {:?}", e))?;
                 if new {
-                    let command_buffer = command.vk_command_buffer();
+                    let command_buffer = command.transfer_command_buffer();
                     unsafe {
                         device
                             .end_command_buffer(command_buffer)
@@ -463,23 +475,60 @@ impl<'a> Renderer<'a> {
                     };
                     unsafe {
                         device.queue_submit(
-                            self.vulkan_context.transfer_queue(),
+                            transfer_queue,
                             &[submit_info],
                             fence,
                         ).map_err(|e| format!("failed to submit transfer commands: {:?}", e))?;
                     };
                 }
+                let (new, fence) = command
+                    .get_graphics_fence()
+                    .map_err(|e| format!("failed to create fence: {:?}", e))?;
+                if new {
+                    let command_buffer = command.graphics_command_buffer();
+                    unsafe {
+                        device.end_command_buffer(command_buffer)
+                        .map_err(|e| format!("failed to end command buffer: {:?}", e))?;
+                    }
+                    let submit_info = vk::SubmitInfo {
+                        s_type: vk::StructureType::SUBMIT_INFO,
+                        command_buffer_count: 1,
+                        p_command_buffers: &command_buffer,
+                        ..Default::default()
+                    };
+                    unsafe {
+                        device.queue_submit(
+                            graphics_queue,
+                            &[submit_info],
+                            fence,
+                        ).map_err(|e| format!("failed to submit graphics commands: {:?}", e))?;
+                    }
+                }
                 unsafe {
-                    match device.wait_for_fences(&[fence], true, SwapchainContext::frame_timeout()) {
+                    let mut transfer_ready = false;
+                    let mut graphics_ready = false;
+                    match device.wait_for_fences(&[fence], true, 0) {
                         Ok(()) => {
-                            ready_transfers.push(i);
+                            transfer_ready = true;
                         },
-                        Err(vk::Result::TIMEOUT) => {
-                            pending_transfers.push(command.id());
-                        }
+                        Err(vk::Result::TIMEOUT) => {}
                         Err(e) => {
                             return Err(format!("unexpected fence wait error: {:?}", e))
                         }
+                    }
+                    match device.wait_for_fences(&[fence], true, 0) {
+                        Ok(()) => {
+                            graphics_ready = true;
+                        },
+                        Err(vk::Result::TIMEOUT) => {},
+                        Err(e) => {
+                            return Err(format!("unexpected fence wait error: {:?}", e))
+                        }
+                    }
+                    if transfer_ready && graphics_ready {
+                        ready_transfers.push(i);
+                    } else {
+                        pending_transfers.push(command.id());
                     }
                 }
             }
@@ -551,7 +600,7 @@ impl<'a> Renderer<'a> {
             ..Default::default()
         };
         let wait_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
-        let mut compute_submit = vk::SubmitInfo {
+        let compute_submit = vk::SubmitInfo {
             s_type: vk::StructureType::SUBMIT_INFO,
             command_buffer_count: 1,
             p_command_buffers: &compute_state.command_buffer,
@@ -561,8 +610,7 @@ impl<'a> Renderer<'a> {
             signal_semaphore_count: 1,
             p_signal_semaphores: &compute_state.semaphore,
             ..Default::default()
-        };
-        compute_submit = compute_submit.push_next(&mut timeline_submit);
+        }.push_next(&mut timeline_submit);
         unsafe {
             let result = device.queue_submit(
                 compute_queue,
@@ -583,7 +631,8 @@ impl<'a> Renderer<'a> {
         unsafe {
             alloc.force_clear();
         }
-        let (mut signal_semaphores, mut signal_values) =
+        self.sync_transfer_commands.clear();
+        let (transfer_fence, mut wait_semaphores, mut wait_values, mut wait_stages, mut signal_semaphores, mut signal_values) =
         {
             let mut frame_graph = FrameGraphImpl::new(
                 self.frame_states[frame_data.frame_index as usize].clone(),
@@ -602,23 +651,131 @@ impl<'a> Renderer<'a> {
             let mut render_commands = RenderCommands::new(
                 device.clone(),
                 frame_data.command_buffer,
+                queue_family_indices,
                 self.global_resources.clone(),
                 compute_state.semaphore,
                 compute_state.timeline_value,
                 &self.tmp_alloc,
                 frame_data.extent.into(),
                 self.buffered_frames,
-            );
+            ).map_err(|e| {
+                format!("failed to create render commands: {:?}", e)
+            })?;
             frame_graph
                 .render(&mut *interface.write().unwrap(), &mut render_commands)
-                .map_err(|e| format!("frame graph failed to render ( {:?} )", e))?;
+                .map_err(|e| format!("frame graph failed to render: {:?}", e))?;
+            let (transfer_fence, wait_semaphores, wait_values, wait_stages) =
+                if render_commands.transfer_commands.is_empty() {
+                    (
+                        vk::Fence::null(),
+                        FixedVec
+                            ::with_capacity(2, alloc)
+                            .map_err(|e| format!("failed to allocate wait semaphores: {:?}", e))?,
+                        FixedVec
+                            ::with_capacity(2, alloc)
+                            .map_err(|e| format!("failed to allocate wait semaphore values: {:?}", e))?,
+                        FixedVec
+                            ::with_capacity(2, alloc)
+                            .map_err(|e| format!("failed to allocate wait semaphore stages: {:?}", e))?,
+                    )
+                } else {
+                    let mut transfer_command_buffers = FixedVec::with_capacity(render_commands.transfer_commands.len(), alloc)
+                        .map_err(|e| format!("failed to allocate command buffers: {:?}", e))?;
+                    let mut graphics_command_buffers = FixedVec::with_capacity(render_commands.transfer_commands.len(), alloc)
+                        .map_err(|e| format!("failed to allocate command buffers: {:?}", e))?;
+                    for transfer_commands in &render_commands.transfer_commands {
+                        let command_buffer = transfer_commands.transfer_command_buffer();
+                        unsafe {
+                            device.end_command_buffer(command_buffer)
+                                .map_err(|e| format!("failed to end transfer command buffer: {:?}", e))?;
+                        }
+                        transfer_command_buffers.push(command_buffer).ok();
+                        let command_buffer = transfer_commands.graphics_command_buffer();
+                        unsafe {
+                            device.end_command_buffer(command_buffer)
+                                .map_err(|e| format!("failed to end graphics command buffer: {:?}", e))?;
+                        }
+                        graphics_command_buffers.push(command_buffer).ok();
+                    }
+                    let fence_info = vk::FenceCreateInfo {
+                        s_type: vk::StructureType::FENCE_CREATE_INFO,
+                        ..Default::default()
+                    };
+                    let transfer_fence = unsafe {
+                        device.create_fence(&fence_info, None)
+                    }.map_err(|e| format!("unexpected error when creating fence: {:?}", e))?;
+                    self.sync_transfer_timeline_value += 1;
+                    let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
+                        s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                        signal_semaphore_value_count: 1,
+                        p_signal_semaphore_values: &self.sync_transfer_timeline_value,
+                        ..Default::default()
+                    };
+                    let submit_info = vk::SubmitInfo {
+                        s_type: vk::StructureType::SUBMIT_INFO,
+                        command_buffer_count: transfer_command_buffers.len() as u32,
+                        p_command_buffers: transfer_command_buffers.as_ptr(),
+                        signal_semaphore_count: 1,
+                        p_signal_semaphores: &self.sync_transfer_semaphore,
+                        ..Default::default()
+                    }.push_next(&mut timeline_info);
+                    unsafe {
+                        device.queue_submit(
+                            transfer_queue,
+                            &[submit_info],
+                            vk::Fence::null(),
+                        ).map_err(|e| format!("failed to submit transfer commands: {:?}", e))?;
+                    };
+                    let wait_value = self.sync_transfer_timeline_value;
+                    let wait_stage = vk::PipelineStageFlags::TRANSFER;
+                    self.sync_transfer_timeline_value += 1;
+                    let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
+                        s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                        wait_semaphore_value_count: 1,
+                        p_wait_semaphore_values: &wait_value,
+                        signal_semaphore_value_count: 1,
+                        p_signal_semaphore_values: &self.sync_transfer_timeline_value,
+                        ..Default::default()
+                    };
+                    let submit_info = vk::SubmitInfo {
+                        s_type: vk::StructureType::SUBMIT_INFO,
+                        command_buffer_count: graphics_command_buffers.len() as u32,
+                        p_command_buffers: graphics_command_buffers.as_ptr(),
+                        wait_semaphore_count: 1,
+                        p_wait_semaphores: &self.sync_transfer_semaphore,
+                        p_wait_dst_stage_mask: &wait_stage,
+                        signal_semaphore_count: 1,
+                        p_signal_semaphores: &self.sync_transfer_semaphore,
+                        ..Default::default()
+                    }.push_next(&mut timeline_info);
+                    unsafe {
+                        device.queue_submit(
+                            graphics_queue,
+                            &[submit_info],
+                            transfer_fence,
+                        ).map_err(|e| format!("failed t o submit graphics commands: {:?}", e))?;
+                    }
+                    let mut wait_semaphores = FixedVec
+                        ::with_capacity(3, alloc)
+                        .map_err(|e| format!("failed to allocate wait semaphores: {:?}", e))?;
+                    wait_semaphores.push(self.sync_transfer_semaphore).ok();
+                    let mut wait_values = FixedVec
+                        ::with_capacity(3, alloc)
+                        .map_err(|e| format!("failed to allocate wait semaphore values: {:?}", e))?;
+                    wait_values.push(self.sync_transfer_timeline_value).ok();
+                    let mut wait_stages = FixedVec
+                        ::with_capacity(3, alloc)
+                        .map_err(|e| format!("failed to allocate wait semaphore stages: {:?}", e))?;
+                    wait_stages.push(vk::PipelineStageFlags::TRANSFER).ok();
+                    (transfer_fence, wait_semaphores, wait_values, wait_stages)
+                };
             let signal_count = frame_graph.signal_semaphore_count() as usize;
             let mut signal_semaphores = FixedVec
                 ::with_capacity(signal_count + 2, alloc)
-                .map_err(|e| format!("failed to allocate signal semaphores ( {:?} )", e))?;
+                .map_err(|e| format!("failed to allocate signal semaphores: {:?}", e))?;
             let mut signal_values = FixedVec
                 ::with_capacity(signal_count + 2, alloc)
-                .map_err(|e| format!("failed to allocate signal semaphore values ( {:?} )", e))?;
+                .map_err(|e| format!("failed to allocate signal semaphore values: {:?}", e))?;
             let g = self.global_resources.read().unwrap();
             frame_graph.collect_signal_semaphores(|id, value| {
                 let handle = g.get_timeline_semaphore(id)?;
@@ -626,7 +783,8 @@ impl<'a> Renderer<'a> {
                 signal_values.push(value)?;
                 Ok(())
             }).map_err(|e| format!("failed to collect signal semaphores ( {:?} )", e))?;
-            (signal_semaphores, signal_values)
+            self.sync_transfer_commands.move_from_vec(&mut render_commands.transfer_commands);
+            (transfer_fence, wait_semaphores, wait_values, wait_stages, signal_semaphores, signal_values)
         };
         let frame_state = self.frame_states[frame_data.frame_index as usize].borrow_mut(&mut self.frame_token);
         let mut image_state = frame_data.image_state;
@@ -731,15 +889,16 @@ impl<'a> Renderer<'a> {
         if let Err(e) = unsafe { device.end_command_buffer(frame_data.command_buffer) } {
             return Err(format!("failed to end command buffer {:?}", e))
         }
-        let wait_values = [0, compute_state.timeline_value + 1];
-        let wait_semaphores = [semaphores.wait_semaphore, compute_state.semaphore];
-        let wait_stages = [semaphores.wait_stage, vk::PipelineStageFlags::COMPUTE_SHADER];
+        wait_semaphores.append(&[semaphores.wait_semaphore, compute_state.semaphore]).unwrap();
+        wait_values.append(&[0, compute_state.timeline_value + 1]).unwrap();
+        wait_stages.append(&[semaphores.wait_stage, vk::PipelineStageFlags::COMPUTE_SHADER]).unwrap();
         signal_semaphores.append(&[semaphores.signal_semaphore, compute_state.semaphore]).unwrap();
         signal_values.append(&[0, compute_state.timeline_value + 2]).unwrap();
+        let wait_count = wait_semaphores.len() as u32;
         let signal_count = signal_semaphores.len() as u32;
         let mut timeline_submit = vk::TimelineSemaphoreSubmitInfo {
             s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
-            wait_semaphore_value_count: 2,
+            wait_semaphore_value_count: wait_count,
             p_wait_semaphore_values: wait_values.as_ptr(),
             signal_semaphore_value_count: signal_count,
             p_signal_semaphore_values: signal_values.as_ptr(),
@@ -747,7 +906,7 @@ impl<'a> Renderer<'a> {
         };
         let mut submit_info = vk::SubmitInfo {
             s_type: vk::StructureType::SUBMIT_INFO,
-            wait_semaphore_count: 2,
+            wait_semaphore_count: wait_count,
             p_wait_semaphores: wait_semaphores.as_ptr(),
             p_wait_dst_stage_mask: wait_stages.as_ptr(),
             signal_semaphore_count: signal_count,
@@ -760,6 +919,14 @@ impl<'a> Renderer<'a> {
         if let Err(e) = unsafe { device.queue_submit(graphics_queue, &[submit_info], fence) } {
             return Err(format!("graphics queue submit failed {:?}", e))
         }
+        if !self.sync_transfer_commands.is_empty() {
+            unsafe {
+                device
+                    .wait_for_fences(&[transfer_fence], true, u64::MAX)
+                    .map_err(|e| format!("failed to wait for transfer fence: {:?}", e))?;
+                device.destroy_fence(transfer_fence, None);
+            }
+        }
         let present_result = swapchain_context
             .present_submit(&swapchain_loader, graphics_queue)
             .map_err(|e| format!("queue present failed {}", e))?;
@@ -767,10 +934,6 @@ impl<'a> Renderer<'a> {
             self.vulkan_context.request_swapchain_update(self.buffered_frames, window.inner_size());
         }
         self.compute_states[frame_data.frame_index as usize].timeline_value += 2;
-        if !render_context.transfer_requests.is_empty() {
-            self.queued_transfer_requests.push(render_context.transfer_requests);
-            self.wait_idle();
-        }
         Ok(())
     }
 
@@ -790,6 +953,9 @@ impl<'a> Renderer<'a> {
                     state.semaphore, None
                 );
             }
+        }
+        unsafe {
+            self.device.destroy_semaphore(self.sync_transfer_semaphore, None);
         }
         self.global_resources.write().unwrap().clean_up();
         self.vulkan_context.destroy_swapchain(self.main_thread_context.graphics_pool(), &allocators);

@@ -214,7 +214,7 @@ impl<'mem> VulkanContext<'mem> {
             p_next: (&features_12 as *const _) as _,
             queue_create_info_count: device_queue_create_infos.len() as u32,
             p_queue_create_infos: device_queue_create_infos.as_ptr() as _,
-            enabled_extension_count: 3,
+            enabled_extension_count: ENABLED_DEVICE_EXTENSION_NAMES.len() as u32,
             pp_enabled_extension_names: ENABLED_DEVICE_EXTENSION_NAMES.as_ptr(),
             p_enabled_features: &features,
             ..Default::default()
