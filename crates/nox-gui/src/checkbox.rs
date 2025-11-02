@@ -1,6 +1,7 @@
 use core::marker::PhantomData;
 
 use nox::{
+    alloc::arena_alloc::ArenaGuard,
     mem::vec_types::{GlobalVec, Vector},
     *,
 };
@@ -116,6 +117,14 @@ impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
                 0.0
             ).unwrap_or_default();
         }
+    }
+
+    #[inline(always)]
+    pub fn hide(&mut self, vertices: &mut [Vertex]) {
+        hide_vertices(vertices, self.rect_vertex_range);
+        hide_vertices(vertices, self.focused_outline_vertex_range);
+        hide_vertices(vertices, self.active_outline_vertex_range);
+        hide_vertices(vertices, self.checkmark_vertex_range);
     }
 }
 
@@ -323,31 +332,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         }
     }
 
-    fn render_commands(
-        &self,
-        _render_commands: &mut RenderCommands,
-        _style: &Style,
-        _base_pipeline: GraphicsPipelineId,
-        _text_pipeline: GraphicsPipelineId,
-        _vertex_buffer: &mut RingBuf,
-        _index_buffer: &mut RingBuf,
-        _window_pos: Vec2,
-        _content_area: BoundingRect,
-        _inv_aspect_ratio: f32,
-        _unit_scale: f32,
-        _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
-    {
-        Ok(None)
-    }
-
     fn hide(
-        &self,
+        &mut self,
         vertices: &mut [Vertex],
-    ) {
-        hide_vertices(vertices, self.rect_vertex_range);
-        hide_vertices(vertices, self.focused_outline_vertex_range);
-        hide_vertices(vertices, self.active_outline_vertex_range);
-        hide_vertices(vertices, self.checkmark_vertex_range);
+        _window_semaphore: (TimelineSemaphoreId, u64),
+        _global_resources: &mut GlobalResources,
+        _tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error> {
+        self.hide(vertices);
+        Ok(())
     }
 }

@@ -6,7 +6,7 @@ use core::{
 
 use compact_str::CompactString;
 
-use nox::{mem::vec_types::{GlobalVec, Vector}, *};
+use nox::{alloc::arena_alloc::ArenaGuard, mem::vec_types::{GlobalVec, Vector}, *};
 
 use nox_geom::{
     shapes::*,
@@ -218,6 +218,11 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
     pub fn set_cursor_enable(&mut self, value: bool) {
         self.flags &= !Self::CURSOR_ENABLE;
         or_flag!(self.flags, Self::CURSOR_ENABLE, value);
+    }
+
+    #[inline(always)]
+    pub fn hide(&mut self, vertices: &mut [Vertex]) {
+        hide_vertices(vertices, self.input_rect_vertex_range);
     }
 
     #[inline(always)]
@@ -1062,19 +1067,24 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
     }
 
     fn hide(
-        &self,
+        &mut self,
         vertices: &mut [shaders::Vertex],
-    )
+        _window_semaphore: (TimelineSemaphoreId, u64),
+        _global_resources: &mut GlobalResources,
+        _tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error>
     {
-        hide_vertices(vertices, self.input_rect_vertex_range);
+        self.hide(vertices);
+        Ok(())
     }
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         _style: &Style,
-        base_pipeline_id: GraphicsPipelineId,
-        _text_pipeline_id: GraphicsPipelineId,
+        base_pipeline: GraphicsPipelineId,
+        _text_pipeline: GraphicsPipelineId,
+        _texture_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
@@ -1099,7 +1109,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
                     .as_ptr()
                     .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), 6);
             }
-            render_commands.bind_pipeline(base_pipeline_id)?;
+            render_commands.bind_pipeline(base_pipeline)?;
             let pc_vertex = push_constants_vertex(window_pos, vec2(1.0, 1.0), inv_aspect_ratio, unit_scale);
             let pc_fragment = base_push_constants_fragment(
                 content_area.min,

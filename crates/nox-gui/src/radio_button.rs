@@ -1,6 +1,7 @@
 use core::marker::PhantomData;
 
 use nox::{
+    alloc::arena_alloc::ArenaGuard,
     mem::vec_types::{GlobalVec, Vector},
     *,
 };
@@ -96,6 +97,14 @@ impl<I, FontHash, Style> RadioButton<I, FontHash, Style>
         } else if value == &radio_value {
             self.flags |= Self::SELECTED;
         }
+    }
+
+    #[inline(always)]
+    pub fn hide(&mut self, vertices: &mut [Vertex]) {
+        hide_vertices(vertices, self.handle_vertex_range);
+        hide_vertices(vertices, self.handle_inner_vertex_range);
+        hide_vertices(vertices, self.focused_handle_outline_vertex_range);
+        hide_vertices(vertices, self.active_handle_outline_vertex_range);
     }
 
     #[inline(always)]
@@ -309,28 +318,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
         }
     }
 
-    fn render_commands(
-        &self,
-        _render_commands: &mut RenderCommands,
-        _style: &Style,
-        _base_pipeline_id: GraphicsPipelineId,
-        _text_pipeline_id: GraphicsPipelineId,
-        _vertex_buffer: &mut RingBuf,
-        _index_buffer: &mut RingBuf,
-        _window_pos: Vec2,
-        _content_area: BoundingRect,
-        _inv_aspect_ratio: f32,
-        _unit_scale: f32,
-        _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error> { Ok(None) }
-
     fn hide(
-        &self,
+        &mut self,
         vertices: &mut [Vertex],
-    ) {
-        hide_vertices(vertices, self.handle_vertex_range);
-        hide_vertices(vertices, self.handle_inner_vertex_range);
-        hide_vertices(vertices, self.focused_handle_outline_vertex_range);
-        hide_vertices(vertices, self.active_handle_outline_vertex_range);
+        _window_semaphore: (TimelineSemaphoreId, u64),
+        _global_resources: &mut GlobalResources,
+        _tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error> {
+        self.hide(vertices); 
+        Ok(())
     }
 }

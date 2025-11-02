@@ -145,6 +145,14 @@ impl<I, FontHash, Style> ComboBox<I, FontHash, Style>
     }
 
     #[inline(always)]
+    pub fn hide(&mut self, vertices: &mut [Vertex]) {
+        hide_vertices(vertices, self.rect_vertex_range);
+        hide_vertices(vertices, self.active_outline_vertex_range);
+        hide_vertices(vertices, self.focused_outline_vertex_range);
+        hide_vertices(vertices, self.arrow_vertex_range);
+    }
+
+    #[inline(always)]
     fn content_requires_triangulation(&self) -> bool {
         self.flags & Self::CONTENT_REQUIRES_TRIANGULATION == Self::CONTENT_REQUIRES_TRIANGULATION
     }
@@ -304,7 +312,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
         self.prev_active_tags.retain(|v| !self.active_tags.contains(v));
         self.combined_text.clear();
         for tag in &self.prev_active_tags {
-            let (_, widget) = &self.selectable_tags[tag];
+            let (_, widget) = self.selectable_tags.get_mut(tag).unwrap();
             widget.hide(&mut self.content_vertices);
         }
         let item_pad_inner = style.item_pad_inner();
@@ -566,8 +574,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
         &self,
         _render_commands: &mut RenderCommands,
         _style: &Style,
-        _base_pipeline_id: GraphicsPipelineId,
-        _text_pipeline_id: GraphicsPipelineId,
+        _base_pipeline: GraphicsPipelineId,
+        _text_pipeline: GraphicsPipelineId,
+        _texture_pipeline: GraphicsPipelineId,
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
         _window_pos: Vec2,
@@ -585,13 +594,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
     }
 
     fn hide(
-        &self,
+        &mut self,
         vertices: &mut [Vertex],
-    ) {
-        hide_vertices(vertices, self.rect_vertex_range);
-        hide_vertices(vertices, self.active_outline_vertex_range);
-        hide_vertices(vertices, self.focused_outline_vertex_range);
-        hide_vertices(vertices, self.arrow_vertex_range);
+        _window_semaphore: (TimelineSemaphoreId, u64),
+        _global_resources: &mut GlobalResources,
+        _tmp_alloc: &alloc::arena_alloc::ArenaGuard,
+    ) -> Result<(), Error> {
+        self.hide(vertices);
+        Ok(())
     }
 }
 
@@ -606,8 +616,9 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for ComboBox<I, FontH
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
-        base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
+        _texture_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
@@ -631,7 +642,7 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for ComboBox<I, FontH
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), index_count);
         }
-        render_commands.bind_pipeline(base_pipeline_id)?;
+        render_commands.bind_pipeline(base_pipeline)?;
         let pc_vertex = push_constants_vertex(
             window_pos,
             vec2(1.0, 1.0),
@@ -659,7 +670,7 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for ComboBox<I, FontH
             ],
             DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
         )?;
-        render_commands.bind_pipeline(text_pipeline_id)?;
+        render_commands.bind_pipeline(text_pipeline)?;
         let pc_vertex = push_constants_vertex(
             window_pos, vec2(style.font_scale(), style.font_scale()),
             inv_aspect_ratio, unit_scale,

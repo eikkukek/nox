@@ -1,9 +1,14 @@
+use std::{
+    fs,
+    rc::Rc
+};
+
 use rustc_hash::FxHashMap;
 
 use nox::{
+    alloc::arena_alloc::{ArenaAlloc, ArenaGuard},
     mem::{
-        vec_types::{GlobalVec, Vector},
-        Allocator,
+        Allocator, vec_types::{GlobalVec, Vector}
     },
     *
 };
@@ -12,7 +17,10 @@ use nox_font::{text_segment, Face, VertexTextRenderer};
 
 use nox_geom::*;
 
-use crate::*;
+use crate::{
+    image::ImageSourceInternal,
+    *
+};
 
 pub(crate) const COLOR_PICKER_PIPELINE_HASH: &str = "nox_gui color picker";
 pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: &str = "nox_gui color picker hue";
@@ -71,6 +79,54 @@ impl CustomPipeline {
     }
 }
 
+pub struct ImageLoader {
+    images: FxHashMap<std::path::PathBuf, (std::time::SystemTime, Rc<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>>)>,
+}
+
+impl ImageLoader {
+
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            images: FxHashMap::default(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn load_image(&mut self, path: &std::path::PathBuf) -> ImageSourceInternal {
+        if let Some((last_modified, source)) = self.images.get_mut(path) {
+            if let Ok(meta) = fs::metadata(path) {
+                if let Ok(modified) = meta.modified() {
+                    if modified == *last_modified {
+                        return ImageSourceInternal::Path(source.clone())
+                    }
+                    if let Ok(new_img) = load_rgba_image(path) {
+                        *source = Rc::new(new_img);
+                        *last_modified = modified;
+                    } else {
+                        return ImageSourceInternal::Err
+                    }
+                }
+            }
+            return ImageSourceInternal::Err
+        }
+        if let Ok(meta) = fs::metadata(path) {
+            if let Ok(modified) = meta.modified() {
+                if let Ok(new_img) = load_rgba_image(path) {
+                    return ImageSourceInternal::Path(
+                        self.images
+                            .entry(path.clone())
+                            .or_insert((modified, Rc::new(new_img)))
+                            .1
+                            .clone()
+                    )
+                }
+            }
+        }
+        ImageSourceInternal::Err
+    }
+}
+
 pub struct Workspace<'a, I, FontHash, Style>
     where
         I: Interface,
@@ -85,6 +141,10 @@ pub struct Workspace<'a, I, FontHash, Style>
     active_windows: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
+    tmp_alloc: ArenaAlloc,
+    image_loader: ImageLoader,
+    device_alloc: Option<LinearDeviceAllocId>,
+    device_alloc_block_size: u64,
     base_pipelines: BasePipelines,
     custom_pipelines: FxHashMap<CompactString, CustomPipeline>,
     frame: u64,
@@ -121,6 +181,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         fonts: impl IntoIterator<Item = (FontHash, Face<'a>)>,
         style: Style,
         font_curve_tolerance: f32,
+        device_alloc_block_size: u64,
     ) -> Self
     {
         let mut text_renderer = VertexTextRenderer::new(fonts, font_curve_tolerance);
@@ -134,6 +195,10 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
             active_windows: Default::default(),
             vertex_buffer: None,
             index_buffer: None,
+            tmp_alloc: ArenaAlloc::new(1 << 16).unwrap(),
+            image_loader: ImageLoader::new(),
+            device_alloc: None,
+            device_alloc_block_size,
             base_pipelines: Default::default(),
             custom_pipelines: FxHashMap::default(),
             frame: 0,
@@ -470,7 +535,13 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
             initial_size,
         ));
         window.set_last_frame(self.frame);
-        f(&mut WindowContext::new(title, window, &self.style, &mut self.text_renderer));
+        f(&mut WindowContext::new(
+            title,
+            window,
+            &self.style,
+            &mut self.text_renderer,
+            &mut self.image_loader,
+        ));
         if !self.active_windows.contains(&id) {
             self.active_windows.push(id);
         }
@@ -480,6 +551,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
     pub fn end(
         &mut self,
         nox: &mut Nox<I>,
+        renderer: &mut RendererContext,
     ) -> Result<(), Error>
     {
         if !self.began() {
@@ -506,8 +578,10 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         let mut window_pressed = None;
         for (i, id) in self.active_windows.iter_mut().enumerate().rev() {
             let window = self.windows.get_mut(id).unwrap();
+            let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
             let cursor_in_window = window.update(
                 nox,
+                renderer,
                 &self.style,
                 &mut self.text_renderer,
                 cursor_pos,
@@ -516,6 +590,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 window_size,
                 aspect_ratio,
                 unit_scale,
+                tmp_alloc,
             )?;
             if cursor_in_window && nox.was_mouse_button_pressed(MouseButton::Left) {
                 window_pressed = Some(i);
@@ -543,14 +618,8 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         resolve_image: (Option<(ResourceId, ResolveMode)>, Option<ImageRangeInfo>),
         load_op: AttachmentLoadOp,
         clear_value: ClearColorValue,
-        sampler: SamplerId,
     ) -> Result<(), Error>
     {
-        let Some(texture_pipeline_layout) = self.base_pipelines.texture_pipeline_layout else {
-            return Err(Error::UserError(
-                "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
-            ))
-        };
         let mut reads = GlobalVec::new();
         let mut signal_semaphores = GlobalVec::new();
         let output_samples = self.output_samples;
@@ -563,17 +632,14 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                     frame_graph,
                     output_samples,
                     output_format,
-                    texture_pipeline_layout,
-                    sampler,
                     resolve_image.0.map(|v| v.1),
-                    &GlobalAlloc,
-                    |read| {
+                    &mut |read| {
                         reads.push(read);
                     },
-                    |id, value| {
+                    &mut |id, value| {
                         signal_semaphores.push((id, value));
                     },
-                    |pass| {
+                    &mut |pass| {
                         self.window_passes.insert(pass, id);
                     },
                 )?;
@@ -610,6 +676,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         &mut self,
         render_commands: &mut RenderCommands,
         pass_id: PassId,
+        sampler: SamplerId,
     ) -> Result<(), Error>
     {
         if self.vertex_buffer.is_none() {
@@ -622,13 +689,34 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         };
         let text_pipeline = self.base_pipelines.text_pipeline.unwrap();
         let texture_pipeline = self.base_pipelines.texture_pipeline.unwrap();
+        let texture_pipeline_layout = self.base_pipelines.texture_pipeline_layout.unwrap();
         let inv_aspect_ratio = self.inv_aspect_ratio;
         let unit_scale = self.unit_scale;
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
         if pass_id == self.main_pass_id {
+            let device_alloc = self.device_alloc.unwrap();
+            unsafe {
+                render_commands.reset_linear_device_alloc(device_alloc)?;
+            }
+            let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
+            render_commands.synced_transfer_commands(
+                device_alloc,
+                |cmd| {
+                    for id in &self.active_windows {
+                        let window = self.windows.get_mut(id).unwrap();
+                        window.transfer_commands(
+                            cmd, sampler,
+                            texture_pipeline_layout,
+                            &tmp_alloc,
+                        )?;
+                    }
+                    Ok(())
+                },
+            )?;
             for id in &self.active_windows {
-                self.windows.get_mut(id).unwrap().render_commands(
+                let window = self.windows.get_mut(id).unwrap();
+                window.render_commands(
                     render_commands,
                     &self.style,
                     pass_id,
@@ -699,6 +787,9 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 buffered_frames,
                 self.ring_buffer_size,
             )?);
+            self.device_alloc = Some(
+                r.create_default_linear_device_alloc_mappable(self.device_alloc_block_size)?
+            );
             Ok(())
         })?;
         Ok(())

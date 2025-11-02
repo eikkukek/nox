@@ -6,6 +6,7 @@ use core::{
 };
 
 use nox::{
+    alloc::arena_alloc::ArenaGuard,
     mem::vec_types::{GlobalVec, Vector},
     *,
 };
@@ -144,6 +145,15 @@ impl<I, FontHash, Style> Slider<I, FontHash, Style>
             self.t = value.calc_t(min, max);
             self.quantized_t = self.t;
         }
+    }
+
+    #[inline(always)]
+    pub fn hide(&mut self, vertices: &mut [Vertex]) {
+        hide_vertices(vertices, self.slider_rect_vertex_range);
+        hide_vertices(vertices, self.handle_rect_vertex_range);
+        hide_vertices(vertices, self.active_handle_outline_vertex_range);
+        hide_vertices(vertices, self.regular_handle_outline_vertex_range);
+        self.drag_value.hide(vertices);
     }
 }
 
@@ -362,8 +372,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
-        base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
+        texture_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
@@ -374,7 +385,8 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
     ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
     {
         self.drag_value.render_commands(
-            render_commands, style, base_pipeline_id, text_pipeline_id,
+            render_commands, style, base_pipeline, text_pipeline,
+            texture_pipeline,
             vertex_buffer, index_buffer,
             window_pos, content_area,
             inv_aspect_ratio, unit_scale, get_custom_pipeline,
@@ -382,14 +394,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
     }
 
     fn hide(
-        &self,
+        &mut self,
         vertices: &mut [Vertex],
-    ) {
-        hide_vertices(vertices, self.slider_rect_vertex_range);
-        hide_vertices(vertices, self.handle_rect_vertex_range);
-        hide_vertices(vertices, self.active_handle_outline_vertex_range);
-        hide_vertices(vertices, self.regular_handle_outline_vertex_range);
-        self.drag_value.hide(vertices);
+        _window_semaphore: (TimelineSemaphoreId, u64),
+        _global_resources: &mut GlobalResources,
+        _tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error> {
+        self.hide(vertices);
+        Ok(())
     }
 }
 

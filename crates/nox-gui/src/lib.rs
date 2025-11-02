@@ -1,3 +1,5 @@
+#[macro_use]
+
 mod ring_buffer;
 mod shaders;
 mod color;
@@ -16,6 +18,7 @@ mod selectable_tag;
 mod combo_box;
 mod hover_window;
 mod scroll_bar;
+pub mod image;
 mod window;
 mod workspace;
 
@@ -45,4 +48,5 @@ pub use color_picker::ColorPicker;
 pub use radio_button::RadioButton;
 pub use selectable_tag::SelectableTag;
 pub use combo_box::{ComboBox, ComboBoxBuilder};
+pub use image::{Image, ImageSource};
 pub use helpers::*;

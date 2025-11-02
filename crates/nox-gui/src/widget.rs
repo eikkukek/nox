@@ -1,8 +1,7 @@
 use core::hash::Hash;
 
 use nox::{
-    mem::vec_types::GlobalVec,
-    *,
+    alloc::arena_alloc::ArenaGuard, mem::{vec_types::GlobalVec}, *
 };
 
 use nox_font::{RenderedText, VertexTextRenderer};
@@ -38,8 +37,9 @@ pub trait HoverContents<I, FontHash, Style: WindowStyle<FontHash>>
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
-        base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
+        texture_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
@@ -139,12 +139,26 @@ pub trait Widget<I, FontHash, Style>
         vertices: &mut [Vertex],
     );
 
+    #[allow(unused_variables)]
+    fn render(
+        &mut self,
+        frame_graph: &mut dyn FrameGraph,
+        msaa_samples: MSAA,
+        render_format: ColorFormat,
+        resolve_mode: Option<ResolveMode>,
+        add_read: &mut dyn FnMut(ReadInfo),
+        add_signal_semaphore: &mut dyn FnMut(TimelineSemaphoreId, u64),
+        add_pass: &mut dyn FnMut(PassId),
+    ) -> Result<(), Error> { Ok(()) }
+
+    #[allow(unused_variables)]
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
-        base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
+        texture_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
@@ -152,10 +166,23 @@ pub trait Widget<I, FontHash, Style>
         inv_aspect_ratio: f32,
         unit_scale: f32,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>;
+    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error> { Ok(None) }
+
+    #[allow(unused_variables)]
+    fn transfer_commands(
+        &mut self,
+        transfer_commands: &mut TransferCommands,
+        window_semaphore: Option<(TimelineSemaphoreId, u64)>,
+        sampler: SamplerId,
+        texture_pipeline_layout: PipelineLayoutId,
+        tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error> { Ok(()) }
 
     fn hide(
-        &self,
+        &mut self,
         vertices: &mut [Vertex],
-    );
+        window_semaphore: (TimelineSemaphoreId, u64),
+        global_resources: &mut GlobalResources,
+        tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error>;
 }

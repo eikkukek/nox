@@ -3,7 +3,7 @@ use core::{
     fmt::Write,
 };
 
-use nox::{mem::vec_types::Vector, *};
+use nox::{alloc::arena_alloc::ArenaGuard, mem::vec_types::Vector, *};
 
 use nox_font::RenderedText;
 use nox_geom::*;
@@ -138,6 +138,13 @@ impl<I, FontHash, Style> DragValue<I, FontHash, Style>
             T: Sliderable
     {
         self.input_text.set_input_sliderable(style, value);
+    }
+
+    #[inline(always)]
+    pub fn hide(&mut self, vertices: &mut [Vertex]) {
+        hide_vertices(vertices, self.focused_outline_vertex_range);
+        hide_vertices(vertices, self.active_outline_vertex_range);
+        self.input_text.hide(vertices);
     }
 
     #[inline(always)]
@@ -328,8 +335,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
-        base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
+        texture_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
@@ -340,19 +348,21 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
     ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
     {
         self.input_text.render_commands(
-            render_commands, style, base_pipeline_id,
-            text_pipeline_id, vertex_buffer, index_buffer,
+            render_commands, style, base_pipeline,
+            text_pipeline, texture_pipeline, vertex_buffer, index_buffer,
             window_pos, content_area, inv_aspect_ratio, unit_scale, get_custom_pipeline
         )
     }
 
     #[inline(always)]
     fn hide(
-        &self,
+        &mut self,
         vertices: &mut [Vertex],
-    ) {
-        hide_vertices(vertices, self.focused_outline_vertex_range);
-        hide_vertices(vertices, self.active_outline_vertex_range);
-        self.input_text.hide(vertices);
+        _window_semaphore: (TimelineSemaphoreId, u64),
+        _global_resources: &mut GlobalResources,
+        _tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error> {
+        self.hide(vertices);
+        Ok(())
     }
 }

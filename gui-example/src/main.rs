@@ -96,7 +96,7 @@ impl<'a> Interface for Example<'a> {
             Default::default(),
             [540, 540],
             true,
-            false,
+            true,
         )
     }
 
@@ -124,7 +124,12 @@ impl<'a> Interface for Example<'a> {
                     File::create_new(&self.cache_dir)?;
                     r.create_pipeline_cache(None)?
                 };
-            self.sampler = r.create_sampler(|_| {})?;
+            self.sampler = r.create_sampler(|builder| {
+                builder
+                    .with_mag_filter(Filter::Linear)
+                    .with_min_filter(Filter::Linear)
+                    .max_lod_clamp_none();
+            })?;
             Ok(())
         })?;
         self.workspace
@@ -168,7 +173,7 @@ impl<'a> Interface for Example<'a> {
     fn update(
         &mut self,
         nox: &mut Nox<Self>,
-        _renderer: &mut RendererContext,
+        renderer: &mut RendererContext,
     ) -> Result<(), Error> {
         self.workspace.begin(nox)?;
         self.workspace.window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
@@ -188,6 +193,9 @@ impl<'a> Interface for Example<'a> {
                     win.tag("Color picker");
                     win.end_row();
 
+                    let image_source = image_source!("ferris.png");
+                    let image_size = win.calc_font_height() * 4.0;
+                    win.image(&image_source, geom::vec2(image_size, image_size));
                     if win.button("Print \"hello\"") {
                         println!("hello");
                     }
@@ -278,7 +286,7 @@ impl<'a> Interface for Example<'a> {
             })?;
         }
         self.tag_color.hue = (self.tag_color.hue + core::f32::consts::PI * nox.delta_time_secs_f32()) % core::f32::consts::TAU;
-        self.workspace.end(nox)?;
+        self.workspace.end(nox, renderer)?;
         Ok(())
     }
 
@@ -296,7 +304,6 @@ impl<'a> Interface for Example<'a> {
             (output, None), (Some((output_resolve, ResolveMode::Average)), None),
             AttachmentLoadOp::Clear,
             Default::default(),
-            self.sampler,
         )?;
         frame_graph.set_render_image(output_resolve, None)?;
         Ok(())
@@ -310,6 +317,7 @@ impl<'a> Interface for Example<'a> {
         self.workspace.render_commands(
             commands,
             pass_id,
+            self.sampler,
         )?;
         Ok(())
     }
@@ -346,6 +354,7 @@ fn main() {
             [("regular", font::Face::parse(&font, 0).unwrap())], 
             DefaultStyle::new("regular"),
             0.1,
+            1 << 26
         ));
     Nox::new(example, &mut Default::default()).run();
 }

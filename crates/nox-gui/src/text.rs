@@ -10,6 +10,7 @@ use nox_geom::{
 };
 
 use nox::{
+    alloc::arena_alloc::ArenaGuard,
     mem::{
         vec_types::{GlobalVec, Vector},
     },
@@ -775,8 +776,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         &self,
         render_commands: &mut RenderCommands,
         _style: &Style,
-        base_pipeline_id: GraphicsPipelineId,
-        _text_pipeline_id: GraphicsPipelineId,
+        base_pipeline: GraphicsPipelineId,
+        _text_pipeline: GraphicsPipelineId,
+        _texture_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
@@ -806,7 +808,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), index_count);
         }
-        render_commands.bind_pipeline(base_pipeline_id)?;
+        render_commands.bind_pipeline(base_pipeline)?;
         let pc_vertex = push_constants_vertex(
             window_pos + self.base_offset,
             vec2(1.0, 1.0), inv_aspect_ratio, unit_scale
@@ -836,7 +838,10 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
     }
 
     fn hide(
-        &self,
+        &mut self,
         _vertices: &mut [Vertex],
-    ) {}
+        _window_semaphore: (TimelineSemaphoreId, u64),
+        _global_resources: &mut GlobalResources,
+        _tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error> { Ok(()) }
 }

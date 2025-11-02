@@ -54,7 +54,7 @@ pub struct BoundedTextInstance {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct PushConstantsVertex{
+pub struct PushConstantsVertex {
     pub vert_off: Vec2,
     pub scale: Vec2,
     pub inv_aspect_ratio: f32,
@@ -227,7 +227,8 @@ pub const BASE_FRAGMENT_SHADER: &'static str = "
 pub const TEXTURE_VERTEX_SHADER: &'static str = "
     #version 450
 
-    layout(location = 0) out vec2 out_uv;
+    layout(location = 0) out vec2 out_pos;
+    layout(location = 1) out vec2 out_uv;
 
     layout(push_constant) uniform PushConstant {
         vec2 vert_off;
@@ -238,11 +239,11 @@ pub const TEXTURE_VERTEX_SHADER: &'static str = "
 
     vec2 positions[6] = vec2[](
         vec2(1.0, 1.0),
-        vec2(-1.0, 1.0),
-        vec2(-1.0, -1.0),
-        vec2(1.0, -1.0),
+        vec2(0.0, 1.0),
+        vec2(0.0, 0.0),
+        vec2(1.0, 0.0),
         vec2(1.0, 1.0),
-        vec2(-1.0, -1.0)
+        vec2(0.0, 0.0)
 
     );
 
@@ -258,11 +259,12 @@ pub const TEXTURE_VERTEX_SHADER: &'static str = "
     void main() {
         int vertex_index = gl_VertexIndex;
         vec2 pos = positions[vertex_index];
-        //pos.x *= pc.scale.x;
-        //pos.y *= pc.scale.y;
-        //pos *= pc.unit_scale;
-        //pos += pc.vert_off;
-        //pos.x *= pc.inv_aspect_ratio;
+        pos.x *= pc.scale.x;
+        pos.y *= pc.scale.y;
+        out_pos = pos + pc.vert_off;
+        pos *= pc.unit_scale;
+        pos += pc.vert_off * pc.unit_scale;
+        pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
         out_uv = uvs[vertex_index];
     }
@@ -271,14 +273,29 @@ pub const TEXTURE_VERTEX_SHADER: &'static str = "
 pub const TEXTURE_FRAGMENT_SHADER: &'static str = "
     #version 450
 
-    layout(location = 0) in vec2 in_uv;
+    layout(location = 0) in vec2 in_pos;
+    layout(location = 1) in vec2 in_uv;
 
     layout(location = 0) out vec4 out_color;
 
     layout(set = 0, binding = 0) uniform sampler2D render_image;
 
+    layout(push_constant) uniform PushConstant {
+        layout(offset = 32) vec2 min_bounds;
+        vec2 max_bounds;
+    } pc;
+
+    bool in_rect() {
+        return pc.min_bounds.x < in_pos.x && pc.max_bounds.x > in_pos.x &&
+            pc.min_bounds.y < in_pos.y && pc.max_bounds.y > in_pos.y;
+    }
+
     void main() {
-        out_color = texture(render_image, in_uv);
+        if (in_rect()) {
+            out_color = texture(render_image, in_uv);
+        } else {
+            out_color = vec4(0.0);
+        }
     }
 ";
 

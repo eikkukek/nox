@@ -6,6 +6,7 @@ use core::{
 };
 
 use nox::{
+    alloc::arena_alloc::ArenaGuard,
     mem::vec_types::{GlobalVec, Vector},
     *
 };
@@ -821,8 +822,9 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
-        base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
+        texture_pipeline: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
@@ -853,7 +855,7 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
                 .as_ptr()
                 .copy_to_nonoverlapping(index_mem.ptr.as_ptr(), index_count);
         }
-        render_commands.bind_pipeline(base_pipeline_id)?;
+        render_commands.bind_pipeline(base_pipeline)?;
         let pc_vertex = push_constants_vertex(
             window_pos,
             vec2(1.0, 1.0),
@@ -959,7 +961,7 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
             [vertex_buffer_info],
             index_buffer_info
         )?;
-        render_commands.bind_pipeline(base_pipeline_id)?;
+        render_commands.bind_pipeline(base_pipeline)?;
         let pc_vertex = push_constants_vertex(
             window_pos,
             vec2(1.0, 1.0),
@@ -985,8 +987,8 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
         let content_area = BoundingRect::from_min_max(vec2(f32::MIN, f32::MIN), vec2(f32::MAX, f32::MAX));
         let mut f = |drag_value: &DragValue<I, FontHash, Style>| -> Result<(), Error> {
             drag_value.render_commands(
-                render_commands, style, base_pipeline_id,
-                text_pipeline_id, vertex_buffer, index_buffer,
+                render_commands, style, base_pipeline,
+                text_pipeline, texture_pipeline, vertex_buffer, index_buffer,
                 window_pos, content_area,
                 inv_aspect_ratio, unit_scale, get_custom_pipeline,
             )?;
@@ -1001,7 +1003,7 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
         let pc_vertex = push_constants_vertex(
             window_pos, vec2(font_scale, font_scale), inv_aspect_ratio, unit_scale
         );
-        render_commands.bind_pipeline(text_pipeline_id)?;
+        render_commands.bind_pipeline(text_pipeline)?;
         render_text(render_commands,
             self.combined_text
                 .iter()
@@ -1066,6 +1068,11 @@ impl<I, FontHash, Style> ColorPicker<I, FontHash, Style>
         self.color_fmt.clear();
         write!(self.color_fmt, "{}", color).ok();
         color
+    }
+
+    #[inline(always)]
+    pub fn hide(&mut self, vertices: &mut [Vertex]) {
+        hide_vertices(vertices, self.color_rect_vertex_range);
     }
 }
 
@@ -1238,8 +1245,9 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         &self,
         _render_commands: &mut RenderCommands,
         _style: &Style,
-        _base_pipeline_id: GraphicsPipelineId,
-        _text_pipeline_id: GraphicsPipelineId,
+        _base_pipeline: GraphicsPipelineId,
+        _text_pipeline: GraphicsPipelineId,
+        _texture_pipeline: GraphicsPipelineId,
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
         _window_pos: Vec2,
@@ -1257,15 +1265,14 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
     }
 
     fn hide(
-        &self,
+        &mut self,
         vertices: &mut [Vertex],
-    )
+        _window_semaphore: (TimelineSemaphoreId, u64),
+        _global_resources: &mut GlobalResources,
+        _tmp_alloc: &ArenaGuard,
+    ) -> Result<(), Error>
     {
-        let vertex_sample = vertices[self.color_rect_vertex_range.start()];
-        if vertex_sample.color.alpha != 0.0 {
-            for vertex in &mut vertices[self.color_rect_vertex_range.range()] {
-                vertex.color = ColorSRGBA::black(0.0);
-            }
-        }
+        self.hide(vertices);
+        Ok(())
     }
 }

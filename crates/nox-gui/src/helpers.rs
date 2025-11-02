@@ -133,6 +133,21 @@ pub fn norm_off_to_off(norm_off: Vec2, unit_scale: f32, aspect_ratio: f32) -> Ve
 }
 
 #[inline(always)]
+pub fn calc_texture_push_constants_vertex(
+    pos: Vec2,
+    size: Vec2,
+    inv_aspect_ratio: f32,
+    unit_scale: f32,
+) -> PushConstantsVertex {
+    PushConstantsVertex {
+        vert_off: pos,
+        scale: size,
+        inv_aspect_ratio,
+        unit_scale,
+    }
+}
+
+#[inline(always)]
 pub fn calc_bounds(
     window_pos: Vec2, content_off: Vec2,
     widget_offset: Vec2, window_size: Vec2
@@ -142,6 +157,12 @@ pub fn calc_bounds(
     let min_bounds = window_pos + offset.min(window_size);
     let max_bounds = min_bounds + window_size - offset;
     (min_bounds, max_bounds)
+}
+
+#[inline(always)]
+pub fn load_rgba_image(path: &std::path::Path) -> Result<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>, ::image::ImageError> {
+    let image = ::image::ImageReader::open(path)?.decode()?;
+    Ok(image.to_rgba8())
 }
 
 #[macro_export]
