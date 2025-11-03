@@ -35,10 +35,10 @@ pub struct VertexTextRenderer<'a, H: Clone + PartialEq + Eq + Hash> {
 
 impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
 
-    pub fn new(fonts: impl IntoIterator<Item = (H, Face<'a>)>, curve_tolerance: f32) -> Self {
+    pub fn new(fonts: impl IntoIterator<Item = (impl Into<H>, Face<'a>)>, curve_tolerance: f32) -> Self {
         let mut faces = FxHashMap::default();
         for face in fonts {
-            faces.insert(face.0, FaceCache { face: face.1, trigs: Default::default(), offsets: Default::default() });
+            faces.insert(face.0.into(), FaceCache { face: face.1, trigs: Default::default(), offsets: Default::default() });
         }
         Self {
             faces,
