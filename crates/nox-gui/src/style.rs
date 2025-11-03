@@ -10,6 +10,12 @@ use nox_geom::*;
 
 use crate::*;
 
+pub struct InteractVisuals {
+    pub bg_col: ColorSRGBA,
+    pub bg_stroke: Option<Stroke>,
+    pub fg_stroke: Stroke,
+}
+
 pub trait WindowStyle {
 
     fn font_regular(&self) -> &CompactString;
@@ -40,8 +46,18 @@ pub trait WindowStyle {
     }
 
     #[inline(always)]
-    fn inactive_widget_outline_col(&self) -> ColorSRGBA {
-        DEFAULT_INACTIVE_WIDGET_OUTLINE_COL
+    fn inactive_widget_fg_col(&self) -> ColorSRGBA {
+        DEFAULT_INACTIVE_TEXT_COL
+    }
+
+    #[inline(always)]
+    fn focused_widget_fg_col(&self) -> ColorSRGBA {
+        DEFAULT_FOCUSED_TEXT_COL
+    }
+
+    #[inline(always)]
+    fn active_widget_fg_col(&self) -> ColorSRGBA {
+        DEFAULT_ACTIVE_TEXT_COL
     }
 
     #[inline(always)]
@@ -110,6 +126,44 @@ pub trait WindowStyle {
     }
 
     #[inline(always)]
+    fn interact_visuals(&self, reaction: &Reaction) -> InteractVisuals {
+        if reaction.held() {
+            InteractVisuals {
+                bg_col: self.widget_bg_col(),
+                bg_stroke: Some(Stroke {
+                    col: self.active_widget_outline_col(),
+                    thickness: self.active_widget_outline_width()
+                }),
+                fg_stroke: Stroke {
+                    col: self.active_widget_fg_col(),
+                    thickness: self.active_widget_outline_width(),
+                },
+            }
+        } else if reaction.hovered() {
+            InteractVisuals {
+                bg_col: self.widget_bg_col(),
+                bg_stroke: Some(Stroke {
+                    col: self.focused_widget_outline_col(),
+                    thickness: self.focused_widget_outline_width(),
+                }),
+                fg_stroke: Stroke {
+                    col: self.focused_widget_fg_col(),
+                    thickness: self.focused_widget_outline_width(),
+                },
+            }
+        } else {
+            InteractVisuals {
+                bg_col: self.widget_bg_col(),
+                bg_stroke: None,
+                fg_stroke: Stroke {
+                    col: self.inactive_widget_fg_col(),
+                    thickness: self.active_widget_outline_width(),
+                },
+            }
+        }
+    }
+
+    #[inline(always)]
     fn get_checkmark_points(
         &self,
         text_renderer: &mut TextRenderer, 
@@ -144,7 +198,7 @@ pub trait WindowStyle {
 
     #[inline(always)]
     fn item_pad_inner(&self) -> Vec2 {
-        vec2(0.01, 0.008)
+        vec2(0.007, 0.005)
     }
 
     #[inline(always)]
@@ -199,12 +253,12 @@ pub trait WindowStyle {
 
     #[inline(always)]
     fn focused_widget_outline_width(&self) -> f32 {
-        0.001
+        0.002
     }
 
     #[inline(always)]
     fn active_widget_outline_width(&self) -> f32 {
-        0.002
+        0.0026
     }
 
     #[inline(always)]
@@ -386,19 +440,19 @@ const DEFAULT_SELECTION_COL: ColorSRGBA =
     ColorSRGBA::new(20.0 / 255.0, 41.0 / 255.0, 56.0 / 255.0, 1.0);
 
 const DEFAULT_INACTIVE_TEXT_COL: ColorSRGBA =
-    ColorSRGBA::new(194.0 / 255.0, 212.0 / 255.0, 214.0 / 255.0, 0.6);
+    ColorSRGBA::new(194.0 / 255.0, 212.0 / 256.0, 214.0 / 255.0, 0.5);
 
 const DEFAULT_FOCUSED_TEXT_COL: ColorSRGBA =
-    DEFAULT_INACTIVE_TEXT_COL.with_alpha(1.0);
+    DEFAULT_INACTIVE_TEXT_COL.with_alpha(0.8);
 
 const DEFAULT_ACTIVE_TEXT_COL: ColorSRGBA =
     ColorSRGBA::white(1.0);
 
-const DEFAULT_INACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_INACTIVE_TEXT_COL;
+const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(65.0 / 255.0, 95.0 / 255.0, 98.0 / 255.0, 1.0);
 
-const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_FOCUSED_TEXT_COL;
-
-const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA = DEFAULT_ACTIVE_TEXT_COL;
+const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA =
+    ColorSRGBA::new(82.0 / 255.0, 118.0 / 255.0, 122.0 / 255.0, 1.0);
 
 const DEFAULT_HOVER_WINDOW_BG_COL: ColorSRGBA =
     ColorSRGBA::new(6.0 / 255.0, 9.0 / 255.0, 9.0 / 255.0, 1.0);

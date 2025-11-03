@@ -23,6 +23,7 @@ impl Reaction {
     const CLICKED: u32 = 0x1;
     const HELD: u32 = 0x2;
     const HOVERED: u32 = 0x4;
+    const ANIMATED_BOOL: u32 = 0x8;
 
     #[inline(always)]
     pub fn new(
@@ -58,6 +59,16 @@ impl Reaction {
     }
 
     #[inline(always)]
+    pub fn animated_bool(&self) -> bool {
+        self.flags & Self::ANIMATED_BOOL == Self::ANIMATED_BOOL
+    }
+
+    #[inline(always)]
+    pub fn enable_animated_bool(&mut self) {
+        self.flags |= Self::ANIMATED_BOOL;
+    }
+
+    #[inline(always)]
     pub fn get_size(&self) -> Vec2 {
         self.size
     }
@@ -85,8 +96,9 @@ impl Reaction {
         window_pos: Vec2,
         cursor_in_window: bool,
         hover_blocked: bool,
-    ) -> Option<CompactString> {
-        self.flags &= !(Self::HELD | Self::HOVERED);
+    ) -> Option<CompactString>
+    {
+        self.flags &= !(Self::CLICKED | Self::HOVERED | Self::ANIMATED_BOOL);
         let cursor_in_self = BoundingRect::from_position_size(
             window_pos + self.offset, self.size
         ).is_point_inside(cursor_pos);
@@ -96,7 +108,8 @@ impl Reaction {
                 or_flag!(self.flags, Self::CLICKED, cursor_in_self);
             }
         } else if cursor_in_self && !hover_blocked && cursor_in_window {
-            or_flag!(self.flags, Self::HOVERED, cursor_in_self);
+            self.flags |= Self::HOVERED;
+            or_flag!(self.flags, Self::HELD, nox.was_mouse_button_pressed(MouseButton::Left));
         }
         if self.hovered() {
             if let Some(hover_text) = self.hover_text.take() {

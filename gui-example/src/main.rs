@@ -3,12 +3,50 @@ use std::{
 };
 
 use memmap2::Mmap;
+
 use nox::{
     linear_device_alloc::LinearDeviceAlloc,
     *
 };
 
-use nox_gui::*;
+use nox_gui::{geom::{shapes::circle, *}, *};
+
+pub fn my_widget_show<I: Interface, Style: WindowStyle>(
+    win: &mut WindowContext<I, Style>,
+    value: &mut bool,
+) -> Reaction {
+    let size = win.standard_interact_height() * vec2(2.0, 1.0);
+    let (reaction, mut rect) = win.reaction_from_value(
+        value, size,
+    );
+    if reaction.clicked() {
+        *value = !*value;
+    }
+    let size = rect.size();
+    let radius = size.y * 0.5;
+    rect.rounding = radius;
+    let visuals = win.style().interact_visuals(&reaction);
+    let mut center = rect.min + vec2(radius, radius);
+    let t = win.animate_bool(reaction.id, *value);
+    center.x += lerp(0.0, size.x - radius * 2.0, t);
+    win
+        .painter()
+        .rect(rect, visuals.bg_col, visuals.bg_stroke)
+        .circle(
+            circle(center, radius * 0.75),
+            18,
+            visuals.bg_col,
+            Some(visuals.fg_stroke)
+        );
+    reaction
+}
+
+pub fn my_widget<I: Interface, Style: WindowStyle>(
+    value: &mut bool
+) -> impl FnMut(&mut WindowContext<I, Style>) -> Reaction
+{
+    |win: &mut WindowContext<I, Style>| my_widget_show(win, value)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MyEnum {
@@ -184,7 +222,7 @@ impl<'a> Interface for Example<'a> {
                     win.end_row();
 
                     let image_source = image_source!("ferris.png");
-                    let image_size = win.calc_font_height() * 4.0;
+                    let image_size = win.standard_interact_height() * 2.0;
                     win.image(&image_source, geom::vec2(image_size, image_size));
                     if win.button("Print \"hello\"") {
                         println!("hello");
@@ -241,6 +279,7 @@ impl<'a> Interface for Example<'a> {
                     );
                     win.tag("Drag value");
                     win.end_row();
+                    win.add(my_widget(&mut self.show_other_window));
                 });
                 //win.collapsing("test", |_| {});
             }

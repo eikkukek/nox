@@ -84,6 +84,20 @@ pub fn set_vertex_params(
 }
 
 #[inline(always)]
+pub fn offset_vertices(
+    vertices: &mut [Vertex],
+    range: VertexRange,
+    offset: Vec2,
+) {
+    let vertex_sample = vertices[range.start()];
+    if vertex_sample.offset != offset {
+        for vertex in &mut vertices[range.range()] {
+            vertex.offset = offset;
+        }
+    }
+}
+
+#[inline(always)]
 pub fn color_vertices(
     vertices: &mut [Vertex],
     range: VertexRange,

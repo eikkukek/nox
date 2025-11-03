@@ -351,14 +351,14 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
         if self.held() || self.cursor_in_slider() {
             target_color =
                 if self.held() {
-                    style.active_widget_outline_col()
+                    style.active_widget_fg_col()
                 } else {
-                    style.focused_widget_outline_col()
+                    style.focused_widget_fg_col()
                 };
             set_vertex_params(vertices, self.active_handle_outline_vertex_range, offset, target_color);
             hide_vertices(vertices, self.regular_handle_outline_vertex_range);
         } else {
-            target_color = style.inactive_widget_outline_col();
+            target_color = style.inactive_widget_fg_col();
             set_vertex_params(vertices, self.regular_handle_outline_vertex_range, offset, target_color);
             hide_vertices(vertices, self.active_handle_outline_vertex_range);
         }

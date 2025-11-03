@@ -398,6 +398,7 @@ pub struct Window<I, Style>
     prev_active_widgets: GlobalVec<WidgetId>,
     reactions: FxHashMap<ReactionId, Reaction>,
     active_reactions: FxHashSet<ReactionId>,
+    animated_bools: FxHashMap<ReactionId, (f32, bool)>,
     collapsing_headers: FxHashMap<Hashable<f64>, (u64, CollapsingHeader)>,
     active_collapsing_headers: FxHashSet<Hashable<f64>>,
     prev_active_collapsing_headers: GlobalVec<Hashable<f64>>,
@@ -415,6 +416,7 @@ pub struct Window<I, Style>
     min_size: Vec2,
     scroll_y: f32,
     scroll_x: f32,
+    widget_scroll_off: Vec2,
     focused_outline_width: f32,
     outline_width: f32,
     distance_from_edge: Vec2,
@@ -499,6 +501,7 @@ impl<I, Style> Window<I, Style>
             prev_active_widgets: Default::default(),
             reactions: FxHashMap::default(),
             active_reactions: FxHashSet::default(),
+            animated_bools: FxHashMap::default(),
             collapsing_headers: FxHashMap::default(),
             active_collapsing_headers: Default::default(),
             prev_active_collapsing_headers: Default::default(),
@@ -516,6 +519,7 @@ impl<I, Style> Window<I, Style>
             min_size: vec2(0.0, 0.0),
             scroll_y: 0.0,
             scroll_x: 0.0,
+            widget_scroll_off: Default::default(),
             focused_outline_width: 0.0,
             outline_width: 0.0,
             distance_from_edge: Default::default(),
@@ -851,6 +855,7 @@ impl<I, Style> Window<I, Style>
         }
         self.active_collapsing_headers.clear();
         self.active_reactions.clear();
+        self.painter_storage.clear();
     }
 
     pub fn update(
@@ -894,14 +899,21 @@ impl<I, Style> Window<I, Style>
         let mut widget_off = vec2(0.0, 0.0);
         self.flags &= !(Self::VER_SCROLL_BAR_VISIBLE | Self::HOR_SCROLL_BAR_VISIBLE);
         let mut delta_lines = nox.mouse_scroll_delta_lines();
+        let mut delta_pixels = nox.mouse_scroll_pixel_delta();
         if !style.natural_scroll() {
             delta_lines = (-delta_lines.0, -delta_lines.1);
+            delta_pixels = (-delta_pixels.0, -delta_pixels.1);
         }
         if !self.clamping_height() {
             if min_size.y > size.y {
                 self.flags |= Self::VER_SCROLL_BAR_VISIBLE;
                 if !self.ver_scroll_bar.held() {
-                    let unit_delta = delta_lines.1 as f32 * item_pad_outer.y * style.scroll_speed();
+                    let unit_delta =
+                        if delta_lines.1 != 0.0 {
+                            delta_lines.1 * item_pad_outer.y * style.scroll_speed()
+                        } else {
+                            delta_pixels.1 as f32 / style.pixels_per_unit() * style.scroll_speed()
+                        };
                     self.scroll_y += unit_delta;
                 }
                 self.scroll_y = self.scroll_y.clamp(0.0, 1.0);
@@ -922,7 +934,12 @@ impl<I, Style> Window<I, Style>
             if min_size.x > size.x {
                 self.flags |= Self::HOR_SCROLL_BAR_VISIBLE;
                 if !self.hor_scroll_bar.held() {
-                    let unit_delta = delta_lines.0 as f32 * item_pad_outer.x * style.scroll_speed();
+                    let unit_delta =
+                        if delta_lines.0 != 0.0 {
+                            delta_lines.0 * item_pad_outer.y * style.scroll_speed()
+                        } else {
+                            delta_pixels.0 as f32 / style.pixels_per_unit() * style.scroll_speed()
+                        };
                     self.scroll_x += unit_delta;
                 }
                 self.scroll_x = self.scroll_x.clamp(0.0, 1.0);
@@ -1147,6 +1164,16 @@ impl<I, Style> Window<I, Style>
         let reaction_blocked = hover_blocked || active_widget.is_some() || hovered_widget.is_some();
         for reaction in &self.active_reactions {
             let reaction = self.reactions.get_mut(reaction).unwrap();
+            reaction.offset += widget_off;
+            if reaction.animated_bool() {
+                if let Some((t, value)) = self.animated_bools.get_mut(&reaction.id) {
+                    if *value {
+                        *t = (*t + style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
+                    } else {
+                        *t = (*t - style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
+                    }
+                }
+            }
             if let Some(text) = reaction.update(
                     nox,
                     cursor_pos,
@@ -1158,7 +1185,11 @@ impl<I, Style> Window<I, Style>
                 self.hover_window.update(style, text_renderer, cursor_pos, &text);
                 self.flags |= Self::HOVER_WINDOW_ACTIVE;
             }
+            if reaction.held() {
+                active_widget = Some(self.active_widgets.len());
+            }
         }
+        self.widget_scroll_off = widget_off;
         let ver_scroll_bar_width = self.ver_scroll_bar.calc_width(style);
         let hor_scroll_bar_height = self.hor_scroll_bar.calc_height(style);
         if self.ver_scroll_bar_visible() && !hover_blocked {
@@ -1593,7 +1624,10 @@ impl<I, Style> Window<I, Style>
         let n = painter_vertex_off as u32;
         self.indices.append_map(painter_indices_usize, |&i| n + i as u32);
         self.vertices.append(painter_vertices);
-
+        if !painter_vertices.is_empty() {
+            let range = VertexRange::new(painter_vertex_off..self.vertices.len());
+            offset_vertices(&mut self.vertices, range, self.widget_scroll_off);
+        }
     }
 
     pub fn render(
@@ -2057,8 +2091,16 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     }
 
     #[inline(always)]
-    pub fn calc_font_height(&mut self) -> f32 {
+    pub fn font_height(&mut self) -> f32 {
         self.style.calc_font_height(self.text_renderer)
+    }
+
+    #[inline(always)]
+    pub fn standard_interact_height(&mut self) -> f32 {
+        let font_height = self.font_height();
+        self.style.calc_text_box_height_from_text_height(
+            font_height
+        )
     }
 
     #[inline(always)]
@@ -2072,8 +2114,8 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     }
 
     #[inline(always)]
-    pub fn add(&mut self, reaction: impl Into<Reaction>) -> &mut Reaction {
-        let reaction = reaction.into();
+    pub fn add(&mut self, mut f: impl FnMut(&mut Self) -> Reaction) -> &mut Reaction {
+        let reaction = f(self);
         self.window.reactions.get_mut(&reaction.id).unwrap()
     }
 
@@ -2097,14 +2139,22 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         &mut self,
         value: &T,
         size: Vec2,
-    ) -> Reaction {
+    ) -> (Reaction, Rect) {
         let (reaction, id) = self.window.activate_reaction(value);
         reaction.set_offset(self.widget_off);
+        let rect = Rect::from_position_size(
+            self.widget_off,
+            size,
+            self.style.rounding(),
+        );
         reaction.set_size(size);
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_reactions.push((id, size));
-        reaction.clone()
+        (
+            reaction.clone(),
+            rect,
+        )
     }
 
     pub fn collapsing<F>(&mut self, label: &str, mut f: F)
@@ -2550,6 +2600,33 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_widgets.push((id, size));
+    }
+
+    #[inline(always)]
+    pub fn animate_bool(
+        &mut self,
+        id: ReactionId,
+        value: bool
+    ) -> f32 {
+        if let Some(reaction) = self.window.reactions.get_mut(&id) {
+            reaction.enable_animated_bool();
+            let entry = self.window.animated_bools
+                .entry(id)
+                .or_insert_with(||
+                    (
+                        if value {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                        value,
+                    )
+                );
+            entry.1 = value;
+            entry.0
+        } else {
+            0.0
+        }
     }
 }
 
