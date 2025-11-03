@@ -18,12 +18,7 @@ enum MyEnum {
 }
 
 struct Example<'a> {
-    workspace: Workspace<
-        'a,
-        Self,
-        &'static str,
-        DefaultStyle<&'static str>,
-    >,
+    workspace: Workspace<'a, Self, DefaultStyle>,
     output_format: ColorFormat,
     aspect_ratio: f32,
     slider_value: f32,
@@ -49,12 +44,7 @@ struct Example<'a> {
 impl<'a> Example<'a> {
 
     pub fn new(
-        workspace: Workspace<
-            'a,
-            Self,
-            &'static str,
-            DefaultStyle<&'static str>,
-        >,
+        workspace: Workspace<'a, Self, DefaultStyle>,
     ) -> Self
     {
         let mut cache_dir = std
@@ -96,7 +86,7 @@ impl<'a> Interface for Example<'a> {
             Default::default(),
             [540, 540],
             true,
-            true,
+            false,
         )
     }
 
@@ -250,6 +240,7 @@ impl<'a> Interface for Example<'a> {
                         None,
                     );
                     win.tag("Drag value");
+                    win.end_row();
                 });
                 //win.collapsing("test", |_| {});
             }
