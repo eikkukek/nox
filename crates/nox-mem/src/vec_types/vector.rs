@@ -44,6 +44,13 @@ pub trait Vector<T>:
 
     fn push(&mut self, value: T) -> Result<&mut T, CapacityError>;
 
+    fn extend(&mut self, iter: impl Iterator<Item = T>) -> Result<&mut Self, CapacityError> {
+        for item in iter {
+            self.push(item)?;
+        }
+        Ok(self)
+    }
+
     fn append(&mut self, slice: &[T]) -> Result<(), CapacityError>
         where
             T: Clone;

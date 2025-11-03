@@ -335,6 +335,11 @@ impl<T> GlobalVec<T> {
     }
 
     #[inline(always)]
+    pub fn extend(&mut self, iter: impl Iterator<Item = T>) -> &mut Self {
+        <Self as Vector<T>>::extend(self, iter).unwrap()
+    }
+
+    #[inline(always)]
     pub fn append(&mut self, slice: &[T])
         where
             T: Clone
