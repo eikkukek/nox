@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use core::marker::PhantomData;
 
-use nox_font::{text_segment_owned, RenderedText, TextOffset, TextSegmentOwned, VertexTextRenderer};
+use nox_font::{text_segment_owned, RenderedText, TextOffset, TextSegmentOwned};
 
 use nox_geom::{
     shapes::*,
@@ -69,11 +69,11 @@ impl Text {
     }
 }
 
-pub struct SelectableText<I, FontHash, Style>
+pub struct SelectableText<I, Style>
 {
     text: GlobalVec<Text>,
     selection: Option<(usize, usize)>,
-    text_segment_builders: GlobalVec<TextSegmentBuilder<FontHash>>,
+    text_segment_builders: GlobalVec<TextSegmentBuilder>,
     tool_tip: Option<Rc<CompactString>>,
     selection_vertices: GlobalVec<Vertex>,
     selection_indices: GlobalVec<u32>,
@@ -93,11 +93,10 @@ pub struct SelectableText<I, FontHash, Style>
     _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
+impl<I, Style> SelectableText<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const TRUNC_TO_WINDOW_WIDTH: u32 = 0x1;
@@ -163,8 +162,8 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
         &'a mut self,
         window_width: f32,
         style: &'a Style,
-        text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
-    ) -> SelectableTextBuilder<'a, 'b, I, FontHash, Style>
+        text_renderer: &'a mut TextRenderer<'b>,
+    ) -> SelectableTextBuilder<'a, 'b, I, Style>
     {
         SelectableTextBuilder::new(style, text_renderer, self, window_width)
     }
@@ -366,32 +365,30 @@ impl<I, FontHash, Style> SelectableText<I, FontHash, Style>
     }
 }
 
-pub struct SelectableTextBuilder<'a, 'b, I, FontHash, Style>
+pub struct SelectableTextBuilder<'a, 'b, I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
     style: &'a Style,
-    text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
-    text: &'a mut SelectableText<I, FontHash, Style>,
+    text_renderer: &'a mut TextRenderer<'b>,
+    text: &'a mut SelectableText<I, Style>,
     window_width: f32,
     color: ColorSRGBA,
     scale: Vec2,
 }
 
-impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Style>
+impl<'a, 'b, I, Style> SelectableTextBuilder<'a, 'b, I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
     fn new(
         style: &'a Style,
-        text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
-        text: &'a mut SelectableText<I, FontHash, Style>,
+        text_renderer: &'a mut TextRenderer<'b>,
+        text: &'a mut SelectableText<I, Style>,
         window_width: f32,
     ) -> Self {
         Self {
@@ -422,10 +419,11 @@ impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Styl
         self
     }
 
+    #[inline(always)]
     pub fn with_text(
         &mut self,
         tool_tip: Option<&str>,
-        mut f: impl FnMut(&mut TextSegmentBuilder<FontHash>)
+        mut f: impl FnMut(&mut TextSegmentBuilder)
     ) -> &mut Self
     {
         let trunc_to_window_width = self.text.trunc_to_window_width();
@@ -527,19 +525,17 @@ impl<'a, 'b, I, FontHash, Style> SelectableTextBuilder<'a, 'b, I, FontHash, Styl
     }
 }
 
-pub struct TextSegmentBuilder<FontHash>
+pub struct TextSegmentBuilder
 {
-    segments: GlobalVec<TextSegmentOwned<FontHash>>,
-    default_font: FontHash,
+    segments: GlobalVec<TextSegmentOwned<CompactString>>,
+    default_font: CompactString,
 }
 
-impl<FontHash> TextSegmentBuilder<FontHash>
-    where
-        FontHash: UiFontHash,
+impl TextSegmentBuilder
 {
 
     #[inline(always)]
-    fn as_segments(&self) -> &[TextSegmentOwned<FontHash>] {
+    fn as_segments(&self) -> &[TextSegmentOwned<CompactString>] {
         &self.segments
     }
 
@@ -547,18 +543,17 @@ impl<FontHash> TextSegmentBuilder<FontHash>
     pub fn with_segment(
         &mut self,
         text: &str,
-        font: Option<&FontHash>,
+        font: Option<&str>,
     ) -> &mut Self {
-        self.segments.push(text_segment_owned(text, font.cloned().unwrap_or(self.default_font.clone())));
+        self.segments.push(text_segment_owned(text, font.map(|v| v.into()).unwrap_or(self.default_font.clone())));
         self
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
@@ -580,7 +575,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
     fn calc_size(
         &mut self,
         _style: &Style,
-        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        _text_renderer: &mut TextRenderer,
     ) -> Vec2 {
         Default::default()
     }
@@ -606,7 +601,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        _text_renderer: &mut TextRenderer,
         _window_size: Vec2,
         window_pos: Vec2,
         _content_offset: Vec2,
@@ -743,7 +738,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         self.current_height = 0.0;
         self.max_width = 0.0;
         self.current_row = 0;
-        UpdateResult { requires_triangulation: false, cursor_in_widget }
+        UpdateResult { requires_triangulation: false, requires_transfer_commands: false, cursor_in_widget }
     }
 
     fn triangulate(
@@ -776,17 +771,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableText<I, FontHa
         &self,
         render_commands: &mut RenderCommands,
         _style: &Style,
+        _sampler: SamplerId,
         base_pipeline: GraphicsPipelineId,
         _text_pipeline: GraphicsPipelineId,
         _texture_pipeline: GraphicsPipelineId,
+        _texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        _tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error> {
+    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error> {
         if self.selection_vertices.is_empty() {
             return Ok(None)
         }

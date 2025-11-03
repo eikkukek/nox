@@ -1,5 +1,4 @@
 use core::{
-    hash::Hash,
     marker::PhantomData,
     f32::consts::{PI, TAU},
     fmt::Write,
@@ -19,12 +18,12 @@ use nox_geom::{
 
 use crate::*;
 
-struct Contents<I, FontHash, Style> {
-    r_drag_value: DragValue<I, FontHash, Style>,
-    g_drag_value: DragValue<I, FontHash, Style>,
-    b_drag_value: DragValue<I, FontHash, Style>,
-    alpha_drag_value: DragValue<I, FontHash, Style>,
-    hue_drag_value: DragValue<I, FontHash, Style>,
+struct Contents<I, Style> {
+    r_drag_value: DragValue<I, Style>,
+    g_drag_value: DragValue<I, Style>,
+    b_drag_value: DragValue<I, Style>,
+    alpha_drag_value: DragValue<I, Style>,
+    hue_drag_value: DragValue<I, Style>,
     offset: Vec2,
     picker_handle_offset: Vec2,
     hue_picker_offset: Vec2,
@@ -54,14 +53,13 @@ struct Contents<I, FontHash, Style> {
     active_outline_width: f32,
     rgba_text_size: Vec2,
     flags: u32,
-    _marker: PhantomData<(I, FontHash, Style)>,
+    _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> Contents<I, FontHash, Style>
+impl<I, Style> Contents<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const WIDGET_HOVERED: u32 = 0x1;
@@ -246,7 +244,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         window_pos: Vec2,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
@@ -254,7 +252,6 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
     ) -> bool
         where
             I: Interface,
-            FontHash: Clone + Eq + Hash,
     {
         let item_pad_outer = style.item_pad_outer();
         let mut text_box_rect_max = vec2(self.rgba_text_size.x, self.r_drag_value.calc_size(style, text_renderer).y);
@@ -477,7 +474,7 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
             },
         );
         let mut f = |
-                drag_value: &mut DragValue<I, FontHash, Style>,
+                drag_value: &mut DragValue<I, Style>,
                 idx: usize,
                 format_result: fn(&mut dyn Write, &str) -> core::fmt::Result,
             |
@@ -811,25 +808,27 @@ impl<I, FontHash, Style> Contents<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontHash, Style>
+impl<I, Style> HoverContents<I, Style> for Contents<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
+        sampler: SamplerId,
         base_pipeline: GraphicsPipelineId,
         text_pipeline: GraphicsPipelineId,
         texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error> {
         let picker_vertex_count = self.picker_vertices.len();
@@ -985,12 +984,12 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
             },
         )?;
         let content_area = BoundingRect::from_min_max(vec2(f32::MIN, f32::MIN), vec2(f32::MAX, f32::MAX));
-        let mut f = |drag_value: &DragValue<I, FontHash, Style>| -> Result<(), Error> {
+        let mut f = |drag_value: &DragValue<I, Style>| -> Result<(), Error> {
             drag_value.render_commands(
-                render_commands, style, base_pipeline,
-                text_pipeline, texture_pipeline, vertex_buffer, index_buffer,
+                render_commands, style, sampler, base_pipeline,
+                text_pipeline, texture_pipeline, texture_pipeline_layout, vertex_buffer, index_buffer,
                 window_pos, content_area,
-                inv_aspect_ratio, unit_scale, get_custom_pipeline,
+                inv_aspect_ratio, unit_scale, tmp_alloc, get_custom_pipeline,
             )?;
             Ok(())
         };
@@ -1014,20 +1013,19 @@ impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for Contents<I, FontH
     }
 }
 
-pub struct ColorPicker<I, FontHash, Style> {
+pub struct ColorPicker<I, Style> {
     color_rect: Rect,
     color_rect_vertex_range: VertexRange,
-    contents: Contents<I, FontHash, Style>,
+    contents: Contents<I, Style>,
     color_fmt: CompactString,
     offset: Vec2,
-    _marker: PhantomData<(I, FontHash, Style)>,
+    _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> ColorPicker<I, FontHash, Style>
+impl<I, Style> ColorPicker<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
@@ -1076,11 +1074,10 @@ impl<I, FontHash, Style> ColorPicker<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
     where 
-        FontHash: UiFontHash,
         I: Interface,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
@@ -1103,7 +1100,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer, 
     ) -> Vec2 {
         let height = style.calc_font_height(text_renderer);
         vec2(height, height)
@@ -1136,7 +1133,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         _window_size: Vec2,
         window_pos: Vec2,
         _content_offset: Vec2,
@@ -1207,6 +1204,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         }
         UpdateResult {
             requires_triangulation,
+            requires_transfer_commands: false,
             cursor_in_widget: (shown && cursor_in_contents) || cursor_in_color_rect || self.picking(),
         }
     }
@@ -1245,17 +1243,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ColorPicker<I, FontHash,
         &self,
         _render_commands: &mut RenderCommands,
         _style: &Style,
+        _sampler: SamplerId,
         _base_pipeline: GraphicsPipelineId,
         _text_pipeline: GraphicsPipelineId,
         _texture_pipeline: GraphicsPipelineId,
+        _texture_pipeline_layout: PipelineLayoutId,
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
         _window_pos: Vec2,
         _content_area: BoundingRect,
         _inv_aspect_ratio: f32,
         _unit_scale: f32,
+        _tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
     {
         if self.contents.shown() {
             Ok(Some(&self.contents))

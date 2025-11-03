@@ -1,10 +1,8 @@
-use core::hash::Hash;
-
 use nox::{
     alloc::arena_alloc::ArenaGuard, mem::{vec_types::GlobalVec}, *
 };
 
-use nox_font::{RenderedText, VertexTextRenderer};
+use nox_font::RenderedText;
 
 use nox_geom::*;
 
@@ -13,6 +11,7 @@ use crate::*;
 #[derive(Default, Clone, Copy)]
 pub struct UpdateResult {
     pub requires_triangulation: bool,
+    pub requires_transfer_commands: bool,
     pub cursor_in_widget: bool,
 }
 
@@ -23,28 +22,26 @@ pub enum WidgetStatus<'a> {
     Active,
 }
 
-pub trait UiFontHash: Default + Clone + Eq + Hash {}
-
-impl<T: Default + Clone + Eq + PartialEq + Hash> UiFontHash for T {}
-
-pub trait HoverContents<I, FontHash, Style: WindowStyle<FontHash>>
+pub trait HoverContents<I, Style: WindowStyle>
     where
         I: Interface,
-        FontHash: UiFontHash,
 {
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
+        sampler: SamplerId,
         base_pipeline: GraphicsPipelineId,
         text_pipeline: GraphicsPipelineId,
         texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error>;
 }
@@ -81,11 +78,10 @@ impl VertexRange {
     }
 }
 
-pub trait Widget<I, FontHash, Style>
+pub trait Widget<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>
+        Style: WindowStyle,
 {
 
     fn get_offset(&self) -> Vec2;
@@ -97,7 +93,7 @@ pub trait Widget<I, FontHash, Style>
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        text_renderer: &mut TextRenderer, 
     ) -> Vec2;
 
     fn status<'a>(
@@ -112,7 +108,7 @@ pub trait Widget<I, FontHash, Style>
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -156,17 +152,20 @@ pub trait Widget<I, FontHash, Style>
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
+        sampler: SamplerId,
         base_pipeline: GraphicsPipelineId,
         text_pipeline: GraphicsPipelineId,
         texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error> { Ok(None) }
+    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error> { Ok(None) }
 
     #[allow(unused_variables)]
     fn transfer_commands(

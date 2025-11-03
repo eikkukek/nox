@@ -8,7 +8,7 @@ use nox::{
     *,
 };
 
-use nox_font::{RenderedText, VertexTextRenderer, text_segment};
+use nox_font::{RenderedText, text_segment};
 
 use crate::*;
 
@@ -17,10 +17,10 @@ use nox_geom::{
     *,
 };
 
-pub struct Button<I, FontHash, Style> {
+pub struct Button<I, Style> {
     label: CompactString,
     label_text: RenderedText,
-    font: FontHash,
+    font: CompactString,
     rect: Rect,
     rect_vertex_range: VertexRange,
     focused_outline_vertex_range: VertexRange,
@@ -29,12 +29,10 @@ pub struct Button<I, FontHash, Style> {
     active_outline_width: f32,
     offset: Vec2,
     flags: u32,
-    _marker: PhantomData<(I, FontHash, Style)>,
+    _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> Button<I, FontHash, Style>
-    where 
-        FontHash: UiFontHash,
+impl<I, Style> Button<I, Style>
 {
 
     const HELD: u32 = 0x1;
@@ -63,10 +61,10 @@ impl<I, FontHash, Style> Button<I, FontHash, Style>
     pub fn set_label(
         &mut self,
         label: &str,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        text_renderer: &mut TextRenderer,
         style: &Style,
     ) where 
-        Style: WindowStyle<FontHash>, 
+        Style: WindowStyle, 
     {
         let font_changed = &self.font != style.font_regular();
         if font_changed {
@@ -104,12 +102,10 @@ impl<I, FontHash, Style> Button<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for
-        Button<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for Button<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
@@ -132,7 +128,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
     fn calc_size(
         &mut self,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<FontHash>,
+        _text_renderer: &mut TextRenderer,
     ) -> Vec2 {
         style.calc_text_box_size(&self.label_text)
     }
@@ -158,7 +154,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        _text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -227,6 +223,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for
         );
         UpdateResult {
             requires_triangulation,
+            requires_transfer_commands: false,
             cursor_in_widget,
         }
     }

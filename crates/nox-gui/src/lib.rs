@@ -20,6 +20,8 @@ mod hover_window;
 mod scroll_bar;
 pub mod image;
 mod window;
+mod painter;
+mod reaction;
 mod workspace;
 
 pub use ring_buffer::*;
@@ -35,6 +37,7 @@ pub use scroll_bar::*;
 pub use window::*;
 pub use hover_window::*;
 pub use workspace::*;
+pub use painter::*;
 
 pub use nox_font as font;
 pub use nox_geom as geom;
@@ -49,4 +52,7 @@ pub use radio_button::RadioButton;
 pub use selectable_tag::SelectableTag;
 pub use combo_box::{ComboBox, ComboBoxBuilder};
 pub use image::{Image, ImageSource};
+pub use reaction::{ReactionId, Reaction};
 pub use helpers::*;
+
+pub type TextRenderer<'a> = font::VertexTextRenderer<'a, compact_str::CompactString>;

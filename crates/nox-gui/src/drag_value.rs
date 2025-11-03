@@ -10,8 +10,8 @@ use nox_geom::*;
 
 use crate::*;
 
-pub struct DragValue<I, FontHash, Style> {
-    input_text: InputText<I, FontHash, Style>,
+pub struct DragValue<I, Style> {
+    input_text: InputText<I, Style>,
     delta_cursor_x: f32,
     amount: f32,
     flags: u32,
@@ -19,12 +19,12 @@ pub struct DragValue<I, FontHash, Style> {
     active_outline_width: f32,
     focused_outline_vertex_range: VertexRange,
     active_outline_vertex_range: VertexRange,
-    _marker: PhantomData<(FontHash, Style)>,
+    _marker: PhantomData<Style>,
 }
 
-impl<I, FontHash, Style> DragValue<I, FontHash, Style>
+impl<I, Style> DragValue<I, Style>
     where
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const HOVERED: u32 = 0x1;
@@ -163,11 +163,10 @@ impl<I, FontHash, Style> DragValue<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for DragValue<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
@@ -190,7 +189,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
     ) -> Vec2
     {
         self.input_text.calc_size(style, text_renderer)
@@ -220,7 +219,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -335,22 +334,25 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for DragValue<I, FontHash, S
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
+        sampler: SamplerId,
         base_pipeline: GraphicsPipelineId,
         text_pipeline: GraphicsPipelineId,
         texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
     {
         self.input_text.render_commands(
-            render_commands, style, base_pipeline,
-            text_pipeline, texture_pipeline, vertex_buffer, index_buffer,
-            window_pos, content_area, inv_aspect_ratio, unit_scale, get_custom_pipeline
+            render_commands, style, sampler, base_pipeline,
+            text_pipeline, texture_pipeline, texture_pipeline_layout, vertex_buffer, index_buffer,
+            window_pos, content_area, inv_aspect_ratio, unit_scale, tmp_alloc, get_custom_pipeline,
         )
     }
 

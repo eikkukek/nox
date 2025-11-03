@@ -6,7 +6,7 @@ use nox::{
     *,
 };
 
-use nox_font::{VertexTextRenderer, text_segment, RenderedText};
+use nox_font::{text_segment, RenderedText};
 
 use nox_geom::{
     shapes::*,
@@ -15,7 +15,7 @@ use nox_geom::{
 
 use crate::*;
 
-pub struct RadioButton<I, FontHash, Style> {
+pub struct RadioButton<I, Style> {
     offset: Vec2,
     diameter: f32,
     size: Vec2,
@@ -27,15 +27,14 @@ pub struct RadioButton<I, FontHash, Style> {
     active_handle_outline_vertex_range: VertexRange,
     label: CompactString,
     label_text: RenderedText,
-    font: FontHash,
+    font: CompactString,
     flags: u32,
     _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> RadioButton<I, FontHash, Style>
+impl<I, Style> RadioButton<I, Style>
     where 
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const HELD: u32 = 0x1;
@@ -67,7 +66,7 @@ impl<I, FontHash, Style> RadioButton<I, FontHash, Style>
     pub fn set_label(
         &mut self,
         label: &str,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        text_renderer: &mut TextRenderer,
         style: &Style,
     ) {
         let font_changed = &self.font != style.font_regular();
@@ -128,11 +127,10 @@ impl<I, FontHash, Style> RadioButton<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for RadioButton<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
@@ -153,7 +151,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
     fn calc_size(
         &mut self,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<FontHash>,
+        _text_renderer: &mut TextRenderer,
     ) -> Vec2
     {
         let text_size = style.calc_text_size(&self.label_text);
@@ -184,7 +182,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        _text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -255,6 +253,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for RadioButton<I, FontHash,
         );
         UpdateResult {
             requires_triangulation,
+            requires_transfer_commands: false,
             cursor_in_widget
         }
     }

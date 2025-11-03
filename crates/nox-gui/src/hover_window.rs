@@ -2,7 +2,7 @@ use compact_str::CompactString;
 
 use nox::{mem::vec_types::{Vector, GlobalVec}, *};
 
-use nox_font::{VertexTextRenderer, CombinedRenderedText, text_segment};
+use nox_font::{CombinedRenderedText, text_segment};
 
 use nox_geom::{
     *,
@@ -40,15 +40,13 @@ impl HoverWindow {
         }
     }
 
-    pub fn update<FontHash>(
+    pub fn update(
         &mut self,
-        style: &impl WindowStyle<FontHash>,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        style: &impl WindowStyle,
+        text_renderer: &mut TextRenderer,
         cursor_pos: Vec2,
         text: &str,
     )
-        where
-            FontHash: UiFontHash,
     {
         let mut rect = self.rect;
         rect.rounding = style.rounding();
@@ -100,9 +98,9 @@ impl HoverWindow {
         self.indices.append_map(&indices_usize, |&v| v as u32);
     }
 
-    pub fn set_vertex_params<FontHash>(
+    pub fn set_vertex_params(
         &mut self,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
     ) {
         if self.rect_outline_vertex_range.start() >= self.vertices.len() {
             return
@@ -123,10 +121,10 @@ impl HoverWindow {
         }
     }
 
-    pub fn render_commands<FontHash>(
+    pub fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: & impl WindowStyle<FontHash>,
+        style: & impl WindowStyle,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,

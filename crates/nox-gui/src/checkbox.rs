@@ -6,7 +6,7 @@ use nox::{
     *,
 };
 
-use nox_font::{RenderedText, VertexTextRenderer, text_segment};
+use nox_font::{RenderedText, text_segment};
 
 use crate::*;
 
@@ -15,7 +15,7 @@ use nox_geom::{
     *,
 };
 
-pub struct Checkbox<I, FontHash, Style> {
+pub struct Checkbox<I, Style> {
     offset: Vec2,
     rect: Rect,
     size: Vec2,
@@ -28,15 +28,14 @@ pub struct Checkbox<I, FontHash, Style> {
     checkmark_vertex_range: VertexRange,
     focused_outline_vertex_range: VertexRange,
     active_outline_vertex_range: VertexRange,
-    font: FontHash,
+    font: CompactString,
     flags: u32,
-    _marker: PhantomData<(I, FontHash, Style)>
+    _marker: PhantomData<(I, Style)>
 }
 
-impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
+impl<I, Style> Checkbox<I, Style>
     where
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const HELD: u32 = 0x1;
@@ -99,11 +98,10 @@ impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
     pub fn set_label(
         &mut self,
         label: &str,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        text_renderer: &mut TextRenderer,
         style: &Style,
     ) where 
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
     {
         let font_changed = &self.font != style.font_regular();
         if font_changed {
@@ -128,11 +126,10 @@ impl<I, FontHash, Style> Checkbox<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for Checkbox<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
@@ -156,7 +153,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        text_renderer: &mut TextRenderer,
     ) -> Vec2
     {
         let checkmark_box_max = style.calc_font_height(text_renderer);
@@ -186,7 +183,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -260,6 +257,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Checkbox<I, FontHash, St
         }
         UpdateResult {
             requires_triangulation,
+            requires_transfer_commands: false,
             cursor_in_widget
         }
     }

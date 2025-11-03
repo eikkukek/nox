@@ -4,7 +4,7 @@ use compact_str::CompactString;
 
 use nox::{alloc::arena_alloc::ArenaGuard, mem::vec_types::Vector, *};
 
-use nox_font::{VertexTextRenderer, RenderedText, text_segment};
+use nox_font::{RenderedText, text_segment};
 
 use nox_geom::{
     shapes::*,
@@ -13,7 +13,7 @@ use nox_geom::{
 
 use crate::*;
 
-pub struct SelectableTag<I, FontHash, Style> {
+pub struct SelectableTag<I, Style> {
     offset: Vec2,
     size: Vec2,
     rounding: f32,
@@ -25,16 +25,15 @@ pub struct SelectableTag<I, FontHash, Style> {
     text_box_vertex_range: VertexRange,
     focused_outline_vertex_range: VertexRange,
     active_outline_vertex_range: VertexRange,
-    font: FontHash,
+    font: CompactString,
     flags: u32,
     _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> SelectableTag<I, FontHash, Style>
+impl<I, Style> SelectableTag<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const HELD: u32 = 0x1;
@@ -67,7 +66,7 @@ impl<I, FontHash, Style> SelectableTag<I, FontHash, Style>
     pub fn set_label(
         &mut self,
         label: &str,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        text_renderer: &mut TextRenderer,
         style: &Style,
     ) {
         let font_changed = &self.font != style.font_regular();
@@ -145,11 +144,10 @@ impl<I, FontHash, Style> SelectableTag<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     #[inline(always)]
@@ -172,7 +170,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHas
     fn calc_size(
         &mut self,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<FontHash>,
+        _text_renderer: &mut TextRenderer,
     ) -> Vec2 {
         style.calc_text_box_size(&self.label_text)
     }
@@ -198,7 +196,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHas
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        _text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        _text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -273,6 +271,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for SelectableTag<I, FontHas
         );
         UpdateResult {
             requires_triangulation,
+            requires_transfer_commands: false,
             cursor_in_widget
         }
     }

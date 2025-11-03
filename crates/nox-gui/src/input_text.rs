@@ -13,11 +13,11 @@ use nox_geom::{
     *,
 };
 
-use nox_font::{text_segment, RenderedText, VertexTextRenderer};
+use nox_font::{text_segment, RenderedText};
 
 use crate::*;
 
-pub struct InputText<I, FontHash, Style> {
+pub struct InputText<I, Style> {
     offset: Vec2,
     input: CompactString,
     input_text: Option<RenderedText>,
@@ -40,12 +40,12 @@ pub struct InputText<I, FontHash, Style> {
     focused_outline_width: f32,
     width: f32,
     bg_col_override: ColorSRGBA,
-    _marker: PhantomData<(I, FontHash, Style)>,
+    _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> InputText<I, FontHash, Style>
+impl<I, Style> InputText<I, Style>
     where
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const HOVERED: u32 = 0x1;
@@ -360,10 +360,10 @@ impl<I, FontHash, Style> InputText<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for InputText<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash, Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     fn get_offset(&self) -> Vec2 {
@@ -384,7 +384,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>
+        text_renderer: &mut TextRenderer,
     ) -> Vec2
     {
         let item_pad_inner = style.item_pad_inner();
@@ -427,7 +427,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -1012,6 +1012,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         );
         UpdateResult {
             requires_triangulation,
+            requires_transfer_commands: false,
             cursor_in_widget,
         }
     }
@@ -1082,17 +1083,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for InputText<I, FontHash, S
         &self,
         render_commands: &mut RenderCommands,
         _style: &Style,
+        _sampler: SamplerId,
         base_pipeline: GraphicsPipelineId,
         _text_pipeline: GraphicsPipelineId,
         _texture_pipeline: GraphicsPipelineId,
+        _texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        _tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
     {
         if let Some(selection) = self.selection && selection.0 != selection.1 {
             let vert_mem = unsafe {

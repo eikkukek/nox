@@ -13,7 +13,7 @@ use nox::{
     *
 };
 
-use nox_font::{text_segment, Face, VertexTextRenderer};
+use nox_font::{text_segment, Face};
 
 use nox_geom::*;
 
@@ -127,15 +127,14 @@ impl ImageLoader {
     }
 }
 
-pub struct Workspace<'a, I, FontHash, Style>
+pub struct Workspace<'a, I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
-    text_renderer: VertexTextRenderer<'a, FontHash>,
+    text_renderer: TextRenderer<'a>,
     style: Style,
-    windows: FxHashMap<u32, Window<I, FontHash, Style>>,
+    windows: FxHashMap<u32, Window<I, Style>>,
     main_pass_id: PassId,
     window_passes: FxHashMap<PassId, u32>,
     active_windows: GlobalVec<u32>,
@@ -158,15 +157,15 @@ pub struct Workspace<'a, I, FontHash, Style>
     output_format: ColorFormat,
 }
 
-impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
+impl<'a, I, Style> Workspace<'a, I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const BEGAN: u32 = 0x1;
     const CURSOR_IN_WINDOW: u32 = 0x2;
+    const REQUIRES_TRANSFER_COMMANDS: u32 = 0x4;
 
     const BLEND_STATE: ColorOutputBlendState = ColorOutputBlendState {
         src_color_blend_factor: BlendFactor::SrcAlpha,
@@ -178,13 +177,13 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
     };
 
     pub fn new(
-        fonts: impl IntoIterator<Item = (FontHash, Face<'a>)>,
+        fonts: impl IntoIterator<Item = (impl Into<CompactString>, Face<'a>)>,
         style: Style,
         font_curve_tolerance: f32,
         device_alloc_block_size: u64,
     ) -> Self
     {
-        let mut text_renderer = VertexTextRenderer::new(fonts, font_curve_tolerance);
+        let mut text_renderer = TextRenderer::new(fonts, font_curve_tolerance);
         text_renderer.render(&[text_segment("0123456789", style.font_regular())], false, 0.0);
         Self {
             text_renderer,
@@ -493,6 +492,11 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
     }
 
     #[inline(always)]
+    fn requires_transfer_commands(&self) -> bool {
+        self.flags & Self::REQUIRES_TRANSFER_COMMANDS == Self::REQUIRES_TRANSFER_COMMANDS
+    }
+
+    #[inline(always)]
     pub fn begin(&mut self, nox: &mut Nox<I>) -> Result<(), Error>
     {
         if self.began() {
@@ -522,7 +526,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         mut f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(&mut WindowContext<I, FontHash, Style>)
+            F: FnMut(&mut WindowContext<I, Style>)
     {
         if !self.began() {
             return Err(Error::UserError(
@@ -579,7 +583,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         for (i, id) in self.active_windows.iter_mut().enumerate().rev() {
             let window = self.windows.get_mut(id).unwrap();
             let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
-            let cursor_in_window = window.update(
+            let WindowUpdateResult { cursor_in_window, requires_transfer_commands } = window.update(
                 nox,
                 renderer,
                 &self.style,
@@ -596,6 +600,7 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 window_pressed = Some(i);
             }
             cursor_in_some_window |= cursor_in_window;
+            or_flag!(self.flags, Self::REQUIRES_TRANSFER_COMMANDS, requires_transfer_commands);
             window.triangulate();
             window.refresh_position(aspect_ratio, unit_scale, window_size);
         }
@@ -692,41 +697,49 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
         let texture_pipeline_layout = self.base_pipelines.texture_pipeline_layout.unwrap();
         let inv_aspect_ratio = self.inv_aspect_ratio;
         let unit_scale = self.unit_scale;
+        let requires_transfer_commands = self.requires_transfer_commands();
         let vertex_buffer = self.vertex_buffer.as_mut().unwrap();
         let index_buffer = self.index_buffer.as_mut().unwrap();
         if pass_id == self.main_pass_id {
-            let device_alloc = self.device_alloc.unwrap();
-            unsafe {
-                render_commands.reset_linear_device_alloc(device_alloc)?;
+            if requires_transfer_commands {
+                let device_alloc = self.device_alloc.unwrap();
+                unsafe {
+                    render_commands.reset_linear_device_alloc(device_alloc)?;
+                }
+                let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
+                render_commands.synced_transfer_commands(
+                    device_alloc,
+                    |cmd| {
+                        for id in &self.active_windows {
+                            let window = self.windows.get_mut(id).unwrap();
+                            window.transfer_commands(
+                                cmd, sampler,
+                                texture_pipeline_layout,
+                                &tmp_alloc,
+                            )?;
+                        }
+                        Ok(())
+                    },
+                )?;
+                self.flags &= !Self::REQUIRES_TRANSFER_COMMANDS;
             }
             let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
-            render_commands.synced_transfer_commands(
-                device_alloc,
-                |cmd| {
-                    for id in &self.active_windows {
-                        let window = self.windows.get_mut(id).unwrap();
-                        window.transfer_commands(
-                            cmd, sampler,
-                            texture_pipeline_layout,
-                            &tmp_alloc,
-                        )?;
-                    }
-                    Ok(())
-                },
-            )?;
             for id in &self.active_windows {
                 let window = self.windows.get_mut(id).unwrap();
                 window.render_commands(
                     render_commands,
                     &self.style,
+                    sampler,
                     pass_id,
                     base_pipeline,
                     text_pipeline,
                     texture_pipeline,
+                    texture_pipeline_layout,
                     vertex_buffer,
                     index_buffer,
                     inv_aspect_ratio,
                     unit_scale,
+                    &tmp_alloc,
                     &mut |hash| {
                         self.custom_pipelines
                             .get(&CompactString::new(hash))
@@ -735,17 +748,21 @@ impl<'a, I, FontHash, Style> Workspace<'a, I, FontHash, Style>
                 )?;
             }
         } else if let Some(id) = self.window_passes.get_mut(&pass_id) {
+            let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
             self.windows.get_mut(id).unwrap().render_commands(
                 render_commands,
                 &mut self.style,
+                sampler,
                 pass_id,
                 base_pipeline,
                 text_pipeline,
                 texture_pipeline,
+                texture_pipeline_layout,
                 vertex_buffer,
                 index_buffer,
                 inv_aspect_ratio,
                 unit_scale,
+                &tmp_alloc,
                 &mut |hash| {
                     self.custom_pipelines
                         .get(&CompactString::new(hash))

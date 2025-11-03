@@ -109,15 +109,15 @@ impl VerScrollBar {
     }
 
     #[inline(always)]
-    pub fn calc_width<FontHash>(&mut self, style: &impl WindowStyle<FontHash>) -> f32 {
+    pub fn calc_width(&mut self, style: &impl WindowStyle) -> f32 {
         self.width = lerp(style.scroll_bar_width(), style.scroll_bar_fat_width(), self.width_t);
         self.width
     }
 
-    pub fn update<I: Interface, FontHash>(
+    pub fn update<I: Interface>(
         &mut self,
         nox: &Nox<I>,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
         current_t: f32,
         offset: Vec2,
         window_pos: Vec2,
@@ -201,9 +201,9 @@ impl VerScrollBar {
         self.handle_vertex_range = tri(points);
     }
 
-    pub fn set_vertex_params<FontHash>(
+    pub fn set_vertex_params(
         &self,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
         vertices: &mut [Vertex],
     ) {
         let (mut bar_col, mut handle_col) =
@@ -288,7 +288,7 @@ impl HorScrollBar {
     }
 
     #[inline(always)]
-    pub fn calc_height<FontHash>(&mut self, style: &impl WindowStyle<FontHash>) -> f32 {
+    pub fn calc_height(&mut self, style: &impl WindowStyle) -> f32 {
         self.height = lerp(style.scroll_bar_width(), style.scroll_bar_fat_width(), self.height_t);
         self.height
     }
@@ -330,10 +330,10 @@ impl HorScrollBar {
         t.clamp(0.0, self.max_t)
     }
 
-    pub fn update<I: Interface, FontHash>(
+    pub fn update<I: Interface>(
         &mut self,
         nox: &Nox<I>,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
         current_t: f32,
         offset: Vec2,
         window_pos: Vec2,
@@ -417,9 +417,9 @@ impl HorScrollBar {
         self.handle_vertex_range = tri(points);
     }
 
-    pub fn set_vertex_params<FontHash>(
+    pub fn set_vertex_params(
         &self,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
         vertices: &mut [Vertex],
     ) {
         let (mut bar_col, mut handle_col) =

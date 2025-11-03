@@ -1,6 +1,5 @@
 use core::{
     fmt::Write,
-    hash::Hash,
     marker::PhantomData,
     str::FromStr,
 };
@@ -11,7 +10,7 @@ use nox::{
     *,
 };
 
-use nox_font::{VertexTextRenderer, RenderedText};
+use nox_font::RenderedText;
 
 use nox_geom::{
     *,
@@ -31,14 +30,14 @@ pub trait Sliderable: Copy + FromStr + PartialEq {
 
     fn calc_t(&self, min: Self, max: Self) -> f32;
 
-    fn display<FontHash>(
+    fn display(
         &self,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
         to: &mut impl Write, 
     ) -> core::fmt::Result;
 }
 
-pub struct Slider<I, FontHash, Style>
+pub struct Slider<I, Style>
 {
     slider_rect: Rect,
     slider_rect_vertex_range: VertexRange,
@@ -50,19 +49,18 @@ pub struct Slider<I, FontHash, Style>
     active_handle_outline_width: f32,
     active_handle_outline_vertex_range: VertexRange,
     offset: Vec2,
-    drag_value: DragValue<I, FontHash, Style>,
+    drag_value: DragValue<I, Style>,
     t: f32,
     quantized_t: f32,
     width: f32,
     flags: u32,
-    _marker: PhantomData<(I, FontHash, Style)>,
+    _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> Slider<I, FontHash, Style>
+impl<I, Style> Slider<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const HELD: u32 = 0x1;
@@ -157,11 +155,10 @@ impl<I, FontHash, Style> Slider<I, FontHash, Style>
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for Slider<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
     #[inline(always)]
     fn get_offset(&self) -> Vec2 {
@@ -183,7 +180,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
     fn calc_size(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
     ) -> Vec2
     {
         let slider_size = vec2(
@@ -229,7 +226,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -244,7 +241,6 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
     ) -> UpdateResult
         where
             I: Interface,
-            FontHash: Clone + Eq + Hash
     {
         let width = self.width;
         let diameter = style.default_handle_radius() * 2.0;
@@ -312,6 +308,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         }
         UpdateResult {
             requires_triangulation: requires_triangulation || drag_result.requires_triangulation,
+            requires_transfer_commands: false,
             cursor_in_widget: cursor_in_widget || drag_result.cursor_in_widget,
         }
     }
@@ -372,24 +369,27 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Slider<I, FontHash, Styl
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
+        sampler: SamplerId,
         base_pipeline: GraphicsPipelineId,
         text_pipeline: GraphicsPipelineId,
         texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
     {
         self.drag_value.render_commands(
-            render_commands, style, base_pipeline, text_pipeline,
-            texture_pipeline,
+            render_commands, style, sampler, base_pipeline, text_pipeline,
+            texture_pipeline, texture_pipeline_layout,
             vertex_buffer, index_buffer,
             window_pos, content_area,
-            inv_aspect_ratio, unit_scale, get_custom_pipeline,
+            inv_aspect_ratio, unit_scale, tmp_alloc, get_custom_pipeline,
         )
     }
 
@@ -432,9 +432,9 @@ impl Sliderable for f32 {
     }
 
     #[inline(always)]
-    fn display<FontHash>(
+    fn display(
         &self,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
         to: &mut impl Write,
     ) -> core::fmt::Result
     {
@@ -469,9 +469,9 @@ impl Sliderable for f64 {
     }
 
     #[inline(always)]
-    fn display<FontHash>(
+    fn display(
         &self,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
         to: &mut impl Write,
     ) -> core::fmt::Result
     {
@@ -530,9 +530,9 @@ macro_rules! impl_sliderable_int {
                 }
 
                 #[inline(always)]
-                fn display<FontHash>(
+                fn display(
                     &self,
-                    _style: &impl WindowStyle<FontHash>,
+                    _style: &impl WindowStyle,
                     to: &mut impl Write,
                 ) -> core::fmt::Result
                 {
@@ -594,9 +594,9 @@ macro_rules! impl_sliderable_uint {
                 }
 
                 #[inline(always)]
-                fn display<FontHash>(
+                fn display(
                     &self,
-                    _style: &impl WindowStyle<FontHash>,
+                    _style: &impl WindowStyle,
                     to: &mut impl Write,
                 ) -> core::fmt::Result
                 {

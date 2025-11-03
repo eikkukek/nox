@@ -84,6 +84,20 @@ pub fn set_vertex_params(
 }
 
 #[inline(always)]
+pub fn color_vertices(
+    vertices: &mut [Vertex],
+    range: VertexRange,
+    target_color: ColorSRGBA,
+) {
+    let vertex_sample = vertices[range.start()];
+    if vertex_sample.color != target_color {
+        for vertex in &mut vertices[range.range()] {
+            vertex.color = target_color;
+        }
+    }
+}
+
+#[inline(always)]
 pub fn hide_vertices(
     vertices: &mut [Vertex],
     range: VertexRange,

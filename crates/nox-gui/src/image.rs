@@ -59,18 +59,18 @@ macro_rules! image_source {
     };
 }
 
-pub struct Image<I, FontHash, Style> {
+pub struct Image<I, Style> {
     offset: Vec2,
     size: Vec2,
     source: Option<ImageSourceInternal>,
     render_format: ColorFormat,
     image: Option<ImageId>,
-    shader_resource: Option<ShaderResourceId>,
+    shader_resource: core::cell::RefCell<Option<ShaderResourceId>>,
     flags: u32,
-    _marker: PhantomData<(I, FontHash, Style)>
+    _marker: PhantomData<(I, Style)>
 }
 
-impl<I, FontHash, Style> Image<I, FontHash, Style> {
+impl<I, Style> Image<I, Style> {
 
     const SOURCE_RESET: u32 = 0x1;
 
@@ -82,7 +82,7 @@ impl<I, FontHash, Style> Image<I, FontHash, Style> {
             source: None,
             render_format: Default::default(),
             image: None,
-            shader_resource: None,
+            shader_resource: core::cell::RefCell::new(None),
             flags: 0,
             _marker: PhantomData,
         }
@@ -113,11 +113,10 @@ impl<I, FontHash, Style> Image<I, FontHash, Style> {
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for Image<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for Image<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     fn get_offset(&self) -> Vec2 {
@@ -135,7 +134,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Image<I, FontHash, Style
     fn calc_size(
         &mut self,
         _style: &Style,
-        _text_renderer: &mut nox_font::VertexTextRenderer<FontHash>,
+        _text_renderer: &mut TextRenderer,
     ) -> Vec2 {
         self.size
     }
@@ -154,7 +153,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Image<I, FontHash, Style
         &mut self,
         _nox: &mut Nox<I>,
         _style: &Style,
-        _text_renderer: &mut nox_font::VertexTextRenderer<'_, FontHash>,
+        _text_renderer: &mut TextRenderer,
         _window_size: Vec2,
         _window_pos: Vec2,
         _content_offset: Vec2,
@@ -169,6 +168,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Image<I, FontHash, Style
     ) -> UpdateResult {
         UpdateResult {
             requires_triangulation: false,
+            requires_transfer_commands: self.source_reset(),
             cursor_in_widget: false,
         }
     }
@@ -195,40 +195,70 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Image<I, FontHash, Style
         &self,
         render_commands: &mut RenderCommands,
         _style: &Style,
-        _base_pipeline_id: GraphicsPipelineId,
-        _text_pipeline_id: GraphicsPipelineId,
-        texture_pipeline_id: GraphicsPipelineId,
+        sampler: SamplerId,
+        _base_pipeline: GraphicsPipelineId,
+        _text_pipeline: GraphicsPipelineId,
+        texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
         window_pos: Vec2,
         content_area: BoundingRect,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error> {
-        if let Some(resource) = self.shader_resource {
-            render_commands.bind_pipeline(texture_pipeline_id)?;
-            render_commands.bind_shader_resources(|_| {
-                resource
+    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error> {
+        let mut shader_resource = self.shader_resource.borrow_mut();
+        if shader_resource.is_none() {
+            render_commands.edit_resources(|r| {
+                r.allocate_shader_resources(
+                    &[
+                        ShaderResourceInfo::new(texture_pipeline_layout, 0)
+                    ],
+                    |_, id| { *shader_resource = Some(id); },
+                    tmp_alloc
+                )?;
+                r.update_shader_resources(
+                    &[
+                        ShaderResourceImageUpdate {
+                            resource: shader_resource.unwrap(),
+                            binding: 0,
+                            starting_index: 0,
+                            infos: &[
+                                ShaderResourceImageInfo {
+                                    sampler,
+                                    image_source: (self.image.unwrap(), None),
+                                    storage_image: false,
+                                }
+                        ]
+                        }
+                    ], &[], &[], tmp_alloc
+                )?;
+                Ok(())
             })?;
-            let pc_vertex = calc_texture_push_constants_vertex(
-                window_pos + self.offset,
-                self.size,
-                inv_aspect_ratio,
-                unit_scale
-            );
-            let pc_fragment = base_push_constants_fragment(
-                content_area.min, content_area.max
-            );
-            render_commands.push_constants(|pc| unsafe {
-                if pc.stage == ShaderStage::Vertex {
-                    pc_vertex.as_bytes()
-                } else {
-                    pc_fragment.as_bytes()
-                }
-            })?;
-            render_commands.draw_bufferless(6, 1);
         }
+        render_commands.bind_pipeline(texture_pipeline)?;
+        render_commands.bind_shader_resources(|_| {
+            shader_resource.unwrap()
+        })?;
+        let pc_vertex = calc_texture_push_constants_vertex(
+            window_pos + self.offset,
+            self.size,
+            inv_aspect_ratio,
+            unit_scale
+        );
+        let pc_fragment = base_push_constants_fragment(
+            content_area.min, content_area.max
+        );
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
+        })?;
+        render_commands.draw_bufferless(6, 1);
         Ok(None)
     }
 
@@ -296,18 +326,19 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Image<I, FontHash, Style
                                 *self.image.insert(t)
                             }
                         };
+                        let mut shader_resource = self.shader_resource.borrow_mut();
                         let resource =
-                            if let Some(resource) = self.shader_resource {
+                            if let Some(resource) = *shader_resource {
                                 resource
                             } else {
                                 r.allocate_shader_resources(
                                     &[
                                         ShaderResourceInfo::new(texture_pipeline_layout, 0)
                                     ],
-                                    |_, id| { self.shader_resource = Some(id); },
+                                    |_, id| { *shader_resource = Some(id); },
                                     tmp_alloc,
                                 )?;
-                                self.shader_resource.unwrap()
+                                shader_resource.unwrap()
                             };
                         r.update_shader_resources(
                             &[
@@ -327,33 +358,6 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for Image<I, FontHash, Style
                         )?;
                     }
                 }
-                Ok(())
-            })?;
-        } else if self.shader_resource.is_none() {
-            transfer_commands.edit_resources(|_, r| {
-                r.allocate_shader_resources(
-                    &[
-                        ShaderResourceInfo::new(texture_pipeline_layout, 0)
-                    ],
-                    |_, id| { self.shader_resource = Some(id) },
-                    tmp_alloc
-                )?;
-                r.update_shader_resources(
-                    &[
-                        ShaderResourceImageUpdate {
-                            resource: self.shader_resource.unwrap(),
-                            binding: 0,
-                            starting_index: 0,
-                            infos: &[
-                                ShaderResourceImageInfo {
-                                    sampler,
-                                    image_source: (self.image.unwrap(), None),
-                                    storage_image: false,
-                                }
-                        ]
-                        }
-                    ], &[], &[], tmp_alloc
-                )?;
                 Ok(())
             })?;
         }

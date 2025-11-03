@@ -3,11 +3,12 @@ use core::marker::PhantomData;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use nox::{
+    alloc::arena_alloc::ArenaGuard,
     mem::{vec_types::{GlobalVec, Vector}, Hashable},
     *,
 };
 
-use nox_font::{VertexTextRenderer, CombinedRenderedText};
+use nox_font::{CombinedRenderedText};
 
 use nox_geom::{
     shapes::*,
@@ -16,7 +17,7 @@ use nox_geom::{
 
 use crate::*;
 
-pub struct ComboBox<I, FontHash, Style> {
+pub struct ComboBox<I, Style> {
     offset: Vec2,
     widget_size: Vec2,
     content_size: Vec2,
@@ -28,7 +29,7 @@ pub struct ComboBox<I, FontHash, Style> {
     focused_outline_vertex_range: VertexRange,
     active_outline_vertex_range: VertexRange,
     arrow_vertex_range: VertexRange,
-    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, FontHash, Style>)>,
+    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, Style>)>,
     active_tags: FxHashSet<Hashable<f64>>,
     prev_active_tags: GlobalVec<Hashable<f64>>,
     selected: Option<Hashable<f64>>,
@@ -39,14 +40,13 @@ pub struct ComboBox<I, FontHash, Style> {
     combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     last_triangulation: u64,
     flags: u32,
-    _marker: PhantomData<(I, FontHash, Style)>,
+    _marker: PhantomData<(I, Style)>,
 }
 
-impl<I, FontHash, Style> ComboBox<I, FontHash, Style>
+impl<I, Style> ComboBox<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const CONTENT_REQUIRES_TRIANGULATION: u32 = 0x1;
@@ -89,8 +89,8 @@ impl<I, FontHash, Style> ComboBox<I, FontHash, Style>
     pub fn update_values<T>(
         &mut self,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
-        mut f: impl FnMut(&mut ComboBoxBuilder<T, I, FontHash, Style>),
+        text_renderer: &mut TextRenderer,
+        mut f: impl FnMut(&mut ComboBoxBuilder<T, I, Style>),
     ) {
         self.prev_active_tags.clear();
         for &widget in &self.active_tags {
@@ -186,7 +186,7 @@ impl<I, FontHash, Style> ComboBox<I, FontHash, Style>
     fn activate_tag(
         &mut self,
         label: &str,
-    ) -> (&mut SelectableTag<I, FontHash, Style>, Hashable<f64>)
+    ) -> (&mut SelectableTag<I, Style>, Hashable<f64>)
     {
         let mut id = Hashable((label as *const str).addr() as f64);
         while !self.active_tags.insert(id) {
@@ -202,20 +202,19 @@ impl<I, FontHash, Style> ComboBox<I, FontHash, Style>
     }
 }
 
-pub struct ComboBoxBuilder<'a, 'b, T, I, FontHash: UiFontHash, Style> {
-    combo_box: &'a mut ComboBox<I, FontHash, Style>,
-    text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
+pub struct ComboBoxBuilder<'a, 'b, T, I, Style> {
+    combo_box: &'a mut ComboBox<I, Style>,
+    text_renderer: &'a mut TextRenderer<'b>,
     style: &'a Style,
     widget_off: Vec2,
     min_width: f32,
     _marker: PhantomData<T>,
 }
 
-impl<'a, 'b, T: Eq, I, FontHash, Style> ComboBoxBuilder<'a, 'b, T, I, FontHash, Style>
+impl<'a, 'b, T: Eq, I, Style> ComboBoxBuilder<'a, 'b, T, I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     pub fn item(&mut self, value: &mut T, target: T, label: &str) {
@@ -232,11 +231,10 @@ impl<'a, 'b, T: Eq, I, FontHash, Style> ComboBoxBuilder<'a, 'b, T, I, FontHash, 
     }
 }
 
-impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, Style>
+impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     fn get_offset(&self) -> Vec2 {
@@ -256,7 +254,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
     fn calc_size(
         &mut self,
         _style: &Style,
-        _text_renderer: &mut VertexTextRenderer<FontHash>,
+        _text_renderer: &mut TextRenderer,
     ) -> Vec2 {
         self.widget_size
     }
@@ -295,7 +293,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
         &mut self,
         nox: &mut Nox<I>,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         window_size: Vec2,
         window_pos: Vec2,
         content_offset: Vec2,
@@ -473,6 +471,7 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
         self.flags &= !Self::WIDGET_REQUIRES_TRIANGULATION;
         UpdateResult {
             requires_triangulation,
+            requires_transfer_commands: false,
             cursor_in_widget: cursor_in_this_window && !other_widget_active && !cursor_in_other_widget &&
                 (self.widget_hovered() || (self.contents_shown() && cursor_in_contents))
         }
@@ -574,17 +573,20 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
         &self,
         _render_commands: &mut RenderCommands,
         _style: &Style,
+        _sampler: SamplerId,
         _base_pipeline: GraphicsPipelineId,
         _text_pipeline: GraphicsPipelineId,
         _texture_pipeline: GraphicsPipelineId,
+        _texture_pipeline_layout: PipelineLayoutId,
         _vertex_buffer: &mut RingBuf,
         _index_buffer: &mut RingBuf,
         _window_pos: Vec2,
         _content_area: BoundingRect,
         _inv_aspect_ratio: f32,
         _unit_scale: f32,
+        _tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, FontHash, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
     {
         if self.contents_shown() {
             Ok(Some(self))
@@ -605,25 +607,27 @@ impl<I, FontHash, Style> Widget<I, FontHash, Style> for ComboBox<I, FontHash, St
     }
 }
 
-impl<I, FontHash, Style> HoverContents<I, FontHash, Style> for ComboBox<I, FontHash, Style>
+impl<I, Style> HoverContents<I, Style> for ComboBox<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
         style: &Style,
+        _sampler: SamplerId,
         base_pipeline: GraphicsPipelineId,
         text_pipeline: GraphicsPipelineId,
         _texture_pipeline: GraphicsPipelineId,
+        _texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         window_pos: Vec2,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        _tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error> {
         let vertex_count = self.content_vertices.len();

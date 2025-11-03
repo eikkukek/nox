@@ -1,18 +1,18 @@
 use core::{
     fmt::Write,
 };
-use std::f32::consts::FRAC_PI_2;
 
-use crate::*;
+use std::f32::consts::FRAC_PI_2;
 
 use nox::mem::vec_types::GlobalVec;
 
-use nox_font::VertexTextRenderer;
 use nox_geom::*;
 
-pub trait WindowStyle<FontHash> {
+use crate::*;
 
-    fn font_regular(&self) -> &FontHash;
+pub trait WindowStyle {
+
+    fn font_regular(&self) -> &CompactString;
 
     #[inline(always)]
     fn window_bg_col(&self) -> ColorSRGBA {
@@ -112,10 +112,9 @@ pub trait WindowStyle<FontHash> {
     #[inline(always)]
     fn get_checkmark_points(
         &self,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        text_renderer: &mut TextRenderer, 
         points: &mut GlobalVec<[f32; 2]>,
-    ) where 
-        FontHash: UiFontHash,
+    )
     {
         let scale = 1.0 / text_renderer.font_height(self.font_regular()).unwrap();
         let mut checkmark = [Vec2::default(); 6];
@@ -299,11 +298,9 @@ pub trait WindowStyle<FontHash> {
     }
 
     #[inline(always)]
-    fn calc_font_height(&self, text_renderer: &mut VertexTextRenderer<FontHash>) -> f32
-        where 
-            FontHash: Clone + Eq + core::hash::Hash,
+    fn calc_font_height(&self, text_renderer: &mut TextRenderer) -> f32
     {
-        text_renderer.font_height(self.font_regular()).unwrap_or_default() *
+        text_renderer.font_height(&self.font_regular()).unwrap_or_default() *
             self.font_scale()
     }
 
@@ -353,20 +350,20 @@ pub trait WindowStyle<FontHash> {
     }
 }
 
-pub struct DefaultStyle<FontHash>(pub FontHash);
+pub struct DefaultStyle(pub CompactString);
 
-impl<FontHash> DefaultStyle<FontHash> {
+impl DefaultStyle {
 
     #[inline(always)]
-    pub fn new(font_regular: FontHash) -> Self {
-        Self(font_regular)
+    pub fn new(font_regular: &str) -> Self {
+        Self(font_regular.into())
     }
 }
 
-impl<FontHash> WindowStyle<FontHash> for DefaultStyle<FontHash> {
+impl WindowStyle for DefaultStyle {
 
     #[inline(always)]
-    fn font_regular(&self) -> &FontHash {
+    fn font_regular(&self) -> &CompactString {
         &self.0
     }
 }

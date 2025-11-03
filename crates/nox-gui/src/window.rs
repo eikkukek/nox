@@ -17,13 +17,18 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use compact_str::CompactString;
 
-use nox_font::{VertexTextRenderer, text_segment, RenderedText, CombinedRenderedText};
+use nox_font::{text_segment, RenderedText, CombinedRenderedText};
 
 use nox_geom::{
     shapes::*, *
 };
 
 use crate::{image::ImageSourceInternal, *};
+
+pub struct WindowUpdateResult {
+    pub cursor_in_window: bool,
+    pub requires_transfer_commands: bool,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum WidgetId {
@@ -88,14 +93,12 @@ impl CollapsingHeader {
     }
 
     #[inline(always)]
-    pub fn set_label<FontHash>(
+    pub fn set_label(
         &mut self,
-        style: &impl WindowStyle<FontHash>,
-        text_renderer: &mut VertexTextRenderer<FontHash>,
+        style: &impl WindowStyle,
+        text_renderer: &mut TextRenderer,
         label: &str
     )
-        where 
-            FontHash: UiFontHash,
     {
         if self.label != label {
             self.label = CompactString::new(label);
@@ -111,20 +114,19 @@ impl CollapsingHeader {
     }
 
     #[inline(always)]
-    fn update<I, FontHash>(
+    fn update<I>(
         &mut self,
         nox: &Nox<I>,
         window_pos: Vec2,
         min_bounds: Vec2,
         max_bounds: Vec2,
         cursor_pos: Vec2,
-        style: &impl WindowStyle<FontHash>,
+        style: &impl WindowStyle,
         widget_active: bool,
         mut collect_text: impl FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> f32
         where
             I: Interface,
-            FontHash: UiFontHash,
     {
         let item_pad_outer = style.item_pad_outer();
         let collapse_scale = style.collapse_symbol_scale();
@@ -166,7 +168,7 @@ impl CollapsingHeader {
     }
 
     #[inline(always)]
-    fn set_vertex_params<FontHash>(&self, style: &impl WindowStyle<FontHash>, vertices: &mut [Vertex]) {
+    fn set_vertex_params(&self, style: &impl WindowStyle, vertices: &mut [Vertex]) {
         let rotation = self.rotation;
         let (scale, color) = 
             if self.hovered() {
@@ -232,25 +234,24 @@ impl CollapsingHeader {
     }
 }
 
-struct WidgetTables<I, FontHash, Style> {
-    selectable_texts: FxHashMap<Hashable<f64>, (u64, SelectableText<I, FontHash, Style>)>,
-    buttons: FxHashMap<Hashable<f64>, (u64, Button<I, FontHash, Style>)>,
-    sliders: FxHashMap<Hashable<f64>, (u64, Slider<I, FontHash, Style>)>,
-    checkboxes: FxHashMap<Hashable<f64>, (u64, Checkbox<I, FontHash, Style>)>,
-    input_texts: FxHashMap<Hashable<f64>, (u64, InputText<I, FontHash, Style>)>,
-    drag_values: FxHashMap<Hashable<f64>, (u64, DragValue<I, FontHash, Style>)>,
-    color_pickers: FxHashMap<Hashable<f64>, (u64, ColorPicker<I, FontHash, Style>)>,
-    radio_buttons: FxHashMap<Hashable<f64>, (u64, RadioButton<I, FontHash, Style>)>,
-    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, FontHash, Style>)>,
-    combo_boxes: FxHashMap<Hashable<f64>, (u64, ComboBox<I, FontHash, Style>)>,
-    images: FxHashMap<Hashable<f64>, (u64, Image<I, FontHash, Style>)>,
+struct WidgetTables<I, Style> {
+    selectable_texts: FxHashMap<Hashable<f64>, (u64, SelectableText<I, Style>)>,
+    buttons: FxHashMap<Hashable<f64>, (u64, Button<I, Style>)>,
+    sliders: FxHashMap<Hashable<f64>, (u64, Slider<I, Style>)>,
+    checkboxes: FxHashMap<Hashable<f64>, (u64, Checkbox<I, Style>)>,
+    input_texts: FxHashMap<Hashable<f64>, (u64, InputText<I, Style>)>,
+    drag_values: FxHashMap<Hashable<f64>, (u64, DragValue<I, Style>)>,
+    color_pickers: FxHashMap<Hashable<f64>, (u64, ColorPicker<I, Style>)>,
+    radio_buttons: FxHashMap<Hashable<f64>, (u64, RadioButton<I, Style>)>,
+    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, Style>)>,
+    combo_boxes: FxHashMap<Hashable<f64>, (u64, ComboBox<I, Style>)>,
+    images: FxHashMap<Hashable<f64>, (u64, Image<I, Style>)>,
 }
 
-impl<I, FontHash, Style> WidgetTables<I, FontHash, Style>
+impl<I, Style> WidgetTables<I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     fn new() -> Self {
@@ -270,51 +271,51 @@ impl<I, FontHash, Style> WidgetTables<I, FontHash, Style>
     }
 
     #[inline(always)]
-    fn get_widget(&self, widget: WidgetId) -> (u64, &dyn Widget<I, FontHash, Style>) {
+    fn get_widget(&self, widget: WidgetId) -> (u64, &dyn Widget<I, Style>) {
         match widget {
             WidgetId::Slider(id) =>
                 self.sliders.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::Button(id) =>
                 self.buttons.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::Checkbox(id) =>
                 self.checkboxes.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::ColorPicker(id) =>
                 self.color_pickers.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::InputText(id) =>
                 self.input_texts.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::DragValue(id) =>
                 self.drag_values.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::SelectableText(id) =>
                  self.selectable_texts.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::RadioButton(id) =>
                  self.radio_buttons.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::SelectabelTag(id) =>
                  self.selectable_tags.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::ComboBox(id) =>
                  self.combo_boxes.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::Image(id) =>
                  self.images.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
         }
     }
@@ -323,58 +324,58 @@ impl<I, FontHash, Style> WidgetTables<I, FontHash, Style>
     fn get_widget_mut(
         &mut self,
         widget: WidgetId
-    ) -> (&mut u64, &mut dyn Widget<I, FontHash, Style>)
+    ) -> (&mut u64, &mut dyn Widget<I, Style>)
     {
         match widget {
             WidgetId::Slider(id) =>
                 self.sliders.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::Button(id) =>
                 self.buttons.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::Checkbox(id) =>
                 self.checkboxes.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::ColorPicker(id) =>
                 self.color_pickers.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style,>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style,>)
                 ).unwrap(),
             WidgetId::InputText(id) =>
                 self.input_texts.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::DragValue(id) =>
                 self.drag_values.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::SelectableText(id) =>
                  self.selectable_texts.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::RadioButton(id) =>
                  self.radio_buttons.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::SelectabelTag(id) =>
                  self.selectable_tags.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::ComboBox(id) =>
                  self.combo_boxes.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::Image(id) =>
                  self.images.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, FontHash, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
         }
     }
 }
 
-pub struct Window<I, FontHash, Style>
+pub struct Window<I, Style>
 {
     main_rect: Rect,
     title_bar_rect: Rect,
@@ -392,12 +393,17 @@ pub struct Window<I, FontHash, Style>
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
     text: GlobalVec<Text>,
-    widgets: Option<WidgetTables<I, FontHash, Style>>,
+    widgets: Option<WidgetTables<I, Style>>,
     active_widgets: FxHashSet<WidgetId>,
     prev_active_widgets: GlobalVec<WidgetId>,
+    reactions: FxHashMap<ReactionId, Reaction>,
+    active_reactions: FxHashSet<ReactionId>,
     collapsing_headers: FxHashMap<Hashable<f64>, (u64, CollapsingHeader)>,
     active_collapsing_headers: FxHashSet<Hashable<f64>>,
     prev_active_collapsing_headers: GlobalVec<Hashable<f64>>,
+    painter_storage: PainterStorage,
+    painter_vertex_off: u32,
+    painter_index_off: u32,
     hover_window: HoverWindow,
     scroll_bar_vertices: GlobalVec<Vertex>,
     scroll_bar_indices: GlobalVec<u32>,
@@ -421,7 +427,7 @@ pub struct Window<I, FontHash, Style>
 macro_rules! impl_get_widget {
     ($fn_name:ident, $field:ident, $ty:ident) => {
         #[inline(always)]
-        pub fn $fn_name(&mut self, id: Hashable<f64>) -> &mut $ty<I, FontHash, Style> {
+        pub fn $fn_name(&mut self, id: Hashable<f64>) -> &mut $ty<I, Style> {
             let widgets = unsafe {
                 self.widgets
                     .as_mut()
@@ -438,11 +444,10 @@ macro_rules! impl_get_widget {
     };
 }
 
-impl<I, FontHash, Style> Window<I, FontHash, Style>
+impl<I, Style> Window<I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const RENDERABLE: u32 = 0x1;
@@ -490,11 +495,16 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             indices: Default::default(),
             text: Default::default(),
             widgets: Some(WidgetTables::new()),
-            active_widgets: Default::default(),
+            active_widgets: FxHashSet::default(),
             prev_active_widgets: Default::default(),
+            reactions: FxHashMap::default(),
+            active_reactions: FxHashSet::default(),
             collapsing_headers: FxHashMap::default(),
             active_collapsing_headers: Default::default(),
             prev_active_collapsing_headers: Default::default(),
+            painter_storage: PainterStorage::new(),
+            painter_vertex_off: 0,
+            painter_index_off: 0,
             hover_window: HoverWindow::new(),
             scroll_bar_vertices: Default::default(),
             scroll_bar_indices: Default::default(),
@@ -544,7 +554,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     pub fn edit_selectable_text(
         &mut self,
         id: WidgetId,
-        mut f: impl FnMut(&mut SelectableText<I, FontHash, Style>)
+        mut f: impl FnMut(&mut SelectableText<I, Style>)
     )
     {
         let widgets = unsafe {
@@ -587,7 +597,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     }
 
     #[inline(always)]
-    pub fn activate_widget<'a, W: Widget<I, FontHash, Style>, T: ?Sized>(
+    pub fn activate_widget<'a, W: Widget<I, Style>, T: ?Sized>(
         &'a mut self,
         value: &T,
         mut make_id: impl FnMut(Hashable<f64>) -> WidgetId,
@@ -629,6 +639,20 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             self.flags |= Self::REQUIRES_TRIANGULATION;
         }
         (collapsing_headers, id)
+    }
+
+    #[inline(always)]
+    pub fn activate_reaction<T: ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> (&mut Reaction, ReactionId)
+    {
+        let mut id = ReactionId(Hashable((value as *const T).addr() as f64));
+        while !self.active_reactions.insert(id) {
+            id.0.0 += 0.01;
+        }
+        let reaction = self.reactions.entry(id).or_insert_with(|| Reaction::new(id));
+        (reaction, id)
     }
 
     #[inline(always)]
@@ -826,6 +850,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             self.prev_active_collapsing_headers.push(c);
         }
         self.active_collapsing_headers.clear();
+        self.active_reactions.clear();
     }
 
     pub fn update(
@@ -833,7 +858,7 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         nox: &mut Nox<I>,
         renderer: &mut RendererContext,
         style: &Style,
-        text_renderer: &mut VertexTextRenderer<'_, FontHash>,
+        text_renderer: &mut TextRenderer,
         cursor_pos: Vec2,
         delta_cursor_pos: Vec2,
         cursor_in_other_window: bool,
@@ -841,10 +866,9 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         aspect_ratio: f32,
         unit_scale: f32,
         tmp_alloc: ArenaGuard,
-    ) -> Result<bool, Error>
+    ) -> Result<WindowUpdateResult, Error>
         where 
             I: Interface,
-            FontHash: UiFontHash,
     {
         let override_cursor = style.override_cursor();
         let mut cursor_in_this_window =
@@ -1080,11 +1104,13 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             }
         }
         let scroll_bar_hovered = self.ver_scroll_bar.hovering() || self.hor_scroll_bar.hovering();
+        let mut transfer_commands_required = false;
         for (i, &widget) in self.active_widgets.iter().enumerate() {
             let (_, widget) = widgets.get_widget_mut(widget);
             widget.set_scroll_offset(widget_off);
             let UpdateResult {
                 requires_triangulation,
+                requires_transfer_commands,
                 cursor_in_widget,
             } = widget.update(
                 nox,
@@ -1114,10 +1140,24 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
                     self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
                 },
             );
-            if requires_triangulation {
-                self.flags |= Self::REQUIRES_TRIANGULATION;
-            }
+            or_flag!(self.flags, Self::REQUIRES_TRIANGULATION, requires_triangulation);
+            transfer_commands_required |= requires_transfer_commands;
             cursor_in_some_widget |= cursor_in_widget;
+        }
+        let reaction_blocked = hover_blocked || active_widget.is_some() || hovered_widget.is_some();
+        for reaction in &self.active_reactions {
+            let reaction = self.reactions.get_mut(reaction).unwrap();
+            if let Some(text) = reaction.update(
+                    nox,
+                    cursor_pos,
+                    pos,
+                    cursor_in_this_window,
+                    reaction_blocked,
+                )
+            {
+                self.hover_window.update(style, text_renderer, cursor_pos, &text);
+                self.flags |= Self::HOVER_WINDOW_ACTIVE;
+            }
         }
         let ver_scroll_bar_width = self.ver_scroll_bar.calc_width(style);
         let hor_scroll_bar_height = self.hor_scroll_bar.calc_height(style);
@@ -1390,7 +1430,10 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         let mut norm_size = self.main_rect.max * unit_scale;
         norm_size.x /= aspect_ratio;
         norm_size *= 0.5;
-        Ok(cursor_in_this_window || self.any_resize())
+        Ok(WindowUpdateResult {
+            cursor_in_window: cursor_in_this_window || self.any_resize(),
+            requires_transfer_commands: transfer_commands_required,
+        })
     }
 
     #[inline(always)]
@@ -1531,11 +1574,26 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             self.indices.append_map(&indices_usize, |&i| i as u32);
             self.last_triangulation = new_triangulation;
             self.content_draw_info = DrawInfo {
-                first_index: first_index,
+                first_index,
                 index_count: indices_usize.len() as u32 - first_index,
                 ..Default::default()
             };
+            self.painter_vertex_off = self.vertices.len() as u32;
+            self.painter_index_off = self.indices.len() as u32;
         }
+        let painter_vertex_off = self.painter_vertex_off as usize;
+        let painter_index_off = self.painter_index_off as usize;
+        let index_delta = self.indices.len() - painter_index_off;
+        self.content_draw_info.index_count -= index_delta as u32;
+        self.vertices.resize(painter_vertex_off, Default::default());
+        self.indices.resize(painter_index_off, Default::default());
+        let painter_vertices = self.painter_storage.get_vertices();
+        let painter_indices_usize = self.painter_storage.get_indices();
+        self.content_draw_info.index_count += painter_indices_usize.len() as u32;
+        let n = painter_vertex_off as u32;
+        self.indices.append_map(painter_indices_usize, |&i| n + i as u32);
+        self.vertices.append(painter_vertices);
+
     }
 
     pub fn render(
@@ -1578,14 +1636,17 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
         &mut self,
         render_commands: &mut RenderCommands,
         style: &Style,
+        sampler: SamplerId,
         _pass: PassId,
         base_pipeline: GraphicsPipelineId,
         text_pipeline: GraphicsPipelineId,
         texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
         unit_scale: f32,
+        tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut impl FnMut(&str) -> Option<GraphicsPipelineId>,
     ) -> Result<(), Error>
     {
@@ -1737,15 +1798,18 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             if let Some(contents) = widget.render_commands(
                 render_commands,
                 style,
+                sampler,
                 base_pipeline,
                 text_pipeline,
                 texture_pipeline,
+                texture_pipeline_layout,
                 vertex_buffer,
                 index_buffer,
                 pos,
                 content_area,
                 inv_aspect_ratio,
                 unit_scale,
+                tmp_alloc,
                 get_custom_pipeline,
             )? {
                 on_top_contents = Some(contents);
@@ -1814,14 +1878,17 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
             contents.render_commands(
                 render_commands,
                 style,
+                sampler,
                 base_pipeline,
                 text_pipeline,
                 texture_pipeline,
+                texture_pipeline_layout,
                 vertex_buffer,
                 index_buffer,
                 pos,
                 inv_aspect_ratio,
                 unit_scale,
+                tmp_alloc,
                 get_custom_pipeline
             )?;
         }
@@ -1863,17 +1930,17 @@ impl<I, FontHash, Style> Window<I, FontHash, Style>
     }
 }
 
-pub struct WindowContext<'a, 'b, I, FontHash, Style>
+pub struct WindowContext<'a, 'b, I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash, 
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
     style: &'a Style,
-    window: &'a mut Window<I, FontHash, Style>,
-    text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
+    window: &'a mut Window<I, Style>,
+    text_renderer: &'a mut TextRenderer<'b>,
     current_row_widgets: GlobalVec<(WidgetId, Vec2)>,
     current_row_text: GlobalVec<(usize, usize, usize, WidgetId)>,
+    current_row_reactions: GlobalVec<(ReactionId, Vec2)>,
     collapsing_header_id: Hashable<f64>,
     image_loader: &'a mut ImageLoader,
     widget_off: Vec2,
@@ -1887,11 +1954,10 @@ pub struct WindowContext<'a, 'b, I, FontHash, Style>
     flags: u32,
 }
 
-impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
+impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     where
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
 
     const IS_COLLAPSING: u32 = 0x1;
@@ -1899,9 +1965,9 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
 
     pub(crate) fn new(
         title: &str,
-        window: &'a mut Window<I, FontHash, Style>,
+        window: &'a mut Window<I, Style>,
         style: &'a Style,
-        text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
+        text_renderer: &'a mut TextRenderer<'b>,
         image_loader: &'a mut ImageLoader,
     ) -> Self {
         if title != window.title {
@@ -1926,6 +1992,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             text_renderer,
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
+            current_row_reactions: Default::default(),
             collapsing_header_id: Default::default(),
             image_loader,
             min_width: 0.0,
@@ -1941,9 +2008,9 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
 
     pub(crate) fn new_collapsing(
         label: &str,
-        window: &'a mut Window<I, FontHash, Style>,
+        window: &'a mut Window<I, Style>,
         style: &'a Style,
-        text_renderer: &'a mut VertexTextRenderer<'b, FontHash>,
+        text_renderer: &'a mut TextRenderer<'b>,
         widget_off: Vec2,
         slider_width: f32,
         input_text_width: f32,
@@ -1966,6 +2033,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             text_renderer,
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
+            current_row_reactions: Default::default(),
             collapsing_header_id: id,
             image_loader,
             min_width: 0.0,
@@ -1994,6 +2062,22 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
     }
 
     #[inline(always)]
+    pub fn style(&self) -> &Style {
+        self.style
+    }
+
+    #[inline(always)]
+    pub fn painter<'c>(&'c mut self) -> Painter<'c> {
+        Painter::new(&mut self.window.painter_storage)
+    }
+
+    #[inline(always)]
+    pub fn add(&mut self, reaction: impl Into<Reaction>) -> &mut Reaction {
+        let reaction = reaction.into();
+        self.window.reactions.get_mut(&reaction.id).unwrap()
+    }
+
+    #[inline(always)]
     pub fn resizeable(&mut self, value: bool) {
         self.window.set_resizeable(value);
     }
@@ -2008,9 +2092,24 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         self.window.set_clamp_width(value);
     }
 
+    #[inline(always)]
+    pub fn reaction_from_value<T: ?Sized>(
+        &mut self,
+        value: &T,
+        size: Vec2,
+    ) -> Reaction {
+        let (reaction, id) = self.window.activate_reaction(value);
+        reaction.set_offset(self.widget_off);
+        reaction.set_size(size);
+        self.current_height = self.current_height.max(size.y);
+        self.widget_off.x += size.x + self.style.item_pad_outer().x;
+        self.current_row_reactions.push((id, size));
+        reaction.clone()
+    }
+
     pub fn collapsing<F>(&mut self, label: &str, mut f: F)
         where 
-            F: FnMut(&mut WindowContext<I, FontHash, Style>)
+            F: FnMut(&mut WindowContext<I, Style>)
     {
         if self.is_collapsed() {
             return
@@ -2064,6 +2163,11 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
             let (_, widget) = widgets.get_widget_mut(widget);
             let offset = widget.get_offset();
             widget.set_offset(vec2(offset.x, offset.y + current_height_half - size.y * 0.5));
+        }
+        for &(reaction, size) in &self.current_row_reactions {
+            let reaction = self.window.reactions.get_mut(&reaction).unwrap();
+            let offset = reaction.get_offset();
+            reaction.set_offset(vec2(offset.x, offset.y + current_height_half - size.y * 0.5));
         }
         let current_height_half_scaled = current_height_half / self.style.font_scale();
         for &(index, row_index, selectable_index, id) in &self.current_row_text {
@@ -2151,7 +2255,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
         self.tag_internal(tag, color, Some(tool_tip));
     }
 
-    pub fn text(&mut self, label: &str, truncate: bool, mut f: impl FnMut(&mut SelectableTextBuilder<I, FontHash, Style>))
+    pub fn text(&mut self, label: &str, truncate: bool, mut f: impl FnMut(&mut SelectableTextBuilder<I, Style>))
     {
         let window_width = self.window.size().x;
         let (selectable_text, id) = self.window.activate_widget(
@@ -2406,7 +2510,7 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
     pub fn combo_box<T: Clone + Eq>(
         &mut self,
         label: &str,
-        f: impl FnMut(&mut ComboBoxBuilder<T, I, FontHash, Style>)
+        f: impl FnMut(&mut ComboBoxBuilder<T, I, Style>)
     ) {
         let (combo_box, id) = self.window.activate_widget(
             label,
@@ -2449,12 +2553,10 @@ impl<'a, 'b, I, FontHash, Style> WindowContext<'a, 'b, I, FontHash, Style>
     }
 }
 
-impl<'a, 'b, I, FontHash, Style> Drop for
-        WindowContext<'a, 'b, I, FontHash, Style>
+impl<'a, 'b, I, Style> Drop for WindowContext<'a, 'b, I, Style>
     where 
         I: Interface,
-        FontHash: UiFontHash,
-        Style: WindowStyle<FontHash>,
+        Style: WindowStyle,
 {
     fn drop(&mut self) {
         if !self.is_collapsing() {
