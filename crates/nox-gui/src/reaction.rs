@@ -13,7 +13,7 @@ pub struct ReactionId(pub Hashable<f64>);
 pub struct Reaction {
     pub offset: Vec2,
     pub size: Vec2,
-    pub id: ReactionId,
+    id: ReactionId,
     hover_text: Option<CompactString>,
     flags: u32,
 }
@@ -41,6 +41,11 @@ impl Reaction {
     #[inline(always)]
     pub fn hover_text(&mut self, text: &str) {
         self.hover_text = Some(CompactString::new(text));
+    }
+
+    #[inline(always)]
+    pub fn id(&self) -> ReactionId {
+        self.id
     }
 
     #[inline(always)]

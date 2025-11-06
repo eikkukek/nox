@@ -16,7 +16,7 @@ pub fn my_widget_show<I: Interface, Style: WindowStyle>(
     value: &mut bool,
 ) -> Reaction {
     let size = win.standard_interact_height() * vec2(2.0, 1.0);
-    let (reaction, mut rect) = win.reaction_from_value(
+    let (mut reaction, mut rect) = win.reaction_from_value(
         value, size,
     );
     if reaction.clicked() {
@@ -27,7 +27,7 @@ pub fn my_widget_show<I: Interface, Style: WindowStyle>(
     rect.rounding = radius;
     let visuals = win.style().interact_visuals(&reaction);
     let mut center = rect.min + vec2(radius, radius);
-    let t = win.animate_bool(reaction.id, *value);
+    let t = win.animate_bool(&mut reaction, *value);
     center.x += lerp(0.0, size.x - radius * 2.0, t);
     win
         .painter()

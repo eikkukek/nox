@@ -649,14 +649,14 @@ impl<I, Style> Window<I, Style>
     pub fn activate_reaction<T: ?Sized>(
         &mut self,
         value: &T,
-    ) -> (&mut Reaction, ReactionId)
+    ) -> &mut Reaction
     {
         let mut id = ReactionId(Hashable((value as *const T).addr() as f64));
         while !self.active_reactions.insert(id) {
             id.0.0 += 0.01;
         }
         let reaction = self.reactions.entry(id).or_insert_with(|| Reaction::new(id));
-        (reaction, id)
+        reaction
     }
 
     #[inline(always)]
@@ -1166,7 +1166,7 @@ impl<I, Style> Window<I, Style>
             let reaction = self.reactions.get_mut(reaction).unwrap();
             reaction.offset += widget_off;
             if reaction.animated_bool() {
-                if let Some((t, value)) = self.animated_bools.get_mut(&reaction.id) {
+                if let Some((t, value)) = self.animated_bools.get_mut(&reaction.id()) {
                     if *value {
                         *t = (*t + style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
                     } else {
@@ -2116,7 +2116,11 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     #[inline(always)]
     pub fn add(&mut self, mut f: impl FnMut(&mut Self) -> Reaction) -> &mut Reaction {
         let reaction = f(self);
-        self.window.reactions.get_mut(&reaction.id).unwrap()
+        let entry = self.window.reactions
+            .entry(reaction.id())
+            .or_insert_with(|| reaction.clone());
+        *entry = reaction.clone();
+        entry
     }
 
     #[inline(always)]
@@ -2140,7 +2144,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         value: &T,
         size: Vec2,
     ) -> (Reaction, Rect) {
-        let (reaction, id) = self.window.activate_reaction(value);
+        let reaction = self.window.activate_reaction(value);
         reaction.set_offset(self.widget_off);
         let rect = Rect::from_position_size(
             self.widget_off,
@@ -2150,7 +2154,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         reaction.set_size(size);
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_reactions.push((id, size));
+        self.current_row_reactions.push((reaction.id(), size));
         (
             reaction.clone(),
             rect,
@@ -2605,28 +2609,24 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     #[inline(always)]
     pub fn animate_bool(
         &mut self,
-        id: ReactionId,
+        reaction: &mut Reaction,
         value: bool
     ) -> f32 {
-        if let Some(reaction) = self.window.reactions.get_mut(&id) {
-            reaction.enable_animated_bool();
-            let entry = self.window.animated_bools
-                .entry(id)
-                .or_insert_with(||
-                    (
-                        if value {
-                            1.0
-                        } else {
-                            0.0
-                        },
-                        value,
-                    )
-                );
-            entry.1 = value;
-            entry.0
-        } else {
-            0.0
-        }
+        reaction.enable_animated_bool();
+        let entry = self.window.animated_bools
+            .entry(reaction.id())
+            .or_insert_with(||
+                (
+                    if value {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    value,
+                )
+            );
+        entry.1 = value;
+        entry.0
     }
 }
 

@@ -157,7 +157,7 @@ pub trait WindowStyle {
                 bg_stroke: None,
                 fg_stroke: Stroke {
                     col: self.inactive_widget_fg_col(),
-                    thickness: self.active_widget_outline_width(),
+                    thickness: self.focused_widget_outline_width(),
                 },
             }
         }

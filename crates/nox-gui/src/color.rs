@@ -317,7 +317,6 @@ impl ColorRGBA {
             1.055 * srgb_ch.powf(1.0 / 2.4) - 0.055
         } * 255.0).clamp(0.0, 255.0).round() as u8
     }
-
     #[inline(always)]
     pub fn from_srgba(value: ColorSRGBA) -> Self {
         let map = |ch: f32| -> u8 {
