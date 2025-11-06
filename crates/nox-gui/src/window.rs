@@ -2119,7 +2119,6 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         let entry = self.window.reactions
             .entry(reaction.id())
             .or_insert_with(|| reaction.clone());
-        *entry = reaction.clone();
         entry
     }
 
@@ -2609,24 +2608,28 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     #[inline(always)]
     pub fn animate_bool(
         &mut self,
-        reaction: &mut Reaction,
+        id: ReactionId,
         value: bool
     ) -> f32 {
-        reaction.enable_animated_bool();
-        let entry = self.window.animated_bools
-            .entry(reaction.id())
-            .or_insert_with(||
-                (
-                    if value {
-                        1.0
-                    } else {
-                        0.0
-                    },
-                    value,
-                )
-            );
-        entry.1 = value;
-        entry.0
+        if let Some(reaction) = self.window.reactions.get_mut(&id) {
+            reaction.enable_animated_bool();
+            let entry = self.window.animated_bools
+                .entry(reaction.id())
+                .or_insert_with(||
+                    (
+                        if value {
+                            1.0
+                        } else {
+                            0.0
+                        },
+                        value,
+                    )
+                );
+            entry.1 = value;
+            entry.0
+        } else {
+            0.0
+        }
     }
 }
 
