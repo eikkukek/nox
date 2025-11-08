@@ -16,27 +16,30 @@ pub fn my_widget_show<I: Interface, Style: WindowStyle>(
     value: &mut bool,
 ) -> Reaction {
     let size = win.standard_interact_height() * vec2(2.0, 1.0);
-    let (reaction, mut rect) = win.reaction_from_value(
+    let reaction = win.reaction_from_value(
         value, size,
     );
+    let offset = reaction.offset;
     if reaction.clicked() {
         *value = !*value;
     }
-    let size = rect.size();
     let radius = size.y * 0.5;
-    rect.rounding = radius;
+    let rect = shapes::rect(Default::default(), size, radius);
     let visuals = win.style().interact_visuals(&reaction);
-    let mut center = rect.min + vec2(radius, radius);
+    let mut center = offset + vec2(radius, radius);
     let t = win.animate_bool(reaction.id(), *value);
     center.x += lerp(0.0, size.x - radius * 2.0, t);
     win
         .painter()
-        .rect(rect, visuals.bg_col, visuals.bg_stroke)
+        .rect(reaction.id(), rect, offset, visuals.bg_col, visuals.bg_strokes, visuals.bg_stroke_idx)
         .circle(
-            circle(center, radius * 0.75),
+            reaction.id(),
+            circle(Vec2::default(), radius * 0.75),
             18,
+            center,
             visuals.bg_col,
-            Some(visuals.fg_stroke)
+            visuals.fg_strokes,
+            visuals.fg_stroke_idx,
         );
     reaction
 }
@@ -282,7 +285,6 @@ impl<'a> Interface for Example<'a> {
                     win.add(my_widget(&mut self.show_other_window))
                         .hover_text("Simple custom widget");
                 });
-                //win.collapsing("test", |_| {});
             }
         )?;
         if self.show_other_window {

@@ -15,10 +15,10 @@ pub struct DragValue<I, Style> {
     delta_cursor_x: f32,
     amount: f32,
     flags: u32,
-    focused_outline_width: f32,
-    active_outline_width: f32,
-    focused_outline_vertex_range: VertexRange,
-    active_outline_vertex_range: VertexRange,
+    focused_stroke_thickness: f32,
+    active_stroke_thickness: f32,
+    focused_stroke_vertex_range: Option<VertexRange>,
+    active_stroke_vertex_range: Option<VertexRange>,
     _marker: PhantomData<Style>,
 }
 
@@ -39,10 +39,10 @@ impl<I, Style> DragValue<I, Style>
             delta_cursor_x: 0.0,
             amount: 0.0,
             flags: 0,
-            focused_outline_width: 0.0,
-            active_outline_width: 0.0,
-            focused_outline_vertex_range: Default::default(),
-            active_outline_vertex_range: Default::default(),
+            focused_stroke_thickness: 0.0,
+            active_stroke_thickness: 0.0,
+            focused_stroke_vertex_range: None,
+            active_stroke_vertex_range: None,
             _marker: PhantomData,
         }
     }
@@ -142,8 +142,8 @@ impl<I, Style> DragValue<I, Style>
 
     #[inline(always)]
     pub fn hide(&mut self, vertices: &mut [Vertex]) {
-        hide_vertices(vertices, self.focused_outline_vertex_range);
-        hide_vertices(vertices, self.active_outline_vertex_range);
+        hide_vertices(vertices, self.focused_stroke_vertex_range);
+        hide_vertices(vertices, self.active_stroke_vertex_range);
         self.input_text.hide(vertices);
     }
 
@@ -282,10 +282,10 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
         );
         update_results.cursor_in_widget |= cursor_in_rect || self.held();
         update_results.requires_triangulation |=
-            self.focused_outline_width != style.focused_widget_outline_width() ||
-            self.active_outline_width != style.active_widget_outline_width();
-        self.focused_outline_width = style.focused_widget_outline_width();
-        self.active_outline_width = style.active_widget_outline_width();
+            self.focused_stroke_thickness != style.focused_widget_stroke_thickness() ||
+            self.active_stroke_thickness != style.active_widget_stroke_thickness();
+        self.focused_stroke_thickness = style.focused_widget_stroke_thickness();
+        self.active_stroke_thickness = style.active_widget_stroke_thickness();
         update_results
     }
     
@@ -294,13 +294,13 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
         &mut self,
         points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
         helper_points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     ) {
-        self.input_text.outline_points(self.focused_outline_width, points);
-        self.focused_outline_vertex_range = tri(&points);
+        self.input_text.outline_points(self.focused_stroke_thickness, points);
+        self.focused_stroke_vertex_range = tri(&points);
         points.clear();
-        self.input_text.outline_points(self.active_outline_width, points);
-        self.active_outline_vertex_range = tri(&points);
+        self.input_text.outline_points(self.active_stroke_thickness, points);
+        self.active_stroke_vertex_range = tri(&points);
         points.clear();
         self.input_text.triangulate(points, helper_points, tri);
     }
@@ -314,17 +314,17 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
         if !self.input_text.active() && (self.held() || self.hovered()) {
             let offset = self.input_text.offset();
             if self.held() {
-                let target_color = style.active_widget_outline_col();
-                set_vertex_params(vertices, self.active_outline_vertex_range, offset, target_color);
-                hide_vertices(vertices, self.focused_outline_vertex_range);
+                let target_color = style.active_widget_stroke_col();
+                set_vertex_params(vertices, self.active_stroke_vertex_range, offset, target_color);
+                hide_vertices(vertices, self.focused_stroke_vertex_range);
             } else {
-                let target_color = style.focused_widget_outline_col();
-                set_vertex_params(vertices, self.focused_outline_vertex_range, offset, target_color);
-                hide_vertices(vertices, self.active_outline_vertex_range);
+                let target_color = style.focused_widget_stroke_col();
+                set_vertex_params(vertices, self.focused_stroke_vertex_range, offset, target_color);
+                hide_vertices(vertices, self.active_stroke_vertex_range);
             }
         } else {
-            hide_vertices(vertices, self.focused_outline_vertex_range);
-            hide_vertices(vertices, self.active_outline_vertex_range);
+            hide_vertices(vertices, self.focused_stroke_vertex_range);
+            hide_vertices(vertices, self.active_stroke_vertex_range);
         }
         self.input_text.set_vertex_params(style, vertices);
     }

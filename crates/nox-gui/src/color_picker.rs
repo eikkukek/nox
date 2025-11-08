@@ -42,15 +42,15 @@ struct Contents<I, Style> {
     other_vertices_draw_info_bg: DrawInfo,
     other_vertices_draw_info: DrawInfo,
     picker_draw_info: DrawInfo,
-    window_vertex_range: VertexRange,
-    window_outline_vertex_range: VertexRange,
-    picker_handle_vertex_range: VertexRange,
-    picker_handle_outline_vertex_range: VertexRange,
-    hue_picker_handle_vertex_range: VertexRange,
-    alpha_picker_handle_vertex_range: VertexRange,
+    window_vertex_range: Option<VertexRange>,
+    window_stroke_vertex_range: Option<VertexRange>,
+    picker_handle_vertex_range: Option<VertexRange>,
+    picker_handle_stroke_vertex_range: Option<VertexRange>,
+    hue_picker_handle_vertex_range: Option<VertexRange>,
+    alpha_picker_handle_vertex_range: Option<VertexRange>,
     combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
-    outline_width: f32,
-    active_outline_width: f32,
+    stroke_thickness: f32,
+    active_stroke_thickness: f32,
     rgba_text_size: Vec2,
     flags: u32,
     _marker: PhantomData<(I, Style)>,
@@ -115,15 +115,15 @@ impl<I, Style> Contents<I, Style>
             picker_draw_info,
             other_vertices_draw_info_bg: Default::default(),
             other_vertices_draw_info: Default::default(),
-            window_vertex_range: Default::default(),
-            window_outline_vertex_range: Default::default(),
-            picker_handle_vertex_range: Default::default(),
-            picker_handle_outline_vertex_range: Default::default(),
-            hue_picker_handle_vertex_range: Default::default(),
-            alpha_picker_handle_vertex_range: Default::default(),
+            window_vertex_range: None,
+            window_stroke_vertex_range: None,
+            picker_handle_vertex_range: None,
+            picker_handle_stroke_vertex_range: None,
+            hue_picker_handle_vertex_range: None,
+            alpha_picker_handle_vertex_range: None,
             combined_text: CombinedRenderedText::new(),
-            outline_width: 0.0,
-            active_outline_width: 0.0,
+            stroke_thickness: 0.0,
+            active_stroke_thickness: 0.0,
             rgba_text_size: Default::default(),
             flags: Self::FONT_CHANGED,
             _marker: PhantomData,
@@ -549,20 +549,20 @@ impl<I, Style> Contents<I, Style>
         }
         let handle_radius = style.default_handle_radius();
         let rounding = style.rounding();
-        let outline_width = style.window_outline_width();
-        let active_outline_width = style.active_widget_outline_width();
+        let stroke_thickness = style.window_stroke_thickness();
+        let active_stroke_thickness = style.active_widget_stroke_thickness();
         let hue_alpha_picker_handle_height = picker_size.y * 0.06;
         let requires_triangulation =
             self.window_rect.max != window_rect_max ||
             self.window_rect.rounding != rounding ||
-            self.outline_width != outline_width ||
-            self.active_outline_width != active_outline_width ||
+            self.stroke_thickness != stroke_thickness ||
+            self.active_stroke_thickness != active_stroke_thickness ||
             self.picker_handle_radius != handle_radius ||
             self.hue_alpha_picker_handle_height != hue_alpha_picker_handle_height;
         self.window_rect.max = window_rect_max;
         self.window_rect.rounding = rounding;
-        self.outline_width = outline_width;
-        self.active_outline_width = active_outline_width;
+        self.stroke_thickness = stroke_thickness;
+        self.active_stroke_thickness = active_stroke_thickness;
         self.picker_handle_radius = handle_radius;
         self.hue_alpha_picker_handle_height = hue_alpha_picker_handle_height;
         self.hue_picker_offset = hue_picker_offset;
@@ -658,7 +658,7 @@ impl<I, Style> Contents<I, Style>
         self.window_rect.to_points(&mut |p| { points.push(p.into()); });
         nox_geom::shapes::outline_points(
             &points,
-            self.outline_width,
+            self.stroke_thickness,
             false,
             &mut |p| { outline_points.push(p.into()); },
         );
@@ -666,7 +666,7 @@ impl<I, Style> Contents<I, Style>
             &outline_points, &[], false,
             &mut self.other_vertices, &mut indices_usize,
         ).unwrap();
-        self.window_outline_vertex_range = VertexRange::new(0..self.other_vertices.len());
+        self.window_stroke_vertex_range = VertexRange::new(0..self.other_vertices.len());
         let mut vertex_off = self.other_vertices.len();
         earcut::earcut(
             &points, &[], false,
@@ -675,7 +675,7 @@ impl<I, Style> Contents<I, Style>
         self.window_vertex_range = VertexRange::new(vertex_off..self.other_vertices.len());
         points.clear();
         outline_points.clear();
-        let mut tri = |points: &[[f32; 2]]| -> VertexRange {
+        let mut tri = |points: &[[f32; 2]]| -> Option<VertexRange> {
             let vertex_begin = self.other_vertices.len();
             earcut::earcut(points, &[], false, &mut self.other_vertices, &mut indices_usize).unwrap();
             VertexRange::new(vertex_begin..self.other_vertices.len())
@@ -706,7 +706,7 @@ impl<I, Style> Contents<I, Style>
         circle(vec2(0.0, 0.0), self.picker_handle_radius).to_points(16, &mut |p| { points.push(p.into()); });
         nox_geom::shapes::outline_points(
             &points,
-            self.active_outline_width,
+            self.active_stroke_thickness,
             false,
             &mut |p| { outline_points.push(p.into()); }
         );
@@ -715,7 +715,7 @@ impl<I, Style> Contents<I, Style>
             &outline_points, &[], false,
             &mut self.other_vertices, &mut indices_usize
         ).unwrap();
-        self.picker_handle_outline_vertex_range = VertexRange::new(vertex_off..self.other_vertices.len());
+        self.picker_handle_stroke_vertex_range = VertexRange::new(vertex_off..self.other_vertices.len());
         vertex_off = self.other_vertices.len();
         earcut::earcut(
             &points, &[], false,
@@ -756,8 +756,8 @@ impl<I, Style> Contents<I, Style>
         let mut offset = self.offset;
         let mut target_color = style.hover_window_bg_col();
         set_vertex_params(&mut self.other_vertices, self.window_vertex_range, offset, target_color);
-        target_color = style.window_outline_col();
-        set_vertex_params(&mut self.other_vertices, self.window_outline_vertex_range, offset, target_color);
+        target_color = style.window_stroke_col();
+        set_vertex_params(&mut self.other_vertices, self.window_stroke_vertex_range, offset, target_color);
         let item_pad_outer = style.item_pad_outer();
         self.r_drag_value.set_vertex_params(style, &mut self.other_vertices);
         self.g_drag_value.set_vertex_params(style, &mut self.other_vertices);
@@ -781,7 +781,7 @@ impl<I, Style> Contents<I, Style>
         set_vertex_params(&mut self.other_vertices, self.picker_handle_vertex_range, offset, target_color);
         target_color = picker_handle_col;
         set_vertex_params(&mut self.other_vertices,
-            self.picker_handle_outline_vertex_range, offset, target_color);
+            self.picker_handle_stroke_vertex_range, offset, target_color);
         target_color =
             if hue_picker_black {
                 ColorSRGBA::black(1.0)
@@ -861,11 +861,11 @@ impl<I, Style> HoverContents<I, Style> for Contents<I, Style>
             inv_aspect_ratio,
             unit_scale,
         );
-        let outline_width = style.window_outline_width();
+        let stroke_thickness = style.window_stroke_thickness();
         let min_bounds = window_pos + self.offset;
         let pc_fragment = base_push_constants_fragment(
-            min_bounds - vec2(outline_width, outline_width),
-            min_bounds + self.window_rect.max + vec2(outline_width, outline_width),
+            min_bounds - vec2(stroke_thickness, stroke_thickness),
+            min_bounds + self.window_rect.max + vec2(stroke_thickness, stroke_thickness),
         );
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -1015,7 +1015,7 @@ impl<I, Style> HoverContents<I, Style> for Contents<I, Style>
 
 pub struct ColorPicker<I, Style> {
     color_rect: Rect,
-    color_rect_vertex_range: VertexRange,
+    color_rect_vertex_range: Option<VertexRange>,
     contents: Contents<I, Style>,
     color_fmt: CompactString,
     offset: Vec2,
@@ -1032,7 +1032,7 @@ impl<I, Style> ColorPicker<I, Style>
     pub fn new() -> Self {
         Self {
             color_rect: Default::default(),
-            color_rect_vertex_range: Default::default(),
+            color_rect_vertex_range: None,
             contents: Contents::new(),
             color_fmt: Default::default(),
             offset: Default::default(),
@@ -1213,7 +1213,7 @@ impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
         &mut self,
         points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
         _helper_points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     )
     {
         self.color_rect.to_points(&mut |p| { points.push(p.into()); });
@@ -1230,13 +1230,7 @@ impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
         }
         let offset = self.offset;
         let target_color = self.contents.srgba.with_alpha(1.0);
-        let vertex_sample = vertices[self.color_rect_vertex_range.start()];
-        if vertex_sample.offset != offset || vertex_sample.color != target_color {
-            for vertex in &mut vertices[self.color_rect_vertex_range.range()] {
-                vertex.offset = offset;
-                vertex.color = target_color;
-            }
-        }
+        set_vertex_params(vertices, self.color_rect_vertex_range, offset, target_color);
     }
 
     fn render_commands(

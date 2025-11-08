@@ -19,12 +19,12 @@ pub struct RadioButton<I, Style> {
     offset: Vec2,
     diameter: f32,
     size: Vec2,
-    focused_outline_width: f32,
-    active_outline_width: f32,
-    handle_vertex_range: VertexRange,
-    handle_inner_vertex_range: VertexRange,
-    focused_handle_outline_vertex_range: VertexRange,
-    active_handle_outline_vertex_range: VertexRange,
+    focused_stroke_thickness: f32,
+    active_stroke_thickness: f32,
+    handle_vertex_range: Option<VertexRange>,
+    handle_inner_vertex_range: Option<VertexRange>,
+    focused_handle_stroke_vertex_range: Option<VertexRange>,
+    active_handle_stroke_vertex_range: Option<VertexRange>,
     label: CompactString,
     label_text: RenderedText,
     font: CompactString,
@@ -48,12 +48,12 @@ impl<I, Style> RadioButton<I, Style>
             offset: Default::default(),
             diameter: 0.0,
             size: Default::default(),
-            focused_outline_width: 0.0,
-            active_outline_width: 0.0,
-            handle_vertex_range: Default::default(),
-            handle_inner_vertex_range: Default::default(),
-            focused_handle_outline_vertex_range: Default::default(),
-            active_handle_outline_vertex_range: Default::default(),
+            focused_stroke_thickness: 0.0,
+            active_stroke_thickness: 0.0,
+            handle_vertex_range: None,
+            handle_inner_vertex_range: None,
+            focused_handle_stroke_vertex_range: None,
+            active_handle_stroke_vertex_range: None,
             label: Default::default(),
             label_text: Default::default(),
             font: Default::default(),
@@ -102,8 +102,8 @@ impl<I, Style> RadioButton<I, Style>
     pub fn hide(&mut self, vertices: &mut [Vertex]) {
         hide_vertices(vertices, self.handle_vertex_range);
         hide_vertices(vertices, self.handle_inner_vertex_range);
-        hide_vertices(vertices, self.focused_handle_outline_vertex_range);
-        hide_vertices(vertices, self.active_handle_outline_vertex_range);
+        hide_vertices(vertices, self.focused_handle_stroke_vertex_range);
+        hide_vertices(vertices, self.active_handle_stroke_vertex_range);
     }
 
     #[inline(always)]
@@ -199,11 +199,11 @@ impl<I, Style> Widget<I, Style> for RadioButton<I, Style>
         let diameter = style.default_handle_radius() * 2.0;
         let requires_triangulation =
             self.diameter != diameter ||
-            self.focused_outline_width != style.focused_widget_outline_width() ||
-            self.active_outline_width != style.active_widget_outline_width();
+            self.focused_stroke_thickness != style.focused_widget_stroke_thickness() ||
+            self.active_stroke_thickness != style.active_widget_stroke_thickness();
         self.diameter = diameter;
-        self.focused_outline_width = style.focused_widget_outline_width();
-        self.active_outline_width = style.active_widget_outline_width();
+        self.focused_stroke_thickness = style.focused_widget_stroke_thickness();
+        self.active_stroke_thickness = style.active_widget_stroke_thickness();
         let size = self.size;
         let error_margin = style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
@@ -262,20 +262,20 @@ impl<I, Style> Widget<I, Style> for RadioButton<I, Style>
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
         helper_points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     )
     {
         let radius = self.diameter * 0.5;
         points.clear();
         circle(vec2(radius, radius), radius)
             .to_points(16, &mut |p| { points.push(p.into()); });
-        outline_points(points, self.focused_outline_width, false,
+        outline_points(points, self.focused_stroke_thickness, false,
             &mut |p| { helper_points.push(p.into()); });
-        self.focused_handle_outline_vertex_range = tri(&helper_points);
+        self.focused_handle_stroke_vertex_range = tri(&helper_points);
         helper_points.clear();
-        outline_points(points, self.active_outline_width, false,
+        outline_points(points, self.active_stroke_thickness, false,
             &mut |p| { helper_points.push(p.into()); });
-        self.active_handle_outline_vertex_range = tri(&helper_points);
+        self.active_handle_stroke_vertex_range = tri(&helper_points);
         self.handle_vertex_range = tri(&points);
         points.clear();
         let inner_radius = radius * 0.4;
@@ -293,14 +293,14 @@ impl<I, Style> Widget<I, Style> for RadioButton<I, Style>
         let offset = self.offset;
         set_vertex_params(vertices, self.handle_vertex_range, offset, style.widget_bg_col());
         if self.held() {
-            set_vertex_params(vertices, self.active_handle_outline_vertex_range, offset, style.active_widget_outline_col());
+            set_vertex_params(vertices, self.active_handle_stroke_vertex_range, offset, style.active_widget_stroke_col());
         } else {
-            hide_vertices(vertices, self.active_handle_outline_vertex_range);
+            hide_vertices(vertices, self.active_handle_stroke_vertex_range);
         }
         if self.hovered() {
-            set_vertex_params(vertices, self.focused_handle_outline_vertex_range, offset, style.focused_widget_outline_col());
+            set_vertex_params(vertices, self.focused_handle_stroke_vertex_range, offset, style.focused_widget_stroke_col());
         } else {
-            hide_vertices(vertices, self.focused_handle_outline_vertex_range);
+            hide_vertices(vertices, self.focused_handle_stroke_vertex_range);
         }
         if self.selected() {
             let target_color =

@@ -21,13 +21,13 @@ pub struct Checkbox<I, Style> {
     size: Vec2,
     label: CompactString,
     label_text: RenderedText,
-    focused_outline_width: f32,
-    active_outline_width: f32,
+    focused_stroke_thickness: f32,
+    active_stroke_thickness: f32,
     checkmark_points: GlobalVec<[f32; 2]>,
-    rect_vertex_range: VertexRange,
-    checkmark_vertex_range: VertexRange,
-    focused_outline_vertex_range: VertexRange,
-    active_outline_vertex_range: VertexRange,
+    rect_vertex_range: Option<VertexRange>,
+    checkmark_vertex_range: Option<VertexRange>,
+    focused_stroke_vertex_range: Option<VertexRange>,
+    active_stroke_vertex_range: Option<VertexRange>,
     font: CompactString,
     flags: u32,
     _marker: PhantomData<(I, Style)>
@@ -52,13 +52,13 @@ impl<I, Style> Checkbox<I, Style>
             offset: Default::default(),
             label: Default::default(),
             label_text: Default::default(),
-            focused_outline_width: 0.0,
-            active_outline_width: 0.0,
+            focused_stroke_thickness: 0.0,
+            active_stroke_thickness: 0.0,
             checkmark_points: Default::default(),
-            checkmark_vertex_range: Default::default(),
-            rect_vertex_range: Default::default(),
-            focused_outline_vertex_range: Default::default(),
-            active_outline_vertex_range: Default::default(),
+            checkmark_vertex_range: None,
+            rect_vertex_range: None,
+            focused_stroke_vertex_range: None,
+            active_stroke_vertex_range: None,
             font: Default::default(),
             flags: 0,
             _marker: PhantomData,
@@ -120,8 +120,8 @@ impl<I, Style> Checkbox<I, Style>
     #[inline(always)]
     pub fn hide(&mut self, vertices: &mut [Vertex]) {
         hide_vertices(vertices, self.rect_vertex_range);
-        hide_vertices(vertices, self.focused_outline_vertex_range);
-        hide_vertices(vertices, self.active_outline_vertex_range);
+        hide_vertices(vertices, self.focused_stroke_vertex_range);
+        hide_vertices(vertices, self.active_stroke_vertex_range);
         hide_vertices(vertices, self.checkmark_vertex_range);
     }
 }
@@ -203,11 +203,11 @@ impl<I, Style> Widget<I, Style> for Checkbox<I, Style>
         let rect = rect(Default::default(), rect_size, style.rounding());
         let requires_triangulation =
             self.rect != rect ||
-            self.focused_outline_width != style.focused_widget_outline_width() ||
-            self.active_outline_width != style.active_widget_outline_width();
+            self.focused_stroke_thickness != style.focused_widget_stroke_thickness() ||
+            self.active_stroke_thickness != style.active_widget_stroke_thickness();
         self.rect = rect;
-        self.focused_outline_width = style.focused_widget_outline_width();
-        self.active_outline_width = style.active_widget_outline_width();
+        self.focused_stroke_thickness = style.focused_widget_stroke_thickness();
+        self.active_stroke_thickness = style.active_widget_stroke_thickness();
         let mut cursor_in_widget = false;
         self.flags &= !(Self::CLICKED | Self::CURSOR_IN_CHECKBOX);
         let pos = window_pos + offset;
@@ -267,19 +267,19 @@ impl<I, Style> Widget<I, Style> for Checkbox<I, Style>
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
         helper_points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     )
     {
         self.rect.to_points(&mut |p| { points.push(p.into()); });
         outline_points(points,
-            self.focused_outline_width, false, &mut |p| { helper_points.push(p.into()); }
+            self.focused_stroke_thickness, false, &mut |p| { helper_points.push(p.into()); }
         );
-        self.focused_outline_vertex_range = tri(&helper_points);
+        self.focused_stroke_vertex_range = tri(&helper_points);
         helper_points.clear();
         outline_points(points,
-            self.active_outline_width, false, &mut |p| { helper_points.push(p.into()); }
+            self.active_stroke_thickness, false, &mut |p| { helper_points.push(p.into()); }
         );
-        self.active_outline_vertex_range = tri(&helper_points);
+        self.active_stroke_vertex_range = tri(&helper_points);
         self.rect_vertex_range = tri(&points);
         points.clear();
         points.append(&self.checkmark_points);
@@ -294,17 +294,17 @@ impl<I, Style> Widget<I, Style> for Checkbox<I, Style>
     {
         let offset = self.offset;
         if self.held() {
-            let target_color = style.active_widget_outline_col();
-            set_vertex_params(vertices, self.active_outline_vertex_range, offset, target_color);
+            let target_color = style.active_widget_stroke_col();
+            set_vertex_params(vertices, self.active_stroke_vertex_range, offset, target_color);
         }
         else {
-            hide_vertices(vertices, self.active_outline_vertex_range);
+            hide_vertices(vertices, self.active_stroke_vertex_range);
         }
         if self.hovered() {
-            let target_color = style.focused_widget_outline_col();
-            set_vertex_params(vertices, self.focused_outline_vertex_range, offset, target_color);
+            let target_color = style.focused_widget_stroke_col();
+            set_vertex_params(vertices, self.focused_stroke_vertex_range, offset, target_color);
         } else {
-            hide_vertices(vertices, self.focused_outline_vertex_range);
+            hide_vertices(vertices, self.focused_stroke_vertex_range);
         }
         if self.checked() {
             let offset = offset + self.rect.max * 0.5;
@@ -320,14 +320,7 @@ impl<I, Style> Widget<I, Style> for Checkbox<I, Style>
         } else {
             hide_vertices(vertices, self.checkmark_vertex_range);
         }
-        let vertex_sample = vertices[self.rect_vertex_range.start()];
-        if vertex_sample.offset != offset || vertex_sample.color != style.widget_bg_col() {
-            let target_color = style.widget_bg_col();
-            for vertex in &mut vertices[self.rect_vertex_range.range()] {
-                vertex.offset = offset;
-                vertex.color = target_color;
-            }
-        }
+        set_vertex_params(vertices, self.rect_vertex_range, offset, style.widget_bg_col());
     }
 
     fn hide(

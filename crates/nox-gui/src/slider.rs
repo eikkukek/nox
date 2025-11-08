@@ -40,14 +40,14 @@ pub trait Sliderable: Copy + FromStr + PartialEq {
 pub struct Slider<I, Style>
 {
     slider_rect: Rect,
-    slider_rect_vertex_range: VertexRange,
+    slider_rect_vertex_range: Option<VertexRange>,
     max_y: f32,
     handle_rect: Rect,
-    handle_rect_vertex_range: VertexRange,
-    regular_handle_outline_width: f32,
-    regular_handle_outline_vertex_range: VertexRange,
-    active_handle_outline_width: f32,
-    active_handle_outline_vertex_range: VertexRange,
+    handle_rect_vertex_range: Option<VertexRange>,
+    regular_handle_stroke_thickness: f32,
+    regular_handle_stroke_vertex_range: Option<VertexRange>,
+    active_handle_stroke_thickness: f32,
+    active_handle_stroke_vertex_range: Option<VertexRange>,
     offset: Vec2,
     drag_value: DragValue<I, Style>,
     t: f32,
@@ -71,14 +71,14 @@ impl<I, Style> Slider<I, Style>
     {
         Self {
             slider_rect: Default::default(),
-            slider_rect_vertex_range: Default::default(),
+            slider_rect_vertex_range: None,
             max_y: 0.0,
             handle_rect: Default::default(),
-            handle_rect_vertex_range: Default::default(),
-            regular_handle_outline_width: 0.0,
-            regular_handle_outline_vertex_range: Default::default(),
-            active_handle_outline_width: 0.0,
-            active_handle_outline_vertex_range: Default::default(),
+            handle_rect_vertex_range: None,
+            regular_handle_stroke_thickness: 0.0,
+            regular_handle_stroke_vertex_range: None,
+            active_handle_stroke_thickness: 0.0,
+            active_handle_stroke_vertex_range: None,
             offset: Default::default(),
             drag_value: DragValue::new(),
             t: 1.0,
@@ -149,8 +149,8 @@ impl<I, Style> Slider<I, Style>
     pub fn hide(&mut self, vertices: &mut [Vertex]) {
         hide_vertices(vertices, self.slider_rect_vertex_range);
         hide_vertices(vertices, self.handle_rect_vertex_range);
-        hide_vertices(vertices, self.active_handle_outline_vertex_range);
-        hide_vertices(vertices, self.regular_handle_outline_vertex_range);
+        hide_vertices(vertices, self.active_handle_stroke_vertex_range);
+        hide_vertices(vertices, self.regular_handle_stroke_vertex_range);
         self.drag_value.hide(vertices);
     }
 }
@@ -265,10 +265,10 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
         let requires_triangulation =
             slider_rect != self.slider_rect ||
             handle_rect != self.handle_rect ||
-            self.regular_handle_outline_width != style.focused_widget_outline_width() ||
-            self.active_handle_outline_width != style.active_widget_outline_width();
-        self.regular_handle_outline_width = style.focused_widget_outline_width();
-        self.active_handle_outline_width = style.active_widget_outline_width();
+            self.regular_handle_stroke_thickness != style.focused_widget_stroke_thickness() ||
+            self.active_handle_stroke_thickness != style.active_widget_stroke_thickness();
+        self.regular_handle_stroke_thickness = style.focused_widget_stroke_thickness();
+        self.active_handle_stroke_thickness = style.active_widget_stroke_thickness();
         self.slider_rect = slider_rect;
         self.handle_rect = handle_rect;
         let mut cursor_in_widget = false;
@@ -317,7 +317,7 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
         helper_points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     )
     {
         self.slider_rect.to_points(&mut |p| { points.push(p.into()); });
@@ -325,12 +325,12 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
         points.clear();
         self.handle_rect.to_points(&mut |p| { points.push(p.into()); });
         outline_points(points,
-            self.regular_handle_outline_width, false, &mut |p| { helper_points.push(p.into()); });
-        self.regular_handle_outline_vertex_range = tri(&helper_points);
+            self.regular_handle_stroke_thickness, false, &mut |p| { helper_points.push(p.into()); });
+        self.regular_handle_stroke_vertex_range = tri(&helper_points);
         helper_points.clear();
         outline_points(points,
-            self.active_handle_outline_width, false, &mut |p| { helper_points.push(p.into()); });
-        self.active_handle_outline_vertex_range = tri(&helper_points);
+            self.active_handle_stroke_thickness, false, &mut |p| { helper_points.push(p.into()); });
+        self.active_handle_stroke_vertex_range = tri(&helper_points);
         self.handle_rect_vertex_range = tri(&points);
         points.clear();
         helper_points.clear();
@@ -355,12 +355,12 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
                 } else {
                     style.focused_widget_fg_col()
                 };
-            set_vertex_params(vertices, self.active_handle_outline_vertex_range, offset, target_color);
-            hide_vertices(vertices, self.regular_handle_outline_vertex_range);
+            set_vertex_params(vertices, self.active_handle_stroke_vertex_range, offset, target_color);
+            hide_vertices(vertices, self.regular_handle_stroke_vertex_range);
         } else {
             target_color = style.inactive_widget_fg_col();
-            set_vertex_params(vertices, self.regular_handle_outline_vertex_range, offset, target_color);
-            hide_vertices(vertices, self.active_handle_outline_vertex_range);
+            set_vertex_params(vertices, self.regular_handle_stroke_vertex_range, offset, target_color);
+            hide_vertices(vertices, self.active_handle_stroke_vertex_range);
         }
         self.drag_value.set_vertex_params(style, vertices);
     }

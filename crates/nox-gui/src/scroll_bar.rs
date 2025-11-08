@@ -21,8 +21,8 @@ pub struct VerScrollBar {
     handle_rect_max: Vec2,
     max_t: f32,
     rounding: f32,
-    bar_vertex_range: VertexRange,
-    handle_vertex_range: VertexRange,
+    bar_vertex_range: Option<VertexRange>,
+    handle_vertex_range: Option<VertexRange>,
     opacity: f32,
     flags: u32,
 }
@@ -44,8 +44,8 @@ impl VerScrollBar {
             handle_rect_max: Default::default(),
             rounding: 0.0,
             max_t: 0.0,
-            bar_vertex_range: Default::default(),
-            handle_vertex_range: Default::default(),
+            bar_vertex_range: None,
+            handle_vertex_range: None,
             opacity: 0.0,
             flags: 0,
         }
@@ -184,7 +184,7 @@ impl VerScrollBar {
     pub fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
-        mut tri: impl FnMut(&[[f32; 2]]) -> VertexRange,
+        mut tri: impl FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     ) {
         rect(
             Default::default(),
@@ -237,8 +237,8 @@ pub struct HorScrollBar {
     handle_rect_max: Vec2,
     max_t: f32,
     rounding: f32,
-    bar_vertex_range: VertexRange,
-    handle_vertex_range: VertexRange,
+    bar_vertex_range: Option<VertexRange>,
+    handle_vertex_range: Option<VertexRange>,
     opacity: f32,
     flags: u32,
 }
@@ -400,7 +400,7 @@ impl HorScrollBar {
     pub fn triangulate(
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
-        mut tri: impl FnMut(&[[f32; 2]]) -> VertexRange,
+        mut tri: impl FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     ) {
         rect(
             Default::default(),

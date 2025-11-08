@@ -4,7 +4,7 @@ use core::{
 
 use std::f32::consts::FRAC_PI_2;
 
-use nox::mem::vec_types::GlobalVec;
+use nox::mem::vec_types::{ArrayVec, GlobalVec};
 
 use nox_geom::*;
 
@@ -12,8 +12,11 @@ use crate::*;
 
 pub struct InteractVisuals {
     pub bg_col: ColorSRGBA,
-    pub bg_stroke: Option<Stroke>,
-    pub fg_stroke: Stroke,
+    pub bg_strokes: ArrayVec<Stroke, 4>,
+    pub bg_stroke_idx: u32,
+    pub fg_strokes: ArrayVec<Stroke, 4>,
+    pub fg_stroke_idx: u32,
+    pub rounding: f32,
 }
 
 pub trait WindowStyle {
@@ -31,13 +34,13 @@ pub trait WindowStyle {
     }
 
     #[inline(always)]
-    fn window_outline_col(&self) -> ColorSRGBA {
-        DEFAULT_WINDOW_OUTLINE_COL
+    fn window_stroke_col(&self) -> ColorSRGBA {
+        DEFAULT_WINDOW_STROKE_COL
     }
 
     #[inline(always)]
-    fn focused_window_outline_col(&self) -> ColorSRGBA {
-        DEFAULT_FOCUSED_WINDOW_OUTLINE_COL
+    fn focused_window_stroke_col(&self) -> ColorSRGBA {
+        DEFAULT_FOCUSED_WINDOW_STROKE_COL
     }
 
     #[inline(always)]
@@ -61,13 +64,13 @@ pub trait WindowStyle {
     }
 
     #[inline(always)]
-    fn focused_widget_outline_col(&self) -> ColorSRGBA {
-        DEFAULT_FOCUSED_WIDGET_OUTLINE_COL
+    fn focused_widget_stroke_col(&self) -> ColorSRGBA {
+        DEFAULT_FOCUSED_WIDGET_STROKE_COL
     }
 
     #[inline(always)]
-    fn active_widget_outline_col(&self) -> ColorSRGBA {
-        DEFAULT_ACTIVE_WIDGET_OUTLINE_COL
+    fn active_widget_stroke_col(&self) -> ColorSRGBA {
+        DEFAULT_ACTIVE_WIDGET_STROKE_COL
     }
 
     #[inline(always)]
@@ -111,8 +114,8 @@ pub trait WindowStyle {
     }
 
     #[inline(always)]
-    fn input_text_active_outline_col(&self) -> ColorSRGBA {
-        DEFAULT_INPUT_TEXT_ACTIVE_OUTLINE_COL
+    fn input_text_active_stroke_col(&self) -> ColorSRGBA {
+        DEFAULT_INPUT_TEXT_ACTIVE_STROKE_COL
     }
 
     #[inline(always)]
@@ -127,38 +130,53 @@ pub trait WindowStyle {
 
     #[inline(always)]
     fn interact_visuals(&self, reaction: &Reaction) -> InteractVisuals {
+        let bg_strokes = ArrayVec::from([
+            Stroke {
+                col: self.active_widget_stroke_col(),
+                thickness: self.active_widget_stroke_thickness(),
+            },
+            Stroke {
+                col: self.focused_widget_stroke_col(),
+                thickness: self.focused_widget_stroke_thickness(),
+            },
+        ].as_slice());
+        let mut fg_strokes = ArrayVec::from([
+            Stroke {
+                col: self.active_widget_fg_col(),
+                thickness: self.active_widget_stroke_thickness(),
+            },
+            Stroke {
+                col: self.focused_widget_fg_col(),
+                thickness: self.focused_widget_stroke_thickness(),
+            },
+        ].as_slice());
         if reaction.held() {
             InteractVisuals {
                 bg_col: self.widget_bg_col(),
-                bg_stroke: Some(Stroke {
-                    col: self.active_widget_outline_col(),
-                    thickness: self.active_widget_outline_width()
-                }),
-                fg_stroke: Stroke {
-                    col: self.active_widget_fg_col(),
-                    thickness: self.active_widget_outline_width(),
-                },
+                bg_strokes,
+                bg_stroke_idx: 0,
+                fg_strokes,
+                fg_stroke_idx: 0,
+                rounding: self.rounding(),
             }
         } else if reaction.hovered() {
             InteractVisuals {
                 bg_col: self.widget_bg_col(),
-                bg_stroke: Some(Stroke {
-                    col: self.focused_widget_outline_col(),
-                    thickness: self.focused_widget_outline_width(),
-                }),
-                fg_stroke: Stroke {
-                    col: self.focused_widget_fg_col(),
-                    thickness: self.focused_widget_outline_width(),
-                },
+                bg_strokes,
+                bg_stroke_idx: 1,
+                fg_strokes,
+                fg_stroke_idx: 1,
+                rounding: self.rounding(),
             }
         } else {
+            fg_strokes[1].col = self.inactive_widget_fg_col();
             InteractVisuals {
                 bg_col: self.widget_bg_col(),
-                bg_stroke: None,
-                fg_stroke: Stroke {
-                    col: self.inactive_widget_fg_col(),
-                    thickness: self.focused_widget_outline_width(),
-                },
+                bg_strokes,
+                bg_stroke_idx: 2,
+                fg_strokes,
+                fg_stroke_idx: 1,
+                rounding: self.rounding(),
             }
         }
     }
@@ -242,22 +260,22 @@ pub trait WindowStyle {
     }
 
     #[inline(always)]
-    fn window_outline_width(&self) -> f32 {
+    fn window_stroke_thickness(&self) -> f32 {
         0.002
     }
 
     #[inline(always)]
-    fn focused_window_outline_width(&self) -> f32 {
+    fn focused_window_stroke_thickness(&self) -> f32 {
         0.0035
     }
 
     #[inline(always)]
-    fn focused_widget_outline_width(&self) -> f32 {
+    fn focused_widget_stroke_thickness(&self) -> f32 {
         0.002
     }
 
     #[inline(always)]
-    fn active_widget_outline_width(&self) -> f32 {
+    fn active_widget_stroke_thickness(&self) -> f32 {
         0.0026
     }
 
@@ -427,10 +445,10 @@ const DEFAULT_WINDOW_BG_COL: ColorSRGBA =
 
 const DEFAULT_WINDOW_TITLE_BAR_COL: ColorSRGBA = DEFAULT_WINDOW_BG_COL;
 
-const DEFAULT_WINDOW_OUTLINE_COL: ColorSRGBA =
+const DEFAULT_WINDOW_STROKE_COL: ColorSRGBA =
     ColorSRGBA::new(38.0 / 255.0, 54.0 / 255.0, 54.0 / 255.0, 1.0);
 
-const DEFAULT_FOCUSED_WINDOW_OUTLINE_COL: ColorSRGBA =
+const DEFAULT_FOCUSED_WINDOW_STROKE_COL: ColorSRGBA =
     ColorSRGBA::new(103.0 / 255.0, 148.0 / 255.0, 152.0 / 255.0, 1.0);
 
 const DEFAULT_WIDGET_BG_COL: ColorSRGBA =
@@ -448,10 +466,10 @@ const DEFAULT_FOCUSED_TEXT_COL: ColorSRGBA =
 const DEFAULT_ACTIVE_TEXT_COL: ColorSRGBA =
     ColorSRGBA::white(1.0);
 
-const DEFAULT_FOCUSED_WIDGET_OUTLINE_COL: ColorSRGBA =
+const DEFAULT_FOCUSED_WIDGET_STROKE_COL: ColorSRGBA =
     ColorSRGBA::new(65.0 / 255.0, 95.0 / 255.0, 98.0 / 255.0, 1.0);
 
-const DEFAULT_ACTIVE_WIDGET_OUTLINE_COL: ColorSRGBA =
+const DEFAULT_ACTIVE_WIDGET_STROKE_COL: ColorSRGBA =
     ColorSRGBA::new(82.0 / 255.0, 118.0 / 255.0, 122.0 / 255.0, 1.0);
 
 const DEFAULT_HOVER_WINDOW_BG_COL: ColorSRGBA =
@@ -466,7 +484,7 @@ const DEFAULT_SCROLL_BAR_HANDLE_COL: ColorSRGBA =
 const DEFAULT_INPUT_TEXT_BG_COL: ColorSRGBA =
     ColorSRGBA::new(4.0 / 255.0, 6.0 / 255.0, 6.0 / 255.0, 1.0);
 
-const DEFAULT_INPUT_TEXT_ACTIVE_OUTLINE_COL: ColorSRGBA =
+const DEFAULT_INPUT_TEXT_ACTIVE_STROKE_COL: ColorSRGBA =
     ColorSRGBA::new(40.0 / 255.0, 215.0 / 255.0, 215.0 / 255.0, 0.7);
 
 const DEFAULT_INPUT_TEXT_SELECTION_BG_COL: ColorSRGBA

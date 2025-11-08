@@ -27,17 +27,17 @@ pub struct InputText<I, Style> {
     input_offsets: GlobalVec<Vec2>,
     input_text_offset_x: f32,
     selection: Option<(usize, usize)>,
-    cursor_rect_vertex_range: VertexRange,
+    cursor_rect_vertex_range: Option<VertexRange>,
     text_cursor_pos: usize,
     input_rect: Rect,
-    input_rect_vertex_range: VertexRange,
-    input_rect_outline_vertex_range: VertexRange,
+    input_rect_vertex_range: Option<VertexRange>,
+    input_rect_stroke_vertex_range: Option<VertexRange>,
     selection_rect_vertices: [Vertex; 4],
     cursor_rect: Rect,
     flags: u32,
     cursor_timer: f32,
     double_click_timer: f32,
-    focused_outline_width: f32,
+    focused_stroke_thickness: f32,
     width: f32,
     bg_col_override: ColorSRGBA,
     _marker: PhantomData<(I, Style)>,
@@ -85,15 +85,15 @@ impl<I, Style> InputText<I, Style>
             text_cursor_pos: Default::default(),
             selection: None,
             input_rect: Default::default(),
-            input_rect_vertex_range: Default::default(),
-            input_rect_outline_vertex_range: Default::default(),
+            input_rect_vertex_range: None,
+            input_rect_stroke_vertex_range: None,
             selection_rect_vertices: Default::default(),
             cursor_rect: Default::default(),
-            cursor_rect_vertex_range: Default::default(),
+            cursor_rect_vertex_range: None,
             flags: Self::MOUSE_VISIBLE | Self::CURSOR_ENABLE,
             cursor_timer: 0.0,
             double_click_timer: 100.0,
-            focused_outline_width: 0.0,
+            focused_stroke_thickness: 0.0,
             width: 0.0,
             bg_col_override: Default::default(),
             _marker: PhantomData,
@@ -944,10 +944,10 @@ impl<I, Style> Widget<I, Style> for InputText<I, Style>
         let requires_triangulation =
             self.input_rect != input_rect ||
             self.cursor_rect.max != cursor_rect_max ||
-            self.focused_outline_width != style.focused_widget_outline_width();
+            self.focused_stroke_thickness != style.focused_widget_stroke_thickness();
         self.input_rect = input_rect;
         self.cursor_rect.max = cursor_rect_max;
-        self.focused_outline_width = style.focused_widget_outline_width();
+        self.focused_stroke_thickness = style.focused_widget_stroke_thickness();
         if !self.active() {
             self.selection = None;
         }
@@ -1021,14 +1021,14 @@ impl<I, Style> Widget<I, Style> for InputText<I, Style>
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
         helper_points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     ) {
         self.input_rect.to_points(&mut |p| { points.push(p.into()); });
         outline_points(
-            points, self.focused_outline_width, false,
+            points, self.focused_stroke_thickness, false,
             &mut |p| { helper_points.push(p.into()); }
         );
-        self.input_rect_outline_vertex_range = tri(&helper_points);
+        self.input_rect_stroke_vertex_range = tri(&helper_points);
         self.input_rect_vertex_range = tri(points);
         points.clear();
         self.cursor_rect.to_points(&mut |p| { points.push(p.into()); });
@@ -1049,13 +1049,13 @@ impl<I, Style> Widget<I, Style> for InputText<I, Style>
         };
         set_vertex_params(vertices, self.input_rect_vertex_range, offset, target_color);
         if self.active() {
-            let target_color = style.input_text_active_outline_col();
-            set_vertex_params(vertices, self.input_rect_outline_vertex_range, offset, target_color);
+            let target_color = style.input_text_active_stroke_col();
+            set_vertex_params(vertices, self.input_rect_stroke_vertex_range, offset, target_color);
         } else if self.hovered() {
-            let target_color = style.focused_widget_outline_col();
-            set_vertex_params(vertices, self.input_rect_outline_vertex_range, offset, target_color);
+            let target_color = style.focused_widget_stroke_col();
+            set_vertex_params(vertices, self.input_rect_stroke_vertex_range, offset, target_color);
         } else {
-            hide_vertices(vertices, self.input_rect_outline_vertex_range);
+            hide_vertices(vertices, self.input_rect_stroke_vertex_range);
         }
         if self.cursor_visible() {
             offset += style.item_pad_inner() +

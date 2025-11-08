@@ -368,7 +368,7 @@ impl<I, Style> Widget<I, Style> for Image<I, Style>
         &mut self,
         _points: &mut GlobalVec<[f32; 2]>,
         _helper_points: &mut GlobalVec<[f32; 2]>,
-        _tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        _tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     ) {}
 
     fn set_vertex_params(

@@ -22,21 +22,21 @@ pub struct ComboBox<I, Style> {
     widget_size: Vec2,
     content_size: Vec2,
     rounding: f32,
-    focused_outline_width: f32,
-    active_outline_width: f32,
-    window_outline_width: f32,
-    rect_vertex_range: VertexRange,
-    focused_outline_vertex_range: VertexRange,
-    active_outline_vertex_range: VertexRange,
-    arrow_vertex_range: VertexRange,
+    focused_stroke_thickness: f32,
+    active_stroke_thickness: f32,
+    window_stroke_thickness: f32,
+    rect_vertex_range: Option<VertexRange>,
+    focused_stroke_vertex_range: Option<VertexRange>,
+    active_stroke_vertex_range: Option<VertexRange>,
+    arrow_vertex_range: Option<VertexRange>,
     selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, Style>)>,
     active_tags: FxHashSet<Hashable<f64>>,
     prev_active_tags: GlobalVec<Hashable<f64>>,
     selected: Option<Hashable<f64>>,
     content_vertices: GlobalVec<Vertex>,
     content_indices: GlobalVec<u32>,
-    content_rect_vertex_range: VertexRange,
-    content_outline_vertex_range: VertexRange,
+    content_rect_vertex_range: Option<VertexRange>,
+    content_stroke_vertex_range: Option<VertexRange>,
     combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     last_triangulation: u64,
     flags: u32,
@@ -63,21 +63,21 @@ impl<I, Style> ComboBox<I, Style>
             widget_size: Default::default(),
             content_size: Default::default(),
             rounding: 0.0,
-            focused_outline_width: 0.0,
-            active_outline_width: 0.0,
-            window_outline_width: 0.0,
-            rect_vertex_range: Default::default(),
-            focused_outline_vertex_range: Default::default(),
-            arrow_vertex_range: Default::default(),
-            active_outline_vertex_range: Default::default(),
+            focused_stroke_thickness: 0.0,
+            active_stroke_thickness: 0.0,
+            window_stroke_thickness: 0.0,
+            rect_vertex_range: None,
+            focused_stroke_vertex_range: None,
+            arrow_vertex_range: None,
+            active_stroke_vertex_range: None,
             selectable_tags: FxHashMap::default(),
             active_tags: FxHashSet::default(),
             prev_active_tags: Default::default(),
             selected: None,
             content_vertices: Default::default(),
             content_indices: Default::default(),
-            content_rect_vertex_range: Default::default(),
-            content_outline_vertex_range: Default::default(),
+            content_rect_vertex_range: None,
+            content_stroke_vertex_range: None,
             combined_text: Default::default(),
             last_triangulation: 0,
             flags: 0,
@@ -120,21 +120,21 @@ impl<I, Style> ComboBox<I, Style>
         let widget_size = vec2(min_width, text_box_height);
         let widget_requires_triangulation =
             self.widget_size != widget_size ||
-            self.focused_outline_width != style.focused_widget_outline_width() ||
-            self.active_outline_width != style.active_widget_outline_width() ||
+            self.focused_stroke_thickness != style.focused_widget_stroke_thickness() ||
+            self.active_stroke_thickness != style.active_widget_stroke_thickness() ||
             self.rounding != style.rounding();
         self.widget_size = widget_size;
-        self.focused_outline_width = style.focused_widget_outline_width();
-        self.active_outline_width = style.active_widget_outline_width();
+        self.focused_stroke_thickness = style.focused_widget_stroke_thickness();
+        self.active_stroke_thickness = style.active_widget_stroke_thickness();
         or_flag!(self.flags, Self::WIDGET_REQUIRES_TRIANGULATION, widget_requires_triangulation);
         let content_offset = self.offset + vec2(0.0, widget_size.y + item_pad_outer.y);
         let content_size = vec2(min_width, widget_off.y - content_offset.y + item_pad_outer.y);
         let content_requires_triangulation =
             content_size != self.content_size ||
-            self.window_outline_width != style.window_outline_width() ||
+            self.window_stroke_thickness != style.window_stroke_thickness() ||
             self.rounding != style.rounding();
         self.rounding = style.rounding();
-        self.window_outline_width = style.window_outline_width();
+        self.window_stroke_thickness = style.window_stroke_thickness();
         self.content_size = content_size;
         or_flag!(self.flags, Self::CONTENT_REQUIRES_TRIANGULATION, content_requires_triangulation);
         let min_width = min_width - style.collapse_symbol_scale() - item_pad_inner.x;
@@ -147,8 +147,8 @@ impl<I, Style> ComboBox<I, Style>
     #[inline(always)]
     pub fn hide(&mut self, vertices: &mut [Vertex]) {
         hide_vertices(vertices, self.rect_vertex_range);
-        hide_vertices(vertices, self.active_outline_vertex_range);
-        hide_vertices(vertices, self.focused_outline_vertex_range);
+        hide_vertices(vertices, self.active_stroke_vertex_range);
+        hide_vertices(vertices, self.focused_stroke_vertex_range);
         hide_vertices(vertices, self.arrow_vertex_range);
     }
 
@@ -431,10 +431,10 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
                 self.content_size,
                 self.rounding,
             ).to_points(&mut |p| { points.push(p.into()); });
-            outline_points(&points, self.focused_outline_width, false,
+            outline_points(&points, self.focused_stroke_thickness, false,
                 &mut |p| { helper_points.push(p.into()); }
             );
-            self.content_outline_vertex_range = tri(&helper_points);
+            self.content_stroke_vertex_range = tri(&helper_points);
             self.content_rect_vertex_range = tri(&points);
             points.clear();
             helper_points.clear();
@@ -456,8 +456,8 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
         }
         if contents_shown {
             let offset = hover_content_offset;
-            set_vertex_params(&mut self.content_vertices, self.content_outline_vertex_range,
-                offset, style.window_outline_col(),
+            set_vertex_params(&mut self.content_vertices, self.content_stroke_vertex_range,
+                offset, style.window_stroke_col(),
             );
             set_vertex_params(&mut self.content_vertices, self.content_rect_vertex_range,
                 offset, style.hover_window_bg_col(),
@@ -481,22 +481,22 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
         helper_points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     ) {
         rect(
             Default::default(),
             self.widget_size,
             self.rounding,
         ).to_points(&mut |p| { points.push(p.into()); });
-        outline_points(points, self.focused_outline_width, false,
+        outline_points(points, self.focused_stroke_thickness, false,
             &mut |p| { helper_points.push(p.into()); }
         );
-        self.focused_outline_vertex_range = tri(&helper_points);
+        self.focused_stroke_vertex_range = tri(&helper_points);
         helper_points.clear();
-        outline_points(points, self.active_outline_width, false,
+        outline_points(points, self.active_stroke_thickness, false,
             &mut |p| { helper_points.push(p.into()); }
         );
-        self.active_outline_vertex_range = tri(&helper_points);
+        self.active_stroke_vertex_range = tri(&helper_points);
         self.rect_vertex_range = tri(&points);
         points.clear();
         points.append(&[Default::default(); 3]);
@@ -512,18 +512,18 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
         let offset = self.offset;
         let contents_shown = self.contents_shown();
         if self.widget_held() && !contents_shown {
-            set_vertex_params(vertices, self.active_outline_vertex_range,
-                offset, style.active_widget_outline_col()
+            set_vertex_params(vertices, self.active_stroke_vertex_range,
+                offset, style.active_widget_stroke_col()
             );
         } else {
-            hide_vertices(vertices, self.active_outline_vertex_range);
+            hide_vertices(vertices, self.active_stroke_vertex_range);
         }
         if self.widget_hovered() && !contents_shown {
-            set_vertex_params(vertices, self.focused_outline_vertex_range, offset,
-                style.focused_widget_outline_col()
+            set_vertex_params(vertices, self.focused_stroke_vertex_range, offset,
+                style.focused_widget_stroke_col()
             );
         } else {
-            hide_vertices(vertices, self.focused_outline_vertex_range);
+            hide_vertices(vertices, self.focused_stroke_vertex_range);
         }
         set_vertex_params(vertices, self.rect_vertex_range, offset, style.widget_bg_col());
         let (scale, color) = 
@@ -550,23 +550,25 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
                     style.inactive_text_col(),
                 )
             };
-        let size = self.widget_size;
-        let offset = offset + vec2(size.x - style.item_pad_outer().x, size.y * 0.5);
-        vertices[self.arrow_vertex_range.start()] = Vertex {
-            pos: vec2(0.6, -0.5) * scale,
-            offset: offset,
-            color,
-        };
-        vertices[self.arrow_vertex_range.start() + 1] = Vertex {
-            pos: vec2(0.0, 0.5) * scale,
-            offset: offset,
-            color,
-        };
-        vertices[self.arrow_vertex_range.start() + 2] = Vertex {
-            pos: vec2(-0.6, -0.5) * scale,
-            offset: offset,
-            color,
-        };
+        if let Some(range) = self.arrow_vertex_range {
+            let size = self.widget_size;
+            let offset = offset + vec2(size.x - style.item_pad_outer().x, size.y * 0.5);
+            vertices[range.start()] = Vertex {
+                pos: vec2(0.6, -0.5) * scale,
+                offset: offset,
+                color,
+            };
+            vertices[range.start() + 1] = Vertex {
+                pos: vec2(0.0, 0.5) * scale,
+                offset: offset,
+                color,
+            };
+            vertices[range.start() + 2] = Vertex {
+                pos: vec2(-0.6, -0.5) * scale,
+                offset: offset,
+                color,
+            };
+        }
     }
 
     fn render_commands(

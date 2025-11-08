@@ -20,11 +20,11 @@ pub struct SelectableTag<I, Style> {
     width_override: f32,
     label: CompactString,
     label_text: RenderedText,
-    focused_outline_width: f32,
-    active_outline_width: f32,
-    text_box_vertex_range: VertexRange,
-    focused_outline_vertex_range: VertexRange,
-    active_outline_vertex_range: VertexRange,
+    focused_stroke_thickness: f32,
+    active_stroke_thickness: f32,
+    text_box_vertex_range: Option<VertexRange>,
+    focused_stroke_vertex_range: Option<VertexRange>,
+    active_stroke_vertex_range: Option<VertexRange>,
     font: CompactString,
     flags: u32,
     _marker: PhantomData<(I, Style)>,
@@ -51,11 +51,11 @@ impl<I, Style> SelectableTag<I, Style>
             width_override: 0.0,
             label: Default::default(),
             label_text: Default::default(),
-            focused_outline_width: 0.0,
-            active_outline_width: 0.0,
-            text_box_vertex_range: Default::default(),
-            focused_outline_vertex_range: Default::default(),
-            active_outline_vertex_range: Default::default(),
+            focused_stroke_thickness: 0.0,
+            active_stroke_thickness: 0.0,
+            text_box_vertex_range: None,
+            focused_stroke_vertex_range: None,
+            active_stroke_vertex_range: None,
             font: Default::default(),
             flags: 0,
             _marker: PhantomData,
@@ -139,8 +139,8 @@ impl<I, Style> SelectableTag<I, Style>
     #[inline(always)]
     pub fn hide(&mut self, vertices: &mut [Vertex]) {
         hide_vertices(vertices, self.text_box_vertex_range);
-        hide_vertices(vertices, self.active_outline_vertex_range);
-        hide_vertices(vertices, self.focused_outline_vertex_range);
+        hide_vertices(vertices, self.active_stroke_vertex_range);
+        hide_vertices(vertices, self.focused_stroke_vertex_range);
     }
 }
 
@@ -217,12 +217,12 @@ impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
         let requires_triangulation =
             self.size != size ||
             self.rounding != style.rounding() ||
-            self.focused_outline_width != style.focused_widget_outline_width() ||
-            self.active_outline_width != style.active_widget_outline_width();
+            self.focused_stroke_thickness != style.focused_widget_stroke_thickness() ||
+            self.active_stroke_thickness != style.active_widget_stroke_thickness();
         self.size = size;
         self.rounding = style.rounding();
-        self.focused_outline_width = style.focused_widget_outline_width();
-        self.active_outline_width = style.active_widget_outline_width();
+        self.focused_stroke_thickness = style.focused_widget_stroke_thickness();
+        self.active_stroke_thickness = style.active_widget_stroke_thickness();
         let error_margin = style.cursor_error_margin();
         let error_margin_2 = error_margin + error_margin;
         let bounding_rect = BoundingRect::from_position_size(
@@ -280,18 +280,18 @@ impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
         &mut self,
         points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
         helper_points: &mut mem::vec_types::GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     )
     {
         let text_box = rect(Default::default(), self.size, self.rounding);
         text_box.to_points(&mut |p| { points.push(p.into()); });
-        outline_points(points, self.focused_outline_width,
+        outline_points(points, self.focused_stroke_thickness,
             false, &mut |p| { helper_points.push(p.into()); });
-        self.focused_outline_vertex_range = tri(&helper_points);
+        self.focused_stroke_vertex_range = tri(&helper_points);
         helper_points.clear();
-        outline_points(points, self.active_outline_width,
+        outline_points(points, self.active_stroke_thickness,
             false, &mut |p| { helper_points.push(p.into()); });
-        self.active_outline_vertex_range = tri(&helper_points);
+        self.active_stroke_vertex_range = tri(&helper_points);
         self.text_box_vertex_range = tri(&points);
     }
 
@@ -309,14 +309,14 @@ impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
             hide_vertices(vertices, self.text_box_vertex_range);
         }
         if self.held() {
-            set_vertex_params(vertices, self.active_outline_vertex_range, offset, style.active_widget_outline_col());
+            set_vertex_params(vertices, self.active_stroke_vertex_range, offset, style.active_widget_stroke_col());
         } else {
-            hide_vertices(vertices, self.active_outline_vertex_range);
+            hide_vertices(vertices, self.active_stroke_vertex_range);
         }
         if self.hovered() {
-            set_vertex_params(vertices, self.focused_outline_vertex_range, offset, style.focused_widget_outline_col());
+            set_vertex_params(vertices, self.focused_stroke_vertex_range, offset, style.focused_widget_stroke_col());
         } else {
-            hide_vertices(vertices, self.focused_outline_vertex_range);
+            hide_vertices(vertices, self.focused_stroke_vertex_range);
         }
     }
 

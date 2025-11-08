@@ -17,11 +17,11 @@ pub struct HoverWindow {
     rendered_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     rect: Rect,
     vertices: GlobalVec<Vertex>,
-    rect_vertex_range: VertexRange,
-    rect_outline_vertex_range: VertexRange,
+    rect_vertex_range: Option<VertexRange>,
+    rect_stroke_vertex_range: Option<VertexRange>,
     indices: GlobalVec<u32>,
     position: Vec2,
-    outline_width: f32,
+    stroke_thickness: f32,
 }
 
 impl HoverWindow {
@@ -31,12 +31,12 @@ impl HoverWindow {
             text: Default::default(),
             rendered_text: Default::default(),
             rect: Default::default(),
-            rect_vertex_range: Default::default(),
-            rect_outline_vertex_range: Default::default(),
+            rect_vertex_range: None,
+            rect_stroke_vertex_range: None,
             vertices: Default::default(),
             indices: Default::default(),
             position: Default::default(),
-            outline_width: 0.0,
+            stroke_thickness: 0.0,
         }
     }
 
@@ -70,8 +70,8 @@ impl HoverWindow {
         }
         let requires_triangulation =
             rect != self.rect ||
-            self.outline_width != style.window_outline_width();
-        self.outline_width = style.window_outline_width();
+            self.stroke_thickness != style.window_stroke_thickness();
+        self.stroke_thickness = style.window_stroke_thickness();
         self.rect = rect;
         self.position = cursor_pos + vec2(-self.rect.max.x, style.item_pad_outer().y);
         if requires_triangulation {
@@ -87,11 +87,11 @@ impl HoverWindow {
         let mut indices_usize = GlobalVec::new();
         self.rect.to_points(&mut |p| { points.push(p.into()); });
         nox_geom::shapes::outline_points(
-            &points, self.outline_width * 0.5, false,
+            &points, self.stroke_thickness * 0.5, false,
             &mut |p| { outline_points.push(p.into()); }
         );
         earcut::earcut(&outline_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap();
-        self.rect_outline_vertex_range = VertexRange::new(0..self.vertices.len());
+        self.rect_stroke_vertex_range = VertexRange::new(0..self.vertices.len());
         let vertex_off = self.vertices.len();
         earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap();
         self.rect_vertex_range = VertexRange::new(vertex_off..self.vertices.len());
@@ -102,23 +102,8 @@ impl HoverWindow {
         &mut self,
         style: &impl WindowStyle,
     ) {
-        if self.rect_outline_vertex_range.start() >= self.vertices.len() {
-            return
-        }
-        let vertex_sample = self.vertices[self.rect_outline_vertex_range.start()];
-        if vertex_sample.color != style.window_outline_col() {
-            let target_color = style.window_outline_col();
-            set_vertex_params(&mut self.vertices,
-                self.rect_outline_vertex_range, vec2(0.0, 0.0), target_color
-            );
-        }
-        let vertex_sample = self.vertices[self.rect_vertex_range.start()];
-        if vertex_sample.color != style.hover_window_bg_col() {
-            let target_color = style.hover_window_bg_col();
-            for vertex in &mut self.vertices[self.rect_vertex_range.range()] {
-                vertex.color = target_color;
-            }
-        }
+        color_vertices(&mut self.vertices, self.rect_stroke_vertex_range, style.window_stroke_col());
+        color_vertices(&mut self.vertices, self.rect_vertex_range, style.hover_window_bg_col());
     }
 
     pub fn render_commands(

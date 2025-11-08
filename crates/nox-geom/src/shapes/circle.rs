@@ -2,7 +2,7 @@ use core::f32::consts::TAU;
 
 use crate::*;
 
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
 pub struct Circle {
     pub origin: Vec2,
     pub radius: f32,

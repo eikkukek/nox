@@ -46,38 +46,6 @@ pub trait HoverContents<I, Style: WindowStyle>
     ) -> Result<(), Error>;
 }
 
-#[derive(Default, Clone, Copy, Debug)]
-pub struct VertexRange {
-    pub start: u32,
-    pub end: u32,
-}
-
-impl VertexRange {
-
-    #[inline(always)]
-    pub fn new(range: core::ops::Range<usize>) -> Self {
-        Self {
-            start: range.start as u32,
-            end: range.end as u32,
-        }
-    }
-
-    #[inline(always)]
-    pub fn start(self) -> usize {
-        self.start as usize
-    }
-
-    #[inline(always)]
-    pub fn end(self) -> usize {
-        self.end as usize
-    }
-
-    #[inline(always)]
-    pub fn range(self) -> core::ops::Range<usize> {
-        self.start as usize..self.end as usize
-    }
-}
-
 pub trait Widget<I, Style>
     where
         I: Interface,
@@ -126,7 +94,7 @@ pub trait Widget<I, Style>
         &mut self,
         points: &mut GlobalVec<[f32; 2]>,
         helper_points: &mut GlobalVec<[f32; 2]>,
-        tri: &mut dyn FnMut(&[[f32; 2]]) -> VertexRange,
+        tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     );
 
     fn set_vertex_params(

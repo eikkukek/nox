@@ -49,8 +49,8 @@ pub struct CollapsingHeader {
     label: CompactString,
     label_text: RenderedText,
     offset: Vec2,
-    symbol_vertex_range: VertexRange,
-    beam_vertex_range: VertexRange,
+    symbol_vertex_range: Option<VertexRange>,
+    beam_vertex_range: Option<VertexRange>,
     beam_width: f32,
     beam_height: f32,
     rotation: f32,
@@ -68,8 +68,8 @@ impl CollapsingHeader {
             label: Default::default(),
             label_text: Default::default(),
             offset: Default::default(),
-            symbol_vertex_range: Default::default(),
-            beam_vertex_range: Default::default(),
+            symbol_vertex_range: None,
+            beam_vertex_range: None,
             beam_width: 0.0,
             beam_height: 0.0,
             rotation: 0.0,
@@ -163,7 +163,7 @@ impl CollapsingHeader {
                 }
             }
         );
-        self.beam_width = style.window_outline_width();
+        self.beam_width = style.window_stroke_thickness();
         offset.x + collapse_scale + text_size.x + item_pad_outer.x
     }
 
@@ -183,48 +183,52 @@ impl CollapsingHeader {
                 )
             };
         let offset = self.offset + vec2(scale * 0.5, style.calc_text_height(&self.label_text) * 0.5);
-        let start = self.symbol_vertex_range.start();
-        vertices[start] = Vertex {
-            pos: vec2(0.5, 0.0).rotated(rotation) * scale,
-            offset,
-            color,
-        };
-        vertices[start + 1] = Vertex {
-            pos: vec2(-0.5, 0.5).rotated(rotation) * scale,
-            offset,
-            color,
-        };
-        vertices[start + 2] = Vertex {
-            pos: vec2(-0.5, -0.5).rotated(rotation) * scale,
-            offset,
-            color,
-        };
-        let item_pad_outer = style.item_pad_outer();
-        let beam_width_half = self.beam_width * 0.5;
-        let offset = self.offset + vec2(style.collapse_symbol_scale() * 0.5, item_pad_outer.y + item_pad_outer.y);
-        let beam_height = self.beam_height - item_pad_outer.y;
-        let start = self.beam_vertex_range.start();
-        let color = color.scale_alpha(0.3);
-        vertices[start] = Vertex {
-            pos: vec2(-beam_width_half, 0.0),
-            offset,
-            color,
-        };
-        vertices[start + 1] = Vertex {
-            pos: vec2(-beam_width_half, beam_height),
-            offset,
-            color,
-        };
-        vertices[start + 2] = Vertex {
-            pos: vec2(beam_width_half, beam_height),
-            offset,
-            color,
-        };
-        vertices[start + 3] = Vertex {
-            pos: vec2(beam_width_half, 0.0),
-            offset,
-            color,
-        };
+        if let Some(range) = self.symbol_vertex_range {
+            let start = range.start();
+            vertices[start] = Vertex {
+                pos: vec2(0.5, 0.0).rotated(rotation) * scale,
+                offset,
+                color,
+            };
+            vertices[start + 1] = Vertex {
+                pos: vec2(-0.5, 0.5).rotated(rotation) * scale,
+                offset,
+                color,
+            };
+            vertices[start + 2] = Vertex {
+                pos: vec2(-0.5, -0.5).rotated(rotation) * scale,
+                offset,
+                color,
+            };
+        }
+        if let Some(range) = self.beam_vertex_range {
+            let item_pad_outer = style.item_pad_outer();
+            let beam_width_half = self.beam_width * 0.5;
+            let offset = self.offset + vec2(style.collapse_symbol_scale() * 0.5, item_pad_outer.y + item_pad_outer.y);
+            let beam_height = self.beam_height - item_pad_outer.y;
+            let start = range.start();
+            let color = color.scale_alpha(0.3);
+            vertices[start] = Vertex {
+                pos: vec2(-beam_width_half, 0.0),
+                offset,
+                color,
+            };
+            vertices[start + 1] = Vertex {
+                pos: vec2(-beam_width_half, beam_height),
+                offset,
+                color,
+            };
+            vertices[start + 2] = Vertex {
+                pos: vec2(beam_width_half, beam_height),
+                offset,
+                color,
+            };
+            vertices[start + 3] = Vertex {
+                pos: vec2(beam_width_half, 0.0),
+                offset,
+                color,
+            };
+        }
     }
 
     #[inline(always)]
@@ -379,11 +383,11 @@ pub struct Window<I, Style>
 {
     main_rect: Rect,
     title_bar_rect: Rect,
-    main_rect_vertex_range: VertexRange,
-    title_bar_vertex_range: VertexRange,
-    focused_outline_vertex_range: VertexRange,
-    outline_vertex_range: VertexRange,
-    title_outline_vertex_range: VertexRange,
+    main_rect_vertex_range: Option<VertexRange>,
+    title_bar_vertex_range: Option<VertexRange>,
+    focused_stroke_vertex_range: Option<VertexRange>,
+    stroke_vertex_range: Option<VertexRange>,
+    title_stroke_vertex_range: Option<VertexRange>,
     window_draw_info: DrawInfo,
     content_draw_info: DrawInfo,
     position: Vec2,
@@ -417,8 +421,8 @@ pub struct Window<I, Style>
     scroll_y: f32,
     scroll_x: f32,
     widget_scroll_off: Vec2,
-    focused_outline_width: f32,
-    outline_width: f32,
+    focused_stroke_thickness: f32,
+    stroke_thickness: f32,
     distance_from_edge: Vec2,
     signal_semaphore: Option<TimelineSemaphoreId>,
     signal_semaphore_value: u64,
@@ -484,9 +488,9 @@ impl<I, Style> Window<I, Style>
             title_bar_rect: Default::default(),
             main_rect_vertex_range: Default::default(),
             title_bar_vertex_range: Default::default(),
-            focused_outline_vertex_range: Default::default(),
-            title_outline_vertex_range: Default::default(),
-            outline_vertex_range: Default::default(),
+            focused_stroke_vertex_range: Default::default(),
+            title_stroke_vertex_range: Default::default(),
+            stroke_vertex_range: Default::default(),
             window_draw_info: Default::default(),
             content_draw_info: Default::default(),
             position: position.into(),
@@ -520,8 +524,8 @@ impl<I, Style> Window<I, Style>
             scroll_y: 0.0,
             scroll_x: 0.0,
             widget_scroll_off: Default::default(),
-            focused_outline_width: 0.0,
-            outline_width: 0.0,
+            focused_stroke_thickness: 0.0,
+            stroke_thickness: 0.0,
             distance_from_edge: Default::default(),
             signal_semaphore: None,
             signal_semaphore_value: 0,
@@ -855,7 +859,7 @@ impl<I, Style> Window<I, Style>
         }
         self.active_collapsing_headers.clear();
         self.active_reactions.clear();
-        self.painter_storage.clear();
+        self.painter_storage.begin();
     }
 
     pub fn update(
@@ -1446,8 +1450,8 @@ impl<I, Style> Window<I, Style>
         self.text.clear();
         let requires_triangulation =
             (style.rounding() != self.main_rect.rounding ||
-            self.focused_outline_width != style.focused_window_outline_width() ||
-            self.outline_width != style.window_outline_width() ||
+            self.focused_stroke_thickness != style.focused_window_stroke_thickness() ||
+            self.stroke_thickness != style.window_stroke_thickness() ||
             main_rect_max != self.main_rect.max ||
             self.title_bar_rect != title_bar_rect
         ) as u32;
@@ -1455,8 +1459,8 @@ impl<I, Style> Window<I, Style>
         self.main_rect.rounding = style.rounding();
         self.main_rect.max = main_rect_max;
         self.title_bar_rect = title_bar_rect;
-        self.outline_width = style.window_outline_width();
-        self.focused_outline_width = style.focused_window_outline_width();
+        self.stroke_thickness = style.window_stroke_thickness();
+        self.focused_stroke_thickness = style.focused_window_stroke_thickness();
         self.title_bar_rect = title_bar_rect;
         let mut norm_size = self.main_rect.max * unit_scale;
         norm_size.x /= aspect_ratio;
@@ -1520,21 +1524,21 @@ impl<I, Style> Window<I, Style>
             self.main_rect.to_points(&mut |p| { points.push(p.into()); });
             let mut helper_points = GlobalVec::new();
             outline_points(&points,
-                self.focused_outline_width, false, &mut |p| { helper_points.push(p.into()); }
+                self.focused_stroke_thickness, false, &mut |p| { helper_points.push(p.into()); }
             );
             if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.focused_outline_vertex_range = VertexRange::new(0..self.vertices.len());
+            self.focused_stroke_vertex_range = VertexRange::new(0..self.vertices.len());
             helper_points.clear();
             outline_points(&points,
-                self.outline_width, false, &mut |p| { helper_points.push(p.into()); }
+                self.stroke_thickness, false, &mut |p| { helper_points.push(p.into()); }
             );
             let mut vertex_begin = self.vertices.len();
             if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.outline_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
+            self.stroke_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
             vertex_begin = self.vertices.len();
             if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
@@ -1546,12 +1550,12 @@ impl<I, Style> Window<I, Style>
             );
             helper_points.clear();
             outline_points(&points,
-                self.outline_width, false, &mut |p| { helper_points.push(p.into()); });
+                self.stroke_thickness, false, &mut |p| { helper_points.push(p.into()); });
             vertex_begin = self.vertices.len();
             if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
             }
-            self.title_outline_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
+            self.title_stroke_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
             vertex_begin = self.vertices.len();
             if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
                 self.flags &= !Self::RENDERABLE;
@@ -1618,15 +1622,14 @@ impl<I, Style> Window<I, Style>
         self.content_draw_info.index_count -= index_delta as u32;
         self.vertices.resize(painter_vertex_off, Default::default());
         self.indices.resize(painter_index_off, Default::default());
-        let painter_vertices = self.painter_storage.get_vertices();
-        let painter_indices_usize = self.painter_storage.get_indices();
+        let (painter_vertices, painter_indices_usize) = self.painter_storage.triangulate();
         self.content_draw_info.index_count += painter_indices_usize.len() as u32;
         let n = painter_vertex_off as u32;
         self.indices.append_map(painter_indices_usize, |&i| n + i as u32);
         self.vertices.append(painter_vertices);
         if !painter_vertices.is_empty() {
             let range = VertexRange::new(painter_vertex_off..self.vertices.len());
-            offset_vertices(&mut self.vertices, range, self.widget_scroll_off);
+            add_offset_vertices(&mut self.vertices, range, self.widget_scroll_off);
         }
     }
 
@@ -1715,52 +1718,22 @@ impl<I, Style> Window<I, Style>
             let (_, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
             collapsing_headers.set_vertex_params(style, &mut self.vertices);
         }
-        let vertex_sample = self.vertices[self.main_rect_vertex_range.start()];
-        if vertex_sample.color != style.window_bg_col() {
-            let target_color = style.window_bg_col();
-            for vertex in &mut self.vertices[self.main_rect_vertex_range.range()] {
-                vertex.color = target_color;
-            }
-        }
-        let vertex_sample = self.vertices[self.title_bar_vertex_range.start()];
-        if vertex_sample.color != style.window_title_bar_col() {
-            let target_color = style.window_title_bar_col();
-            for vertex in &mut self.vertices[self.title_bar_vertex_range.range()] {
-                vertex.color = target_color;
-            }
-        }
+        color_vertices(&mut self.vertices, self.main_rect_vertex_range, style.window_bg_col());
+        color_vertices(&mut self.vertices, self.title_bar_vertex_range, style.window_title_bar_col());
         let any_resize = self.any_resize();
         if self.cursor_in_window() || any_resize {
             let target_color = if any_resize || self.held() {
-                style.window_outline_col()
+                style.window_stroke_col()
             } else {
-                style.focused_window_outline_col()
+                style.focused_window_stroke_col()
             };
-            set_vertex_params(&mut self.vertices, self.focused_outline_vertex_range, vec2(0.0, 0.0), target_color);
-            set_vertex_params(&mut self.vertices, self.title_outline_vertex_range, vec2(0.0, 0.0), target_color);
-            hide_vertices(&mut self.vertices, self.outline_vertex_range);
+            color_vertices(&mut self.vertices, self.focused_stroke_vertex_range, target_color);
+            color_vertices(&mut self.vertices, self.title_stroke_vertex_range, target_color);
+            hide_vertices(&mut self.vertices, self.stroke_vertex_range);
         } else {
-            let vertex_sample = self.vertices[self.focused_outline_vertex_range.start()];
-            let target_color = ColorSRGBA::black(0.0);
-            if vertex_sample.color != target_color {
-                for vertex in &mut self.vertices[self.focused_outline_vertex_range.range()] {
-                    vertex.color = target_color;
-                }
-            }
-            let vertex_sample = self.vertices[self.outline_vertex_range.start()];
-            let target_color = style.window_outline_col();
-            if vertex_sample.color != target_color {
-                for vertex in &mut self.vertices[self.outline_vertex_range.range()] {
-                    vertex.color = target_color;
-                }
-            }
-            let vertex_sample = self.vertices[self.title_outline_vertex_range.start()];
-            if vertex_sample.color != style.window_outline_col() {
-                let target_color = style.window_outline_col();
-                for vertex in &mut self.vertices[self.title_outline_vertex_range.range()] {
-                    vertex.color = target_color;
-                }
-            }
+            hide_vertices(&mut self.vertices, self.focused_stroke_vertex_range);
+            color_vertices(&mut self.vertices, self.title_stroke_vertex_range, style.window_stroke_col());
+            color_vertices(&mut self.vertices, self.stroke_vertex_range, style.window_stroke_col());
         }
         unsafe {
             self.vertices
@@ -1778,10 +1751,10 @@ impl<I, Style> Window<I, Style>
             inv_aspect_ratio,
             unit_scale,
         );
-        let focused_outline_width = self.focused_outline_width;
+        let focused_stroke_thickness = self.focused_stroke_thickness;
         let pc_fragment = base_push_constants_fragment(
-            pos - vec2(focused_outline_width, focused_outline_width),
-            pos + self.main_rect.max + vec2(focused_outline_width, focused_outline_width),
+            pos - vec2(focused_stroke_thickness, focused_stroke_thickness),
+            pos + self.main_rect.max + vec2(focused_stroke_thickness, focused_stroke_thickness),
         );
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -2142,22 +2115,14 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         &mut self,
         value: &T,
         size: Vec2,
-    ) -> (Reaction, Rect) {
+    ) -> Reaction {
         let reaction = self.window.activate_reaction(value);
         reaction.set_offset(self.widget_off);
-        let rect = Rect::from_position_size(
-            self.widget_off,
-            size,
-            self.style.rounding(),
-        );
         reaction.set_size(size);
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_reactions.push((reaction.id(), size));
-        (
-            reaction.clone(),
-            rect,
-        )
+        reaction.clone()
     }
 
     pub fn collapsing<F>(&mut self, label: &str, mut f: F)

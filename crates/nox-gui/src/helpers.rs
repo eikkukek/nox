@@ -70,29 +70,30 @@ pub fn render_text<'a>(
 #[inline(always)]
 pub fn set_vertex_params(
     vertices: &mut [Vertex],
-    range: VertexRange,
+    range: Option<VertexRange>,
     offset: Vec2,
     target_color: ColorSRGBA,
 ) {
-    let vertex_sample = vertices[range.start()];
-    if vertex_sample.offset != offset || vertex_sample.color != target_color {
-        for vertex in &mut vertices[range.range()] {
-            vertex.offset = offset;
-            vertex.color = target_color;
+    if let Some(range) = range {
+        let vertex_sample = vertices[range.start()];
+        if vertex_sample.offset != offset || vertex_sample.color != target_color {
+            for vertex in &mut vertices[range.range()] {
+                vertex.offset = offset;
+                vertex.color = target_color;
+            }
         }
     }
 }
 
 #[inline(always)]
-pub fn offset_vertices(
+pub fn add_offset_vertices(
     vertices: &mut [Vertex],
-    range: VertexRange,
+    range: Option<VertexRange>,
     offset: Vec2,
 ) {
-    let vertex_sample = vertices[range.start()];
-    if vertex_sample.offset != offset {
+    if let Some(range) = range {
         for vertex in &mut vertices[range.range()] {
-            vertex.offset = offset;
+            vertex.offset += offset;
         }
     }
 }
@@ -100,13 +101,15 @@ pub fn offset_vertices(
 #[inline(always)]
 pub fn color_vertices(
     vertices: &mut [Vertex],
-    range: VertexRange,
+    range: Option<VertexRange>,
     target_color: ColorSRGBA,
 ) {
-    let vertex_sample = vertices[range.start()];
-    if vertex_sample.color != target_color {
-        for vertex in &mut vertices[range.range()] {
-            vertex.color = target_color;
+    if let Some(range) = range {
+        let vertex_sample = vertices[range.start()];
+        if vertex_sample.color != target_color {
+            for vertex in &mut vertices[range.range()] {
+                vertex.color = target_color;
+            }
         }
     }
 }
@@ -114,12 +117,14 @@ pub fn color_vertices(
 #[inline(always)]
 pub fn hide_vertices(
     vertices: &mut [Vertex],
-    range: VertexRange,
+    range: Option<VertexRange>,
 ) {
-    let vertex_sample = vertices[range.start()];
-    if vertex_sample.color.alpha != 0.0 {
-        for vertex in &mut vertices[range.range()] {
-            vertex.color = ColorSRGBA::black(0.0);
+    if let Some(range) = range {
+        let vertex_sample = vertices[range.start()];
+        if vertex_sample.color.alpha != 0.0 {
+            for vertex in &mut vertices[range.range()] {
+                vertex.color = ColorSRGBA::black(0.0);
+            }
         }
     }
 }
