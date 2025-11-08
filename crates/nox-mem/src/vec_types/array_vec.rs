@@ -48,6 +48,13 @@ impl<T, const N: usize> ArrayVec<T, N>
             len,
         })
     }
+
+    pub fn mapped<U>(&self, f: impl FnMut(&T) -> U) -> ArrayVec<U, N>
+    {
+        let mut vec = ArrayVec::new();
+        vec.append_map(self, f).unwrap();
+        vec
+    }
 }
 
 impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
@@ -350,6 +357,14 @@ impl_traits! {
             self.as_mut_slice()
         }
     ,
+    From<&[T]> where T: Clone =>
+        
+        fn from(slice: &[T]) -> Self {
+            let mut vec = Self::new();
+            vec.append(slice).unwrap();
+            vec
+        }
+    ,
     Deref =>
 
         type Target = [T];
@@ -395,6 +410,13 @@ impl_traits! {
             vec
         }
     ,
+    PartialEq where T: PartialEq =>
+
+        fn eq(&self, rhs: &Self) -> bool {
+            self.as_slice() == rhs.as_slice()
+        }
+    ,
+    Eq where T: Eq =>,
     Debug where T: Debug =>
 
         fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
