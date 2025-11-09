@@ -31,13 +31,13 @@ pub fn my_widget_show<I: Interface, Style: WindowStyle>(
     center.x += lerp(0.0, size.x - radius * 2.0, t);
     win
         .painter()
-        .rect(reaction.id(), rect, offset, visuals.bg_col, visuals.bg_strokes, visuals.bg_stroke_idx)
+        .rect(reaction.id(), rect, offset, visuals.fill_col, visuals.bg_strokes, visuals.bg_stroke_idx)
         .circle(
             reaction.id(),
             circle(Vec2::default(), radius * 0.75),
             18,
             center,
-            visuals.bg_col,
+            visuals.fill_col,
             visuals.fg_strokes,
             visuals.fg_stroke_idx,
         );
@@ -227,7 +227,7 @@ impl<'a> Interface for Example<'a> {
                     let image_source = image_source!("ferris.png");
                     let image_size = win.standard_interact_height() * 2.0;
                     win.image(&image_source, geom::vec2(image_size, image_size));
-                    if win.button("Print \"hello\"") {
+                    if win.button("Print \"hello\"").clicked() {
                         println!("hello");
                     }
                     win.end_row();

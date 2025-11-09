@@ -402,6 +402,7 @@ pub struct Window<I, Style>
     prev_active_widgets: GlobalVec<WidgetId>,
     reactions: FxHashMap<ReactionId, Reaction>,
     active_reactions: FxHashSet<ReactionId>,
+    reaction_text: FxHashMap<ReactionId, (CompactString, Text)>,
     animated_bools: FxHashMap<ReactionId, (f32, bool)>,
     collapsing_headers: FxHashMap<Hashable<f64>, (u64, CollapsingHeader)>,
     active_collapsing_headers: FxHashSet<Hashable<f64>>,
@@ -505,6 +506,7 @@ impl<I, Style> Window<I, Style>
             prev_active_widgets: Default::default(),
             reactions: FxHashMap::default(),
             active_reactions: FxHashSet::default(),
+            reaction_text: FxHashMap::default(),
             animated_bools: FxHashMap::default(),
             collapsing_headers: FxHashMap::default(),
             active_collapsing_headers: Default::default(),
@@ -1100,6 +1102,35 @@ impl<I, Style> Window<I, Style>
             active_widget = Some(self.active_widgets.len());
             hover_blocked = true;
         }
+        let reaction_blocked = hover_blocked || active_widget.is_some() || hovered_widget.is_some();
+        for reaction in &self.active_reactions {
+            let reaction = self.reactions.get_mut(reaction).unwrap();
+            reaction.offset += widget_off;
+            if reaction.animated_bool() {
+                if let Some((t, value)) = self.animated_bools.get_mut(&reaction.id()) {
+                    if *value {
+                        *t = (*t + style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
+                    } else {
+                        *t = (*t - style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
+                    }
+                }
+            }
+            if let Some(text) = reaction.update(
+                    nox,
+                    cursor_pos,
+                    pos,
+                    cursor_in_this_window,
+                    reaction_blocked,
+                )
+            {
+                self.hover_window.update(style, text_renderer, cursor_pos, &text);
+                self.flags |= Self::HOVER_WINDOW_ACTIVE;
+            }
+            if reaction.held() {
+                active_widget = Some(self.active_widgets.len());
+                cursor_in_this_window = true;
+            }
+        }
         let window_moving = self.held() || self.any_resize();
         let content_area = 
         (
@@ -1164,34 +1195,6 @@ impl<I, Style> Window<I, Style>
             or_flag!(self.flags, Self::REQUIRES_TRIANGULATION, requires_triangulation);
             transfer_commands_required |= requires_transfer_commands;
             cursor_in_some_widget |= cursor_in_widget;
-        }
-        let reaction_blocked = hover_blocked || active_widget.is_some() || hovered_widget.is_some();
-        for reaction in &self.active_reactions {
-            let reaction = self.reactions.get_mut(reaction).unwrap();
-            reaction.offset += widget_off;
-            if reaction.animated_bool() {
-                if let Some((t, value)) = self.animated_bools.get_mut(&reaction.id()) {
-                    if *value {
-                        *t = (*t + style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
-                    } else {
-                        *t = (*t - style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
-                    }
-                }
-            }
-            if let Some(text) = reaction.update(
-                    nox,
-                    cursor_pos,
-                    pos,
-                    cursor_in_this_window,
-                    reaction_blocked,
-                )
-            {
-                self.hover_window.update(style, text_renderer, cursor_pos, &text);
-                self.flags |= Self::HOVER_WINDOW_ACTIVE;
-            }
-            if reaction.held() {
-                active_widget = Some(self.active_widgets.len());
-            }
         }
         self.widget_scroll_off = widget_off;
         let ver_scroll_bar_width = self.ver_scroll_bar.calc_width(style);
@@ -1937,6 +1940,30 @@ impl<I, Style> Window<I, Style>
     }
 }
 
+pub struct RowText {
+    pub index: usize,
+    pub row_index: usize,
+    pub selectable_index: usize,
+    pub widget_id: Option<WidgetId>,
+}
+
+impl RowText {
+
+    pub fn new(
+        index: usize,
+        row_index: usize,
+        selectable_index: usize,
+        widget_id: Option<WidgetId>
+    ) -> Self {
+        Self {
+            index,
+            row_index,
+            selectable_index,
+            widget_id,
+        }
+    }
+}
+
 pub struct WindowContext<'a, 'b, I, Style>
     where
         I: Interface,
@@ -1946,8 +1973,9 @@ pub struct WindowContext<'a, 'b, I, Style>
     window: &'a mut Window<I, Style>,
     text_renderer: &'a mut TextRenderer<'b>,
     current_row_widgets: GlobalVec<(WidgetId, Vec2)>,
-    current_row_text: GlobalVec<(usize, usize, usize, WidgetId)>,
+    current_row_text: GlobalVec<RowText>,
     current_row_reactions: GlobalVec<(ReactionId, Vec2)>,
+    current_row_paints: Option<GlobalVec<Box<dyn FnMut(&mut Painter, f32)>>>,
     collapsing_header_id: Hashable<f64>,
     image_loader: &'a mut ImageLoader,
     widget_off: Vec2,
@@ -2000,6 +2028,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
             current_row_reactions: Default::default(),
+            current_row_paints: Some(GlobalVec::new()),
             collapsing_header_id: Default::default(),
             image_loader,
             min_width: 0.0,
@@ -2041,6 +2070,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
             current_row_reactions: Default::default(),
+            current_row_paints: Some(GlobalVec::new()),
             collapsing_header_id: id,
             image_loader,
             min_width: 0.0,
@@ -2087,6 +2117,14 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     }
 
     #[inline(always)]
+    pub fn paint(&mut self, f: Box<dyn FnMut(&mut Painter, f32)>) {
+        self.current_row_paints
+            .as_mut()
+            .unwrap()
+            .push(f);
+    }
+
+    #[inline(always)]
     pub fn add(&mut self, mut f: impl FnMut(&mut Self) -> Reaction) -> &mut Reaction {
         let reaction = f(self);
         let entry = self.window.reactions
@@ -2123,6 +2161,45 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_reactions.push((reaction.id(), size));
         reaction.clone()
+    }
+
+    #[inline(always)]
+    pub fn reaction_text(
+        &mut self,
+        id: ReactionId,
+        text: &str,
+    ) -> &mut Text {
+        let entry = self.window.reaction_text
+            .entry(id)
+            .or_default();
+        if entry.0 != text {
+            entry.0 = text.into();
+            let mut row = RowOffsets::new();
+            let text = self.text_renderer
+                .render_and_collect_offsets(
+                    &[text_segment(text, self.style.font_regular())],
+                    false,
+                    0.0,
+                    0.0,
+                    |offset| {
+                        row.offsets.push(offset);
+                    }
+                )
+                .unwrap_or_default();
+            row.row_height = text.row_height;
+            entry.1 = Text::new(
+                text,
+                GlobalVec::with_len(1, row),
+                Default::default(),
+                Default::default(),
+                vec2(1.0, 1.0),
+                None,
+                0,
+                1, 
+                None
+            );
+        }
+        &mut entry.1
     }
 
     pub fn collapsing<F>(&mut self, label: &str, mut f: F)
@@ -2173,7 +2250,8 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         let height_add = self.current_height + item_pad_outer.y;
         self.beam_height += height_add;
         self.widget_off.y += height_add;
-        let current_height_half = self.current_height * 0.5;
+        let current_height = self.current_height;
+        let current_height_half = current_height * 0.5;
         let widgets = unsafe {
             self.window.widgets.as_mut().unwrap_unchecked()
         };
@@ -2187,8 +2265,15 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
             let offset = reaction.get_offset();
             reaction.set_offset(vec2(offset.x, offset.y + current_height_half - size.y * 0.5));
         }
+        let mut paints = self.current_row_paints.take().unwrap();
+        let mut painter = self.painter();
+        for paint in &mut paints {
+            paint(&mut painter, current_height);
+        }
+        paints.clear();
+        self.current_row_paints = Some(paints);
         let current_height_half_scaled = current_height_half / self.style.font_scale();
-        for &(index, row_index, selectable_index, id) in &self.current_row_text {
+        for &RowText { index, row_index, selectable_index, widget_id } in &self.current_row_text {
             let text = &mut self.window.get_text_mut(index);
             let row_height_halved = text.text.row_height * 0.5;
             let row = &text.rows[row_index - text.row_offset as usize];
@@ -2199,23 +2284,26 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
                     offset.offset = vec.into();
                 }
             }
-            self.window.edit_selectable_text(id, |text| {
-                let text = &mut text.as_text_mut()[selectable_index];
-                if text.row_offset > row_index as u32 {
-                    panic!("should not happen")
-                }
-                else if let Some(RowOffsets { offsets, row_height, max_x: _, min_x: _ }) =
-                    &mut text.rows.get_mut(row_index - text.row_offset as usize)
-                {
-                    let row_height_halved = *row_height * 0.5;
-                    for offset in offsets {
-                        offset.offset[1] += current_height_half_scaled - row_height_halved;
+            if let Some(id) = widget_id {
+                self.window.edit_selectable_text(id, |text| {
+                    let text = &mut text.as_text_mut()[selectable_index];
+                    if text.row_offset > row_index as u32 {
+                        panic!("should not happen")
                     }
-                }
-            });
+                    else if let Some(RowOffsets { offsets, row_height, max_x: _, min_x: _ }) =
+                        &mut text.rows.get_mut(row_index - text.row_offset as usize)
+                    {
+                        let row_height_halved = *row_height * 0.5;
+                        for offset in offsets {
+                            offset.offset[1] += current_height_half_scaled - row_height_halved;
+                        }
+                    }
+                });
+            }
         }
         self.current_row_widgets.clear();
         self.current_row_text.clear();
+        self.current_row_reactions.clear();
         self.current_height = 0.0;
     }
 
@@ -2244,7 +2332,12 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         self.current_height = selectable_text.current_height();
         self.window.add_selectable_text(id, |index, text|
             for (i, _) in text.rows.iter().enumerate() {
-                self.current_row_text.push((index, i + text.row_offset as usize, text.selectable_index.unwrap(), id));
+                self.current_row_text.push(RowText::new(
+                    index,
+                    i + text.row_offset as usize,
+                    text.selectable_index.unwrap(),
+                    Some(id)
+                ));
             }
         );
     }
@@ -2297,7 +2390,12 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         self.current_height = selectable_text.current_height();
         self.window.add_selectable_text(id, |index, text|
             for(i, _) in text.rows.iter().enumerate() {
-                self.current_row_text.push((index, i + text.row_offset as usize, text.selectable_index.unwrap(), id));
+                self.current_row_text.push(RowText::new(
+                    index,
+                    i + text.row_offset as usize,
+                    text.selectable_index.unwrap(),
+                    Some(id)
+                ));
             }
         );
     }
@@ -2305,20 +2403,41 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     pub fn button(
         &mut self,
         label: &str,
-    ) -> bool
+    ) -> &mut Reaction
     {
-        let (button, id) = self.window.activate_widget(
-            label,
-            |id| WidgetId::Button(id),
-            |win, id| win.get_button(id)
-        );
-        button.set_label(label, self.text_renderer, self.style);
-        let size = button.calc_size(self.style, self.text_renderer);
-        button.set_offset(self.widget_off);
+        let mut reaction = self.window.activate_reaction(label).clone();
+        let id = reaction.id();
+        let offset = self.widget_off;
+        reaction.set_offset(offset);
+        let visuals = self.style.interact_visuals(&reaction);
+        let mut text = self.reaction_text(id, label).clone();
+        text.offset = offset;
+        text.offset.x += self.style.item_pad_inner().x;
+        text.color = visuals.fg_strokes[visuals.fg_stroke_idx as usize].col;
+        let size = self.style.calc_text_box_size(&text.text);
+        reaction.set_size(size);
+        let text_index = self.window.add_text(text);
+        self.current_row_text.push(RowText::new(text_index, 0, 0, None));
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_widgets.push((id, size));
-        button.pressed()
+        self.current_row_reactions.push((id, size));
+        let rounding = self.style.rounding();
+        self.paint(Box::new(move |painter, current_height| {
+            painter
+                .rect(
+                    id,
+                    rect(Default::default(), size, rounding),
+                    offset + vec2(0.0, current_height * 0.5 - size.y * 0.5),
+                    visuals.fill_col,
+                    visuals.bg_strokes.clone(),
+                    visuals.bg_stroke_idx
+                );
+        }));
+        let entry = self.window.reactions
+            .get_mut(&id)
+            .unwrap();
+        *entry = reaction;
+        entry
     }
 
     pub fn slider_width(&mut self, width: f32) {

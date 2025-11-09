@@ -11,7 +11,7 @@ use nox_geom::*;
 use crate::*;
 
 pub struct InteractVisuals {
-    pub bg_col: ColorSRGBA,
+    pub fill_col: ColorSRGBA,
     pub bg_strokes: ArrayVec<Stroke, 4>,
     pub bg_stroke_idx: u32,
     pub fg_strokes: ArrayVec<Stroke, 4>,
@@ -152,7 +152,7 @@ pub trait WindowStyle {
         ].as_slice());
         if reaction.held() {
             InteractVisuals {
-                bg_col: self.widget_bg_col(),
+                fill_col: self.widget_bg_col(),
                 bg_strokes,
                 bg_stroke_idx: 0,
                 fg_strokes,
@@ -161,7 +161,7 @@ pub trait WindowStyle {
             }
         } else if reaction.hovered() {
             InteractVisuals {
-                bg_col: self.widget_bg_col(),
+                fill_col: self.widget_bg_col(),
                 bg_strokes,
                 bg_stroke_idx: 1,
                 fg_strokes,
@@ -171,7 +171,7 @@ pub trait WindowStyle {
         } else {
             fg_strokes[1].col = self.inactive_widget_fg_col();
             InteractVisuals {
-                bg_col: self.widget_bg_col(),
+                fill_col: self.widget_bg_col(),
                 bg_strokes,
                 bg_stroke_idx: 2,
                 fg_strokes,

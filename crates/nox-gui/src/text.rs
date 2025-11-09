@@ -27,7 +27,19 @@ pub struct RowOffsets {
     pub min_x: f32,
 }
 
-#[derive(Clone)]
+impl RowOffsets {
+
+    pub fn new() -> Self {
+        Self {
+            offsets: Default::default(),
+            row_height: 0.0,
+            max_x: 0.0,
+            min_x: 0.0,
+        }
+    }
+}
+
+#[derive(Default, Clone)]
 pub struct Text {
     pub text: RenderedText,
     pub rows: GlobalVec<RowOffsets>,
