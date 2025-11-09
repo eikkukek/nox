@@ -34,12 +34,9 @@ pub struct WindowUpdateResult {
 pub enum WidgetId {
     SelectableText(Hashable<f64>),
     Slider(Hashable<f64>),
-    Button(Hashable<f64>),
-    Checkbox(Hashable<f64>),
     ColorPicker(Hashable<f64>),
     InputText(Hashable<f64>),
     DragValue(Hashable<f64>),
-    RadioButton(Hashable<f64>),
     SelectabelTag(Hashable<f64>),
     ComboBox(Hashable<f64>),
     Image(Hashable<f64>),
@@ -240,13 +237,10 @@ impl CollapsingHeader {
 
 struct WidgetTables<I, Style> {
     selectable_texts: FxHashMap<Hashable<f64>, (u64, SelectableText<I, Style>)>,
-    buttons: FxHashMap<Hashable<f64>, (u64, Button<I, Style>)>,
     sliders: FxHashMap<Hashable<f64>, (u64, Slider<I, Style>)>,
-    checkboxes: FxHashMap<Hashable<f64>, (u64, Checkbox<I, Style>)>,
     input_texts: FxHashMap<Hashable<f64>, (u64, InputText<I, Style>)>,
     drag_values: FxHashMap<Hashable<f64>, (u64, DragValue<I, Style>)>,
     color_pickers: FxHashMap<Hashable<f64>, (u64, ColorPicker<I, Style>)>,
-    radio_buttons: FxHashMap<Hashable<f64>, (u64, RadioButton<I, Style>)>,
     selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, Style>)>,
     combo_boxes: FxHashMap<Hashable<f64>, (u64, ComboBox<I, Style>)>,
     images: FxHashMap<Hashable<f64>, (u64, Image<I, Style>)>,
@@ -261,13 +255,10 @@ impl<I, Style> WidgetTables<I, Style>
     fn new() -> Self {
         Self {
             selectable_texts: FxHashMap::default(),
-            buttons: FxHashMap::default(),
             sliders: FxHashMap::default(),
-            checkboxes: FxHashMap::default(),
             input_texts: FxHashMap::default(),
             drag_values: FxHashMap::default(),
             color_pickers: FxHashMap::default(),
-            radio_buttons: FxHashMap::default(),
             selectable_tags: FxHashMap::default(),
             combo_boxes: FxHashMap::default(),
             images: FxHashMap::default(),
@@ -279,14 +270,6 @@ impl<I, Style> WidgetTables<I, Style>
         match widget {
             WidgetId::Slider(id) =>
                 self.sliders.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
-                ).unwrap(),
-            WidgetId::Button(id) =>
-                self.buttons.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
-                ).unwrap(),
-            WidgetId::Checkbox(id) =>
-                self.checkboxes.get(&id).map(
                     |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::ColorPicker(id) =>
@@ -303,10 +286,6 @@ impl<I, Style> WidgetTables<I, Style>
                 ).unwrap(),
             WidgetId::SelectableText(id) =>
                  self.selectable_texts.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
-                ).unwrap(),
-            WidgetId::RadioButton(id) =>
-                 self.radio_buttons.get(&id).map(
                     |(l, w)| (*l, w as &dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::SelectabelTag(id) =>
@@ -335,14 +314,6 @@ impl<I, Style> WidgetTables<I, Style>
                 self.sliders.get_mut(&id).map(
                     |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
-            WidgetId::Button(id) =>
-                self.buttons.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
-                ).unwrap(),
-            WidgetId::Checkbox(id) =>
-                self.checkboxes.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
-                ).unwrap(),
             WidgetId::ColorPicker(id) =>
                 self.color_pickers.get_mut(&id).map(
                     |(l, w)| (l, w as &mut dyn Widget<I, Style,>)
@@ -357,10 +328,6 @@ impl<I, Style> WidgetTables<I, Style>
                 ).unwrap(),
             WidgetId::SelectableText(id) =>
                  self.selectable_texts.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
-                ).unwrap(),
-            WidgetId::RadioButton(id) =>
-                 self.radio_buttons.get_mut(&id).map(
                     |(l, w)| (l, w as &mut dyn Widget<I, Style>)
                 ).unwrap(),
             WidgetId::SelectabelTag(id) =>
@@ -623,13 +590,10 @@ impl<I, Style> Window<I, Style>
     }
 
     impl_get_widget!(get_selectable_text, selectable_texts, SelectableText);
-    impl_get_widget!(get_button, buttons, Button);
     impl_get_widget!(get_slider, sliders, Slider);
-    impl_get_widget!(get_checkbox, checkboxes, Checkbox); 
     impl_get_widget!(get_input_text, input_texts, InputText);
     impl_get_widget!(get_drag_value, drag_values, DragValue); 
     impl_get_widget!(get_color_picker, color_pickers, ColorPicker);
-    impl_get_widget!(get_radio_button, radio_buttons, RadioButton);
     impl_get_widget!(get_selectable_tag, selectable_tags, SelectableTag);
     impl_get_widget!(get_combo_box, combo_boxes, ComboBox);
     impl_get_widget!(get_image, images, Image);
@@ -2113,7 +2077,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
 
     #[inline(always)]
     pub fn painter<'c>(&'c mut self) -> Painter<'c> {
-        Painter::new(&mut self.window.painter_storage)
+        Painter::new(&mut self.window.painter_storage, self.style, self.text_renderer)
     }
 
     #[inline(always)]
@@ -2440,6 +2404,71 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         entry
     }
 
+    pub fn checkbox(
+        &mut self,
+        value: &mut bool,
+        label: &str,
+    ) -> bool
+    {
+        let item_pad_inner = self.style.item_pad_inner();
+        let mut reaction = self.window.activate_reaction(label).clone();
+        let id = reaction.id();
+        let offset = self.widget_off;
+        let size_max = self.style.calc_font_height(self.text_renderer);
+        let rect_size = vec2(size_max, size_max);
+        reaction.set_offset(offset);
+        let visuals = self.style.interact_visuals(&reaction);
+        let mut text = self.reaction_text(id, label).clone();
+        let text_width = self.style.calc_text_width(&text.text);
+        text.offset = offset;
+        text.offset.x += size_max + item_pad_inner.x;
+        let fg_col = visuals.fg_strokes[visuals.fg_stroke_idx as usize].col;
+        text.color = fg_col;
+        let size = vec2(size_max + text_width + item_pad_inner.x, size_max);
+        reaction.set_size(size);
+        let text_index = self.window.add_text(text);
+        self.current_row_text.push(RowText::new(text_index, 0, 0, None));
+        self.current_height = self.current_height.max(size.y);
+        self.widget_off.x += size.x + self.style.item_pad_outer().x;
+        self.current_row_reactions.push((id, size));
+        let rounding = self.style.rounding();
+        if reaction.clicked() {
+            *value = !*value;
+        }
+        let value = *value;
+        self.paint(Box::new(move |painter, current_height| {
+            let height_half = current_height * 0.5;
+            let checkbox_col =
+                if value {
+                    fg_col
+                } else {
+                    ColorSRGBA::black(0.0)
+                };
+            painter
+                .rect(
+                    id,
+                    rect(Default::default(), rect_size, rounding),
+                    offset + vec2(0.0, height_half - size.y * 0.5),
+                    visuals.fill_col,
+                    visuals.bg_strokes.clone(),
+                    visuals.bg_stroke_idx
+                )
+                .checkmark(
+                    id,
+                    1.0,
+                    offset + rect_size * 0.5 + vec2(0.0, height_half - rect_size.y * 0.5),
+                    checkbox_col,
+                    Default::default(),
+                    0
+                );
+        }));
+        let entry = self.window.reactions
+            .get_mut(&id)
+            .unwrap();
+        *entry = reaction;
+        value
+    }
+
     pub fn slider_width(&mut self, width: f32) {
         self.slider_width = width.clamp(self.style.slider_min_width(), f32::MAX);
     }
@@ -2463,27 +2492,6 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_widgets.push((id, size));
-    }
-
-    pub fn checkbox(
-        &mut self,
-        value: &mut bool,
-        label: &str,
-    ) -> bool
-    {
-        let (checkbox, id) = self.window.activate_widget(
-            value,
-            |id| WidgetId::Checkbox(id),
-            |win, id| win.get_checkbox(id)
-        );
-        checkbox.update_value(value);
-        let size = checkbox.calc_size(self.style, self.text_renderer);
-        checkbox.set_label(label, self.text_renderer, self.style);
-        checkbox.set_offset(self.widget_off);
-        self.current_height = self.current_height.max(size.y);
-        self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_widgets.push((id, size));
-        *value
     }
 
     pub fn color_picker<C: Color>(
@@ -2600,25 +2608,73 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     }
 
     #[inline(always)]
-    pub fn radio_button<T: Clone + Eq>(
+    pub fn radio_button<T: Clone + Eq + 'static>(
         &mut self,
         value: &mut T,
         radio_value: T,
         label: &str,
-    )
+    ) -> Reaction
     {
-        let (radio_button, id) = self.window.activate_widget(
-            label,
-            |id| WidgetId::RadioButton(id),
-            |win, id| win.get_radio_button(id)
-        );
-        radio_button.set_label(label, self.text_renderer, self.style);
-        let size = radio_button.calc_size(self.style, self.text_renderer);
-        radio_button.update_value(value, radio_value);
-        radio_button.set_offset(self.widget_off);
+        let item_pad_inner = self.style.item_pad_inner();
+        let mut reaction = self.window.activate_reaction(label).clone();
+        let id = reaction.id();
+        let offset = self.widget_off;
+        let radius = self.style.default_handle_radius();
+        let diameter = radius * 2.0;
+        reaction.set_offset(offset);
+        let visuals = self.style.interact_visuals(&reaction);
+        let mut text = self.reaction_text(id, label).clone();
+        let text_size = self.style.calc_text_size(&text.text);
+        text.offset = offset;
+        text.offset.x += diameter + item_pad_inner.x;
+        let fg_col = visuals.fg_strokes[visuals.fg_stroke_idx as usize].col;
+        text.color = fg_col;
+        let size = vec2(diameter + text_size.x + item_pad_inner.x, diameter.max(text_size.y));
+        reaction.set_size(size);
+        let text_index = self.window.add_text(text);
+        self.current_row_text.push(RowText::new(text_index, 0, 0, None));
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_widgets.push((id, size));
+        self.current_row_reactions.push((id, size));
+        if reaction.clicked() {
+            *value = radio_value.clone();
+        }
+        let value = value.clone();
+        self.paint(Box::new(move |painter, current_height| {
+            let height_half = current_height * 0.5;
+            let size_y_half = size.y * 0.5;
+            let radio_col =
+                if value == radio_value {
+                    fg_col
+                } else {
+                    ColorSRGBA::black(0.0)
+                };
+            let inner_radius = radius * 0.4;
+            painter
+                .circle(
+                    id,
+                    circle(vec2(radius, radius), radius),
+                    16,
+                    offset + vec2(0.0, height_half - size_y_half),
+                    visuals.fill_col,
+                    visuals.bg_strokes.clone(),
+                    visuals.bg_stroke_idx
+                )
+                .circle(
+                    id,
+                    circle(vec2(radius, radius), inner_radius),
+                    16,
+                    offset + vec2(0.0, height_half - size_y_half),
+                    radio_col,
+                    Default::default(),
+                    0
+                );
+        }));
+        let entry = self.window.reactions
+            .get_mut(&id)
+            .unwrap();
+        *entry = reaction;
+        entry.clone()
     }
 
     #[inline(always)]

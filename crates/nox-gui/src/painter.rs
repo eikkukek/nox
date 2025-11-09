@@ -19,6 +19,7 @@ pub struct Stroke {
 enum Shape {
     Rect(Rect),
     Circle(Circle, u32),
+    Checkmark(f32),
 }
 
 #[derive(Clone)]
@@ -62,6 +63,24 @@ impl ShapeParams {
     ) -> Self {
         Self {
             shape: Shape::Circle(circle, steps),
+            offset,
+            fill_col,
+            shape_vertex_range: None,
+            strokes: strokes.mapped(|&v| (v, None)),
+            stroke_idx,
+        }
+    }
+
+    #[inline(always)]
+    fn new_checkmark(
+        scale: f32,
+        offset: Vec2,
+        fill_col: ColorSRGBA,
+        strokes: ArrayVec<Stroke, 4>,
+        stroke_idx: u32,
+    ) -> Self {
+        Self {
+            shape: Shape::Checkmark(scale),
             offset,
             fill_col,
             shape_vertex_range: None,
@@ -122,6 +141,7 @@ pub struct PainterStorage {
     vertices: GlobalVec<Vertex>,
     indices_usize: GlobalVec<usize>,
     points: GlobalVec<[f32; 2]>,
+    checkmark_points: GlobalVec<[f32; 2]>,
     helper_points: GlobalVec<[f32; 2]>,
     reaction_shapes: FxHashMap<ReactionId, ReactionShapes>,
     active_reactions: FxHashSet<ReactionId>,
@@ -137,6 +157,7 @@ impl PainterStorage {
             vertices: Default::default(),
             indices_usize: Default::default(),
             points: Default::default(),
+            checkmark_points: Default::default(),
             helper_points: Default::default(),
             reaction_shapes: FxHashMap::default(),
             active_reactions: FxHashSet::default(),
@@ -154,7 +175,8 @@ impl PainterStorage {
         self.active_reactions.clear();
     }
 
-    pub fn triangulate(&mut self) -> (&[Vertex], &[usize]) {
+    pub fn triangulate(&mut self) -> (&[Vertex], &[usize])
+    {
         let mut requires_triangulation = false;
         for &id in &self.active_reactions {
             let reaction_shapes = self.reaction_shapes.get_mut(&id).unwrap();
@@ -168,6 +190,7 @@ impl PainterStorage {
         let vertices = &mut self.vertices;
         let indices_usize = &mut self.indices_usize;
         if requires_triangulation {
+            println!("here");
             vertices.clear();
             indices_usize.clear();
             self.shapes.clear();
@@ -198,8 +221,7 @@ impl PainterStorage {
                             }
                             let vertex_off = vertices.len();
                             earcut::earcut(&points, &[], false, vertices, indices_usize).ok();
-                            let range = VertexRange::new(vertex_off..vertices.len());
-                            shape.shape_vertex_range = range;
+                            shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
                         },
                         Shape::Circle(circle, steps) => {
                             circle.to_points(steps, &mut |p| { points.push(p.into()); });
@@ -217,9 +239,30 @@ impl PainterStorage {
                             }
                             let vertex_off = vertices.len();
                             earcut::earcut(&points, &[], false, vertices, indices_usize).ok();
-                            let range = VertexRange::new(vertex_off..vertices.len());
-                            shape.shape_vertex_range = range;
-                        }
+                            shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
+                        },
+                        Shape::Checkmark(scale) => {
+                            points.clone_from_slice(&self.checkmark_points);
+                            for point in &mut *points {
+                                point[0] *= scale;
+                                point[1] *= scale;
+                            }
+                            for (stroke, range) in &mut shape.strokes {
+                                outline_points(
+                                    points,
+                                    stroke.thickness,
+                                    false,
+                                    &mut |p| { helper_points.push(p.into()); }
+                                );
+                                let vertex_off = vertices.len();
+                                earcut::earcut(&helper_points, &[], false, vertices, indices_usize).ok();
+                                *range = VertexRange::new(vertex_off..vertices.len());
+                                helper_points.clear();
+                            }
+                            let vertex_off = vertices.len();
+                            earcut::earcut(&points, &[], false, vertices, indices_usize).ok();
+                            shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
+                        },
                     };
                     reaction_shapes
                         .rendered_shapes.push(shape.clone());
@@ -258,7 +301,11 @@ impl<'a> Painter<'a>
     #[inline(always)]
     pub fn new(
         storage: &'a mut PainterStorage,
+        style: &impl WindowStyle,
+        text_renderer: &mut TextRenderer,
     ) -> Self {
+        storage.checkmark_points.clear();
+        style.get_checkmark_points(text_renderer, &mut storage.checkmark_points);
         Self {
             storage,
         }
@@ -297,6 +344,24 @@ impl<'a> Painter<'a>
             .entry(reaction_id)
             .or_default();
         let shape_params = ShapeParams::new_circle(circle, steps, offset, fill_col, strokes, stroke_idx);
+        entry.shapes.push(shape_params);
+        self
+    }
+
+    pub fn checkmark(
+        &mut self,
+        reaction_id: ReactionId,
+        scale: f32,
+        offset: Vec2,
+        fill_col: ColorSRGBA,
+        strokes: ArrayVec<Stroke, 4>,
+        stroke_idx: u32,
+    ) -> &mut Self {
+        self.storage.active_reactions.insert(reaction_id);
+        let entry = self.storage.reaction_shapes
+            .entry(reaction_id)
+            .or_default();
+        let shape_params = ShapeParams::new_checkmark(scale, offset, fill_col, strokes, stroke_idx);
         entry.shapes.push(shape_params);
         self
     }
