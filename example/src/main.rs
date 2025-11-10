@@ -213,6 +213,12 @@ struct App {
     heat_in: u32,
     fire_transfer_id: CommandRequestId,
     rot: f32,
+    semaphore: TimelineSemaphoreId,
+    semaphore_value: u64,
+    fire_semaphore: TimelineSemaphoreId,
+    fire_semaphore_value: u64,
+    staging_alloc: LinearDeviceAllocId,
+    image_alloc: LinearDeviceAllocId,
 }
 
 impl App {
@@ -257,6 +263,12 @@ impl App {
             pipeline_cache: Default::default(),
             heat_in: 0,
             rot: 0.0,
+            semaphore: Default::default(),
+            semaphore_value: 0,
+            fire_semaphore: Default::default(),
+            fire_semaphore_value: 0,
+            staging_alloc: Default::default(),
+            image_alloc: Default::default(),
         }
     }
 }
@@ -264,13 +276,13 @@ impl App {
 impl Interface for App {
 
     fn init_settings(&self) -> InitSettings {
-        InitSettings::new("Test", Version::default(), [540, 540], true, false)
+        InitSettings::new("Test", Version::default(), [540, 540], true, true)
     }
 
     fn init_callback(
         &mut self,
-        nox: &mut Nox<Self>,
-        renderer: &mut nox::renderer::RendererContext
+        nox: &Nox<Self>,
+        renderer: &mut RendererContext
     ) -> Result<(), nox::Error>
     {
         println!("GPU: {}", nox.gpu_name());
@@ -581,7 +593,7 @@ impl Interface for App {
                 FormatFeature::SampledImage | FormatFeature::StorageImage
             ).unwrap();
             self.image = r.create_image(
-                &mut r.default_binder(),
+                ResourceBinderImage::DefaultBinder,
                 |builder| {
                     builder
                         .with_usage(ImageUsage::TransferDst)
@@ -676,22 +688,22 @@ impl Interface for App {
             self.vertex_buffer = r.create_buffer(
                 (CUBE_VERTICES.len() * size_of!(Vertex)) as u64,
                 &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
-                &mut r.default_binder(),
+                ResourceBinderBuffer::DefaultBinder,
             )?;
             self.vertex_instance_buffer = r.create_buffer(
                 (CUBE_OFF.len() * size_of!(VertexOff)) as u64,
                 &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
-                &mut r.default_binder(),
+                ResourceBinderBuffer::DefaultBinder,
             )?;
             self.index_buffer = r.create_buffer(
                 (CUBE_INDICES.len() * size_of!(u32)) as u64,
                 &[BufferUsage::IndexBuffer , BufferUsage::TransferDst],
-                &mut r.default_binder(),
+                ResourceBinderBuffer::DefaultBinder,
             )?;
             self.matrices_buffer = r.create_buffer(
                 size_of!(Matrices) as u64,
                 &[BufferUsage::UniformBuffer],
-                &mut r.default_binder_mappable(),
+                ResourceBinderBuffer::DefaultBinderMappable,
             )?;
             self.matrices_map = unsafe {
                 r.map_buffer(self.matrices_buffer).unwrap().cast::<Matrices>()
@@ -699,7 +711,7 @@ impl Interface for App {
             self.light_info_buffer = r.create_buffer(
                 size_of!(LightInfo) as u64,
                 &[BufferUsage::UniformBuffer],
-                &mut r.default_binder_mappable(),
+                ResourceBinderBuffer::DefaultBinderMappable,
             )?;
             self.light_info_map = unsafe {
                 r.map_buffer(self.light_info_buffer).unwrap().cast::<LightInfo>()
@@ -764,27 +776,37 @@ impl Interface for App {
                 &[],
                 &GlobalAlloc
             )?;
+            self.semaphore = r.create_timeline_semaphore(0)?;
+            self.fire_semaphore = r.create_timeline_semaphore(0)?;
+            self.staging_alloc = r.create_default_linear_device_alloc_mappable(1 << 28)?;
+            self.image_alloc = r.create_default_linear_device_alloc(1 << 28)?;
             Ok(())
         })?;
-        renderer
-            .transfer_requests()
-            .add_request(1 << 28);
+        renderer.edit_transfer_requests(|requests| {
+            requests.add_async_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
+            self.fire_semaphore_value += 1;
+        });
         self.frame_buffer_size = renderer.frame_buffer_size();
         Ok(())
     }
 
     fn frame_buffer_size_callback(
         &mut self,
-        renderer: &mut RendererContext
+        renderer: &mut RendererContext,
     ) -> Result<(), nox::Error>
     {
         renderer.edit_resources(|r| {
+            r.wait_for_semaphores(&[(self.fire_semaphore, self.fire_semaphore_value)], u64::MAX, &GlobalAlloc)?;
+            unsafe {
+                r.lock_linear_device_alloc(self.image_alloc, &[])?
+                    .reset();
+            }
             for image in self.fire_images.iter_mut() {
                 if r.is_valid_image(*image) {
                     r.destroy_image(*image);
                 }
                 *image = r.create_image(
-                    &mut r.default_binder(),
+                    ResourceBinderImage::LinearDeviceAlloc(self.image_alloc),
                     |builder| {
                         builder
                             .with_usage(ImageUsage::Storage)
@@ -796,22 +818,28 @@ impl Interface for App {
                 )?;
                 self.heat_in = 0;
             }
+            let mut staging_alloc = r.lock_linear_device_alloc(self.staging_alloc, &[])?;
+            unsafe {
+                staging_alloc.reset();
+            }
             Ok(())
         })?;
-        self.fire_transfer_id = renderer
-            .transfer_requests()
-            .add_request(1 << 28);
+        renderer.edit_transfer_requests(|requests| {
+            self.fire_transfer_id = requests.add_async_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
+            self.fire_semaphore_value += 1;
+        });
         self.frame_buffer_size = renderer.frame_buffer_size();
         Ok(())
     }
 
     fn update(
         &mut self,
-        nox: &mut Nox<Self>,
+        _nox: &Nox<Self>,
+        ctx: &mut WindowCtx,
         _renderer: &mut RendererContext,
     ) -> Result<(), Error>
     {
-        let (cursor_x, cursor_y) = nox.cursor_position();
+        let (cursor_x, cursor_y) = ctx.cursor_position();
         let relative_cursor = glam::vec3(
             1.0 - 2.0 * cursor_x as f32 / self.frame_buffer_size.width as f32,
             2.0 * cursor_y as f32 / self.frame_buffer_size.height as f32 - 1.0,
@@ -849,7 +877,7 @@ impl Interface for App {
                 LightInfo { pos: light_pos }
             );
         }
-        self.rot = (self.rot + PI * nox.delta_time().as_secs_f32()) % (PI * 2.0);
+        self.rot = (self.rot + PI * ctx.delta_time().as_secs_f32()) % (PI * 2.0);
         Ok(())
     }
 
@@ -914,20 +942,17 @@ impl Interface for App {
         commands.bind_shader_resources(|_| self.shader_resources[2])?;
         commands.push_constants(|_| unsafe { slice_as_bytes(params).unwrap() })?;
         commands.dispatch((self.frame_buffer_size.width + 7) / 8, (self.frame_buffer_size.height + 7) / 8, 1);
+        commands.wait_semaphore(self.fire_semaphore, self.fire_semaphore_value, PipelineStage::Transfer);
         self.heat_in = (self.heat_in + 1) % 2;
         Ok(())
     }
 
     fn render<'a>(
         &mut self,
-        frame_graph: &'a mut dyn FrameGraphInit,
-        pending_transfers: &[nox::renderer::CommandRequestId],
+        frame_graph: &'a mut dyn FrameGraph,
+        _pending_transfers: &[CommandRequestId],
     ) -> Result<(), Error>
     {
-        if !pending_transfers.is_empty() {
-            return Ok(())
-        }
-        let frame_graph = frame_graph.init(3)?;
         let frame_buffer_size = frame_graph.frame_buffer_size();
         let depth_stencil_output = frame_graph.add_transient_image(
             &mut |builder| {
@@ -956,11 +981,10 @@ impl Interface for App {
                     .with_dimensions(frame_buffer_size);
             }
         )?;
-        let fire_tex = frame_graph.add_image(self.fire_images[self.heat_in as usize])?;
-        let texture = frame_graph.add_image(self.image)?;
         frame_graph.set_render_image(color_output_resolve, None)?;
+        let fire_tex = frame_graph.add_image(self.fire_images[self.heat_in as usize])?;
         self.fire_pass = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, max_reads: 1, msaa_samples: MSAA::X4 },
+            PassInfo { max_color_writes: 1, max_reads: 1, msaa_samples: MSAA::X4, ..Default::default() },
             &mut |builder| {
                 builder
                     .with_read(ReadInfo::new(fire_tex, None))
@@ -975,8 +999,9 @@ impl Interface for App {
                     ));
             },
         )?;
+        let texture = frame_graph.add_image(self.image)?;
         self.cube_pass = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4 },
+            PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4, ..Default::default() },
             &mut |builder| {
                 builder
                     .with_read(ReadInfo { resource_id: texture, range_info: None })
@@ -1001,7 +1026,7 @@ impl Interface for App {
             }
         )?;
         self.outline_pass = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4 },
+            PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4 , signal_semaphores: 1, wait_semaphores: 1 },
             &mut |builder| {
                 builder
                     .with_write(WriteInfo::new(
@@ -1021,7 +1046,10 @@ impl Interface for App {
                         AttachmentLoadOp::Load,
                         AttachmentStoreOp::Store,
                         Default::default(),
-                    ));
+                    ))
+                    .with_signal_semaphore(self.semaphore, self.semaphore_value + 1)
+                    .with_wait_semaphore(self.fire_semaphore, self.fire_semaphore_value, PipelineStage::Transfer);
+                self.semaphore_value += 1;
             }
         )?;
         Ok(())
@@ -1029,15 +1057,15 @@ impl Interface for App {
 
     fn transfer_commands(
         &mut self,
-        id: nox::renderer::CommandRequestId,
-        commands: &mut nox::renderer::TransferCommands,
-    ) -> Result<Option<std::thread::JoinHandle<()>>, Error>
+        id: CommandRequestId,
+        commands: &mut TransferCommands,
+    ) -> Result<(), Error>
     {
         if id == self.fire_transfer_id {
-            for image in &self.fire_images {
-                commands.clear_color_image(*image, [0.0, 0.0, 0.0, 0.0].into(), None, &GlobalAlloc)?;
+            for &image in &self.fire_images {
+                commands.clear_color_image(image, [0.0, 0.0, 0.0, 0.0].into(), None, &GlobalAlloc)?;
             }
-            return Ok(None)
+            return Ok(())
         }
         for (i, asset) in self.assets.iter().enumerate() {
             commands.copy_data_to_image(
@@ -1065,7 +1093,7 @@ impl Interface for App {
             0,
             indices.len() as u64,
         ).unwrap();
-        Ok(None)
+        Ok(())
     }
 
     fn render_commands(
