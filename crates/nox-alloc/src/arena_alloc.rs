@@ -57,7 +57,8 @@ impl ArenaAlloc {
     }
 
     #[inline(always)]
-    pub fn clear(&mut self) {
+    /// Resets the pointer position to 0
+    pub unsafe fn clear(&mut self) {
         let cell = self.cell.get_mut();
         assert!(cell.guard_active == false, "attempting to clear while guard is active");
         cell.pos = 0;

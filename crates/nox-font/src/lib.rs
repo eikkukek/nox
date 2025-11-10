@@ -6,7 +6,7 @@ pub use face::Face;
 pub use triangulate::{triangulate, GlyphTriangles};
 pub use vertex_text_renderer::*;
 
-pub use nox::renderer::VertexInput;
+pub use nox::VertexInput;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy, Debug, VertexInput)]
