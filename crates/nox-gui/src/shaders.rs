@@ -28,6 +28,17 @@ impl From<[f32; 2]> for Vertex {
     }
 }
 
+impl From<Vec2> for Vertex {
+
+    fn from(value: Vec2) -> Self {
+        Self {
+            pos: value,
+            offset: Default::default(),
+            color: Default::default(),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, VertexInput)]
 pub struct ColorPickerVertex {

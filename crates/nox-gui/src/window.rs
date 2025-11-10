@@ -1,14 +1,16 @@
 use core::{
     hash::Hash,
-    str::FromStr,
     marker::PhantomData,
     f32::consts::FRAC_PI_2,
+    ptr::NonNull,
+    any::TypeId,
 };
 
 use nox::{
-    alloc::arena_alloc::ArenaGuard,
+    alloc::arena_alloc::{ArenaAlloc, ArenaGuard},
     mem::{
-        Hashable, vec_types::{GlobalVec, Vector}
+        Hashable, vec_types::{GlobalVec, Vector},
+        Allocator,
     },
     *
 };
@@ -111,9 +113,9 @@ impl CollapsingHeader {
     }
 
     #[inline(always)]
-    fn update<I>(
+    fn update(
         &mut self,
-        nox: &Nox<I>,
+        ctx: &WindowCtx,
         window_pos: Vec2,
         min_bounds: Vec2,
         max_bounds: Vec2,
@@ -122,8 +124,6 @@ impl CollapsingHeader {
         widget_active: bool,
         mut collect_text: impl FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> f32
-        where
-            I: Interface,
     {
         let item_pad_outer = style.item_pad_outer();
         let collapse_scale = style.collapse_symbol_scale();
@@ -135,16 +135,16 @@ impl CollapsingHeader {
         );
         self.flags &= !Self::HOVERED;
         or_flag!(self.flags, Self::HOVERED, bounding_rect.is_point_inside(cursor_pos) && !widget_active);
-        if !widget_active && nox.was_mouse_button_pressed(MouseButton::Left) && self.hovered() {
+        if !widget_active && self.hovered() && ctx.mouse_button_state(MouseButton::Left).pressed() {
             self.flags ^= Self::COLLAPSED;
         }
         if self.collapsed() {
             self.rotation =
-                (self.rotation - FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32())
+                (self.rotation - FRAC_PI_2 * style.animation_speed() * ctx.delta_time_secs_f32())
                 .clamp(0.0, FRAC_PI_2);
         } else {
             self.rotation =
-                (self.rotation + FRAC_PI_2 * style.animation_speed() * nox.delta_time_secs_f32())
+                (self.rotation + FRAC_PI_2 * style.animation_speed() * ctx.delta_time_secs_f32())
                 .clamp(0.0, FRAC_PI_2);
         }
         collect_text(
@@ -235,20 +235,19 @@ impl CollapsingHeader {
     }
 }
 
-struct WidgetTables<I, Style> {
-    selectable_texts: FxHashMap<Hashable<f64>, (u64, SelectableText<I, Style>)>,
-    sliders: FxHashMap<Hashable<f64>, (u64, Slider<I, Style>)>,
-    input_texts: FxHashMap<Hashable<f64>, (u64, InputText<I, Style>)>,
-    drag_values: FxHashMap<Hashable<f64>, (u64, DragValue<I, Style>)>,
-    color_pickers: FxHashMap<Hashable<f64>, (u64, ColorPicker<I, Style>)>,
-    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, Style>)>,
-    combo_boxes: FxHashMap<Hashable<f64>, (u64, ComboBox<I, Style>)>,
-    images: FxHashMap<Hashable<f64>, (u64, Image<I, Style>)>,
+struct WidgetTables<Style> {
+    selectable_texts: FxHashMap<Hashable<f64>, (u64, SelectableText<Style>)>,
+    sliders: FxHashMap<Hashable<f64>, (u64, Slider<Style>)>,
+    input_texts: FxHashMap<Hashable<f64>, (u64, InputText<Style>)>,
+    drag_values: FxHashMap<Hashable<f64>, (u64, DragValue<Style>)>,
+    color_pickers: FxHashMap<Hashable<f64>, (u64, ColorPicker<Style>)>,
+    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<Style>)>,
+    combo_boxes: FxHashMap<Hashable<f64>, (u64, ComboBox<Style>)>,
+    images: FxHashMap<Hashable<f64>, (u64, Image<Style>)>,
 }
 
-impl<I, Style> WidgetTables<I, Style>
-    where 
-        I: Interface,
+impl<Style> WidgetTables<Style>
+    where
         Style: WindowStyle,
 {
 
@@ -266,39 +265,39 @@ impl<I, Style> WidgetTables<I, Style>
     }
 
     #[inline(always)]
-    fn get_widget(&self, widget: WidgetId) -> (u64, &dyn Widget<I, Style>) {
+    fn get_widget(&self, widget: WidgetId) -> (u64, &dyn Widget<Style>) {
         match widget {
             WidgetId::Slider(id) =>
                 self.sliders.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::ColorPicker(id) =>
                 self.color_pickers.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::InputText(id) =>
                 self.input_texts.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::DragValue(id) =>
                 self.drag_values.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::SelectableText(id) =>
                  self.selectable_texts.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::SelectabelTag(id) =>
                  self.selectable_tags.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::ComboBox(id) =>
                  self.combo_boxes.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::Image(id) =>
                  self.images.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<I, Style>)
+                    |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
         }
     }
@@ -307,46 +306,53 @@ impl<I, Style> WidgetTables<I, Style>
     fn get_widget_mut(
         &mut self,
         widget: WidgetId
-    ) -> (&mut u64, &mut dyn Widget<I, Style>)
+    ) -> (&mut u64, &mut dyn Widget<Style>)
     {
         match widget {
             WidgetId::Slider(id) =>
                 self.sliders.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::ColorPicker(id) =>
                 self.color_pickers.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style,>)
+                    |(l, w)| (l, w as &mut dyn Widget<Style,>)
                 ).unwrap(),
             WidgetId::InputText(id) =>
                 self.input_texts.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::DragValue(id) =>
                 self.drag_values.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::SelectableText(id) =>
                  self.selectable_texts.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::SelectabelTag(id) =>
                  self.selectable_tags.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::ComboBox(id) =>
                  self.combo_boxes.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<Style>)
                 ).unwrap(),
             WidgetId::Image(id) =>
                  self.images.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<I, Style>)
+                    |(l, w)| (l, w as &mut dyn Widget<Style>)
                 ).unwrap(),
         }
     }
 }
 
-pub struct Window<I, Style>
+struct ReactionData {
+    ty: TypeId,
+    ptr: Option<NonNull<u8>>,
+    move_fn: Box<dyn FnMut(Option<NonNull<u8>>, &ArenaAlloc) -> Option<NonNull<u8>>>,
+    drop_fn: Box<dyn FnMut(Option<NonNull<u8>>)>,
+}
+
+pub struct Window<Style>
 {
     main_rect: Rect,
     title_bar_rect: Rect,
@@ -364,11 +370,13 @@ pub struct Window<I, Style>
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
     text: GlobalVec<Text>,
-    widgets: Option<WidgetTables<I, Style>>,
+    widgets: Option<WidgetTables<Style>>,
     active_widgets: FxHashSet<WidgetId>,
     prev_active_widgets: GlobalVec<WidgetId>,
     reactions: FxHashMap<ReactionId, Reaction>,
     active_reactions: FxHashSet<ReactionId>,
+    prev_active_reactions: GlobalVec<ReactionId>,
+    reaction_data: FxHashMap<ReactionId, ReactionData>,
     reaction_text: FxHashMap<ReactionId, (CompactString, Text)>,
     animated_bools: FxHashMap<ReactionId, (f32, bool)>,
     collapsing_headers: FxHashMap<Hashable<f64>, (u64, CollapsingHeader)>,
@@ -394,6 +402,8 @@ pub struct Window<I, Style>
     distance_from_edge: Vec2,
     signal_semaphore: Option<TimelineSemaphoreId>,
     signal_semaphore_value: u64,
+    reaction_data_alloc_0: ArenaAlloc,
+    reaction_data_alloc_1: ArenaAlloc,
     flags: u32,
     _marker: PhantomData<Style>,
 }
@@ -401,7 +411,7 @@ pub struct Window<I, Style>
 macro_rules! impl_get_widget {
     ($fn_name:ident, $field:ident, $ty:ident) => {
         #[inline(always)]
-        pub fn $fn_name(&mut self, id: Hashable<f64>) -> &mut $ty<I, Style> {
+        pub fn $fn_name(&mut self, id: Hashable<f64>) -> &mut $ty<Style> {
             let widgets = unsafe {
                 self.widgets
                     .as_mut()
@@ -418,9 +428,8 @@ macro_rules! impl_get_widget {
     };
 }
 
-impl<I, Style> Window<I, Style>
+impl<Style> Window<Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -444,6 +453,7 @@ impl<I, Style> Window<I, Style>
     const VER_SCROLL_BAR_RENDERABLE: u32 = 0x2000_0;
     const HOR_SCROLL_BAR_RENDERABLE: u32 = 0x4000_0;
     const CONTENT_HELD: u32 = 0x8000_0;
+    const USING_REACTION_DATA_ALLOC_1: u32 = 0x1000_00;
 
     pub(crate) fn new(
         title: &str,
@@ -473,6 +483,8 @@ impl<I, Style> Window<I, Style>
             prev_active_widgets: Default::default(),
             reactions: FxHashMap::default(),
             active_reactions: FxHashSet::default(),
+            prev_active_reactions: Default::default(),
+            reaction_data: FxHashMap::default(),
             reaction_text: FxHashMap::default(),
             animated_bools: FxHashMap::default(),
             collapsing_headers: FxHashMap::default(),
@@ -498,6 +510,8 @@ impl<I, Style> Window<I, Style>
             distance_from_edge: Default::default(),
             signal_semaphore: None,
             signal_semaphore_value: 0,
+            reaction_data_alloc_0: ArenaAlloc::new(1 << 20).unwrap(),
+            reaction_data_alloc_1: ArenaAlloc::new(1 << 20).unwrap(),
             flags:
                 Self::REQUIRES_TRIANGULATION |
                 Self::APPEARING |
@@ -531,7 +545,7 @@ impl<I, Style> Window<I, Style>
     pub fn edit_selectable_text(
         &mut self,
         id: WidgetId,
-        mut f: impl FnMut(&mut SelectableText<I, Style>)
+        mut f: impl FnMut(&mut SelectableText<Style>)
     )
     {
         let widgets = unsafe {
@@ -574,7 +588,7 @@ impl<I, Style> Window<I, Style>
     }
 
     #[inline(always)]
-    pub fn activate_widget<'a, W: Widget<I, Style>, T: ?Sized>(
+    pub fn activate_widget<'a, W: Widget<Style>, T: ?Sized>(
         &'a mut self,
         value: &T,
         mut make_id: impl FnMut(Hashable<f64>) -> WidgetId,
@@ -627,6 +641,50 @@ impl<I, Style> Window<I, Style>
         }
         let reaction = self.reactions.entry(id).or_insert_with(|| Reaction::new(id));
         reaction
+    }
+
+    #[inline(always)]
+    pub fn reaction_data_or_insert_with<T: 'static>(
+        &mut self,
+        id: ReactionId,
+        mut f: impl FnMut() -> T,
+    ) -> Option<NonNull<T>> {
+        let alloc =
+            if self.using_reaction_data_alloc_1() {
+                &self.reaction_data_alloc_1
+            } else {
+                &self.reaction_data_alloc_0
+            };
+        let entry = self.reaction_data
+            .entry(id)
+            .or_insert_with(|| {
+                let ptr = unsafe {
+                    alloc
+                        .allocate_uninit::<T>(1)
+                };
+                if let Some(ptr) = ptr {
+                    unsafe {
+                        ptr.write(f());
+                    }
+                }
+                ReactionData {
+                    ty: TypeId::of::<T>(),
+                    ptr: ptr.map(|v| v.cast()),
+                    move_fn: Box::new(|ptr, alloc| unsafe {
+                        let ptr = ptr?.cast::<T>();
+                        let new_ptr = alloc.allocate_uninit::<T>(1)?;
+                        ptr.copy_to_nonoverlapping(new_ptr, 1);
+                        Some(new_ptr.cast())
+                    }),
+                    drop_fn: Box::new(|ptr| unsafe {
+                        if let Some(ptr) = ptr {
+                            ptr.cast::<T>().drop_in_place();
+                        }
+                    }),
+                }
+            });
+        assert!(TypeId::of::<T>() == entry.ty, "reaction data type mismatch");
+        Some(entry.ptr?.cast())
     }
 
     #[inline(always)]
@@ -791,7 +849,12 @@ impl<I, Style> Window<I, Style>
     #[inline(always)]
     fn hover_window_active(&self) -> bool {
         self.flags & Self::HOVER_WINDOW_ACTIVE == Self::HOVER_WINDOW_ACTIVE
-    } 
+    }
+
+    #[inline(always)]
+    fn using_reaction_data_alloc_1(&self) -> bool {
+        self.flags & Self::USING_REACTION_DATA_ALLOC_1 == Self::USING_REACTION_DATA_ALLOC_1
+    }
 
     #[inline(always)]
     pub fn set_last_frame(&mut self, frame: u64) {
@@ -815,14 +878,18 @@ impl<I, Style> Window<I, Style>
     #[inline(always)]
     pub fn begin(&mut self) {
         self.prev_active_widgets.clear();
-        for &widget in &self.active_widgets {
-            self.prev_active_widgets.push(widget);
+        for &id in &self.active_widgets {
+            self.prev_active_widgets.push(id);
+        }
+        self.prev_active_collapsing_headers.clear();
+        for &id in &self.active_collapsing_headers {
+            self.prev_active_collapsing_headers.push(id);
+        }
+        self.prev_active_reactions.clear();
+        for &id in &self.active_reactions {
+            self.prev_active_reactions.push(id);
         }
         self.active_widgets.clear();
-        self.prev_active_collapsing_headers.clear();
-        for &c in &self.active_collapsing_headers {
-            self.prev_active_collapsing_headers.push(c);
-        }
         self.active_collapsing_headers.clear();
         self.active_reactions.clear();
         self.painter_storage.begin();
@@ -830,7 +897,7 @@ impl<I, Style> Window<I, Style>
 
     pub fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         renderer: &mut RendererContext,
         style: &Style,
         text_renderer: &mut TextRenderer,
@@ -842,15 +909,13 @@ impl<I, Style> Window<I, Style>
         unit_scale: f32,
         tmp_alloc: ArenaGuard,
     ) -> Result<WindowUpdateResult, Error>
-        where 
-            I: Interface,
     {
         let override_cursor = style.override_cursor();
         let mut cursor_in_this_window =
             !cursor_in_other_window &&
             self.bounding_rect(style.cursor_error_margin()).is_point_inside(cursor_pos);
         if cursor_in_this_window && override_cursor && !self.any_resize() {
-            nox.set_cursor(CursorIcon::Default);
+            ctx.set_cursor(CursorIcon::Default);
         }
         let mut title_bar_rect = self.title_bar_rect;
 
@@ -868,8 +933,8 @@ impl<I, Style> Window<I, Style>
         let mut min_size = self.widget_rect_max.max(title_text_box_size + item_pad_outer);
         let mut widget_off = vec2(0.0, 0.0);
         self.flags &= !(Self::VER_SCROLL_BAR_VISIBLE | Self::HOR_SCROLL_BAR_VISIBLE);
-        let mut delta_lines = nox.mouse_scroll_delta_lines();
-        let mut delta_pixels = nox.mouse_scroll_pixel_delta();
+        let mut delta_lines = ctx.mouse_scroll_delta_lines();
+        let mut delta_pixels = ctx.mouse_scroll_pixel_delta();
         if !style.natural_scroll() {
             delta_lines = (-delta_lines.0, -delta_lines.1);
             delta_pixels = (-delta_pixels.0, -delta_pixels.1);
@@ -952,6 +1017,12 @@ impl<I, Style> Window<I, Style>
             let (_, collapsing_headers) = &self.collapsing_headers[collapsing_headers];
             collapsing_headers.hide(&mut self.vertices);
         }
+        self.prev_active_reactions.retain(|v| !self.active_reactions.contains(v));
+        for id in &self.prev_active_reactions {
+            if let Some(mut data) = self.reaction_data.remove(id) {
+                (data.drop_fn)(data.ptr);
+            }
+        }
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.combined_text.clear();
         let mut active_widget = None;
@@ -959,7 +1030,7 @@ impl<I, Style> Window<I, Style>
         let mut cursor_in_some_widget = false;
         for (i, &widget) in self.active_widgets.iter().enumerate() {
             let (_, widget) = widgets.get_widget(widget);
-            match widget.status(nox, style, pos, cursor_pos) {
+            match widget.status(ctx, style, pos, cursor_pos) {
                 WidgetStatus::Inactive => {},
                 WidgetStatus::Hovered(text) => {
                     if let Some(text) = text {
@@ -980,12 +1051,12 @@ impl<I, Style> Window<I, Style>
             active_widget.is_none() ||
             self.ver_scroll_bar.held() ||
             self.hor_scroll_bar.held();
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if !self.held() && !self.any_resize() {
             if cursor_in_this_window && active_widget.is_none() {
                 let mut flags = self.flags;
                 flags &= !Self::RESIZE_BLOCKED_COL;
                 flags &= !Self::RESIZE_BLOCKED_ROW;
-                let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
                 let error_margin = style.cursor_error_margin();
                 if self.is_resizeable() {
                     if  cursor_pos.x >= self.position.x - error_margin &&
@@ -1018,10 +1089,10 @@ impl<I, Style> Window<I, Style>
                     {
                         hovered_widget = Some(self.active_widgets.len());
                         hover_blocked = true;
-                        or_flag!(self.flags, Self::HELD, mouse_pressed);
+                        or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
                     }
                     if override_cursor {
-                        nox.set_cursor(CursorIcon::Default);
+                        ctx.set_cursor(CursorIcon::Default);
                     }
                 }
                 else {
@@ -1029,36 +1100,36 @@ impl<I, Style> Window<I, Style>
                     hover_blocked = true;
                     if override_cursor {
                         if self.resize_nw() {
-                            nox.set_cursor(CursorIcon::NwResize);
+                            ctx.set_cursor(CursorIcon::NwResize);
                         }
                         else if self.resize_ne() {
-                            nox.set_cursor(CursorIcon::NeResize);
+                            ctx.set_cursor(CursorIcon::NeResize);
                         }
                         else if self.resize_sw() {
-                            nox.set_cursor(CursorIcon::SwResize);
+                            ctx.set_cursor(CursorIcon::SwResize);
                         }
                         else if self.resize_se() {
-                            nox.set_cursor(CursorIcon::SeResize);
+                            ctx.set_cursor(CursorIcon::SeResize);
                         }
                         else {
                             if self.resize_left() {
-                                nox.set_cursor(CursorIcon::WResize);
+                                ctx.set_cursor(CursorIcon::WResize);
                             }
                             if self.resize_right() {
-                                nox.set_cursor(CursorIcon::EResize);
+                                ctx.set_cursor(CursorIcon::EResize);
                             }
                             if self.resize_top() {
-                                nox.set_cursor(CursorIcon::NResize);
+                                ctx.set_cursor(CursorIcon::NResize);
                             }
                             if self.resize_bottom() {
-                                nox.set_cursor(CursorIcon::SResize);
+                                ctx.set_cursor(CursorIcon::SResize);
                             }
                         }
                     }
                 }
                 self.flags &=
                     !((Self::RESIZE_LEFT | Self::RESIZE_RIGHT | Self::RESIZE_TOP | Self::RESIZE_BOTTOM) *
-                        !mouse_pressed as u32
+                        !mouse_left_state.pressed() as u32
                     );
             }
         } else {
@@ -1067,24 +1138,53 @@ impl<I, Style> Window<I, Style>
             hover_blocked = true;
         }
         let reaction_blocked = hover_blocked || active_widget.is_some() || hovered_widget.is_some();
-        for reaction in &self.active_reactions {
-            let reaction = self.reactions.get_mut(reaction).unwrap();
+        let mut held_reaction = None;
+        for &id in &self.active_reactions {
+            let reaction = self.reactions.get_mut(&id).unwrap();
+            if reaction.held() {
+                held_reaction = Some(id);
+                break;
+            }
+        }
+        self.flags ^= Self::USING_REACTION_DATA_ALLOC_1;
+        let reaction_data_alloc =
+            if self.using_reaction_data_alloc_1() {
+                unsafe {
+                    self.reaction_data_alloc_1.clear();
+                }
+                &self.reaction_data_alloc_1
+            } else {
+                unsafe {
+                    self.reaction_data_alloc_0.clear();
+                }
+                &self.reaction_data_alloc_0
+            };
+        for &id in &self.active_reactions {
+            let reaction = self.reactions.get_mut(&id).unwrap();
             reaction.offset += widget_off;
             if reaction.animated_bool() {
-                if let Some((t, value)) = self.animated_bools.get_mut(&reaction.id()) {
+                if let Some((t, value)) = self.animated_bools.get_mut(&id) {
                     if *value {
-                        *t = (*t + style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
+                        *t = (*t + style.animation_speed() * ctx.delta_time_secs_f32()).clamp(0.0, 1.0);
                     } else {
-                        *t = (*t - style.animation_speed() * nox.delta_time_secs_f32()).clamp(0.0, 1.0);
+                        *t = (*t - style.animation_speed() * ctx.delta_time_secs_f32()).clamp(0.0, 1.0);
                     }
                 }
             }
+            if let Some(data) = self.reaction_data.get_mut(&id) {
+                data.ptr = (data.move_fn)(data.ptr, reaction_data_alloc);
+            }
             if let Some(text) = reaction.update(
-                    nox,
+                    ctx,
                     cursor_pos,
                     pos,
                     cursor_in_this_window,
-                    reaction_blocked,
+                    reaction_blocked ||
+                    if let Some(held_id) = held_reaction {
+                        held_id != id
+                    } else {
+                        false
+                    },
                 )
             {
                 self.hover_window.update(style, text_renderer, cursor_pos, &text);
@@ -1105,7 +1205,7 @@ impl<I, Style> Window<I, Style>
             let (_, collapsing_header) = self.collapsing_headers.get_mut(collapsing_header).unwrap();
             collapsing_header.offset += widget_off;
             let width = collapsing_header.update(
-                nox, pos,
+                ctx, pos,
                 content_area.0, content_area.1,
                 cursor_pos, style, active_widget.is_some() || window_moving,
                 |text, offset, bounded_text_instance| {
@@ -1129,7 +1229,7 @@ impl<I, Style> Window<I, Style>
                 requires_transfer_commands,
                 cursor_in_widget,
             } = widget.update(
-                nox,
+                ctx,
                 style,
                 text_renderer,
                 size,
@@ -1177,7 +1277,7 @@ impl<I, Style> Window<I, Style>
         }
         let mut main_rect_max = self.main_rect.max;
         if self.held() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
             } else {
                 self.position += delta_cursor_pos;
@@ -1192,10 +1292,10 @@ impl<I, Style> Window<I, Style>
             self.flags &= !Self::APPEARING;
         }
         if self.resize_left() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_LEFT;
                 if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
+                    ctx.set_cursor(CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_col() {
@@ -1217,10 +1317,10 @@ impl<I, Style> Window<I, Style>
             }
         }
         if self.resize_right() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_RIGHT;
                 if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
+                    ctx.set_cursor(CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_col() {
@@ -1239,10 +1339,10 @@ impl<I, Style> Window<I, Style>
             }
         }
         if self.resize_top() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_TOP;
                 if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
+                    ctx.set_cursor(CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_row() {
@@ -1265,10 +1365,10 @@ impl<I, Style> Window<I, Style>
             }
         }
         if self.resize_bottom() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_BOTTOM;
                 if override_cursor {
-                    nox.set_cursor(CursorIcon::Default);
+                    ctx.set_cursor(CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_row() {
@@ -1322,7 +1422,7 @@ impl<I, Style> Window<I, Style>
                 0.0
             };
             let res = self.ver_scroll_bar.update(
-                nox, style,
+                ctx, style,
                 self.scroll_y, offset,
                 pos, cursor_pos, height,
                 self.widget_rect_max.y,
@@ -1341,7 +1441,7 @@ impl<I, Style> Window<I, Style>
                 0.0
             };
             let res = self.hor_scroll_bar.update(
-                nox, style,
+                ctx, style,
                 self.scroll_x, offset,
                 pos, cursor_pos, width,
                 self.widget_rect_max.x,
@@ -1353,7 +1453,7 @@ impl<I, Style> Window<I, Style>
             self.scroll_x = res.new_t;
         }
         if self.content_held() {
-            if nox.was_mouse_button_released(MouseButton::Left) {
+            if mouse_left_state.released() {
                 self.flags &= !Self::CONTENT_HELD;
             } else if
                 !self.ver_scroll_bar_visible() &&
@@ -1374,7 +1474,7 @@ impl<I, Style> Window<I, Style>
             active_widget.is_none() &&
             hovered_widget.is_none() &&
             cursor_in_this_window &&
-            nox.was_mouse_button_pressed(MouseButton::Left)
+            mouse_left_state.pressed()
         {
             self.flags |= Self::CONTENT_HELD;
         }
@@ -1592,7 +1692,7 @@ impl<I, Style> Window<I, Style>
         let (painter_vertices, painter_indices_usize) = self.painter_storage.triangulate();
         self.content_draw_info.index_count += painter_indices_usize.len() as u32;
         let n = painter_vertex_off as u32;
-        self.indices.append_map(painter_indices_usize, |&i| n + i as u32);
+        self.indices.append_map(painter_indices_usize, |&i| n + i);
         self.vertices.append(painter_vertices);
         if !painter_vertices.is_empty() {
             let range = VertexRange::new(painter_vertex_off..self.vertices.len());
@@ -1904,6 +2004,15 @@ impl<I, Style> Window<I, Style>
     }
 }
 
+impl<Style> Drop for Window<Style> {
+
+    fn drop(&mut self) {
+        for (_, data) in &mut self.reaction_data {
+            (data.drop_fn)(data.ptr);
+        }
+    }
+}
+
 pub struct RowText {
     pub index: usize,
     pub row_index: usize,
@@ -1928,14 +2037,14 @@ impl RowText {
     }
 }
 
-pub struct WindowContext<'a, 'b, I, Style>
+pub struct UiCtx<'a, 'b, Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
-    style: &'a Style,
-    window: &'a mut Window<I, Style>,
-    text_renderer: &'a mut TextRenderer<'b>,
+    pub ctx: &'a mut WindowCtx,
+    pub style: &'a Style,
+    pub window: &'a mut Window<Style>,
+    pub text_renderer: &'a mut TextRenderer<'b>,
     current_row_widgets: GlobalVec<(WidgetId, Vec2)>,
     current_row_text: GlobalVec<RowText>,
     current_row_reactions: GlobalVec<(ReactionId, Vec2)>,
@@ -1953,9 +2062,8 @@ pub struct WindowContext<'a, 'b, I, Style>
     flags: u32,
 }
 
-impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
+impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -1964,8 +2072,9 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
 
     pub(crate) fn new(
         title: &str,
-        window: &'a mut Window<I, Style>,
+        ctx: &'a mut WindowCtx,
         style: &'a Style,
+        window: &'a mut Window<Style>,
         text_renderer: &'a mut TextRenderer<'b>,
         image_loader: &'a mut ImageLoader,
     ) -> Self {
@@ -1986,6 +2095,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
                     title_text.row_height * style.font_scale() * style.title_add_scale()) +
                     style.item_pad_outer().y,
             ),
+            ctx,
             window,
             style,
             text_renderer,
@@ -2008,8 +2118,9 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
 
     pub(crate) fn new_collapsing(
         label: &str,
-        window: &'a mut Window<I, Style>,
+        ctx: &'a mut WindowCtx,
         style: &'a Style,
+        window: &'a mut Window<Style>,
         text_renderer: &'a mut TextRenderer<'b>,
         widget_off: Vec2,
         slider_width: f32,
@@ -2028,6 +2139,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         Self {
             widget_off: base_off,
             row_widget_off_x: widget_off.x + item_pad_outer.x,
+            ctx,
             window,
             style,
             text_renderer,
@@ -2068,16 +2180,16 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         self.style.calc_text_box_height_from_text_height(
             font_height
         )
-    }
-
-    #[inline(always)]
-    pub fn style(&self) -> &Style {
-        self.style
-    }
+    } 
 
     #[inline(always)]
     pub fn painter<'c>(&'c mut self) -> Painter<'c> {
         Painter::new(&mut self.window.painter_storage, self.style, self.text_renderer)
+    }
+
+    #[inline(always)]
+    pub fn add_text(&mut self, text: Text) {
+        self.window.add_text(text);
     }
 
     #[inline(always)]
@@ -2119,8 +2231,8 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         size: Vec2,
     ) -> Reaction {
         let reaction = self.window.activate_reaction(value);
-        reaction.set_offset(self.widget_off);
-        reaction.set_size(size);
+        reaction.offset = self.widget_off;
+        reaction.size = size;
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_reactions.push((reaction.id(), size));
@@ -2168,7 +2280,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
 
     pub fn collapsing<F>(&mut self, label: &str, mut f: F)
         where 
-            F: FnMut(&mut WindowContext<I, Style>)
+            F: FnMut(&mut UiCtx<Style>)
     {
         if self.is_collapsed() {
             return
@@ -2178,8 +2290,8 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         }
         self.widget_off.x = self.row_widget_off_x;
         let item_pad_outer = self.style.item_pad_outer();
-        let mut collapsing = WindowContext::new_collapsing(
-            label, self.window, self.style, self.text_renderer,
+        let mut collapsing = UiCtx::new_collapsing(
+            label, self.ctx, self.style, self.window, self.text_renderer,
             self.widget_off, self.slider_width, self.input_text_width,
             self.image_loader,
         );
@@ -2226,8 +2338,8 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         }
         for &(reaction, size) in &self.current_row_reactions {
             let reaction = self.window.reactions.get_mut(&reaction).unwrap();
-            let offset = reaction.get_offset();
-            reaction.set_offset(vec2(offset.x, offset.y + current_height_half - size.y * 0.5));
+            let offset = reaction.offset;
+            reaction.offset = vec2(offset.x, offset.y + current_height_half - size.y * 0.5);
         }
         let mut paints = self.current_row_paints.take().unwrap();
         let mut painter = self.painter();
@@ -2330,7 +2442,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         self.tag_internal(tag, color, Some(tool_tip));
     }
 
-    pub fn text(&mut self, label: &str, truncate: bool, mut f: impl FnMut(&mut SelectableTextBuilder<I, Style>))
+    pub fn text(&mut self, label: &str, truncate: bool, mut f: impl FnMut(&mut SelectableTextBuilder<Style>))
     {
         let window_width = self.window.size().x;
         let (selectable_text, id) = self.window.activate_widget(
@@ -2372,14 +2484,14 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         let mut reaction = self.window.activate_reaction(label).clone();
         let id = reaction.id();
         let offset = self.widget_off;
-        reaction.set_offset(offset);
+        reaction.offset = offset;
         let visuals = self.style.interact_visuals(&reaction);
         let mut text = self.reaction_text(id, label).clone();
         text.offset = offset;
         text.offset.x += self.style.item_pad_inner().x;
-        text.color = visuals.fg_strokes[visuals.fg_stroke_idx as usize].col;
+        text.color = visuals.fg_stroke_col();
         let size = self.style.calc_text_box_size(&text.text);
-        reaction.set_size(size);
+        reaction.size = size;
         let text_index = self.window.add_text(text);
         self.current_row_text.push(RowText::new(text_index, 0, 0, None));
         self.current_height = self.current_height.max(size.y);
@@ -2416,16 +2528,16 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         let offset = self.widget_off;
         let size_max = self.style.calc_font_height(self.text_renderer);
         let rect_size = vec2(size_max, size_max);
-        reaction.set_offset(offset);
+        reaction.offset = offset;
         let visuals = self.style.interact_visuals(&reaction);
         let mut text = self.reaction_text(id, label).clone();
         let text_width = self.style.calc_text_width(&text.text);
         text.offset = offset;
         text.offset.x += size_max + item_pad_inner.x;
-        let fg_col = visuals.fg_strokes[visuals.fg_stroke_idx as usize].col;
+        let fg_col = visuals.fg_stroke_col();
         text.color = fg_col;
         let size = vec2(size_max + text_width + item_pad_inner.x, size_max);
-        reaction.set_size(size);
+        reaction.size = size;
         let text_index = self.window.add_text(text);
         self.current_row_text.push(RowText::new(text_index, 0, 0, None));
         self.current_height = self.current_height.max(size.y);
@@ -2518,7 +2630,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     }
 
     #[inline(always)]
-    fn input_text_internal<T: core::fmt::Display + FromStr>(
+    fn input_text_internal<T: core::fmt::Display + core::str::FromStr>(
         &mut self,
         value: &mut T,
         empty_input_prompt: &str,
@@ -2551,7 +2663,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     }
 
     #[inline(always)]
-    pub fn input_text<T: core::fmt::Display + FromStr>(
+    pub fn input_text<T: core::fmt::Display + core::str::FromStr>(
         &mut self,
         value: &mut T,
         empty_input_prompt: &str,
@@ -2565,7 +2677,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     }
     
     #[inline(always)]
-    pub fn centered_input_text<T: core::fmt::Display + FromStr>(
+    pub fn centered_input_text<T: core::fmt::Display + core::str::FromStr>(
         &mut self,
         value: &mut T,
         empty_input_prompt: &str,
@@ -2577,6 +2689,46 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
             value, empty_input_prompt,
             width, true, format_input
         );
+    }
+
+    #[inline(always)]
+    pub fn input_text_test<T: core::fmt::Display + core::str::FromStr>(
+        &mut self,
+        value: &mut T,
+        empty_input_prompt: &str,
+        width: f32,
+        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
+    )  {
+        let mut reaction = self.window.activate_reaction(value).clone();
+        let id = reaction.id();
+        let window_moving = self.window.held() || self.window.any_resize();
+        let data = self.window.reaction_data_or_insert_with(id, || {
+            InputTextData::new()
+        });
+        if let Some(mut data) = data {
+            let input_text = unsafe {
+                data.as_mut()
+            };
+            input_text.set_params(
+                width, None, false,
+                empty_input_prompt, format_input,
+                false,
+            );
+            if input_text.active() {
+                if let Some(v) = input_text.get_input() {
+                    *value = v;
+                }
+            } else {
+                input_text.set_input(value);
+            }
+            reaction.size = input_text.update(
+                self,
+                &mut reaction,
+                window_moving,
+            )
+        }
+        let offset = self.widget_off;
+        reaction.offset = offset;
     }
 
     #[inline(always)]
@@ -2613,7 +2765,7 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         value: &mut T,
         radio_value: T,
         label: &str,
-    ) -> Reaction
+    ) -> &mut Reaction
     {
         let item_pad_inner = self.style.item_pad_inner();
         let mut reaction = self.window.activate_reaction(label).clone();
@@ -2621,16 +2773,16 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
         let offset = self.widget_off;
         let radius = self.style.default_handle_radius();
         let diameter = radius * 2.0;
-        reaction.set_offset(offset);
+        reaction.offset = offset;
         let visuals = self.style.interact_visuals(&reaction);
         let mut text = self.reaction_text(id, label).clone();
         let text_size = self.style.calc_text_size(&text.text);
         text.offset = offset;
         text.offset.x += diameter + item_pad_inner.x;
-        let fg_col = visuals.fg_strokes[visuals.fg_stroke_idx as usize].col;
+        let fg_col = visuals.fg_stroke_col();
         text.color = fg_col;
         let size = vec2(diameter + text_size.x + item_pad_inner.x, diameter.max(text_size.y));
-        reaction.set_size(size);
+        reaction.size = size;
         let text_index = self.window.add_text(text);
         self.current_row_text.push(RowText::new(text_index, 0, 0, None));
         self.current_height = self.current_height.max(size.y);
@@ -2674,36 +2826,69 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
             .get_mut(&id)
             .unwrap();
         *entry = reaction;
-        entry.clone()
+        entry
     }
 
     #[inline(always)]
-    pub fn selectable_tag<T: Clone + Eq>(
+    pub fn selectable_tag<T: Clone + Eq + 'static>(
         &mut self,
         value: &mut T,
         target: T,
         label: &str,
-    )
+    ) -> &mut Reaction
     {
-        let (selectable_tag, id) = self.window.activate_widget(
-            label,
-            |id| WidgetId::SelectabelTag(id),
-            |win, id| win.get_selectable_tag(id)
-        );
-        selectable_tag.set_label(label, self.text_renderer, self.style);
-        let size = selectable_tag.calc_size(self.style, self.text_renderer);
-        selectable_tag.update_value(value, target);
-        selectable_tag.set_offset(self.widget_off);
+        let item_pad_inner = self.style.item_pad_inner();
+        let mut reaction = self.window.activate_reaction(value).clone();
+        let id = reaction.id();
+        let offset = self.widget_off;
+        reaction.offset = offset;
+        let visuals = self.style.interact_visuals(&reaction);
+        let mut text = self.reaction_text(id, label).clone();
+        let size = self.style.calc_text_box_size(&text.text);
+        text.offset = offset;
+        text.offset.x += item_pad_inner.x;
+        text.color = visuals.fg_stroke_col();
+        reaction.size = size;
+        let text_index = self.window.add_text(text);
+        self.current_row_text.push(RowText::new(text_index, 0, 0, None));
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_widgets.push((id, size));
+        self.current_row_reactions.push((id, size));
+        if reaction.clicked() {
+            *value = target.clone();
+        }
+        let rounding = self.style.rounding();
+        let value = value.clone();
+        let selected_col = self.style.selection_col();
+        self.paint(Box::new(move |painter, current_height| {
+            let fill_col =
+                if value == target {
+                    selected_col
+                } else {
+                    visuals.fill_col
+                };
+            painter
+                .rect(
+                    id,
+                    rect(Default::default(), size, rounding),
+                    offset + vec2(0.0, current_height * 0.5 - size.y * 0.5),
+                    fill_col,
+                    visuals.bg_strokes.clone(),
+                    visuals.bg_stroke_idx
+                );
+        }));
+        let entry = self.window.reactions
+            .get_mut(&id)
+            .unwrap();
+        *entry = reaction;
+        entry
     }
 
     #[inline(always)]
     pub fn combo_box<T: Clone + Eq>(
         &mut self,
         label: &str,
-        f: impl FnMut(&mut ComboBoxBuilder<T, I, Style>)
+        f: impl FnMut(&mut ComboBoxBuilder<T, Style>)
     ) {
         let (combo_box, id) = self.window.activate_widget(
             label,
@@ -2773,9 +2958,8 @@ impl<'a, 'b, I, Style> WindowContext<'a, 'b, I, Style>
     }
 }
 
-impl<'a, 'b, I, Style> Drop for WindowContext<'a, 'b, I, Style>
+impl<'a, 'b, Style> Drop for UiCtx<'a, 'b, Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
     fn drop(&mut self) {

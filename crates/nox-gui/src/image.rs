@@ -59,7 +59,7 @@ macro_rules! image_source {
     };
 }
 
-pub struct Image<I, Style> {
+pub struct Image<Style> {
     offset: Vec2,
     size: Vec2,
     source: Option<ImageSourceInternal>,
@@ -67,10 +67,10 @@ pub struct Image<I, Style> {
     image: Option<ImageId>,
     shader_resource: core::cell::RefCell<Option<ShaderResourceId>>,
     flags: u32,
-    _marker: PhantomData<(I, Style)>
+    _marker: PhantomData<Style>
 }
 
-impl<I, Style> Image<I, Style> {
+impl<Style> Image<Style> {
 
     const SOURCE_RESET: u32 = 0x1;
 
@@ -113,9 +113,8 @@ impl<I, Style> Image<I, Style> {
     }
 }
 
-impl<I, Style> Widget<I, Style> for Image<I, Style>
+impl<Style> Widget<Style> for Image<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -141,7 +140,7 @@ impl<I, Style> Widget<I, Style> for Image<I, Style>
 
     fn status<'a>(
         &'a self,
-        _nox: &Nox<I>,
+        _ctx: &WindowCtx,
         _style: &Style,
         _window_pos: Vec2,
         _cursor_pos: Vec2,
@@ -151,7 +150,7 @@ impl<I, Style> Widget<I, Style> for Image<I, Style>
 
     fn update(
         &mut self,
-        _nox: &mut Nox<I>,
+        _ctx: &mut WindowCtx,
         _style: &Style,
         _text_renderer: &mut TextRenderer,
         _window_size: Vec2,
@@ -208,7 +207,7 @@ impl<I, Style> Widget<I, Style> for Image<I, Style>
         unit_scale: f32,
         tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error> {
+    ) -> Result<Option<&dyn HoverContents<Style>>, Error> {
         let mut shader_resource = self.shader_resource.borrow_mut();
         if shader_resource.is_none() {
             render_commands.edit_resources(|r| {

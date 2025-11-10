@@ -11,8 +11,8 @@ use nox::{
 
 use nox_gui::{geom::{shapes::circle, *}, *};
 
-pub fn my_widget_show<I: Interface, Style: WindowStyle>(
-    win: &mut WindowContext<I, Style>,
+pub fn my_widget_show<Style: WindowStyle>(
+    win: &mut UiCtx<Style>,
     value: &mut bool,
 ) -> Reaction {
     let size = win.standard_interact_height() * vec2(2.0, 1.0);
@@ -25,7 +25,7 @@ pub fn my_widget_show<I: Interface, Style: WindowStyle>(
     }
     let radius = size.y * 0.5;
     let rect = shapes::rect(Default::default(), size, radius);
-    let visuals = win.style().interact_visuals(&reaction);
+    let visuals = win.style.interact_visuals(&reaction);
     let mut center = offset + vec2(radius, radius);
     let t = win.animate_bool(reaction.id(), *value);
     center.x += lerp(0.0, size.x - radius * 2.0, t);
@@ -44,11 +44,11 @@ pub fn my_widget_show<I: Interface, Style: WindowStyle>(
     reaction
 }
 
-pub fn my_widget<I: Interface, Style: WindowStyle>(
+pub fn my_widget<Style: WindowStyle>(
     value: &mut bool
-) -> impl FnMut(&mut WindowContext<I, Style>) -> Reaction
+) -> impl FnMut(&mut UiCtx<Style>) -> Reaction
 {
-    |win: &mut WindowContext<I, Style>| my_widget_show(win, value)
+    |win: &mut UiCtx<Style>| my_widget_show(win, value)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -59,7 +59,7 @@ enum MyEnum {
 }
 
 struct Example<'a> {
-    workspace: Workspace<'a, Self, DefaultStyle>,
+    workspace: Workspace<'a, DefaultStyle>,
     output_format: ColorFormat,
     aspect_ratio: f32,
     slider_value: f32,
@@ -85,7 +85,7 @@ struct Example<'a> {
 impl<'a> Example<'a> {
 
     pub fn new(
-        workspace: Workspace<'a, Self, DefaultStyle>,
+        workspace: Workspace<'a, DefaultStyle>,
     ) -> Self
     {
         let mut cache_dir = std
@@ -133,7 +133,7 @@ impl<'a> Interface for Example<'a> {
 
     fn init_callback(
         &mut self,
-        _nox: &mut Nox<Self>,
+        _nox: &Nox<Self>,
         renderer: &mut RendererContext,
     ) -> Result<(), Error>
     {
@@ -203,11 +203,12 @@ impl<'a> Interface for Example<'a> {
 
     fn update(
         &mut self,
-        nox: &mut Nox<Self>,
+        _nox: &Nox<Self>,
+        ctx: &mut WindowCtx,
         renderer: &mut RendererContext,
     ) -> Result<(), Error> {
-        self.workspace.begin(nox)?;
-        self.workspace.window(0, "Widgets", [0.0, 0.0], [0.5, 0.5],
+        self.workspace.begin(ctx)?;
+        self.workspace.window(ctx, 0, "Widgets", [0.0, 0.0], [0.5, 0.5],
             |win| {
                 win.checkbox(&mut self.resizeable, "Resizeable");
                 win.checkbox(&mut self.clamp_width, "Clamp width");
@@ -289,8 +290,8 @@ impl<'a> Interface for Example<'a> {
         )?;
         if self.show_other_window {
             let mut fmt = String::new();
-            <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / nox.delta_time_secs_f32())).unwrap();
-            self.workspace.window(1, fmt.as_str(), [0.25, 0.25], [0.4, 0.4], 
+            <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / ctx.delta_time_secs_f32())).unwrap();
+            self.workspace.window(ctx, 1, fmt.as_str(), [0.25, 0.25], [0.4, 0.4], 
                 |win| {
                     let mut fmt = String::new();
                     <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("Hue: {}°", (self.tag_color.hue * 180.0 / core::f32::consts::PI).round())).unwrap();
@@ -318,8 +319,8 @@ impl<'a> Interface for Example<'a> {
                     });
             })?;
         }
-        self.tag_color.hue = (self.tag_color.hue + core::f32::consts::PI * nox.delta_time_secs_f32()) % core::f32::consts::TAU;
-        self.workspace.end(nox, renderer)?;
+        self.tag_color.hue = (self.tag_color.hue + core::f32::consts::PI * ctx.delta_time_secs_f32()) % core::f32::consts::TAU;
+        self.workspace.end(ctx, renderer)?;
         Ok(())
     }
 

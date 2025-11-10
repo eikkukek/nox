@@ -127,17 +127,16 @@ impl ImageLoader {
     }
 }
 
-pub struct Workspace<'a, I, Style>
+pub struct Workspace<'a, Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
     text_renderer: TextRenderer<'a>,
     style: Style,
-    windows: FxHashMap<u32, Window<I, Style>>,
+    windows: FxHashMap<u32, Window<Style>>,
+    active_windows: GlobalVec<u32>,
     main_pass_id: PassId,
     window_passes: FxHashMap<PassId, u32>,
-    active_windows: GlobalVec<u32>,
     vertex_buffer: Option<RingBuf>,
     index_buffer: Option<RingBuf>,
     tmp_alloc: ArenaAlloc,
@@ -157,9 +156,8 @@ pub struct Workspace<'a, I, Style>
     output_format: ColorFormat,
 }
 
-impl<'a, I, Style> Workspace<'a, I, Style>
+impl<'a, Style> Workspace<'a, Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -189,9 +187,9 @@ impl<'a, I, Style> Workspace<'a, I, Style>
             text_renderer,
             style,
             windows: Default::default(),
+            active_windows: Default::default(),
             main_pass_id: Default::default(),
             window_passes: FxHashMap::default(),
-            active_windows: Default::default(),
             vertex_buffer: None,
             index_buffer: None,
             tmp_alloc: ArenaAlloc::new(1 << 16).unwrap(),
@@ -497,7 +495,7 @@ impl<'a, I, Style> Workspace<'a, I, Style>
     }
 
     #[inline(always)]
-    pub fn begin(&mut self, nox: &mut Nox<I>) -> Result<(), Error>
+    pub fn begin(&mut self, ctx: &WindowCtx) -> Result<(), Error>
     {
         if self.began() {
             return Err(Error::UserError(
@@ -505,7 +503,7 @@ impl<'a, I, Style> Workspace<'a, I, Style>
             ))
         }
         self.window_passes.clear();
-        self.unit_scale = self.style.pixels_per_unit() / nox.window_size_f32().1;
+        self.unit_scale = self.style.pixels_per_unit() / ctx.window_size_f32().1;
         if let Some(buf) = &mut self.vertex_buffer {
             buf.finish_frame();
         }
@@ -519,6 +517,7 @@ impl<'a, I, Style> Workspace<'a, I, Style>
 
     pub fn window<F>(
         &mut self,
+        ctx: &mut WindowCtx,
         id: u32,
         title: &str,
         initial_position: [f32; 2],
@@ -526,7 +525,7 @@ impl<'a, I, Style> Workspace<'a, I, Style>
         mut f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(&mut WindowContext<I, Style>)
+            F: FnMut(&mut UiCtx<Style>),
     {
         if !self.began() {
             return Err(Error::UserError(
@@ -539,10 +538,11 @@ impl<'a, I, Style> Workspace<'a, I, Style>
             initial_size,
         ));
         window.set_last_frame(self.frame);
-        f(&mut WindowContext::new(
+        f(&mut UiCtx::new(
             title,
-            window,
+            ctx,
             &self.style,
+            window,
             &mut self.text_renderer,
             &mut self.image_loader,
         ));
@@ -554,7 +554,7 @@ impl<'a, I, Style> Workspace<'a, I, Style>
 
     pub fn end(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         renderer: &mut RendererContext,
     ) -> Result<(), Error>
     {
@@ -567,11 +567,11 @@ impl<'a, I, Style> Workspace<'a, I, Style>
             let win = self.windows.get(id).unwrap();
             win.last_frame() == self.frame
         });
-        let aspect_ratio = nox.aspect_ratio() as f32;
+        let aspect_ratio = ctx.aspect_ratio() as f32;
         self.inv_aspect_ratio = 1.0 / aspect_ratio;
-        let window_size: Vec2 = nox.window_size_f32().into();
+        let window_size: Vec2 = ctx.window_size_f32().into();
         let unit_scale = self.unit_scale;
-        let mut cursor_pos: Vec2 = nox.normalized_cursor_position_f32().into();
+        let mut cursor_pos: Vec2 = ctx.normalized_cursor_position_f32().into();
         cursor_pos *= 2.0;
         cursor_pos -= vec2(1.0, 1.0);
         cursor_pos.x *= aspect_ratio;
@@ -584,7 +584,7 @@ impl<'a, I, Style> Workspace<'a, I, Style>
             let window = self.windows.get_mut(id).unwrap();
             let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
             let WindowUpdateResult { cursor_in_window, requires_transfer_commands } = window.update(
-                nox,
+                ctx,
                 renderer,
                 &self.style,
                 &mut self.text_renderer,
@@ -596,7 +596,7 @@ impl<'a, I, Style> Workspace<'a, I, Style>
                 unit_scale,
                 tmp_alloc,
             )?;
-            if cursor_in_window && nox.was_mouse_button_pressed(MouseButton::Left) {
+            if cursor_in_window && ctx.mouse_button_state(MouseButton::Left).pressed() {
                 window_pressed = Some(i);
             }
             cursor_in_some_window |= cursor_in_window;
@@ -609,7 +609,7 @@ impl<'a, I, Style> Workspace<'a, I, Style>
            self.active_windows.push(id);
         }
         if self.cursor_in_window() && !cursor_in_some_window && self.style.override_cursor() {
-            nox.set_cursor(CursorIcon::Default);
+            ctx.set_cursor(CursorIcon::Default);
         }
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::BEGAN);
         self.flags |= Self::CURSOR_IN_WINDOW * cursor_in_some_window as u32;

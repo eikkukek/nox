@@ -10,8 +10,8 @@ use nox_geom::*;
 
 use crate::*;
 
-pub struct DragValue<I, Style> {
-    input_text: InputText<I, Style>,
+pub struct DragValue<Style> {
+    input_text: InputText<Style>,
     delta_cursor_x: f32,
     amount: f32,
     flags: u32,
@@ -22,7 +22,7 @@ pub struct DragValue<I, Style> {
     _marker: PhantomData<Style>,
 }
 
-impl<I, Style> DragValue<I, Style>
+impl<Style> DragValue<Style>
     where
         Style: WindowStyle,
 {
@@ -163,9 +163,8 @@ impl<I, Style> DragValue<I, Style>
     }
 }
 
-impl<I, Style> Widget<I, Style> for DragValue<I, Style>
+impl<Style> Widget<Style> for DragValue<Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -198,14 +197,14 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
     #[inline(always)]
     fn status<'a>(
         &'a self,
-        nox: &Nox<I>,
+        ctx: &WindowCtx,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2,
     ) -> WidgetStatus<'a>
     {
         if self.held() ||
-            matches!(self.input_text.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active)
+            matches!(self.input_text.status(ctx, style, window_pos, cursor_pos), WidgetStatus::Active)
         {
             WidgetStatus::Active
         } else if self.hovered() {
@@ -217,7 +216,7 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
 
     fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         style: &Style,
         text_renderer: &mut TextRenderer,
         window_size: Vec2,
@@ -240,11 +239,12 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
         let cursor_in_rect = self.input_text
             .rel_bounding_rect(style)
             .is_point_inside(rel_cursor_pos);
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if !other_widget_active && cursor_in_rect && !self.input_text.active() {
             self.flags |= Self::HOVERED;
             self.input_text.set_hovered(true);
             if self.held() {
-                if nox.was_mouse_button_released(MouseButton::Left) {
+                if mouse_left_state.released() {
                     if !self.held_moved() {
                         self.input_text.activate_and_select_all();
                     }
@@ -252,8 +252,7 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
                 }
             } else {
                 self.flags &= !Self::HELD;
-                self.flags |=
-                    Self::HELD * nox.was_mouse_button_pressed(MouseButton::Left) as u32;
+                or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
             }
         }
         if self.held() {
@@ -262,7 +261,7 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
             if delta_cursor_pos.x.abs() > f32::EPSILON {
                 self.flags |= Self::HELD_MOVED;
             }
-            if nox.was_mouse_button_released(MouseButton::Left) {
+            if mouse_left_state.released() {
                 self.flags &= !Self::HELD;
             }
         } else {
@@ -270,11 +269,11 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
         }
         if style.override_cursor() && !other_widget_active && (cursor_in_rect || self.held())  {
             if style.override_cursor() {
-                nox.set_cursor(CursorIcon::ColResize);
+                ctx.set_cursor(CursorIcon::ColResize);
             }
         }
         let mut update_results = self.input_text.update(
-            nox, style,
+            ctx, style,
             text_renderer, window_size, window_pos, content_offset,
             cursor_pos, delta_cursor_pos, cursor_in_this_window,
             other_widget_active, cursor_in_other_widget, window_moving,
@@ -347,7 +346,7 @@ impl<I, Style> Widget<I, Style> for DragValue<I, Style>
         unit_scale: f32,
         tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<Style>>, Error>
     {
         self.input_text.render_commands(
             render_commands, style, sampler, base_pipeline,

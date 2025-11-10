@@ -22,9 +22,7 @@ pub enum WidgetStatus<'a> {
     Active,
 }
 
-pub trait HoverContents<I, Style: WindowStyle>
-    where
-        I: Interface,
+pub trait HoverContents<Style: WindowStyle>
 {
 
     fn render_commands(
@@ -46,9 +44,8 @@ pub trait HoverContents<I, Style: WindowStyle>
     ) -> Result<(), Error>;
 }
 
-pub trait Widget<I, Style>
+pub trait Widget<Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -66,7 +63,7 @@ pub trait Widget<I, Style>
 
     fn status<'a>(
         &'a self,
-        nox: &Nox<I>,
+        ctx: &WindowCtx,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2,
@@ -74,7 +71,7 @@ pub trait Widget<I, Style>
 
     fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         style: &Style,
         text_renderer: &mut TextRenderer,
         window_size: Vec2,
@@ -133,7 +130,7 @@ pub trait Widget<I, Style>
         unit_scale: f32,
         tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error> { Ok(None) }
+    ) -> Result<Option<&dyn HoverContents<Style>>, Error> { Ok(None) }
 
     #[allow(unused_variables)]
     fn transfer_commands(

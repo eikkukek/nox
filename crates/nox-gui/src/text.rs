@@ -19,7 +19,7 @@ use nox::{
 
 use crate::*;
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug)]
 pub struct RowOffsets {
     pub offsets: GlobalVec<TextOffset>,
     pub row_height: f32,
@@ -81,7 +81,7 @@ impl Text {
     }
 }
 
-pub struct SelectableText<I, Style>
+pub struct SelectableText<Style>
 {
     text: GlobalVec<Text>,
     selection: Option<(usize, usize)>,
@@ -102,12 +102,11 @@ pub struct SelectableText<I, Style>
     current_row: u32,
     next_builder: u32,
     flags: u32,
-    _marker: PhantomData<(I, Style)>,
+    _marker: PhantomData<Style>,
 }
 
-impl<I, Style> SelectableText<I, Style>
+impl<Style> SelectableText<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -175,7 +174,7 @@ impl<I, Style> SelectableText<I, Style>
         window_width: f32,
         style: &'a Style,
         text_renderer: &'a mut TextRenderer<'b>,
-    ) -> SelectableTextBuilder<'a, 'b, I, Style>
+    ) -> SelectableTextBuilder<'a, 'b, Style>
     {
         SelectableTextBuilder::new(style, text_renderer, self, window_width)
     }
@@ -377,22 +376,20 @@ impl<I, Style> SelectableText<I, Style>
     }
 }
 
-pub struct SelectableTextBuilder<'a, 'b, I, Style>
+pub struct SelectableTextBuilder<'a, 'b, Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
     style: &'a Style,
     text_renderer: &'a mut TextRenderer<'b>,
-    text: &'a mut SelectableText<I, Style>,
+    text: &'a mut SelectableText<Style>,
     window_width: f32,
     color: ColorSRGBA,
     scale: Vec2,
 }
 
-impl<'a, 'b, I, Style> SelectableTextBuilder<'a, 'b, I, Style>
+impl<'a, 'b, Style> SelectableTextBuilder<'a, 'b, Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -400,7 +397,7 @@ impl<'a, 'b, I, Style> SelectableTextBuilder<'a, 'b, I, Style>
     fn new(
         style: &'a Style,
         text_renderer: &'a mut TextRenderer<'b>,
-        text: &'a mut SelectableText<I, Style>,
+        text: &'a mut SelectableText<Style>,
         window_width: f32,
     ) -> Self {
         Self {
@@ -562,9 +559,8 @@ impl TextSegmentBuilder
     }
 }
 
-impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
+impl<Style> Widget<Style> for SelectableText<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -594,7 +590,7 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
 
     fn status<'a>(
         &'a self,
-        _nox: &Nox<I>,
+        _ctx: &WindowCtx,
         _style: &Style,
         _window_pos: Vec2,
         _cursor_pos: Vec2,
@@ -611,7 +607,7 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
 
     fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         style: &Style,
         _text_renderer: &mut TextRenderer,
         _window_size: Vec2,
@@ -627,12 +623,12 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
         _collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
     {
-        let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
-        if mouse_pressed || self.prev_char_count != self.char_count {
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
+        if mouse_left_state.pressed() || self.prev_char_count != self.char_count {
             self.selection = None;
         }
         let rel_cursor_pos = cursor_pos - window_pos - self.scroll_offset;
-        if nox.was_mouse_button_released(MouseButton::Left) {
+        if mouse_left_state.released() {
             self.flags &= !Self::HELD;
         }
         let mut cursor_index = self.calc_cursor_index(style, rel_cursor_pos, self.base_offset);
@@ -658,9 +654,9 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
         if cursor_in_this_window && !other_widget_active && !cursor_in_other_widget && !hover_blocked {
             if cursor_in_text {
                 if style.override_cursor() {
-                    nox.set_cursor(CursorIcon::Text);
+                    ctx.set_cursor(CursorIcon::Text);
                 }
-                if mouse_pressed {
+                if mouse_left_state.pressed() {
                     if let Some(index) = cursor_index {
                         self.selection = Some((index, index));
                         self.flags |= Self::HELD;
@@ -677,8 +673,8 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
             if !self.held() {
                 cursor_index = None;
             }
-            if nox.was_key_pressed(KeyCode::ArrowLeft) {
-                if nox.is_key_held(KeyCode::ShiftLeft) {
+            if ctx.key_state(KeyCode::ArrowLeft).pressed() {
+                if ctx.key_state(KeyCode::ShiftLeft).held() {
                     if self.selection_left() {
                         if selection.0 != 0 {
                             selection.0 -= 1;
@@ -694,8 +690,8 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
                         cursor_index = Some(selection.1);
                     }
                 }
-            } else if nox.was_key_pressed(KeyCode::ArrowRight) {
-                if nox.is_key_held(KeyCode::ShiftLeft) {
+            } else if ctx.key_state(KeyCode::ArrowRight).pressed() {
+                if ctx.key_state(KeyCode::ShiftLeft).held() {
                     if self.selection_left() {
                         selection.0 += 1;
                         cursor_index = Some(selection.0);
@@ -726,10 +722,10 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
                 }
             }
             self.selection = Some(selection);
-            if nox.is_key_held(KeyCode::ControlLeft) && nox.was_key_pressed(KeyCode::KeyC) {
+            if ctx.key_state(KeyCode::ControlLeft).held() && ctx.key_state(KeyCode::KeyC).pressed() {
                 let input = self.get_selection();
                 if !input.is_empty() {
-                    nox.set_clipboard(&input);
+                    ctx.set_clipboard(&input);
                 }
                 self.selection = None;
             }
@@ -737,7 +733,7 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
             self.flags &= !Self::SELECTION_LEFT;
         }
         if self.held() && style.override_cursor() {
-            nox.set_cursor(CursorIcon::Text);
+            ctx.set_cursor(CursorIcon::Text);
         }
         self.prev_char_count = self.char_count;
         self.char_count = 0;
@@ -796,7 +792,7 @@ impl<I, Style> Widget<I, Style> for SelectableText<I, Style>
         unit_scale: f32,
         _tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error> {
+    ) -> Result<Option<&dyn HoverContents<Style>>, Error> {
         if self.selection_vertices.is_empty() {
             return Ok(None)
         }

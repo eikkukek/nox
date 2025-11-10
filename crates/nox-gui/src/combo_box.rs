@@ -17,7 +17,7 @@ use nox_geom::{
 
 use crate::*;
 
-pub struct ComboBox<I, Style> {
+pub struct ComboBox<Style> {
     offset: Vec2,
     widget_size: Vec2,
     content_size: Vec2,
@@ -29,7 +29,7 @@ pub struct ComboBox<I, Style> {
     focused_stroke_vertex_range: Option<VertexRange>,
     active_stroke_vertex_range: Option<VertexRange>,
     arrow_vertex_range: Option<VertexRange>,
-    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<I, Style>)>,
+    selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<Style>)>,
     active_tags: FxHashSet<Hashable<f64>>,
     prev_active_tags: GlobalVec<Hashable<f64>>,
     selected: Option<Hashable<f64>>,
@@ -40,12 +40,11 @@ pub struct ComboBox<I, Style> {
     combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     last_triangulation: u64,
     flags: u32,
-    _marker: PhantomData<(I, Style)>,
+    _marker: PhantomData<Style>,
 }
 
-impl<I, Style> ComboBox<I, Style>
+impl<Style> ComboBox<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -90,7 +89,7 @@ impl<I, Style> ComboBox<I, Style>
         &mut self,
         style: &Style,
         text_renderer: &mut TextRenderer,
-        mut f: impl FnMut(&mut ComboBoxBuilder<T, I, Style>),
+        mut f: impl FnMut(&mut ComboBoxBuilder<T, Style>),
     ) {
         self.prev_active_tags.clear();
         for &widget in &self.active_tags {
@@ -186,7 +185,7 @@ impl<I, Style> ComboBox<I, Style>
     fn activate_tag(
         &mut self,
         label: &str,
-    ) -> (&mut SelectableTag<I, Style>, Hashable<f64>)
+    ) -> (&mut SelectableTag<Style>, Hashable<f64>)
     {
         let mut id = Hashable((label as *const str).addr() as f64);
         while !self.active_tags.insert(id) {
@@ -202,8 +201,8 @@ impl<I, Style> ComboBox<I, Style>
     }
 }
 
-pub struct ComboBoxBuilder<'a, 'b, T, I, Style> {
-    combo_box: &'a mut ComboBox<I, Style>,
+pub struct ComboBoxBuilder<'a, 'b, T, Style> {
+    combo_box: &'a mut ComboBox<Style>,
     text_renderer: &'a mut TextRenderer<'b>,
     style: &'a Style,
     widget_off: Vec2,
@@ -211,9 +210,8 @@ pub struct ComboBoxBuilder<'a, 'b, T, I, Style> {
     _marker: PhantomData<T>,
 }
 
-impl<'a, 'b, T: Eq, I, Style> ComboBoxBuilder<'a, 'b, T, I, Style>
+impl<'a, 'b, T: Eq, Style> ComboBoxBuilder<'a, 'b, T, Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -231,9 +229,8 @@ impl<'a, 'b, T: Eq, I, Style> ComboBoxBuilder<'a, 'b, T, I, Style>
     }
 }
 
-impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
+impl<Style> Widget<Style> for ComboBox<Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -261,7 +258,7 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
 
     fn status<'a>(
         &'a self,
-        nox: &Nox<I>,
+        ctx: &WindowCtx,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2,
@@ -269,7 +266,7 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
     {
         for active_tag in &self.active_tags {
             let (_, tag) = &self.selectable_tags[active_tag];
-            match tag.status(nox, style, window_pos, cursor_pos) {
+            match tag.status(ctx, style, window_pos, cursor_pos) {
                 WidgetStatus::Active | WidgetStatus::Hovered(_) => {
                     return WidgetStatus::Active
                 },
@@ -291,7 +288,7 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
 
     fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         style: &Style,
         text_renderer: &mut TextRenderer,
         window_size: Vec2,
@@ -346,10 +343,10 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
             self.widget_size + vec2(error_margin_2, error_margin_2)
         );
         let cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
-        let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         self.flags &= !Self::WIDGET_HOVERED;
         if self.widget_held() {
-            if nox.was_mouse_button_released(MouseButton::Left) {
+            if mouse_left_state.released() {
                 self.flags &= !Self::WIDGET_HELD;
                 if cursor_in_widget {
                     self.flags ^= Self::CONTENTS_SHOWN;
@@ -357,7 +354,7 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
             }
         } else if !other_widget_active && !hover_blocked && cursor_in_widget {
             self.flags |= Self::WIDGET_HOVERED;
-            if mouse_pressed {
+            if mouse_left_state.pressed() {
                 self.flags |= Self::WIDGET_HELD;
             }
         }
@@ -370,7 +367,7 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
             self.flags &= !Self::CONTENTS_SHOWN;
         }
         self.flags &= !Self::CLICKED;
-        if mouse_pressed {
+        if mouse_left_state.pressed() {
             self.flags |= Self::CLICKED;
         }
         let contents_shown = self.contents_shown();
@@ -378,7 +375,7 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
         let mut hovered_widget = None;
         for (i, tag) in self.active_tags.iter().enumerate() {
             let tag = self.selectable_tags.get_mut(tag).unwrap();
-            match tag.1.status(nox, style, window_pos, cursor_pos) {
+            match tag.1.status(ctx, style, window_pos, cursor_pos) {
                 WidgetStatus::Active => active_widget = Some(i),
                 WidgetStatus::Hovered(_) => hovered_widget = Some(i),
                 WidgetStatus::Inactive => {}
@@ -389,7 +386,7 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
         for (i, tag) in self.active_tags.iter().enumerate() {
             let tag = self.selectable_tags.get_mut(tag).unwrap();
             let result = tag.1.update(
-                nox, style, text_renderer, size,
+                ctx, style, text_renderer, size,
                 window_pos, content_offset, cursor_pos, delta_cursor_pos, contents_shown,
                 if let Some(idx) = active_widget {
                     idx != i
@@ -588,7 +585,7 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
         _unit_scale: f32,
         _tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<Style>>, Error>
     {
         if self.contents_shown() {
             Ok(Some(self))
@@ -609,9 +606,8 @@ impl<I, Style> Widget<I, Style> for ComboBox<I, Style>
     }
 }
 
-impl<I, Style> HoverContents<I, Style> for ComboBox<I, Style>
+impl<Style> HoverContents<Style> for ComboBox<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 

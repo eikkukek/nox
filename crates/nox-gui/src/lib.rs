@@ -15,6 +15,7 @@ mod input_text;
 mod selectable_tag;
 mod combo_box;
 mod hover_window;
+mod drop_down;
 mod scroll_bar;
 pub mod image;
 mod window;
@@ -33,8 +34,9 @@ pub use widget::*;
 pub use slider::*;
 pub use drag_value::*;
 pub use scroll_bar::*;
-pub use window::*;
 pub use hover_window::*;
+pub use drop_down::*;
+pub use window::*;
 pub use workspace::*;
 pub use painter::*;
 
@@ -43,7 +45,7 @@ pub use nox_geom as geom;
 
 pub use compact_str::CompactString;
 
-pub use input_text::InputText;
+pub use input_text::{InputText, InputTextData};
 pub use color_picker::ColorPicker;
 pub use selectable_tag::SelectableTag;
 pub use combo_box::{ComboBox, ComboBoxBuilder};

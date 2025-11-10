@@ -19,6 +19,14 @@ pub struct InteractVisuals {
     pub rounding: f32,
 }
 
+impl InteractVisuals {
+
+    #[inline(always)]
+    pub fn fg_stroke_col(&self) -> ColorSRGBA {
+        self.fg_strokes[self.fg_stroke_idx as usize].col
+    }
+}
+
 pub trait WindowStyle {
 
     fn font_regular(&self) -> &CompactString;

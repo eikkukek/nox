@@ -37,7 +37,7 @@ pub trait Sliderable: Copy + FromStr + PartialEq {
     ) -> core::fmt::Result;
 }
 
-pub struct Slider<I, Style>
+pub struct Slider<Style>
 {
     slider_rect: Rect,
     slider_rect_vertex_range: Option<VertexRange>,
@@ -49,17 +49,16 @@ pub struct Slider<I, Style>
     active_handle_stroke_thickness: f32,
     active_handle_stroke_vertex_range: Option<VertexRange>,
     offset: Vec2,
-    drag_value: DragValue<I, Style>,
+    drag_value: DragValue<Style>,
     t: f32,
     quantized_t: f32,
     width: f32,
     flags: u32,
-    _marker: PhantomData<(I, Style)>,
+    _marker: PhantomData<Style>,
 }
 
-impl<I, Style> Slider<I, Style>
+impl<Style> Slider<Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -155,9 +154,8 @@ impl<I, Style> Slider<I, Style>
     }
 }
 
-impl<I, Style> Widget<I, Style> for Slider<I, Style>
+impl<Style> Widget<Style> for Slider<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
     #[inline(always)]
@@ -198,13 +196,13 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
 
     fn status<'a>(
         &'a self,
-        nox: &Nox<I>,
+        ctx: &WindowCtx,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2
     ) -> WidgetStatus<'a>
     {
-        match self.drag_value.status(nox, style, window_pos, cursor_pos) {
+        match self.drag_value.status(ctx, style, window_pos, cursor_pos) {
             WidgetStatus::Active => {
                 return WidgetStatus::Active
             },
@@ -224,7 +222,7 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
 
     fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         style: &Style,
         text_renderer: &mut TextRenderer,
         window_size: Vec2,
@@ -239,8 +237,6 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
         hover_blocked: bool,
         collect_text: &mut dyn FnMut(&RenderedText, Vec2, BoundedTextInstance),
     ) -> UpdateResult
-        where
-            I: Interface,
     {
         let width = self.width;
         let diameter = style.default_handle_radius() * 2.0;
@@ -275,7 +271,7 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
         self.flags &= !Self::CURSOR_IN_SLIDER;
         self.drag_value.set_offset(self.offset + vec2(width + style.item_pad_outer().x, 0.0));
         let drag_result = self.drag_value.update(
-            nox,
+            ctx,
             style,
             text_renderer,
             window_size, window_pos, content_offset,
@@ -283,11 +279,12 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
             cursor_in_this_window, other_widget_active, cursor_in_other_widget,
             window_moving, hover_blocked, collect_text
         );
-        let drag_status = self.drag_value.status(nox, style, window_pos, cursor_pos);
+        let drag_status = self.drag_value.status(ctx, style, window_pos, cursor_pos);
         other_widget_active |= matches!(drag_status, WidgetStatus::Active);
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if self.held() {
             cursor_in_widget = true;
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
             } else {
                 self.t = self.calc_t(cursor_pos, window_pos + offset);
@@ -300,7 +297,7 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
             cursor_in_widget = bounding_rect.is_point_inside(cursor_pos);
             if cursor_in_widget {
                 self.flags |= Self::CURSOR_IN_SLIDER;
-                if nox.was_mouse_button_pressed(MouseButton::Left) {
+                if mouse_left_state.pressed() {
                     self.flags |= Self::HELD;
                     self.t = self.calc_t(cursor_pos, window_pos + offset);
                 }
@@ -382,7 +379,7 @@ impl<I, Style> Widget<I, Style> for Slider<I, Style>
         unit_scale: f32,
         tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<Style>>, Error>
     {
         self.drag_value.render_commands(
             render_commands, style, sampler, base_pipeline, text_pipeline,

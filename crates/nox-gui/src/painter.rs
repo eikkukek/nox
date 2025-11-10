@@ -15,11 +15,46 @@ pub struct Stroke {
     pub thickness: f32,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 enum Shape {
     Rect(Rect),
     Circle(Circle, u32),
     Checkmark(f32),
+    FlatRect(Vec2, Vec2),
+}
+
+impl PartialEq for Shape {
+
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::Rect(rect) => {
+                match other {
+                    Shape::Rect(other) => rect == other,
+                    _ => false,
+                }
+            },
+            Self::Circle(circle, steps) => {
+                match other {
+                    Shape::Circle(other_circle, other_steps) =>
+                        circle == other_circle &&
+                        steps == other_steps,
+                    _ => false,
+                }
+            },
+            Self::Checkmark(scale) => {
+                match other {
+                    Shape::Checkmark(other)  => scale == other,
+                    _ => false,
+                }
+            },
+            Self::FlatRect(_, _) => {
+                match other {
+                    Shape::FlatRect(_, _) => true,
+                    _ => false,
+                }
+            },
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -88,6 +123,22 @@ impl ShapeParams {
             stroke_idx,
         }
     }
+
+    #[inline(always)]
+    fn new_flat_rect(
+        min: Vec2,
+        max: Vec2,
+        fill_col: ColorSRGBA,
+    ) -> Self {
+        Self {
+            shape: Shape::FlatRect(min, max),
+            offset: Default::default(),
+            fill_col,
+            shape_vertex_range: None,
+            strokes: Default::default(),
+            stroke_idx: 0,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -125,6 +176,7 @@ impl ReactionShapes {
         if self.rendered_shapes.len() == self.shapes.len() {
             for (i, shape) in self.rendered_shapes.iter_mut().enumerate() {
                 let update = self.shapes[i].clone();
+                shape.shape = update.shape;
                 shape.offset = update.offset;
                 shape.fill_col = update.fill_col;
                 for (j, stroke) in update.strokes.iter().enumerate() {
@@ -140,6 +192,7 @@ impl ReactionShapes {
 pub struct PainterStorage {
     vertices: GlobalVec<Vertex>,
     indices_usize: GlobalVec<usize>,
+    indices: GlobalVec<u32>,
     points: GlobalVec<[f32; 2]>,
     checkmark_points: GlobalVec<[f32; 2]>,
     helper_points: GlobalVec<[f32; 2]>,
@@ -156,6 +209,7 @@ impl PainterStorage {
         Self {
             vertices: Default::default(),
             indices_usize: Default::default(),
+            indices: Default::default(),
             points: Default::default(),
             checkmark_points: Default::default(),
             helper_points: Default::default(),
@@ -175,7 +229,7 @@ impl PainterStorage {
         self.active_reactions.clear();
     }
 
-    pub fn triangulate(&mut self) -> (&[Vertex], &[usize])
+    pub fn triangulate(&mut self) -> (&[Vertex], &[u32])
     {
         let mut requires_triangulation = false;
         for &id in &self.active_reactions {
@@ -189,10 +243,12 @@ impl PainterStorage {
         }
         let vertices = &mut self.vertices;
         let indices_usize = &mut self.indices_usize;
+        let indices = &mut self.indices;
         if requires_triangulation {
             println!("here");
             vertices.clear();
             indices_usize.clear();
+            indices.clear();
             self.shapes.clear();
             for shapes in &mut self.reaction_shapes {
                 shapes.1.rendered_shapes.clear();
@@ -263,6 +319,20 @@ impl PainterStorage {
                             earcut::earcut(&points, &[], false, vertices, indices_usize).ok();
                             shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
                         },
+                        Shape::FlatRect(min, max) => {
+                            let vertex_off = vertices.len();
+                            vertices.append(&[
+                                min.into(),
+                                vec2(min.x, max.y).into(),
+                                max.into(),
+                                vec2(max.x, min.y).into(),
+                            ]);
+                            shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
+                            indices.append(&[
+                                0, 1, 2,
+                                2, 3, 1,
+                            ]);
+                        },
                     };
                     reaction_shapes
                         .rendered_shapes.push(shape.clone());
@@ -270,14 +340,38 @@ impl PainterStorage {
                     helper_points.clear();
                 }
             }
+            indices.append_map(&indices_usize, |&v| v as u32);
         }
-        for (_, params) in &self.shapes {
-            set_vertex_params(vertices, params.shape_vertex_range, params.offset, params.fill_col);
-            for (i, stroke) in params.strokes.iter().enumerate() {
-                if i as u32 == params.stroke_idx {
-                    set_vertex_params(vertices, stroke.1, params.offset, stroke.0.col);
+        for (_, params) in self.shapes.iter().cloned() {
+            if let Shape::FlatRect(min, max) = params.shape {
+                if min.x != max.x && min.y != max.y {
+                    if let Some(range) = params.shape_vertex_range {
+                        let color = params.fill_col;
+                        let start = range.start();
+                        let mut vertex = &mut vertices[start];
+                        vertex.pos = min;
+                        vertex.color = color;
+                        vertex = &mut vertices[start + 1];
+                        vertex.pos = vec2(min.x, max.y);
+                        vertex.color = color;
+                        vertex = &mut vertices[start + 2];
+                        vertex.pos = max;
+                        vertex.color = color;
+                        vertex = &mut vertices[start + 3];
+                        vertex.pos = vec2(max.x, min.y);
+                        vertex.color = color;
+                    }
                 } else {
-                    hide_vertices(vertices, stroke.1);
+                    hide_vertices(vertices, params.shape_vertex_range);
+                }
+            } else {
+                set_vertex_params(vertices, params.shape_vertex_range, params.offset, params.fill_col);
+                for (i, stroke) in params.strokes.iter().enumerate() {
+                    if i as u32 == params.stroke_idx {
+                        set_vertex_params(vertices, stroke.1, params.offset, stroke.0.col);
+                    } else {
+                        hide_vertices(vertices, stroke.1);
+                    }
                 }
             }
         }
@@ -287,7 +381,7 @@ impl PainterStorage {
             shapes.hide(vertices);
         }
         self.shapes.clear();
-        (vertices, indices_usize)
+        (vertices, &self.indices)
     }
 }
 
@@ -362,6 +456,22 @@ impl<'a> Painter<'a>
             .entry(reaction_id)
             .or_default();
         let shape_params = ShapeParams::new_checkmark(scale, offset, fill_col, strokes, stroke_idx);
+        entry.shapes.push(shape_params);
+        self
+    }
+
+    pub fn flat_rect(
+        &mut self,
+        reaction_id: ReactionId,
+        min: Vec2,
+        max: Vec2,
+        fill_col: ColorSRGBA
+    ) -> &mut Self {
+        self.storage.active_reactions.insert(reaction_id);
+        let entry = self.storage.reaction_shapes
+            .entry(reaction_id)
+            .or_default();
+        let shape_params = ShapeParams::new_flat_rect(min, max, fill_col);
         entry.shapes.push(shape_params);
         self
     }

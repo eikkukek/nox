@@ -18,12 +18,12 @@ use nox_geom::{
 
 use crate::*;
 
-struct Contents<I, Style> {
-    r_drag_value: DragValue<I, Style>,
-    g_drag_value: DragValue<I, Style>,
-    b_drag_value: DragValue<I, Style>,
-    alpha_drag_value: DragValue<I, Style>,
-    hue_drag_value: DragValue<I, Style>,
+struct Contents<Style> {
+    r_drag_value: DragValue<Style>,
+    g_drag_value: DragValue<Style>,
+    b_drag_value: DragValue<Style>,
+    alpha_drag_value: DragValue<Style>,
+    hue_drag_value: DragValue<Style>,
     offset: Vec2,
     picker_handle_offset: Vec2,
     hue_picker_offset: Vec2,
@@ -53,12 +53,11 @@ struct Contents<I, Style> {
     active_stroke_thickness: f32,
     rgba_text_size: Vec2,
     flags: u32,
-    _marker: PhantomData<(I, Style)>,
+    _marker: PhantomData<Style>,
 }
 
-impl<I, Style> Contents<I, Style>
+impl<Style> Contents<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -242,7 +241,7 @@ impl<I, Style> Contents<I, Style>
 
     fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         style: &Style,
         text_renderer: &mut TextRenderer,
         window_pos: Vec2,
@@ -250,8 +249,6 @@ impl<I, Style> Contents<I, Style>
         delta_cursor_pos: Vec2,
         window_moving: bool,
     ) -> bool
-        where
-            I: Interface,
     {
         let item_pad_outer = style.item_pad_outer();
         let mut text_box_rect_max = vec2(self.rgba_text_size.x, self.r_drag_value.calc_size(style, text_renderer).y);
@@ -303,9 +300,9 @@ impl<I, Style> Contents<I, Style>
         let rel_cursor_pos = cursor_pos - window_pos;
         let error_margin = vec2(style.cursor_error_margin(), style.cursor_error_margin());
         let error_margin_2 = error_margin + error_margin;
-        let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if self.picker_held() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::PICKER_HELD;
             } else {
                 self.picker_handle_offset = rel_cursor_pos.clamp(
@@ -315,7 +312,7 @@ impl<I, Style> Contents<I, Style>
             }
         }
         else if self.hue_picker_held() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::HUE_PICKER_HELD;
             } else {
                 self.hue_picker_handle_offset_x = rel_cursor_pos.x.clamp(
@@ -325,7 +322,7 @@ impl<I, Style> Contents<I, Style>
             }
         }
         else if self.alpha_picker_held() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::ALPHA_PICKER_HELD;
             } else {
                 self.alpha_picker_handle_offset_x = rel_cursor_pos.x.clamp(
@@ -334,7 +331,7 @@ impl<I, Style> Contents<I, Style>
                 );
             }
         }
-        else if mouse_pressed {
+        else if mouse_left_state.pressed() {
             if BoundingRect::from_min_max(
                     color_picker_offset - error_margin,
                     color_picker_offset + picker_size + error_margin
@@ -418,15 +415,15 @@ impl<I, Style> Contents<I, Style>
             if self.picker_held() || self.hue_picker_held() || self.alpha_picker_held() {
                 None
             }
-            else if matches!(self.r_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
+            else if matches!(self.r_drag_value.status(ctx, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(0)
-            } else if matches!(self.g_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
+            } else if matches!(self.g_drag_value.status(ctx, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(1)
-            } else if matches!(self.b_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
+            } else if matches!(self.b_drag_value.status(ctx, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(2)
-            } else if matches!(self.alpha_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
+            } else if matches!(self.alpha_drag_value.status(ctx, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(3)
-            } else if matches!(self.hue_drag_value.status(nox, style, window_pos, cursor_pos), WidgetStatus::Active) {
+            } else if matches!(self.hue_drag_value.status(ctx, style, window_pos, cursor_pos), WidgetStatus::Active) {
                 Some(4)
             } else {
                 None
@@ -434,7 +431,7 @@ impl<I, Style> Contents<I, Style>
         self.flags &= !Self::DRAG_VALUE_ACTIVE;
         self.flags |= Self::DRAG_VALUE_ACTIVE * drag_value_active.is_some() as u32;
         if cursor_in_window && style.override_cursor() && drag_value_active.is_none() {
-            nox.set_cursor(CursorIcon::Default);
+            ctx.set_cursor(CursorIcon::Default);
         }
         self.r_drag_value.set_input_params(
             style,
@@ -454,7 +451,7 @@ impl<I, Style> Contents<I, Style>
         let font_scale = style.font_scale();
         let size = self.window_rect.max;
         let mut update_result = self.r_drag_value.update(
-            nox, style,
+            ctx, style,
             text_renderer,
             size,
             window_pos, vec2(0.0, 0.0),
@@ -474,13 +471,13 @@ impl<I, Style> Contents<I, Style>
             },
         );
         let mut f = |
-                drag_value: &mut DragValue<I, Style>,
+                drag_value: &mut DragValue<Style>,
                 idx: usize,
                 format_result: fn(&mut dyn Write, &str) -> core::fmt::Result,
             |
         {
             drag_value.set_input_params(style, text_box_rect_max.x, Some(format_result), true);
-            let res = drag_value.update(nox, style,
+            let res = drag_value.update(ctx, style,
                 text_renderer,
                 size,
                 window_pos, vec2(0.0, 0.0),
@@ -543,7 +540,7 @@ impl<I, Style> Contents<I, Style>
 
         window_rect_max.x = min_width;
 
-        if mouse_pressed && cursor_in_window
+        if mouse_left_state.pressed() && cursor_in_window
         {
             self.flags |= Self::CLICKED;
         }
@@ -808,9 +805,8 @@ impl<I, Style> Contents<I, Style>
     }
 }
 
-impl<I, Style> HoverContents<I, Style> for Contents<I, Style>
+impl<Style> HoverContents<Style> for Contents<Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -984,7 +980,7 @@ impl<I, Style> HoverContents<I, Style> for Contents<I, Style>
             },
         )?;
         let content_area = BoundingRect::from_min_max(vec2(f32::MIN, f32::MIN), vec2(f32::MAX, f32::MAX));
-        let mut f = |drag_value: &DragValue<I, Style>| -> Result<(), Error> {
+        let mut f = |drag_value: &DragValue<Style>| -> Result<(), Error> {
             drag_value.render_commands(
                 render_commands, style, sampler, base_pipeline,
                 text_pipeline, texture_pipeline, texture_pipeline_layout, vertex_buffer, index_buffer,
@@ -1013,18 +1009,17 @@ impl<I, Style> HoverContents<I, Style> for Contents<I, Style>
     }
 }
 
-pub struct ColorPicker<I, Style> {
+pub struct ColorPicker<Style> {
     color_rect: Rect,
     color_rect_vertex_range: Option<VertexRange>,
-    contents: Contents<I, Style>,
+    contents: Contents<Style>,
     color_fmt: CompactString,
     offset: Vec2,
-    _marker: PhantomData<(I, Style)>,
+    _marker: PhantomData<Style>,
 }
 
-impl<I, Style> ColorPicker<I, Style>
+impl<Style> ColorPicker<Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -1074,9 +1069,8 @@ impl<I, Style> ColorPicker<I, Style>
     }
 }
 
-impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
+impl<Style> Widget<Style> for ColorPicker<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -1108,7 +1102,7 @@ impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
 
     fn status<'a>(
         &'a self,
-        _nox: &Nox<I>,
+        _ctx: &WindowCtx,
         style: &Style,
         window_pos: Vec2,
         cursor_pos: Vec2
@@ -1131,7 +1125,7 @@ impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
 
     fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         style: &Style,
         text_renderer: &mut TextRenderer,
         _window_size: Vec2,
@@ -1165,7 +1159,8 @@ impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
             self.contents
             .bounding_rect(error_margin)
             .is_point_inside(rel_cursor_pos);
-        if nox.was_mouse_button_released(MouseButton::Left) {
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
+        if mouse_left_state.released() {
             if self.contents.widget_held() {
                 self.contents.set_widget_held(false);
                 self.contents.set_shown(cursor_in_color_rect);
@@ -1174,8 +1169,7 @@ impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
                 self.contents.set_clicked(false);
             }
         }
-        let mouse_pressed = nox.was_mouse_button_pressed(MouseButton::Left);
-        if cursor_in_color_rect && mouse_pressed {
+        if cursor_in_color_rect && mouse_left_state.pressed() {
             self.contents.set_widget_held(true);
         }
         if other_widget_active && !window_moving {
@@ -1191,7 +1185,7 @@ impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
                 font_height + style.item_pad_inner().y,
             );
             if self.contents.update(
-                nox,
+                ctx,
                 style,
                 text_renderer,
                 window_pos,
@@ -1250,7 +1244,7 @@ impl<I, Style> Widget<I, Style> for ColorPicker<I, Style>
         _unit_scale: f32,
         _tmp_alloc: &ArenaGuard,
         _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<I, Style>>, Error>
+    ) -> Result<Option<&dyn HoverContents<Style>>, Error>
     {
         if self.contents.shown() {
             Ok(Some(&self.contents))

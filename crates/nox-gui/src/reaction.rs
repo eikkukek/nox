@@ -13,6 +13,7 @@ pub struct ReactionId(pub Hashable<f64>);
 pub struct Reaction {
     pub offset: Vec2,
     pub size: Vec2,
+    pub rel_cursor_position: Vec2,
     id: ReactionId,
     hover_text: Option<CompactString>,
     flags: u32,
@@ -24,6 +25,7 @@ impl Reaction {
     const HELD: u32 = 0x2;
     const HOVERED: u32 = 0x4;
     const ANIMATED_BOOL: u32 = 0x8;
+    const HOVER_BLOCKED: u32 = 0x10;
 
     #[inline(always)]
     pub fn new(
@@ -32,6 +34,7 @@ impl Reaction {
         Self {
             offset: Default::default(),
             size: Default::default(),
+            rel_cursor_position: Default::default(),
             id,
             hover_text: None,
             flags: 0,
@@ -69,52 +72,40 @@ impl Reaction {
     }
 
     #[inline(always)]
+    pub fn hover_blocked(&self) -> bool {
+        self.flags & Self::HOVER_BLOCKED == Self::HOVER_BLOCKED
+    }
+
+    #[inline(always)]
     pub fn enable_animated_bool(&mut self) {
         self.flags |= Self::ANIMATED_BOOL;
     }
 
     #[inline(always)]
-    pub fn get_size(&self) -> Vec2 {
-        self.size
-    }
-
-    #[inline(always)]
-    pub fn set_size(&mut self, size: Vec2) {
-        self.size = size;
-    }
-
-    #[inline(always)]
-    pub fn get_offset(&self) -> Vec2 {
-        self.offset
-    }
-
-    #[inline(always)]
-    pub fn set_offset(&mut self, offset: Vec2) {
-        self.offset = offset;
-    }
-
-    #[inline(always)]
-    pub fn update<I: Interface>(
+    pub fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &WindowCtx,
         cursor_pos: Vec2,
         window_pos: Vec2,
         cursor_in_window: bool,
         hover_blocked: bool,
     ) -> Option<CompactString>
     {
-        self.flags &= !(Self::CLICKED | Self::HOVERED | Self::ANIMATED_BOOL);
+        self.flags &= !(Self::CLICKED | Self::HOVERED | Self::ANIMATED_BOOL | Self::HOVER_BLOCKED);
+        or_flag!(self.flags, Self::HOVER_BLOCKED, hover_blocked);
+        self.rel_cursor_position = cursor_pos - window_pos;
         let cursor_in_self = BoundingRect::from_position_size(
-            window_pos + self.offset, self.size
-        ).is_point_inside(cursor_pos);
+            self.offset, self.size
+        ).is_point_inside(self.rel_cursor_position);
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if self.held() {
-            if nox.was_mouse_button_released(MouseButton::Left) {
+            if mouse_left_state.released() {
                 self.flags &= !Self::HELD;
                 or_flag!(self.flags, Self::CLICKED, cursor_in_self);
             }
         } else if cursor_in_self && !hover_blocked && cursor_in_window {
             self.flags |= Self::HOVERED;
-            or_flag!(self.flags, Self::HELD, nox.was_mouse_button_pressed(MouseButton::Left));
+            or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
         }
         if self.hovered() {
             if let Some(hover_text) = self.hover_text.take() {

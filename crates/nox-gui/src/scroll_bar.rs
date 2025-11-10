@@ -114,9 +114,9 @@ impl VerScrollBar {
         self.width
     }
 
-    pub fn update<I: Interface>(
+    pub fn update(
         &mut self,
-        nox: &Nox<I>,
+        ctx: &mut WindowCtx,
         style: &impl WindowStyle,
         current_t: f32,
         offset: Vec2,
@@ -142,8 +142,9 @@ impl VerScrollBar {
         self.rounding = style.rounding();
         self.offset = offset;
         self.flags &= !Self::HOVERING;
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if self.held() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
             } else {
                 self.t = self.calc_t(cursor_pos, window_pos + offset);
@@ -156,7 +157,7 @@ impl VerScrollBar {
             );
             if !hover_blocked && !widget_active && bounding_rect.is_point_inside(cursor_pos) {
                 self.flags |= Self::HOVERING;
-                if nox.was_mouse_button_pressed(MouseButton::Left) {
+                if mouse_left_state.pressed() {
                     self.flags |= Self::HELD;
                     self.t = self.calc_t(cursor_pos, window_pos + offset);
                 }
@@ -164,7 +165,7 @@ impl VerScrollBar {
         }
         self.flags &= !Self::HIDING;
         or_flag!(self.flags, Self::HIDING, hover_blocked && !self.held());
-        let anim_delta = nox.delta_time_secs_f32() * style.animation_speed();
+        let anim_delta = ctx.delta_time_secs_f32() * style.animation_speed();
         if self.hiding() {
             self.opacity = (self.opacity - anim_delta).clamp(0.0, 1.0);
         } else {
@@ -330,9 +331,9 @@ impl HorScrollBar {
         t.clamp(0.0, self.max_t)
     }
 
-    pub fn update<I: Interface>(
+    pub fn update(
         &mut self,
-        nox: &Nox<I>,
+        ctx: &mut WindowCtx,
         style: &impl WindowStyle,
         current_t: f32,
         offset: Vec2,
@@ -358,8 +359,9 @@ impl HorScrollBar {
         self.rounding = style.rounding();
         self.offset = offset;
         self.flags &= !Self::HOVERING;
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if self.held() {
-            if !nox.is_mouse_button_held(MouseButton::Left) {
+            if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
             } else {
                 self.t = self.calc_t(cursor_pos, window_pos + offset);
@@ -372,7 +374,7 @@ impl HorScrollBar {
             );
             if !hover_blocked && !widget_active && bounding_rect.is_point_inside(cursor_pos) {
                 self.flags |= Self::HOVERING;
-                if nox.was_mouse_button_pressed(MouseButton::Left) {
+                if mouse_left_state.pressed() {
                     self.flags |= Self::HELD;
                     self.t = self.calc_t(cursor_pos, window_pos + offset);
                 }
@@ -380,7 +382,7 @@ impl HorScrollBar {
         }
         self.flags &= !Self::HIDING;
         or_flag!(self.flags, Self::HIDING, hover_blocked && !self.held());
-        let anim_delta = nox.delta_time_secs_f32() * style.animation_speed();
+        let anim_delta = ctx.delta_time_secs_f32() * style.animation_speed();
         if self.hiding() {
             self.opacity = (self.opacity - anim_delta).clamp(0.0, 1.0);
         } else {

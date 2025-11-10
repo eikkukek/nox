@@ -13,7 +13,7 @@ use nox_geom::{
 
 use crate::*;
 
-pub struct SelectableTag<I, Style> {
+pub struct SelectableTag<Style> {
     offset: Vec2,
     size: Vec2,
     rounding: f32,
@@ -27,12 +27,11 @@ pub struct SelectableTag<I, Style> {
     active_stroke_vertex_range: Option<VertexRange>,
     font: CompactString,
     flags: u32,
-    _marker: PhantomData<(I, Style)>,
+    _marker: PhantomData<Style>,
 }
 
-impl<I, Style> SelectableTag<I, Style>
+impl<Style> SelectableTag<Style>
     where 
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -144,9 +143,8 @@ impl<I, Style> SelectableTag<I, Style>
     }
 }
 
-impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
+impl<Style> Widget<Style> for SelectableTag<Style>
     where
-        I: Interface,
         Style: WindowStyle,
 {
 
@@ -177,7 +175,7 @@ impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
 
     fn status<'a>(
         &'a self,
-        _nox: &Nox<I>,
+        _ctx: &WindowCtx,
         _style: &Style,
         _window_pos: Vec2,
         _cursor_pos: Vec2,
@@ -194,7 +192,7 @@ impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
 
     fn update(
         &mut self,
-        nox: &mut Nox<I>,
+        ctx: &mut WindowCtx,
         style: &Style,
         _text_renderer: &mut TextRenderer,
         window_size: Vec2,
@@ -234,8 +232,9 @@ impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
             !other_widget_active && !cursor_in_other_widget &&
             bounding_rect.is_point_inside(cursor_pos);
         self.flags &= !(Self::CLICKED | Self::HOVERED);
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if self.held() {
-            if nox.was_mouse_button_released(MouseButton::Left) {
+            if mouse_left_state.released() {
                 self.flags &= !Self::HELD;
                 if cursor_in_widget {
                     self.flags |= Self::CLICKED;
@@ -243,7 +242,7 @@ impl<I, Style> Widget<I, Style> for SelectableTag<I, Style>
             }
         } else if cursor_in_widget {
             self.flags |= Self::HOVERED;
-            if nox.was_mouse_button_pressed(MouseButton::Left) {
+            if mouse_left_state.pressed() {
                 self.flags |= Self::HELD;
             }
         }
