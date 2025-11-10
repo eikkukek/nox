@@ -369,7 +369,7 @@ impl<'a> Renderer<'a> {
 
     fn async_transfer_requests<I: Interface>(
         &mut self,
-        interface: Arc<RwLock<I>>,
+        interface: &mut I,
     ) -> Result<(), Error>
     {
         let requests = unsafe {
@@ -384,7 +384,6 @@ impl<'a> Renderer<'a> {
         let device = self.device.clone();
         let transfer_commands = &mut self.transfer_commands;
         let queue_families = self.vulkan_context.queue_family_indices();
-        let interface = interface.clone();
         let global_resources = self.global_resources.clone();
 
         let transfer_command_pool = Arc::new(TransientCommandPool::new(device.clone(), queue_families.transfer_index())?);
@@ -428,8 +427,6 @@ impl<'a> Renderer<'a> {
             )?);
 
             interface
-                .write()
-                .unwrap()
                 .transfer_commands(id, &mut commands)?;
         }
 
@@ -441,12 +438,12 @@ impl<'a> Renderer<'a> {
     pub(crate) fn render<I: Interface>(
         &mut self,
         window: &Window,
-        interface: Arc<RwLock<I>>,
+        interface: &mut I,
         allocators: &'a Allocators,
     ) -> Result<(), String>
     {
         self
-            .async_transfer_requests(interface.clone())
+            .async_transfer_requests(interface)
             .map_err(|e| format!("failed to record async transfer requests: {:?}", e))?;
         let transfer_queue = self.vulkan_context.transfer_queue();
         let graphics_queue = self.vulkan_context.graphics_queue();
@@ -562,8 +559,6 @@ impl<'a> Renderer<'a> {
             self.frame_buffer_size = frame_data.extent.into();
             render_context.frame_buffer_size = self.frame_buffer_size;
             interface
-                .write()
-                .unwrap()
                 .frame_buffer_size_callback(&mut render_context)
                 .map_err(|e| format!("interface frame buffer size callback failed ( {:?} )", e))?;
         }
@@ -582,8 +577,6 @@ impl<'a> Renderer<'a> {
             queue_family_indices.compute_index(),
         );
         interface
-            .write()
-            .unwrap()
             .compute(&mut compute_commands)
             .map_err(|e| format!("interface failed to record compute commands ( {:?} )", e))?;
         unsafe {
@@ -644,8 +637,6 @@ impl<'a> Renderer<'a> {
                 &mut self.frame_token,
             );
             interface
-                .write()
-                .unwrap()
                 .render(&mut frame_graph, &pending_transfers)
                 .map_err(|e| format!("interface failed to render ( {:?} )", e))?;
             let mut render_commands = RenderCommands::new(
@@ -662,7 +653,7 @@ impl<'a> Renderer<'a> {
                 format!("failed to create render commands: {:?}", e)
             })?;
             frame_graph
-                .render(&mut *interface.write().unwrap(), &mut render_commands)
+                .render(interface, &mut render_commands)
                 .map_err(|e| format!("frame graph failed to render: {:?}", e))?;
             let (transfer_fence, wait_semaphores, wait_values, wait_stages) =
                 if render_commands.transfer_commands.is_empty() {

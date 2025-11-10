@@ -1,7 +1,7 @@
 #[macro_use]
 
 mod nox;
-pub mod renderer;
+mod renderer;
 mod interface;
 
 pub mod version;

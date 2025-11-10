@@ -1,10 +1,11 @@
+mod window_ctx;
+
 use std::sync::{Arc, RwLock};
 
 use std::time;
 
 use nox_mem::vec_types::{Vector, GlobalVec};
 
-use rustc_hash::FxHashMap;
 use compact_str::CompactString;
 
 use winit::{
@@ -23,7 +24,9 @@ pub use winit::event::MouseButton;
 pub use winit::window::CursorIcon;
 pub use winit::monitor::MonitorHandle;
 
-pub use crate::renderer;
+pub use window_ctx::WindowCtx;
+
+use crate::*;
 
 use super::{
     interface::Interface,
@@ -34,35 +37,17 @@ use super::{
 
 pub type AppName = ArrayString<128>;
 
-#[derive(Default, Clone, Copy)]
-struct InputState {
-    pressed: bool,
-    released: bool,
-    held: bool,
-    repeat: bool,
-}
-
 pub struct Nox<'a, I>
     where
         I: Interface,
 {
     interface: Arc<RwLock<I>>,
-    clipboard: Clipboard,
+    window_ctx: Option<WindowCtx>,
     window: Option<Arc<Window>>,
     memory: &'a Memory,
     renderer: Option<Renderer<'a>>,
-    cursor_pos: (f64, f64),
-    mouse_scroll_pixel_delta: (f64, f64),
-    mouse_scroll_line_delta: (f32, f32),
-    physical_keys: FxHashMap<PhysicalKey, InputState>,
-    logical_keys: FxHashMap<Key, InputState>,
-    mouse_buttons: FxHashMap<MouseButton, InputState>,
-    input_text: GlobalVec<(KeyCode, CompactString)>,
     monitors: GlobalVec<MonitorHandle>,
-    delta_counter: time::Instant,
-    delta_time: time::Duration,
     window_size: (u32, u32),
-    current_cursor: CursorIcon,
     flags: u32,
 }
 
@@ -70,35 +55,25 @@ impl<'a, I: Interface> Nox<'a, I>
 {
 
     const ERROR: u32 = 0x1;
-    const CURSOR_SET: u32 = 0x2;
 
-    fn cursor_set(&self) -> bool {
-        self.flags & Self::CURSOR_SET == Self::CURSOR_SET
-    }
-
+    #[inline(always)]
     fn error_set(&self) -> bool {
         self.flags & Self::ERROR == Self::ERROR
     }
 
-    pub fn new(interface: I, memory: &'a mut Memory) -> Self {
+    pub fn new(
+        interface: I,
+        memory: &'a mut Memory,
+    ) -> Self
+    {
         Nox {
             interface: Arc::new(RwLock::new(interface)),
             window: None,
             memory,
             renderer: None,
-            cursor_pos: (0.0, 0.0),
-            mouse_scroll_pixel_delta: Default::default(),
-            mouse_scroll_line_delta: Default::default(),
-            physical_keys: Default::default(),
-            logical_keys: Default::default(),
-            mouse_buttons: Default::default(),
-            input_text: Default::default(),
-            clipboard: Clipboard::None,
+            window_ctx: Some(WindowCtx::new()),
             monitors: Default::default(),
-            delta_counter: time::Instant::now(),
-            delta_time: time::Duration::ZERO,
-            window_size: Default::default(),
-            current_cursor: CursorIcon::Default,
+            window_size: (0, 0),
             flags: 0,
         }
     }
@@ -110,45 +85,12 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn gpu_name(&mut self) -> renderer::DeviceName {
+    pub fn gpu_name(&self) -> renderer::DeviceName {
         self.renderer
             .as_ref()
             .unwrap()
             .device_info()
             .device_name().clone()
-    }
-
-    #[inline(always)]
-    pub fn set_cursor(&mut self, cursor: CursorIcon) {
-        self.current_cursor = cursor;
-        self.flags |= Self::CURSOR_SET;
-    }
-
-    #[inline(always)]
-    pub fn set_cursor_hide(&self, hide: bool) {
-        if let Some(window) = self.window.as_ref() {
-            window.set_cursor_visible(!hide);
-        }
-    }
-
-    #[inline(always)]
-    pub fn get_clipboard(&self) -> Option<String> {
-        self.clipboard.get()
-    }
-
-    #[inline(always)]
-    pub fn set_clipboard(&mut self, text: &str) {
-        self.clipboard.set(text);
-    }
-
-    #[inline(always)]
-    pub fn delta_time(&self) -> time::Duration {
-        self.delta_time
-    }
-
-    #[inline(always)]
-    pub fn delta_time_secs_f32(&self) -> f32 {
-        self.delta_time.as_secs_f32()
     }
 
     #[inline(always)]
@@ -168,133 +110,25 @@ impl<'a, I: Interface> Nox<'a, I>
     }
 
     #[inline(always)]
-    pub fn cursor_position(&self) -> (f64, f64) {
-        self.cursor_pos
-    }
-
-    #[inline(always)]
-    pub fn normalized_cursor_position(&self) -> (f64, f64) {
-        (
-            self.cursor_pos.0 / self.window_size.0 as f64,
-            self.cursor_pos.1 / self.window_size.1 as f64,
-        )
-    }
-
-    #[inline(always)]
-    pub fn normalized_cursor_position_f32(&self) -> (f32, f32) {
-        (
-            self.cursor_pos.0 as f32 / self.window_size.0 as f32,
-            self.cursor_pos.1 as f32 / self.window_size.1 as f32,
-        )
-    }
-
-    #[inline(always)]
-    pub fn mouse_scroll_pixel_delta(&self) -> (f64, f64) {
-        self.mouse_scroll_pixel_delta
-    }
-
-    #[inline(always)]
-    pub fn mouse_scroll_delta_lines(&self) -> (f32, f32) {
-        self.mouse_scroll_line_delta
-    }
-
-    #[inline(always)]
-    pub fn was_key_pressed(&self, key: KeyCode) -> bool {
-        self.physical_keys
-            .get(&PhysicalKey::Code(key))
-            .map(|&v| v)
-            .unwrap_or_default()
-            .pressed
-    }
-
-    #[inline(always)]
-    pub fn was_key_released(&self, key: KeyCode) -> bool {
-        self.physical_keys
-            .get(&PhysicalKey::Code(key))
-            .copied()
-            .unwrap_or_default()
-            .released
-    }
-
-    #[inline(always)]
-    pub fn is_key_held(&self, key: KeyCode) -> bool {
-        self.physical_keys
-            .get(&PhysicalKey::Code(key))
-            .copied()
-            .unwrap_or_default()
-            .held
-    }
-
-    #[inline(always)]
-    pub fn key_value(&self, key: KeyCode) -> f32 {
-        self.physical_keys
-            .get(&PhysicalKey::Code(key))
-            .copied()
-            .unwrap_or_default()
-            .held as u32 as f32
-    }
-
-    #[inline(always)]
-    pub fn was_mouse_button_pressed(&self, button: MouseButton) -> bool {
-        self.mouse_buttons
-            .get(&button)
-            .copied()
-            .unwrap_or_default()
-            .pressed
-    }
-
-    #[inline(always)]
-    pub fn was_mouse_button_released(&self, button: MouseButton) -> bool {
-        self.mouse_buttons
-            .get(&button)
-            .copied()
-            .unwrap_or_default()
-            .released
-    }
-
-    #[inline(always)]
-    pub fn is_mouse_button_held(&self, button: MouseButton) -> bool {
-        self.mouse_buttons
-            .get(&button)
-            .copied()
-            .unwrap_or_default()
-            .held
-    }
-
-    #[inline(always)]
-    pub fn mouse_button_value(&self, button: MouseButton) -> f32 {
-        self.mouse_buttons
-            .get(&button)
-            .copied()
-            .unwrap_or_default()
-            .held as u32 as f32
-    }
-
-    #[inline(always)]
-    pub fn get_input_text(&self) -> &[(KeyCode, CompactString)] {
-        &self.input_text
-    }
-
-    #[inline(always)]
     pub fn monitors(&self) -> &[MonitorHandle] {
         &self.monitors
     }
 
     #[inline(always)]
-    fn reset_input(&mut self) {
-        self.mouse_scroll_pixel_delta = Default::default();
-        self.mouse_scroll_line_delta = Default::default();
-        self.physical_keys.retain(|_, v| {
+    fn reset_input(&self, ctx: &mut WindowCtx) {
+        ctx.mouse_scroll_pixel_delta = (0.0, 0.0); 
+        ctx.mouse_scroll_line_delta = (0.0, 0.0);
+        ctx.physical_keys.retain(|_, v| {
             v.pressed = false;
             v.released = false;
             v.held
         });
-        self.logical_keys.retain(|_, v| {
+        ctx.logical_keys.retain(|_, v| {
             v.pressed = false;
             v.released = false;
             v.held
         });
-        self.mouse_buttons.retain(|_, v| {
+        ctx.mouse_buttons.retain(|_, v| {
             v.pressed = false;
             v.released = false;
             v.held
@@ -322,35 +156,32 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
         if self.error_set() {
             return
         }
+        let mut window_ctx = self.window_ctx.take().unwrap();
         match event {
             WindowEvent::CursorMoved { device_id: _, position } => {
-                self.cursor_pos = (position.x, position.y);
+                window_ctx.cursor_position = (position.x, position.y);
+                window_ctx.flags |= WindowCtx::CURSOR_MOVED;
             },
             WindowEvent::MouseWheel { device_id: _, delta, phase: _ } => {
-               match delta {
+                match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
-                        self.mouse_scroll_line_delta = (x, y);
+                        window_ctx.mouse_scroll_line_delta = (x, y);
                     },
                     MouseScrollDelta::PixelDelta(d) => {
-                        self.mouse_scroll_pixel_delta = (d.x, d.y);
+                        window_ctx.mouse_scroll_pixel_delta = (d.x, d.y);
                     }
                 };
             },
             WindowEvent::KeyboardInput { device_id: _, event, is_synthetic: _ } => {
                 match event {
                     KeyEvent { physical_key, logical_key, text, location: _, state, repeat, .. } => {
-                        let phys = self.physical_keys.entry(physical_key).or_default();
+                        let phys = window_ctx.physical_keys.entry(physical_key).or_default();
                         phys.pressed = state == ElementState::Pressed;
                         phys.released = state == ElementState::Released;
                         phys.held = state != ElementState::Released;
                         phys.repeat = repeat;
-                        let logic = self.logical_keys.entry(logical_key).or_default();
-                        logic.pressed = state == ElementState::Pressed;
-                        logic.released = state == ElementState::Released;
-                        logic.held = state != ElementState::Released;
-                        logic.repeat = repeat;
                         if let Some(text) = text && (phys.pressed || repeat) {
-                            self.input_text.push((
+                            window_ctx.input_text.push((
                                 match physical_key {
                                     PhysicalKey::Code(c) => c,
                                     PhysicalKey::Unidentified(_) => KeyCode::Backspace,
@@ -358,11 +189,16 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                                 CompactString::new(&text))
                             );
                         }
+                        let logic = window_ctx.logical_keys.entry(logical_key).or_default();
+                        logic.pressed = state == ElementState::Pressed;
+                        logic.released = state == ElementState::Released;
+                        logic.held = state != ElementState::Released;
+                        logic.repeat = repeat;
                     },
                 };
             },
             WindowEvent::MouseInput { device_id: _, state, button } => {
-                let button = self.mouse_buttons.entry(button).or_default();
+                let button = window_ctx.mouse_buttons.entry(button).or_default();
                 button.pressed = state == ElementState::Pressed;
                 button.released = state == ElementState::Released;
                 button.held = state != ElementState::Released;
@@ -370,35 +206,34 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
             WindowEvent::CloseRequested => event_loop.exit(), // terminate app,
             WindowEvent::Resized(size) => {
                 self.window_size = (size.width, size.height);
+                window_ctx.window_size = (size.width, size.height);
                 if let Some(renderer) = &mut self.renderer {
                     renderer.request_resize(size);
                 }
             },
             WindowEvent::RedrawRequested => {
-                let interface = self.interface.clone();
                 let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
                 let renderer_allocators = self.memory.renderer_allocators();
                 if let Some(window) = self.window.clone() {
-                    self.delta_time = self.delta_counter.elapsed();
-                    self.delta_counter = time::Instant::now();
-                    if let Err(e) = interface
-                        .write()
-                        .unwrap()
-                        .update(self, &mut renderer_context)
+                    window_ctx.delta_time = window_ctx.delta_counter.elapsed();
+                    window_ctx.delta_counter = time::Instant::now();
+                    let mut write = self.interface.write().unwrap();
+                    if let Err(e) = write
+                        .update(self, &mut window_ctx, &mut renderer_context)
                     {
                         event_loop.exit();
                         self.flags |= Self::ERROR;
                         eprintln!("Failed to update: {:?}", e);
                         return
                     }
-                    if self.cursor_set() {
-                        window.set_cursor(self.current_cursor);
+                    if window_ctx.cursor_set() {
+                        window.set_cursor(window_ctx.current_cursor);
                     }
-                    self.flags &= !Self::CURSOR_SET;
-                    self.input_text.clear();
+                    window_ctx.flags &= !(WindowCtx::CURSOR_SET | WindowCtx::CURSOR_MOVED);
+                    window_ctx.input_text.clear();
                     window.request_redraw();
                     if let Some(renderer) = &mut self.renderer {
-                        if let Err(err) = renderer.render(&window, self.interface.clone(), renderer_allocators) {
+                        if let Err(err) = renderer.render(&window, &mut *write, renderer_allocators) {
                             event_loop.exit();
                             self.flags |= Self::ERROR;
                             eprintln!("Nox renderer error: {}", err);
@@ -406,14 +241,16 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         }
                     }
                 }
-                self.reset_input();
+                self.reset_input(&mut window_ctx);
             },
             _ => {},
         }
+        self.window_ctx = Some(window_ctx);
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let init_settings = self.interface.read().unwrap().init_settings();
+        let mut write = self.interface.write().unwrap();
+        let init_settings = write.init_settings();
         self.monitors.clear();
         for handle in event_loop.available_monitors() {
             self.monitors.push(handle);
@@ -460,7 +297,8 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     return
                 }
             };
-            self.clipboard = match Clipboard::new(&window) {
+            let mut window_ctx = self.window_ctx.take().unwrap();
+            window_ctx.clipboard = match Clipboard::new(&window) {
                 Ok(cb) => cb,
                 Err(e) => {
                     event_loop.exit();
@@ -470,11 +308,10 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 }
             };
             self.window = Some(Arc::new(window));
+            window_ctx.window = self.window.clone();
+            self.window_ctx = Some(window_ctx);
             let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
-            if let Err(e) = self.interface
-                .clone()
-                .write()
-                .unwrap()
+            if let Err(e) = write
                 .init_callback(self, &mut renderer_context) {
                 event_loop.exit();
                 self.flags |= Self::ERROR;

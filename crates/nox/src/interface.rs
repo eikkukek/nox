@@ -12,14 +12,15 @@ pub trait Interface
     /// Gets called once right after start up.
     fn init_callback(
         &mut self,
-        nox: &mut Nox<Self>,
+        nox: &Nox<Self>,
         renderer: &mut RendererContext,
     ) -> Result<(), Error> { Ok(()) }
 
     /// Gets called every frame before `compute`.
     fn update(
         &mut self,
-        nox: &mut Nox<Self>,
+        nox: &Nox<Self>,
+        ctx: &mut WindowCtx,
         renderer: &mut RendererContext,
     ) -> Result<(), Error> { Ok(()) }
 
