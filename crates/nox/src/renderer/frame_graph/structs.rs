@@ -25,6 +25,7 @@ pub struct PassInfo {
     pub max_color_writes: u32,
     pub msaa_samples: MSAA,
     pub signal_semaphores: u32,
+    pub wait_semaphores: u32,
 }
 
 #[derive(Clone, Copy)]

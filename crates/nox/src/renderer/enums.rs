@@ -41,3 +41,19 @@ impl From<CompareOp> for vk::CompareOp {
         Self::from_raw(value.as_raw())
     }
 }
+
+#[repr(u32)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
+pub enum PipelineStage {
+    ComputeShader = vk::PipelineStageFlags::COMPUTE_SHADER.as_raw(),
+    Transfer = vk::PipelineStageFlags::TRANSFER.as_raw(),
+    AllGraphics = vk::PipelineStageFlags::ALL_GRAPHICS.as_raw(),
+    AllCommands = vk::PipelineStageFlags::ALL_COMMANDS.as_raw(),
+}
+
+impl From<PipelineStage> for vk::PipelineStageFlags {
+
+    fn from(value: PipelineStage) -> Self {
+        Self::from_raw(value.as_raw())
+    }
+}

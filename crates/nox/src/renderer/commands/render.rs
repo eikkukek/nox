@@ -112,7 +112,7 @@ impl<'a> RenderCommands<'a> {
             self.global_resources
                 .write()
                 .unwrap()
-                .lock_linear_device_alloc(id)?
+                .lock_linear_device_alloc(id, &[])?
                 .reset();
         }
         Ok(())
@@ -128,7 +128,7 @@ impl<'a> RenderCommands<'a> {
         let alloc = self.global_resources
             .write()
             .unwrap()
-            .lock_linear_device_alloc(alloc)?;
+            .lock_linear_device_alloc(alloc, &[])?;
         let mut alloc_info = vk::CommandBufferAllocateInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
             command_pool: self.transfer_command_pool.handle(),
@@ -158,6 +158,7 @@ impl<'a> RenderCommands<'a> {
             graphics_command_buffer,
             self.global_resources.clone(),
             alloc,
+            &[],
             Default::default()
         )?);
         f(commands)

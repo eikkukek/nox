@@ -722,11 +722,12 @@ impl<'a, T> Iterator for Iter<'a, T> {
                     self.ptr = self.ptr.add(1);
                     index += 1;
                 }
+                let current = self.index;
                 self.index = index;
                 Some((
                     SlotIndex {
                         version: NonZeroU32::new_unchecked(item.version),
-                        index: self.index,
+                        index: current,
                         _marker: PhantomData,
                     },
                     item.value.assume_init_ref(),
@@ -757,11 +758,12 @@ impl<'a, T> Iterator for IterMut<'a, T> {
                     self.ptr = self.ptr.add(1);
                     index += 1;
                 }
+                let current = self.index;
                 self.index = index;
                 Some((
                     SlotIndex {
                         version: NonZeroU32::new_unchecked(item.version),
-                        index: self.index,
+                        index: current,
                         _marker: PhantomData,
                     },
                     item.value.assume_init_mut(),

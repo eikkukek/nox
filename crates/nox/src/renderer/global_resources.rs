@@ -50,7 +50,7 @@ pub struct GlobalResources {
     buffers: GlobalSlotMap<Buffer>,
     samplers: GlobalSlotMap<Sampler>,
     linear_device_allocs: GlobalSlotMap<Arc<RwLock<LinearDeviceAllocResource>>>,
-    timeline_semaphores: GlobalSlotMap<vk::Semaphore>,
+    timeline_semaphores: GlobalSlotMap<TimelineSemaphore>,
     default_binder: DefaultBinder,
     default_binder_mappable: DefaultBinder,
     descriptor_pool: DescriptorPool,
@@ -904,7 +904,7 @@ impl GlobalResources {
                     &self.physical_device_info,
                     false,
                 )?,
-            locked: false,
+            semaphore_count: 0,
         })))))
     }
 
@@ -920,7 +920,7 @@ impl GlobalResources {
                     &self.physical_device_info,
                     true,
                 )?,
-            locked: false,
+            semaphore_count: 0,
         })))))
     }
 
@@ -932,14 +932,21 @@ impl GlobalResources {
     #[inline(always)]
     pub fn lock_linear_device_alloc(
         &mut self,
-        id: LinearDeviceAllocId
+        id: LinearDeviceAllocId,
+        semaphores: &[(TimelineSemaphoreId, u64)],
     ) -> Result<LinearDeviceAllocLock, Error> {
         let alloc = self.linear_device_allocs.get_mut(id.0)?;
         let mut write = alloc.write().unwrap();
-        if write.locked {
+        if write.semaphore_count != 0 {
             return Err(Error::ResourceLocked)
         }
-        write.locked = true;
+        for &(semaphore, value) in semaphores {
+            self.timeline_semaphores
+                .get_mut(semaphore.0)?
+                .locked_resources
+                .push((value, id));
+        }
+        write.semaphore_count = semaphores.len() as u32;
         Ok(LinearDeviceAllocLock { alloc: alloc.clone() })
     }
 
@@ -958,45 +965,18 @@ impl GlobalResources {
         let handle = unsafe {
             self.device.create_semaphore(&semaphore_info, None)?
         };
-        Ok(TimelineSemaphoreId(self.timeline_semaphores.insert(handle)))
+        Ok(TimelineSemaphoreId( self.timeline_semaphores.insert(TimelineSemaphore {
+            handle,
+            locked_resources: Default::default(),
+        })))
     }
 
     #[inline(always)]
-    pub fn wait_for_semaphores_and_then(
-        &mut self,
-        semaphores: &[(TimelineSemaphoreId, u64)],
-        timeout: u64,
-        alloc: &impl Allocator,
-        mut f: impl FnMut(&mut Self) -> Result<(), Error>,
-    ) -> Result<bool, Error> {
-        let mut handles = FixedVec::with_capacity(semaphores.len(), alloc)?;
-        let mut values = FixedVec::with_capacity(semaphores.len(), alloc)?;
-        for &(id, value) in semaphores {
-            let &handle = self.timeline_semaphores.get(id.0)?;
-            handles.push(handle).ok();
-            values.push(value).ok();
+    pub fn get_semaphore_value(&mut self, id: TimelineSemaphoreId) -> Result<u64, Error> {
+        let handle = self.timeline_semaphores.get(id.0)?.handle;
+        unsafe {
+            Ok(self.device.get_semaphore_counter_value(handle)?)
         }
-        let wait_info = vk::SemaphoreWaitInfo {
-            s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
-            semaphore_count: semaphores.len() as u32,
-            p_semaphores: handles.as_ptr(),
-            p_values: values.as_ptr(),
-            ..Default::default()
-        };
-        let res = unsafe {
-            self.device.wait_semaphores(
-                &wait_info,
-                timeout,
-            )
-        };
-        if let Err(err) = res {
-            if err == vk::Result::TIMEOUT {
-                return Ok(false)
-            }
-            return Err(err.into())
-        }
-        f(self)?;
-        Ok(true)
     }
 
     #[inline(always)]
@@ -1008,10 +988,19 @@ impl GlobalResources {
     ) -> Result<bool, Error> {
         let mut handles = FixedVec::with_capacity(semaphores.len(), alloc)?;
         let mut values = FixedVec::with_capacity(semaphores.len(), alloc)?;
+        let mut unlock_resources = FixedVec::with_capacity(semaphores.len(), alloc)?;
         for &(id, value) in semaphores {
-            let &handle = self.timeline_semaphores.get(id.0)?;
-            handles.push(handle).ok();
+            let semaphore = self.timeline_semaphores.get_mut(id.0)?;
+            handles.push(semaphore.handle).ok();
             values.push(value).ok();
+            let unlock_resources = unlock_resources.push(FixedVec::with_capacity(semaphore.locked_resources.len(), alloc)?)?;
+            semaphore.locked_resources.retain(|&(wait_for, resource)| {
+                if wait_for <= value {
+                    unlock_resources.push(resource).ok();
+                    return false
+                }
+                true
+            });
         }
         let wait_info = vk::SemaphoreWaitInfo {
             s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
@@ -1032,21 +1021,56 @@ impl GlobalResources {
             }
             return Err(err.into())
         }
+        for resources in &unlock_resources {
+            for resource in resources {
+                let alloc = self.linear_device_allocs.get_mut(resource.0)?;
+                alloc
+                    .write()
+                    .unwrap()
+                    .semaphore_count -= 1;
+            }
+        }
         Ok(true)
     }
 
     #[inline(always)]
     pub fn destroy_timeline_semaphore(&mut self, id: TimelineSemaphoreId) {
-        if let Ok(handle) = self.timeline_semaphores.remove(id.0) {
+        if let Ok(semaphore) = self.timeline_semaphores.remove(id.0) {
             unsafe {
-                self.device.destroy_semaphore(handle, None);
+                self.device.destroy_semaphore(semaphore.handle, None);
             }
         }
     }
 
     #[inline(always)]
     pub(crate) fn get_timeline_semaphore(&self, id: TimelineSemaphoreId) -> Result<vk::Semaphore, Error> {
-        self.timeline_semaphores.get(id.0).cloned().map_err(|e| e.into())
+        self.timeline_semaphores.get(id.0).map(|v| v.handle).map_err(|e| e.into())
+    }
+
+    #[inline(always)]
+    pub(crate) fn update_semaphores(&mut self) -> Result<(), Error> {
+        for (_, semaphore) in &mut self.timeline_semaphores {
+            let handle = semaphore.handle;
+            let value = unsafe {
+                self.device.get_semaphore_counter_value(handle)?
+            };
+            semaphore.locked_resources.retain(
+                |&(wait_for, resource)| {
+                    if wait_for < value {
+                        let resource = self.linear_device_allocs
+                            .get_mut(resource.0)
+                            .unwrap();
+                        resource
+                            .write()
+                            .unwrap()
+                            .semaphore_count -= 1;
+                        return false;
+                    }
+                    true
+                }
+            );
+        }
+        Ok(())
     }
 
     pub(crate) fn clean_up(&mut self) {
@@ -1061,10 +1085,11 @@ impl GlobalResources {
             self.shaders.clear();
             self.linear_device_allocs.clear();
             self.descriptor_pool.clean_up();
-            for (_, &handle) in &self.timeline_semaphores {
-                self.device.destroy_semaphore(handle, None);
+            for (_, semaphore) in &self.timeline_semaphores {
+                self.device.destroy_semaphore(semaphore.handle, None);
             }
             self.timeline_semaphores.clear();
         }
     }
+
 }

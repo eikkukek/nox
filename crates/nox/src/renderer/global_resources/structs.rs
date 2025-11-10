@@ -171,7 +171,7 @@ pub struct SamplerId(pub(super) SlotIndex<Sampler>);
 
 pub(super) struct LinearDeviceAllocResource {
     pub alloc: LinearDeviceAlloc,
-    pub locked: bool,
+    pub semaphore_count: u32,
 }
 
 #[must_use]
@@ -220,18 +220,14 @@ impl MemoryBinder for LinearDeviceAllocLock {
     }
 }
 
-impl Drop for LinearDeviceAllocLock {
-
-    fn drop(&mut self) {
-        self.alloc
-            .write()
-            .unwrap().locked = false;
-    }
+pub(super) struct TimelineSemaphore {
+    pub handle: vk::Semaphore,
+    pub locked_resources: GlobalVec<(u64, LinearDeviceAllocId)>,
 }
 
 #[must_use]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct TimelineSemaphoreId(pub(super) SlotIndex<vk::Semaphore>);
+pub struct TimelineSemaphoreId(pub(super) SlotIndex<TimelineSemaphore>);
 
 pub enum ResourceBinderImage<'a> {
     DefaultBinder,

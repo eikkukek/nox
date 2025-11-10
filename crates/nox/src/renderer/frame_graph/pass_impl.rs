@@ -17,6 +17,7 @@ pub(crate) struct Pass<'alloc, Alloc: Allocator> {
     pub id: PassId,
     pub reads: FixedVec<'alloc, ReadInfo, Alloc>,
     pub writes: FixedVec<'alloc, WriteInfo, Alloc>,
+    pub wait_semaphores: FixedVec<'alloc, (TimelineSemaphoreId, u64, PipelineStage), Alloc>,
     pub signal_semaphores: FixedVec<'alloc, (TimelineSemaphoreId, u64), Alloc>,
     pub depth_write: Option<(bool, WriteInfo)>,
     pub render_area: Option<vk::Rect2D>,
@@ -33,11 +34,13 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
         let reads = FixedVec::with_capacity(info.max_reads as usize, alloc)?;
         let writes = FixedVec::with_capacity(info.max_color_writes as usize, alloc)?;
         let signal_semaphores = FixedVec::with_capacity(info.signal_semaphores as usize, alloc)?;
+        let wait_semaphores = FixedVec::with_capacity(info.wait_semaphores as usize, alloc)?;
         Ok(Self {
             id,
             reads,
             writes,
             signal_semaphores,
+            wait_semaphores,
             depth_write: None,
             render_area: None,
             msaa_samples: info.msaa_samples,
@@ -192,9 +195,27 @@ impl<'a, Alloc: Allocator> PassAttachmentBuilder<'a> for Pass<'a, Alloc> {
         self
     }
 
-    fn with_signal_semaphore(&mut self, id: TimelineSemaphoreId, value: u64) {
+    fn with_wait_semaphore(
+        &mut self,
+        id: TimelineSemaphoreId,
+        value: u64,
+        stage: PipelineStage
+    ) -> &mut dyn PassAttachmentBuilder<'a>
+    {
+        self.wait_semaphores
+            .push((id, value, stage))
+            .expect("wait semaphore capacity exceeded");
+        self
+    }
+
+    fn with_signal_semaphore(
+        &mut self,
+        id: TimelineSemaphoreId,
+        value: u64
+    ) -> &mut dyn PassAttachmentBuilder<'a> {
         self.signal_semaphores
             .push((id, value))
             .expect("signal semaphore capacity exceeded");
+        self
     }
 }

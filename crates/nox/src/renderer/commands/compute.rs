@@ -14,6 +14,8 @@ pub struct ComputeCommands<'a> {
     command_buffer: vk::CommandBuffer,
     global_resources: Arc<RwLock<GlobalResources>>,
     current_pipeline: Option<ComputePipelineId>,
+    pub(crate) wait_semaphores: GlobalVec<(TimelineSemaphoreId, u64, PipelineStage)>,
+    pub(crate) signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
     tmp_alloc: &'a ArenaAlloc,
     queue_index: u32,
 }
@@ -34,6 +36,8 @@ impl<'a> ComputeCommands<'a> {
             command_buffer,
             global_resources,
             current_pipeline: None,
+            wait_semaphores: Default::default(),
+            signal_semaphores: Default::default(),
             tmp_alloc,
             queue_index,
         }
@@ -161,5 +165,15 @@ impl<'a> ComputeCommands<'a> {
                 group_count_z
             );
         }
+    }
+
+    #[inline(always)]
+    pub fn wait_semaphore(&mut self, id: TimelineSemaphoreId, value: u64, stage: PipelineStage) {
+        self.wait_semaphores.push((id, value, stage));
+    }
+
+    #[inline(always)]
+    pub fn signal_semaphore(&mut self, id: TimelineSemaphoreId, value: u64) {
+        self.signal_semaphores.push((id, value));
     }
 }

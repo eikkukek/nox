@@ -69,6 +69,13 @@ impl Drop for TransientCommandPool {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct SyncObjects {
+    pub transfer_fence: vk::Fence,
+    pub graphics_fence: vk::Fence,
+    pub binary_semaphore: vk::Semaphore,
+}
+
 pub struct TransferCommands {
     transfer_command_pool: Arc<TransientCommandPool>,
     transfer_command_buffer: vk::CommandBuffer,
@@ -77,8 +84,8 @@ pub struct TransferCommands {
     global_resources: Arc<RwLock<GlobalResources>>,
     staging_buffers: GlobalVec<vk::Buffer>,
     linear_device_alloc: LinearDeviceAllocLock,
-    transfer_fence: Option<vk::Fence>,
-    graphics_fence: Option<vk::Fence>,
+    sync_objects: Option<SyncObjects>,
+    signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
     id: CommandRequestId,
 }
 
@@ -96,6 +103,7 @@ impl TransferCommands {
         graphics_command_buffer: vk::CommandBuffer,
         global_resources: Arc<RwLock<GlobalResources>>,
         linear_device_alloc: LinearDeviceAllocLock,
+        signal_semaphores: &[(TimelineSemaphoreId, u64)],
         id: CommandRequestId,
     ) -> Result<Self, Error>
     {
@@ -107,8 +115,8 @@ impl TransferCommands {
             global_resources,
             staging_buffers: GlobalVec::new(),
             linear_device_alloc,
-            transfer_fence: None,
-            graphics_fence: None,
+            sync_objects: None,
+            signal_semaphores: signal_semaphores.into(),
             id,
         })
     }
@@ -129,35 +137,37 @@ impl TransferCommands {
     }
 
     #[inline(always)]
-    pub(crate) fn get_transfer_fence(&mut self) -> Result<(bool, vk::Fence), vk::Result> {
+    pub(crate) fn get_sync_objects(
+        &mut self
+    ) -> Result<(bool, SyncObjects, &[(TimelineSemaphoreId, u64)]), vk::Result>
+    {
         let mut new = false;
-        if self.transfer_fence.is_none() {
-            let info = vk::FenceCreateInfo {
+        if self.sync_objects.is_none() {
+            let fence_info = vk::FenceCreateInfo {
                 s_type: vk::StructureType::FENCE_CREATE_INFO,
                 ..Default::default()
             };
-            self.transfer_fence = Some(unsafe {
-                self.transfer_command_pool.device().create_fence(&info, None)?
-            });
-            new = true;
-        }
-        Ok((new, self.transfer_fence.unwrap()))
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_graphics_fence(&mut self) -> Result<(bool, vk::Fence), vk::Result> {
-        let mut new = false;
-        if self.graphics_fence.is_none() {
-            let info = vk::FenceCreateInfo {
-                s_type: vk::StructureType::FENCE_CREATE_INFO,
+            let semaphore_info = vk::SemaphoreCreateInfo {
+                s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
                 ..Default::default()
             };
-            self.graphics_fence = Some(unsafe {
-                self.graphics_command_pool.device().create_fence(&info, None)?
+            let transfer_fence = unsafe {
+                self.transfer_command_pool.device().create_fence(&fence_info, None)?
+            };
+            let graphics_fence = unsafe {
+                self.graphics_command_pool.device().create_fence(&fence_info, None)?
+            };
+            let binary_semaphore = unsafe {
+                self.transfer_command_pool.device().create_semaphore(&semaphore_info, None)?
+            };
+            self.sync_objects = Some(SyncObjects {
+                transfer_fence,
+                graphics_fence,
+                binary_semaphore,
             });
             new = true;
         }
-        Ok((new, self.graphics_fence.unwrap()))
+        Ok((new, self.sync_objects.unwrap(), &self.signal_semaphores))
     }
 
     #[inline(always)]
@@ -261,12 +271,7 @@ impl TransferCommands {
         );
         let command_buffer = self.transfer_command_buffer;
         image.cmd_memory_barrier(
-            ImageState::new(
-                vk::AccessFlags::TRANSFER_WRITE,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                transfer_queue_index,
-                vk::PipelineStageFlags::TRANSFER
-            ),
+            dst_state,
             command_buffer,
             None,
             false,
@@ -772,11 +777,10 @@ impl Drop for TransferCommands {
                 device.destroy_buffer(*buffer, None);
             }
             self.staging_buffers.clear();
-            if let Some(fence) = self.transfer_fence.take() {
-                device.destroy_fence(fence, None);
-            }
-            if let Some(fence) = self.graphics_fence.take() {
-                device.destroy_fence(fence, None);
+            if let Some(objects) = self.sync_objects.take() {
+                device.destroy_fence(objects.transfer_fence, None);
+                device.destroy_fence(objects.graphics_fence, None);
+                device.destroy_semaphore(objects.binary_semaphore, None);
             }
         }
     }

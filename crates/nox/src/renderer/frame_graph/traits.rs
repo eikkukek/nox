@@ -19,7 +19,18 @@ pub trait PassAttachmentBuilder<'a> {
 
     fn with_render_area(&mut self, render_area: RenderArea) -> &mut dyn PassAttachmentBuilder<'a>;
 
-    fn with_signal_semaphore(&mut self, id: TimelineSemaphoreId, value: u64);
+    fn with_wait_semaphore(
+        &mut self,
+        id: TimelineSemaphoreId,
+        value: u64,
+        stage: PipelineStage
+    ) -> &mut dyn PassAttachmentBuilder<'a>;
+
+    fn with_signal_semaphore(
+        &mut self,
+        id: TimelineSemaphoreId,
+        value: u64
+    ) -> &mut dyn PassAttachmentBuilder<'a>;
 }
 
 pub trait FrameGraph<'a> {

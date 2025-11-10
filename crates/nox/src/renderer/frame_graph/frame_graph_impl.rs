@@ -25,6 +25,7 @@ pub(crate) struct FrameGraphImpl<'a, Alloc: Allocator> {
     command_buffer: vk::CommandBuffer,
     passes: GlobalVec<Pass<'a, Alloc>>,
     signal_semaphore_count: u32,
+    wait_semaphore_count: u32,
     queue_family_indices: QueueFamilyIndices,
     next_pass_id: u32,
     alloc: &'a Alloc,
@@ -51,6 +52,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             command_buffer,
             passes: GlobalVec::with_capacity(4),
             signal_semaphore_count: 0,
+            wait_semaphore_count: 0,
             queue_family_indices,
             next_pass_id: 0,
             alloc,
@@ -112,6 +114,7 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         self.next_pass_id += 1;
         f(pass);
         self.signal_semaphore_count += pass.signal_semaphores.len() as u32;
+        self.wait_semaphore_count += pass.wait_semaphores.len() as u32;
         assert!(pass.validate(alloc)?, "pass valiation error (Image subresource write overlaps)");
         Ok(pass.id)
     }
@@ -406,14 +409,22 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
         self.signal_semaphore_count
     }
 
-    pub fn collect_signal_semaphores(
+    pub fn wait_semaphore_count(&self) -> u32 {
+        self.signal_semaphore_count
+    }
+
+    pub fn collect_semaphores(
         &self,
-        mut collect: impl FnMut(TimelineSemaphoreId, u64) -> Result<(), Error>
+        mut collect_signal: impl FnMut(TimelineSemaphoreId, u64) -> Result<(), Error>,
+        mut collect_wait: impl FnMut(TimelineSemaphoreId, u64, PipelineStage) -> Result<(), Error>,
     ) -> Result<(), Error>
     {
         for pass in &self.passes {
             for &(id, value) in &pass.signal_semaphores {
-                collect(id, value)?;
+                collect_signal(id, value)?;
+            }
+            for &(id, value, stage) in &pass.wait_semaphores {
+                collect_wait(id, value, stage)?;
             }
         }
         Ok(())

@@ -1,4 +1,8 @@
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    rc::Rc,
+    cell::RefCell,
+};
 use winit::{dpi::PhysicalSize, window::Window};
 use ash::{
     khr::{surface, swapchain, wayland_surface, win32_surface, xcb_surface, xlib_surface},
@@ -47,7 +51,7 @@ pub(crate) struct VulkanContext<'mem> {
     graphics_queue: vk::Queue,
     transfer_queue: vk::Queue,
     compute_queue: vk::Queue,
-    swapchain_context: Option<SwapchainContext<'mem>>,
+    swapchain_context: Option<Rc<RefCell<SwapchainContext<'mem>>>>,
     swapchain_state: SwapchainState,
 }
 
@@ -303,8 +307,8 @@ impl<'mem> VulkanContext<'mem> {
         tmp_alloc: &ArenaAlloc,
         allocators: &'mem Allocators,
     ) -> Result<(), String> {
-        if let Some(mut context) = self.swapchain_context.take() {
-            context.destroy(
+        if let Some(context) = self.swapchain_context.take() {
+            context.borrow_mut().destroy(
                 &self.device,
                 &self.swapchain_loader,
                 self.graphics_queue,
@@ -327,7 +331,7 @@ impl<'mem> VulkanContext<'mem> {
             &allocators.swapchain,
             tmp_alloc,
         ) {
-            Ok(context) => context,
+            Ok(context) => context.map(|v| Rc::new(RefCell::new(v))),
             Err(err) => return Err(err),
         };
         self.swapchain_state = SwapchainState::Valid;
@@ -339,7 +343,7 @@ impl<'mem> VulkanContext<'mem> {
         graphics_command_pool: vk::CommandPool,
         tmp_alloc: &ArenaAlloc,
         allocators: &'mem Allocators,
-    ) -> Result<(&mut SwapchainContext<'mem>, bool), String> {
+    ) -> Result<(Rc<RefCell<SwapchainContext<'mem>>>, bool), String> {
         let mut recreated = false;
         match self.swapchain_state {
             SwapchainState::Valid => {},
@@ -352,7 +356,7 @@ impl<'mem> VulkanContext<'mem> {
                     })?;
             },
         }
-        Ok((self.swapchain_context.as_mut().unwrap(), recreated))
+        Ok((self.swapchain_context.clone().unwrap(), recreated))
     }
 
     pub fn destroy_swapchain(
@@ -360,8 +364,8 @@ impl<'mem> VulkanContext<'mem> {
         graphics_command_pool: vk::CommandPool,
         allocators: &'mem Allocators,
     ) {
-        if let Some(mut context) = self.swapchain_context.take() {
-            context.destroy(
+        if let Some(context) = self.swapchain_context.take() {
+            context.borrow_mut().destroy(
                 &self.device,
                 &self.swapchain_loader,
                 self.graphics_queue,
