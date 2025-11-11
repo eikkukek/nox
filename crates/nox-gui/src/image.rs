@@ -384,15 +384,13 @@ impl<Style> Widget<Style> for Image<Style>
         tmp_alloc: &ArenaGuard,
     ) -> Result<(), Error> {
         if let Some(resource) = self.shader_resource.take() {
-            global_resources.wait_for_semaphores_and_then(
+            if global_resources.wait_for_semaphores(
                 &[(window_semaphore.0, window_semaphore.1)],
                 u64::MAX,
                 tmp_alloc,
-                |r| {
-                    r.free_shader_resources(&[resource], &GlobalAlloc)?;
-                    Ok(())
-                }
-            )?;
+            )? {
+                global_resources.free_shader_resources(&[resource], &GlobalAlloc)?;
+            }
         }
         Ok(())
     }

@@ -655,6 +655,7 @@ impl<'a, Style> Workspace<'a, Style>
                 max_color_writes: 1,
                 msaa_samples: output_samples,
                 signal_semaphores: signal_semaphores.len() as u32,
+                ..Default::default()
             },
             &mut |pass| {
                 for &read in &reads {

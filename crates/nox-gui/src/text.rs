@@ -200,10 +200,13 @@ impl<Style> SelectableText<Style>
         let mut result = CompactString::default();
         let mut i_off = 0;
         let selection = self.selection.unwrap_or_default();
+        if selection.0 == selection.1 {
+            return Default::default()
+        }
         for text in &self.text {
             for row in &text.rows {
                 for offset in &row.offsets {
-                    if i_off >= selection.0 && i_off <= selection.1 {
+                    if i_off >= selection.0 && i_off < selection.1 {
                         result.push(offset.char);
                     }
                     if i_off == selection.1 {
@@ -267,10 +270,14 @@ impl<Style> SelectableText<Style>
                 let n = offsets.len();
                 for k in 0..n {
                     let text_offset = offsets[k];
-                    let offset = vec2(text_offset.offset[0] * font_scale, text_offset.offset[1] * font_scale);
+                    let offset = vec2(
+                        text_offset.offset[0] * font_scale,
+                        text_offset.offset[1] * font_scale
+                    );
                     let min_y = text_min.y + offset.y;
                     let max_y = min_y + row_height;
-                    if (rel_cursor_pos.y >= min_y || first_row) && (rel_cursor_pos.y <= max_y || last_row)
+                    if (rel_cursor_pos.y >= min_y || first_row) &&
+                        (rel_cursor_pos.y <= max_y || last_row)
                     {
                         cursor_in_row = Some(text.row_offset + j as u32);
                         if last_row && last_segment && rel_cursor_pos.x >= max_x {
@@ -322,17 +329,19 @@ impl<Style> SelectableText<Style>
         if let Some(mut selection) = self.selection {
             let mut j_off = 0;
             let mut cur_row: Option<usize> = None;
-            let mut cur_max_x = 0.0;
             let mut cur_rect = Default::default();
             for text in &self.text {
                 let rows = &text.rows;
-                if j_off > selection.1 {
+                if j_off >= selection.1 {
                     break
                 }
-                for (i, RowOffsets { offsets, row_height: _, max_x, min_x: _ }) in rows.iter().enumerate() {
-                    cur_max_x = max_x * font_scale;
+                for (i, RowOffsets { offsets, row_height: _, max_x: _, min_x: _ })
+                    in rows
+                        .iter()
+                        .enumerate()
+                {
                     let row = i + text.row_offset as usize;
-                    if j_off > selection.1 {
+                    if j_off >= selection.1 {
                         break
                     }
                     if let Some(r) = cur_row && r != row {
@@ -342,7 +351,7 @@ impl<Style> SelectableText<Style>
                         selection.0 = j_off;
                     }
                     for offset in offsets.iter() {
-                        if j_off > selection.1 {
+                        if j_off >= selection.1 {
                             break
                         }
                         if j_off == selection.0 {
@@ -350,7 +359,7 @@ impl<Style> SelectableText<Style>
                             let mut off: Vec2 = offset.offset.into();
                             off *= font_scale;
                             let row_height = offset.row_height * font_scale;
-                            cur_rect = rect(off, off + vec2(0.0, row_height), 0.0);
+                            cur_rect = rect(off, off + vec2(offset.x_advance * font_scale, row_height), 0.0);
                         } else {
                             cur_rect.max.x = (offset.offset[0] + offset.x_advance) * font_scale;
                         }
@@ -359,9 +368,6 @@ impl<Style> SelectableText<Style>
                 }
             }
             if cur_rect != Default::default() {
-                if cur_row.is_some() && j_off == selection.1 {
-                    cur_rect.max.x = cur_max_x;
-                }
                 self.selection_rects.push(cur_rect);
             }
         }
@@ -369,7 +375,9 @@ impl<Style> SelectableText<Style>
         let mut indices_usize = GlobalVec::new();
         for rect in &mut self.selection_rects {
             rect.to_points(&mut |p| { points.push(p.into()); });
-            earcut::earcut(&points, &[], false, &mut self.selection_vertices, &mut indices_usize).unwrap();
+            earcut
+                ::earcut(&points, &[], false, &mut self.selection_vertices, &mut indices_usize)
+                .unwrap();
             points.clear();
         }
         self.selection_indices.append_map(&indices_usize, |&i| i as u32);
@@ -508,11 +516,16 @@ impl<'a, 'b, Style> SelectableTextBuilder<'a, 'b, Style>
             let font_height = text.row_height * font_scale;
             self.text.current_height = self.text.current_height.max(font_height);
             if text.text_rows > 1 {
-                self.text.offset.y += self.text.current_height + (text.text_rows - 2) as f32 * font_height;
-                self.text.current_height = self.text.current_height.max(font_height);
+                self.text.offset.y +=
+                    self.text.current_height + (text.text_rows - 2) as f32 * font_height;
+                self.text.current_height =
+                    self.text.current_height.max(font_height);
             }
             for row in &mut rows {
-                let (offset, x_advance) = row.offsets.last().map(|v| (v.offset, v.x_advance)).unwrap_or_default();
+                let (offset, x_advance) = row.offsets
+                    .last()
+                    .map(|v| (v.offset, v.x_advance))
+                    .unwrap_or_default();
                 row.max_x = offset[0] + x_advance;
                 self.text.max_width = self.text.max_width.max(row.max_x * font_scale);
                 row.min_x = row.offsets.first().map(|v| v.offset).unwrap_or_default()[0];
@@ -651,7 +664,11 @@ impl<Style> Widget<Style> for SelectableText<Style>
             };
         self.flags &= !Self::HOVERED;
         let mut cursor_in_widget = false;
-        if cursor_in_this_window && !other_widget_active && !cursor_in_other_widget && !hover_blocked {
+        if cursor_in_this_window &&
+            !other_widget_active &&
+            !cursor_in_other_widget &&
+            !hover_blocked
+        {
             if cursor_in_text {
                 if style.override_cursor() {
                     ctx.set_cursor(CursorIcon::Text);
@@ -683,7 +700,7 @@ impl<Style> Widget<Style> for SelectableText<Style>
                     } else {
                         if selection.0 != selection.1 {
                             selection.1 -= 1;
-                        } else {
+                        } else if selection.0 != 0 {
                             self.flags |= Self::SELECTION_LEFT;
                             selection.0 -= 1;
                         }
@@ -700,6 +717,12 @@ impl<Style> Widget<Style> for SelectableText<Style>
                         cursor_index = Some(selection.1);
                     }
                 }
+            }
+            if selection.0 > selection.1 {
+                self.flags ^= Self::SELECTION_LEFT;
+                let tmp = selection.0;
+                selection.0 = selection.1;
+                selection.1 = tmp;
             }
             if let Some(index) = cursor_index {
                 if self.selection_left() || index < selection.0 {

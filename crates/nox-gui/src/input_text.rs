@@ -246,7 +246,9 @@ impl InputTextData {
                 }
                 let input_empty = win.ctx.get_input_text().0 == 0;
                 if win.ctx.key_state(KeyCode::ControlLeft).held() {
-                    if win.ctx.key_state(KeyCode::KeyV).pressed() && let Some(text) = win.ctx.get_clipboard() {
+                    if win.ctx.key_state(KeyCode::KeyV).pressed() &&
+                        let Some(text) = win.ctx.get_clipboard()
+                    {
                         let start_count = self.input.char_indices().count();
                         for i in (selection.0..selection.1).rev() {
                             let (index, _) = self.input.char_indices().skip(i).next().unwrap();
@@ -602,7 +604,10 @@ impl InputTextData {
                     self.flags |= Self::MOUSE_VISIBLE;
                 }
                 if !select_all && !window_moving {
-                    if self.clicked_last_frame() && !self.select_all_last_frame() && !self.activated_last_frame() {
+                    if self.clicked_last_frame() &&
+                        !self.select_all_last_frame() &&
+                        !self.activated_last_frame()
+                    {
                         self.selection = None;
                     }
                     if reaction.held() {
@@ -1653,7 +1658,10 @@ impl<Style> Widget<Style> for InputText<Style>
                     self.flags |= Self::MOUSE_VISIBLE;
                 }
                 if !select_all && !window_moving {
-                    if self.clicked_last_frame() && !self.select_all_last_frame() && !self.activated_last_frame() {
+                    if self.clicked_last_frame() &&
+                        !self.select_all_last_frame() &&
+                        !self.activated_last_frame()
+                    {
                         self.selection = None;
                     }
                     if self.held() {
