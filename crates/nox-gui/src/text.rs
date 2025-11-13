@@ -725,7 +725,9 @@ impl<Style> Widget<Style> for SelectableText<Style>
                 selection.1 = tmp;
             }
             if let Some(index) = cursor_index {
-                if self.selection_left() || index < selection.0 {
+                let selection_left = self.selection_left();
+                let prev_selection = selection;
+                if selection_left || index < selection.0 {
                     selection.0 = index;
                     self.flags |= Self::SELECTION_LEFT;
                     if selection.1 < selection.0 {
@@ -742,6 +744,9 @@ impl<Style> Widget<Style> for SelectableText<Style>
                         selection.1 = tmp;
                         self.flags |= Self::SELECTION_LEFT;
                     }
+                }
+                if !selection_left && self.selection_left() {
+                    selection.1 = prev_selection.0;
                 }
             }
             self.selection = Some(selection);
