@@ -1,3 +1,5 @@
+use std::panic;
+
 use nox_mem::{
     vec_types::{Vector, GlobalVec},
     CapacityError,
@@ -139,16 +141,27 @@ pub fn earcut<P>(
                 points.get_unchecked(*idx.get_unchecked(i)).0,
                 points.get_unchecked(*idx.get_unchecked(next)).0
             )};
-            if orient(a, b, c) * winding < -1e-6  { continue }
+            if orient(a, b, c) * winding < 0.0  { continue }
             ok = true;
+            let bb0 =  vec2(a.x.min(b.x.min(c.x)), a.y.min(b.y.min(c.y)));
+            let bb1 =  vec2(a.x.max(b.x.max(c.x)), a.y.max(b.y.max(c.y)));
             for j in 0..n {
-                let kp = unsafe { points.get_unchecked(*idx.get_unchecked(j)).0 };
-                if kp == a || kp == b || kp == c { continue }
-                if point_in_triangle(a, b, c, kp) { ok = false; break }
+                let j = (j + next + 1) % n;
+                if j == prev { break }
+                let p = unsafe { points.get_unchecked(*idx.get_unchecked(j)).0 };
+                if p == a || p == b || p == c { continue }
+                if  p.x >= bb0.x &&
+                    p.y >= bb0.y &&
+                    p.x <= bb1.x &&
+                    p.y <= bb1.y &&
+                    !(a.x == p.x && a.y == p.y) &&
+                    point_in_triangle(a, b, c, p)
+                {
+                    ok = false;
+                    break
+                }
             }
             if ok {
-                let prev = (i + n - 1) % n;
-                let next = (i + 1) % n;
                 let (a, b, c) = unsafe {(
                     *idx.get_unchecked(prev),
                     *idx.get_unchecked(i),

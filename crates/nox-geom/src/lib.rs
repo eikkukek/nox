@@ -9,6 +9,8 @@ pub mod shapes;
 pub use vec2::*;
 pub use bounding_box::*;
 
+pub use nox_mem as mem;
+
 pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
     (1.0 - t) * a + t * b
 }
