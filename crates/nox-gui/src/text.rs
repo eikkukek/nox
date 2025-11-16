@@ -49,6 +49,7 @@ pub struct Text {
     pub selectable_index: Option<usize>,
     pub row_offset: u32,
     pub row_count: u32,
+    pub bounds: BoundingRect,
     pub tool_tip: Option<Rc<CompactString>>,
 }
 
@@ -64,6 +65,7 @@ impl Text {
         selectable_index: Option<usize>,
         row_offset: u32,
         row_count: u32,
+        bounds: Option<BoundingRect>,
         tool_tip: Option<Rc<CompactString>>,
     ) -> Self
     {
@@ -76,6 +78,7 @@ impl Text {
             selectable_index,
             row_offset,
             row_count,
+            bounds: bounds.unwrap_or(BoundingRect::from_min_max(Vec2::MIN, Vec2::MAX)),
             tool_tip
         }
     }
@@ -539,7 +542,8 @@ impl<'a, 'b, Style> SelectableTextBuilder<'a, 'b, Style>
                 Some(self.text.text.len()),
                 self.text.current_row,
                 row_count,
-                tool_tip.map(|v| Rc::new(CompactString::new(v)))
+                None,
+                tool_tip.map(|v| Rc::new(CompactString::new(v))),
             ));
         }
         self.text.current_row = current_row;

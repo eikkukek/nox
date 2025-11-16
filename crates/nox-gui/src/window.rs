@@ -914,9 +914,6 @@ impl<Style> Window<Style>
         let mut cursor_in_this_window =
             !cursor_in_other_window &&
             self.bounding_rect(style.cursor_error_margin()).is_point_inside(cursor_pos);
-        if cursor_in_this_window && override_cursor && !self.any_resize() {
-            ctx.set_cursor(CursorIcon::Default);
-        }
         let mut title_bar_rect = self.title_bar_rect;
 
         let title_text = self.title_text.as_ref().unwrap();
@@ -1189,6 +1186,11 @@ impl<Style> Window<Style>
             {
                 self.hover_window.update(style, text_renderer, cursor_pos, &text);
                 self.flags |= Self::HOVER_WINDOW_ACTIVE;
+            }
+            if let Some(cursor_override) = reaction.take_cursor() {
+                if override_cursor {
+                    ctx.set_cursor(cursor_override);
+                }
             }
             if reaction.held() {
                 active_widget = Some(self.active_widgets.len());
@@ -1508,8 +1510,8 @@ impl<Style> Window<Style>
                 offset / font_scale,
                 BoundedTextInstance {
                     add_scale: text.scale,
-                    min_bounds: pos + vec2(0.0, title_bar_rect.max.y + item_pad_inner.y),
-                    max_bounds: pos + main_rect_max - vec2(0.0, item_pad_inner.y),
+                    min_bounds: pos + (vec2(0.0, title_bar_rect.max.y + item_pad_inner.y).max(text.bounds.min)),
+                    max_bounds: pos + (main_rect_max - vec2(0.0, item_pad_inner.y)).min(text.bounds.max),
                     color: text.color, 
                 }
             ).unwrap();
@@ -2189,7 +2191,8 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
 
     #[inline(always)]
     pub fn add_text(&mut self, text: Text) {
-        self.window.add_text(text);
+        let index = self.window.add_text(text);
+        self.current_row_text.push(RowText::new(index, 0, 0, None));
     }
 
     #[inline(always)]
@@ -2272,6 +2275,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                 None,
                 0,
                 1, 
+                None,
                 None
             );
         }
@@ -2698,8 +2702,10 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         empty_input_prompt: &str,
         width: f32,
         format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
-    )  {
+    ) -> &mut Reaction {
+        let offset = self.widget_off;
         let mut reaction = self.window.activate_reaction(value).clone();
+        reaction.offset = offset;
         let id = reaction.id();
         let window_moving = self.window.held() || self.window.any_resize();
         let data = self.window.reaction_data_or_insert_with(id, || {
@@ -2727,8 +2733,12 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                 window_moving,
             )
         }
-        let offset = self.widget_off;
-        reaction.offset = offset;
+        self.current_row_reactions.push((id, reaction.size));
+        self.current_height = self.current_height.max(reaction.size.y);
+        self.widget_off.x += reaction.offset.x + self.style.item_pad_outer().x;
+        let res = self.window.reactions.get_mut(&id).unwrap();
+        *res = reaction;
+        res
     }
 
     #[inline(always)]

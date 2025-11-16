@@ -328,9 +328,9 @@ impl PainterStorage {
                                 vec2(max.x, min.y).into(),
                             ]);
                             shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
-                            indices.append(&[
-                                0, 1, 2,
-                                2, 3, 1,
+                            indices_usize.append(&[
+                                vertex_off, vertex_off + 2, vertex_off + 1,
+                                vertex_off + 3, vertex_off + 2, vertex_off,
                             ]);
                         },
                     };

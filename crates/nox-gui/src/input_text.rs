@@ -25,6 +25,7 @@ pub struct InputTextData {
     format_input: Box<fn(&mut dyn Write, &str) -> core::fmt::Result>,
     input_offsets: GlobalVec<Vec2>,
     row_offsets: RowOffsets,
+    formatted_row_offsets: RowOffsets,
     input_text_offset_x: f32,
     selection: Option<(usize, usize)>,
     text_cursor_pos: usize,
@@ -63,6 +64,7 @@ impl InputTextData {
             }),
             input_offsets: Default::default(),
             row_offsets: Default::default(),
+            formatted_row_offsets: Default::default(),
             input_text_offset_x: 0.0,
             selection: None,
             text_cursor_pos: 0,
@@ -462,11 +464,17 @@ impl InputTextData {
                 win.style.inactive_text_col()
             };
         self.input_text.get_or_insert_with(|| {
+            self.formatted_row_offsets.offsets.clear();
             if self.input.is_empty() {
-                self.input_text_formatted = Some(win.text_renderer
-                    .render(&[text_segment(&self.empty_input_prompt, win.style.font_regular())],
-                    false, 0.0
-                ).unwrap_or_default())
+                let text = self.input_text_formatted.insert(win.text_renderer
+                    .render_and_collect_offsets(&[text_segment(&self.empty_input_prompt, win.style.font_regular())],
+                    false, 0.0,
+                    0.0,
+                    |offset| {
+                        self.formatted_row_offsets.offsets.push(offset);
+                    },
+                ).unwrap_or_default());
+                self.formatted_row_offsets.row_height = text.row_height;
             } else {
                 let mut fmt = CompactString::default();
                 if has_format_error {
@@ -476,10 +484,15 @@ impl InputTextData {
                     fmt.clear();
                     write!(fmt, "Format error: ! {}", e).ok();
                 }
-                self.input_text_formatted = Some(win.text_renderer
-                    .render(&[text_segment(&fmt, win.style.font_regular())],
-                    false, 0.0
+                let text = self.input_text_formatted.insert(win.text_renderer
+                    .render_and_collect_offsets(&[text_segment(&fmt, win.style.font_regular())],
+                    false, 0.0,
+                    0.0,
+                    |offset| {
+                        self.formatted_row_offsets.offsets.push(offset);
+                    },
                 ).unwrap_or_default());
+                self.formatted_row_offsets.row_height = text.row_height;
             }
             self.input_offsets.clear();
             self.row_offsets.offsets.clear();
@@ -565,137 +578,133 @@ impl InputTextData {
         let override_cursor = win.style.override_cursor();
         let mouse_left_state = win.ctx.mouse_button_state(MouseButton::Left);
         let rel_cursor_pos = reaction.rel_cursor_position;
-        if !reaction.hover_blocked() {
-            if override_cursor {
-                win.ctx.set_cursor_hide(!mouse_visible);
+        if override_cursor {
+            win.ctx.set_cursor_hide(!mouse_visible);
+        }
+        if mouse_visible && self.cursor_enabled() {
+            let input_min = offset.x + item_pad_inner.x - self.input_text_offset_x;
+            let input_min_max = (input_min, input_min + input_width);
+            let input_box_min_max =
+                (offset.x, offset.x + input_rect.max.x - item_pad_inner.x);
+            let mut select_all = false;
+            if reaction.clicked() {
+                if self.double_click_timer < win.style.double_click_secs() {
+                    select_all = true;
+                } else {
+                    self.text_cursor_pos =
+                        self.calc_cursor_index(
+                            rel_cursor_pos.x,
+                            input_min_max,
+                            input_box_min_max,
+                            input_min,
+                        );
+                }
+                self.double_click_timer = 0.0;
             }
-            if mouse_visible && self.cursor_enabled() {
-                let input_min = offset.x + item_pad_inner.x - self.input_text_offset_x;
-                let input_min_max = (input_min, input_min + input_width);
-                let input_box_min_max =
-                    (offset.x, offset.x + input_rect.max.x - item_pad_inner.x);
-                let mut select_all = false;
-                if reaction.clicked() {
-                    if self.double_click_timer < win.style.double_click_secs() {
-                        select_all = true;
-                    } else {
-                        self.text_cursor_pos =
-                            self.calc_cursor_index(
-                                rel_cursor_pos.x,
-                                input_min_max,
-                                input_box_min_max,
-                                input_min,
-                            );
-                    }
-                    self.double_click_timer = 0.0;
-                }
-                if override_cursor && (reaction.held() || reaction.hovered()) {
-                    win.ctx.set_cursor(CursorIcon::Text);
-                }
-                select_all &= self.selection.is_none();
-                if select_all || self.select_all() {
-                    self.flags |= Self::ACTIVE;
-                    self.selection = Some((0, self.input_offsets.len()));
-                    self.flags |= Self::CURSOR_VISIBLE;
-                    self.cursor_timer = 0.0;
-                }
-                if !reaction.hovered() && !reaction.held() && !window_moving && mouse_left_state.released() {
-                    self.flags &= !Self::ACTIVE;
-                    self.flags |= Self::MOUSE_VISIBLE;
-                }
-                if !select_all && !window_moving {
-                    if self.clicked_last_frame() &&
-                        !self.select_all_last_frame() &&
-                        !self.activated_last_frame()
-                    {
-                        self.selection = None;
-                    }
-                    if reaction.held() {
-                        if mouse_left_state.released() {
-                            if let Some(selection) = self.selection && selection.0 == selection.1 {
-                                self.selection = None;
-                            }
-                        } else {
-                            self.flags |= Self::ACTIVE;
-                            self.flags |= Self::CURSOR_VISIBLE;
-                            let text_cursor_pos = self.calc_cursor_index(
-                                rel_cursor_pos.x,
-                                input_min_max,
-                                input_box_min_max,
-                                input_min,
-                            );
-                            let selection_left = self.selection_left();
-                            if let Some(mut selection) = self.selection {
-                                if selection_left || text_cursor_pos < selection.0 {
-                                    selection.0 = text_cursor_pos;
-                                    self.flags |= Self::SELECTION_LEFT;
-                                    let offset = self.calc_cursor_offset(font_scale, selection.0).x;
-                                    if offset < 0.0 {
-                                        self.input_text_offset_x -=
-                                            win.style.input_text_selection_scroll_speed() *
-                                            win.ctx.delta_time_secs_f32();
-                                    } else if offset > input_text_max_x {
-                                        self.input_text_offset_x +=
-                                            win.style.input_text_selection_scroll_speed() *
-                                            win.ctx.delta_time_secs_f32();
-                                    }
-                                    if selection.1 < selection.0 {
-                                        let tmp = selection.0;
-                                        selection.0 = selection.1;
-                                        selection.1 = tmp;
-                                        self.flags &= !Self::SELECTION_LEFT;
-                                    }
-                                } else {
-                                    selection.1 = text_cursor_pos;
-                                    let offset = self.calc_cursor_offset(font_scale, selection.1).x;
-                                    if offset > input_text_max_x {
-                                        self.input_text_offset_x +=
-                                            win.style.input_text_selection_scroll_speed() *
-                                            win.ctx.delta_time_secs_f32();
-                                    } else if offset < 0.0 {
-                                        self.input_text_offset_x -=
-                                            win.style.input_text_selection_scroll_speed() *
-                                            win.ctx.delta_time_secs_f32();
-                                    }
-                                    if selection.1 < selection.0 {
-                                        let tmp = selection.0;
-                                        selection.0 = selection.1;
-                                        selection.1 = tmp;
-                                        self.flags |= Self::SELECTION_LEFT;
-                                    }
-                                }
-                                selection.1 = selection.1.clamp(0, self.input_offsets.len());
-                                self.selection = Some(selection);
-                                self.text_cursor_pos = if self.selection_left() {
-                                    selection.0
-                                } else {
-                                    selection.1
-                                };
-                            } else {
-                                self.selection = Some((text_cursor_pos, text_cursor_pos));
-                                self.text_cursor_pos = text_cursor_pos;
-                            }
-                            if override_cursor {
-                                win.ctx.set_cursor(CursorIcon::Text);
-                            }
-                        }
-                    }
-                }
-                self.flags &= !Self::SELECT_ALL_LAST_FRAME;
-                or_flag!(self.flags, Self::SELECT_ALL_LAST_FRAME, select_all || self.select_all());
-                self.flags &= !Self::SELECT_ALL;
-                self.flags &= !Self::CLICKED_LAST_FRAME;
-                or_flag!(self.flags, Self::CLICKED_LAST_FRAME, mouse_left_state.pressed());
+            if reaction.held() || reaction.hovered() {
+                reaction.set_cursor(CursorIcon::Text);
             }
-            let deactivate =
-                win.ctx.key_state(KeyCode::Enter).pressed() |
-                win.ctx.key_state(KeyCode::Escape).pressed();
-            if deactivate {
+            select_all &= self.selection.is_none();
+            if select_all || self.select_all() {
+                self.flags |= Self::ACTIVE;
+                self.selection = Some((0, self.input_offsets.len()));
+                self.flags |= Self::CURSOR_VISIBLE;
+                self.cursor_timer = 0.0;
+            }
+            if !reaction.hovered() && !reaction.held() && !window_moving && mouse_left_state.released() {
                 self.flags &= !Self::ACTIVE;
                 self.flags |= Self::MOUSE_VISIBLE;
             }
-        } else {
+            if !select_all && !window_moving {
+                if self.clicked_last_frame() &&
+                    !self.select_all_last_frame() &&
+                    !self.activated_last_frame()
+                {
+                    self.selection = None;
+                }
+                if reaction.held() {
+                    if mouse_left_state.released() {
+                        if let Some(selection) = self.selection && selection.0 == selection.1 {
+                            self.selection = None;
+                        }
+                    } else {
+                        self.flags |= Self::ACTIVE;
+                        self.flags |= Self::CURSOR_VISIBLE;
+                        let text_cursor_pos = self.calc_cursor_index(
+                            rel_cursor_pos.x,
+                            input_min_max,
+                            input_box_min_max,
+                            input_min,
+                        );
+                        let selection_left = self.selection_left();
+                        if let Some(mut selection) = self.selection {
+                            if selection_left || text_cursor_pos < selection.0 {
+                                selection.0 = text_cursor_pos;
+                                self.flags |= Self::SELECTION_LEFT;
+                                let offset = self.calc_cursor_offset(font_scale, selection.0).x;
+                                if offset < 0.0 {
+                                    self.input_text_offset_x -=
+                                        win.style.input_text_selection_scroll_speed() *
+                                        win.ctx.delta_time_secs_f32();
+                                } else if offset > input_text_max_x {
+                                    self.input_text_offset_x +=
+                                        win.style.input_text_selection_scroll_speed() *
+                                        win.ctx.delta_time_secs_f32();
+                                }
+                                if selection.1 < selection.0 {
+                                    let tmp = selection.0;
+                                    selection.0 = selection.1;
+                                    selection.1 = tmp;
+                                    self.flags &= !Self::SELECTION_LEFT;
+                                }
+                            } else {
+                                selection.1 = text_cursor_pos;
+                                let offset = self.calc_cursor_offset(font_scale, selection.1).x;
+                                if offset > input_text_max_x {
+                                    self.input_text_offset_x +=
+                                        win.style.input_text_selection_scroll_speed() *
+                                        win.ctx.delta_time_secs_f32();
+                                } else if offset < 0.0 {
+                                    self.input_text_offset_x -=
+                                        win.style.input_text_selection_scroll_speed() *
+                                        win.ctx.delta_time_secs_f32();
+                                }
+                                if selection.1 < selection.0 {
+                                    let tmp = selection.0;
+                                    selection.0 = selection.1;
+                                    selection.1 = tmp;
+                                    self.flags |= Self::SELECTION_LEFT;
+                                }
+                            }
+                            selection.1 = selection.1.clamp(0, self.input_offsets.len());
+                            self.selection = Some(selection);
+                            self.text_cursor_pos = if self.selection_left() {
+                                selection.0
+                            } else {
+                                selection.1
+                            };
+                        } else {
+                            self.selection = Some((text_cursor_pos, text_cursor_pos));
+                            self.text_cursor_pos = text_cursor_pos;
+                        }
+                        if override_cursor {
+                            win.ctx.set_cursor(CursorIcon::Text);
+                        }
+                    }
+                }
+            }
+            self.flags &= !Self::SELECT_ALL_LAST_FRAME;
+            or_flag!(self.flags, Self::SELECT_ALL_LAST_FRAME, select_all || self.select_all());
+            self.flags &= !Self::SELECT_ALL;
+            self.flags &= !Self::CLICKED_LAST_FRAME;
+            or_flag!(self.flags, Self::CLICKED_LAST_FRAME, mouse_left_state.pressed());
+        }
+        let deactivate =
+            win.ctx.key_state(KeyCode::Enter).pressed() |
+            win.ctx.key_state(KeyCode::Escape).pressed();
+        if deactivate {
             self.flags &= !Self::ACTIVE;
+            self.flags |= Self::MOUSE_VISIBLE;
         }
         if self.center_text() {
             let text_width =  if self.active() {
@@ -711,7 +720,6 @@ impl InputTextData {
                     text_width * 0.5 - self.width * 0.5 + win.style.item_pad_inner().x;
             }
         }
-        let cursor_size = vec2(win.style.input_text_cursor_width(), text_height);
         if !self.active() {
             self.selection = None;
         }
@@ -730,21 +738,33 @@ impl InputTextData {
             self.flags &= !Self::SELECTION_LEFT;
         }
         let reaction_id = reaction.id();
-        let visuals = win.style.interact_visuals(reaction);
+        let mut visuals = win.style.interact_visuals(reaction);
+        if self.active() {
+            visuals.bg_strokes[0].col = win.style.input_text_active_stroke_col();
+            visuals.bg_stroke_idx = 0;
+        }
+        let fill_col = win.style.input_text_bg_col();
         let selection_bg_col = win.style.input_text_selection_bg_col();
+        let cursor_off = offset + item_pad_inner + self.calc_cursor_offset(font_scale, self.text_cursor_pos);
+        let cursor_size =
+            if self.cursor_visible() {
+                vec2(win.style.input_text_cursor_width(), text_height)
+            } else {
+                Default::default()
+            };
         win.paint(Box::new(move |painter, current_height| {
             let height_half = current_height * 0.5;
             painter
                 .rect(
                     reaction_id,
                     input_rect,
-                    offset + vec2(0.0, height_half - input_rect.max.y),
-                    visuals.fill_col,
+                    offset + vec2(0.0, height_half - input_rect.max.y * 0.5),
+                    fill_col,
                     visuals.bg_strokes.clone(),
                     visuals.bg_stroke_idx
                 )
                 .flat_rect(reaction_id, selection_rect.0, selection_rect.1, selection_bg_col)
-                .flat_rect(reaction_id, offset, offset + cursor_size, text_col);
+                .flat_rect(reaction_id, cursor_off, cursor_off + cursor_size, text_col);
         }));
         self.double_click_timer += win.ctx.delta_time_secs_f32();
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
@@ -755,17 +775,18 @@ impl InputTextData {
             } else {
                 self.input_text_formatted.clone().unwrap()
             },
-            GlobalVec::with_len(1, self.row_offsets.clone()),
+            GlobalVec::with_len(1, if self.active() { self.row_offsets.clone() } else { self.formatted_row_offsets.clone() }),
             if self.input.is_empty() {
                 win.style.input_text_empty_text_color()
             } else {
                 text_col
             },
-            offset,
+            offset + vec2(item_pad_inner.x - self.input_text_offset_x, 0.0),
             vec2(1.0, 1.0),
             None,
             0,
             1,
+            Some(BoundingRect::from_min_max(offset + item_pad_inner, offset + input_rect.max - item_pad_inner)),
             None
         );
         win.add_text(text);
@@ -783,9 +804,7 @@ impl InputTextData {
     }
 
     #[inline(always)]
-    fn cursor_visible(&self) -> bool {
-        self.flags & Self::CURSOR_VISIBLE == Self::CURSOR_VISIBLE
-    }
+    fn cursor_visible(&self) -> bool { self.flags & Self::CURSOR_VISIBLE == Self::CURSOR_VISIBLE }
 
     #[inline(always)]
     fn mouse_visible(&self) -> bool {

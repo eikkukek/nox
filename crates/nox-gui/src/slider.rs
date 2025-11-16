@@ -505,13 +505,19 @@ macro_rules! impl_sliderable_int {
                     }
                     if amount.is_sign_negative() {
                         let amount = amount as Self;
-                        if (*self > 0 && amount >= Self::MIN) || Self::MIN - *self <= amount {
+                        let clamp = *self < 0 && Self::MIN - *self >= amount;
+                        if !clamp {
                             *self += amount;
+                        } else {
+                            *self = Self::MIN;
                         }
                     } else {
                         let amount = amount as Self;
-                        if (*self < 0 && amount <= Self::MAX) || Self::MAX - *self >= amount {
+                        let clamp = *self > 0 && Self::MAX - *self <= amount;
+                        if !clamp {
                             *self += amount;
+                        } else {
+                            *self = Self::MAX;
                         }
                     }
                     *self = (*self).clamp(min, max);
@@ -571,11 +577,15 @@ macro_rules! impl_sliderable_uint {
                         let amount = amount.abs() as Self;
                         if amount <= *self {
                             *self -= amount;
+                        } else {
+                            *self = 0;
                         }
                     } else {
                         let amount = amount as Self;
                         if Self::MAX - *self >= amount {
                             *self += amount;
+                        } else {
+                            *self = Self::MAX;
                         }
                     }
                     *self = (*self).clamp(min, max);

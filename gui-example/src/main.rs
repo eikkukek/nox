@@ -63,7 +63,7 @@ struct Example<'a> {
     output_format: ColorFormat,
     aspect_ratio: f32,
     slider_value: f32,
-    slider_value_int: u32,
+    slider_value_uint: u8,
     radio_value: MyEnum,
     drag_value_int: i8,
     input_text: String,
@@ -98,7 +98,7 @@ impl<'a> Example<'a> {
             output_format: Default::default(),
             aspect_ratio: 1.0,
             slider_value: 0.0,
-            slider_value_int: 0,
+            slider_value_uint: 0,
             radio_value: MyEnum::First,
             drag_value_int: 0,
             input_text: Default::default(),
@@ -137,7 +137,7 @@ impl<'a> Interface for Example<'a> {
         renderer: &mut RendererContext,
     ) -> Result<(), Error>
     {
-        self.device_alloc = Some(LinearDeviceAlloc::default(1 << 28, &renderer)?);
+        self.device_alloc = Some(LinearDeviceAlloc::default(1 << 29, &renderer)?);
         renderer.edit_resources(|r| {
             self.output_format = r
                 .supported_image_format(
@@ -267,9 +267,9 @@ impl<'a> Interface for Example<'a> {
                             win.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
                             win.tag("Float 2");
                         });
-                        win.collapsing("Int", |win| {
+                        win.collapsing("u8", |win| {
                             //win.tag("Int");
-                            win.slider(&mut self.slider_value_int, 0, 10, 20.0);
+                            win.slider(&mut self.slider_value_uint, 0, 10, 20.0);
                         });
                     });
                   
@@ -286,6 +286,7 @@ impl<'a> Interface for Example<'a> {
                     win.add(my_widget(&mut self.show_other_window))
                         .hover_text("Simple custom widget");
                 });
+                win.input_text_test(&mut self.input_text, "Input text here", 0.2, None);
             }
         )?;
         if self.show_other_window {

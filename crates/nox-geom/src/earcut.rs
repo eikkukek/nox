@@ -1,5 +1,3 @@
-use std::panic;
-
 use nox_mem::{
     vec_types::{Vector, GlobalVec},
     CapacityError,

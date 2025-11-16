@@ -19,6 +19,9 @@ pub const fn vec2(x: f32, y: f32) -> Vec2 {
 
 impl Vec2 {
 
+    pub const MIN: Vec2 = vec2(f32::MIN, f32::MIN);
+    pub const MAX: Vec2 = vec2(f32::MAX, f32::MAX);
+
     #[inline(always)]
     pub fn dot(self, other: Self) -> f32 {
         self.x * other.x + self.y * other.y

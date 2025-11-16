@@ -14,6 +14,7 @@ pub struct Reaction {
     pub offset: Vec2,
     pub size: Vec2,
     pub rel_cursor_position: Vec2,
+    cursor: Option<CursorIcon>,
     id: ReactionId,
     hover_text: Option<CompactString>,
     flags: u32,
@@ -35,6 +36,7 @@ impl Reaction {
             offset: Default::default(),
             size: Default::default(),
             rel_cursor_position: Default::default(),
+            cursor: None,
             id,
             hover_text: None,
             flags: 0,
@@ -79,6 +81,16 @@ impl Reaction {
     #[inline(always)]
     pub fn enable_animated_bool(&mut self) {
         self.flags |= Self::ANIMATED_BOOL;
+    }
+
+    #[inline(always)]
+    pub fn set_cursor(&mut self, cursor: CursorIcon) {
+        self.cursor = Some(cursor);
+    }
+
+    #[inline(always)]
+    pub fn take_cursor(&mut self) -> Option<CursorIcon> {
+        self.cursor.take()
     }
 
     #[inline(always)]

@@ -86,13 +86,14 @@ impl<Style> DragValue<Style>
             let tmp = *value;
             let amount = self.delta_cursor_x * drag_speed;
             value.drag(min, max, amount + self.amount);
-            if value == &tmp {
+            if value == &tmp && self.held() {
                 self.amount += amount;
             } else {
                 self.amount = 0.0;
             }
             self.input_text.set_input_sliderable(style, value);
         } else {
+            self.amount = 0.0;
             if let Some(v) = self.input_text.get_input() {
                 *value = v;
             }
