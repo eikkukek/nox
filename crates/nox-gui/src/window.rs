@@ -2060,10 +2060,10 @@ pub struct UiCtx<'a, 'b, Style>
     where
         Style: WindowStyle,
 {
-    pub ctx: &'a mut WindowCtx,
-    pub style: &'a Style,
-    pub window: &'a mut Window<Style>,
-    pub text_renderer: &'a mut TextRenderer<'b>,
+    win_ctx: &'a mut WindowCtx,
+    style: &'a Style,
+    window: &'a mut Window<Style>,
+    text_renderer: &'a mut TextRenderer<'b>,
     current_row_widgets: GlobalVec<(WidgetId, Vec2)>,
     current_row_text: GlobalVec<RowText>,
     current_row_reactions: GlobalVec<(ReactionId, Vec2)>,
@@ -2091,7 +2091,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
 
     pub(crate) fn new(
         title: &str,
-        ctx: &'a mut WindowCtx,
+        win_ctx: &'a mut WindowCtx,
         style: &'a Style,
         window: &'a mut Window<Style>,
         text_renderer: &'a mut TextRenderer<'b>,
@@ -2114,10 +2114,10 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                     title_text.row_height * style.font_scale() * style.title_add_scale()) +
                     style.item_pad_outer().y,
             ),
-            ctx,
+            win_ctx,
             window,
             style,
-            text_renderer,
+            text_renderer: text_renderer,
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
             current_row_reactions: Default::default(),
@@ -2137,7 +2137,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
 
     pub(crate) fn new_collapsing(
         label: &str,
-        ctx: &'a mut WindowCtx,
+        win_ctx: &'a mut WindowCtx,
         style: &'a Style,
         window: &'a mut Window<Style>,
         text_renderer: &'a mut TextRenderer<'b>,
@@ -2158,10 +2158,10 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         Self {
             widget_off: base_off,
             row_widget_off_x: widget_off.x + item_pad_outer.x,
-            ctx,
+            win_ctx,
             window,
             style,
-            text_renderer,
+            text_renderer: text_renderer,
             current_row_widgets: Default::default(),
             current_row_text: Default::default(),
             current_row_reactions: Default::default(),
@@ -2186,6 +2186,21 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
     #[inline(always)]
     fn is_collapsing(&self) -> bool {
         self.flags & Self::IS_COLLAPSING == Self::IS_COLLAPSING
+    }
+
+    #[inline(always)]
+    pub fn win_ctx(&mut self) -> &mut WindowCtx {
+        self.win_ctx
+    }
+
+    #[inline(always)]
+    pub fn style(&self) -> &Style {
+        self.style
+    }
+
+    #[inline(always)]
+    pub fn render_text(&mut self, mut f: impl FnMut(&Style, &mut TextRenderer)) {
+        f(self.style, self.text_renderer);
     }
 
     #[inline(always)]
@@ -2325,7 +2340,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         self.widget_off.x = self.row_widget_off_x;
         let item_pad_outer = self.style.item_pad_outer();
         let mut collapsing = UiCtx::new_collapsing(
-            label, self.ctx, self.style, self.window, self.text_renderer,
+            label, self.win_ctx, self.style, self.window, self.text_renderer,
             self.widget_off, self.slider_width, self.input_text_width,
             self.image_loader,
         );
@@ -2440,7 +2455,10 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
             self.widget_off,
         );
         selectable_text.set_current_height(self.current_height);
-        let mut builder = selectable_text.as_builder(window_width, self.style, self.text_renderer);
+        let mut builder = selectable_text.as_builder(
+            window_width, self.style,
+            self.text_renderer,
+        );
         builder
             .color(color)
             .with_text(tool_tip, |b| {
@@ -2499,7 +2517,10 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
             vec2(self.row_widget_off_x, self.widget_off.y),
             self.widget_off
         );
-        let mut builder = selectable_text.as_builder(window_width, self.style, self.text_renderer);
+        let mut builder = selectable_text.as_builder(
+            window_width, self.style,
+            self.text_renderer,
+        );
         f(&mut builder);
         let offset = selectable_text.current_offset();
         if truncate {
@@ -2569,7 +2590,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         let mut reaction = self.window.activate_reaction(label).clone();
         let id = reaction.id();
         let offset = self.widget_off;
-        let size_max = self.style.calc_font_height(self.text_renderer);
+        let size_max = self.font_height();
         let rect_size = vec2(size_max, size_max);
         reaction.offset = offset;
         let visuals = self.style.interact_visuals(&reaction);

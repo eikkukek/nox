@@ -25,7 +25,7 @@ pub fn my_widget_show<Style: WindowStyle>(
     }
     let radius = size.y * 0.5;
     let rect = shapes::rect(Default::default(), size, radius);
-    let visuals = ui.style.interact_visuals(&reaction);
+    let visuals = ui.style().interact_visuals(&reaction);
     let mut center = offset + vec2(radius, radius);
     let t = ui.animate_bool(reaction.id(), *value);
     center.x += lerp(0.0, size.x - radius * 2.0, t);
@@ -255,11 +255,13 @@ impl<'a> Interface for Example<'a> {
 
                     ui.end_row();
 
+                    /*
                     ui.input_text(
                         &mut self.input_text,
                         "Input text here",
                         None,
                     );
+                    */
 
                     ui.collapsing("Sliders", |ui| {
                         ui.collapsing("Float", |ui| {

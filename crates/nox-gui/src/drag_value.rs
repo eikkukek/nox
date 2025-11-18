@@ -150,7 +150,7 @@ impl DragValueData {
         self.flags &= !Self::HOVERED;
         let rel_cursor_pos = reaction.rel_cursor_pos();
         let cursor_in_rect = reaction.hovered() || reaction.held();
-        let mouse_left_state = ui.ctx.mouse_button_state(MouseButton::Left);
+        let mouse_left_state = ui.win_ctx().mouse_button_state(MouseButton::Left);
         if cursor_in_rect && !self.input_text.active() {
             self.flags |= Self::HOVERED;
             if self.held() {

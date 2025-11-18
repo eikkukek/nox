@@ -234,15 +234,15 @@ impl InputTextData {
             Backspace,
         }
         let mut cursor_move = CursorMove::None;
-        let font_scale = ui.style.font_scale();
+        let font_scale = ui.style().font_scale();
         let start_width = self.input_text
             .as_ref()
-            .map(|v| ui.style.calc_text_width(v))
+            .map(|v| ui.style().calc_text_width(v))
             .unwrap_or_default();
         let active_this_frame = self.active();
         if active_this_frame {
-            let mut cursor_timer = self.cursor_timer + ui.ctx.delta_time_secs_f32();
-            if cursor_timer >= ui.style.input_text_cursor_switch_speed() {
+            let mut cursor_timer = self.cursor_timer + ui.win_ctx().delta_time_secs_f32();
+            if cursor_timer >= ui.style().input_text_cursor_switch_speed() {
                 self.toggle_cursor_visible();
                 cursor_timer = 0.0;
             }
@@ -254,10 +254,10 @@ impl InputTextData {
                 } else {
                     self.text_cursor_pos = selection.1;
                 }
-                let input_empty = ui.ctx.get_input_text().0 == 0;
-                if ui.ctx.key_state(KeyCode::ControlLeft).held() {
-                    if ui.ctx.key_state(KeyCode::KeyV).pressed() &&
-                        let Some(text) = ui.ctx.get_clipboard()
+                let input_empty = ui.win_ctx().get_input_text().0 == 0;
+                if ui.win_ctx().key_state(KeyCode::ControlLeft).held() {
+                    if ui.win_ctx().key_state(KeyCode::KeyV).pressed() &&
+                        let Some(text) = ui.win_ctx().get_clipboard()
                     {
                         let start_count = self.input.char_indices().count();
                         for i in (selection.0..selection.1).rev() {
@@ -283,21 +283,21 @@ impl InputTextData {
                         } else {
                             cursor_move = CursorMove::Right;
                         }
-                    } else if ui.ctx.key_state(KeyCode::KeyC).pressed() {
+                    } else if ui.win_ctx().key_state(KeyCode::KeyC).pressed() {
                         let mut text = CompactString::default();
                         let mut iter = self.input.char_indices().skip(selection.0);
                         for _ in selection.0..selection.1  {
                             text.push(iter.next().unwrap().1);
                         }
-                        ui.ctx.set_clipboard(&text);
+                        ui.win_ctx().set_clipboard(&text);
                         self.selection = Some(selection);
-                    } else if ui.ctx.key_state(KeyCode::KeyX).pressed() {
+                    } else if ui.win_ctx().key_state(KeyCode::KeyX).pressed() {
                         let mut text = CompactString::default();
                         let mut iter = self.input.char_indices().skip(selection.0);
                         for _ in selection.0..selection.1  {
                             text.push(iter.next().unwrap().1);
                         }
-                        ui.ctx.set_clipboard(&text);
+                        ui.win_ctx().set_clipboard(&text);
                         for i in (selection.0..selection.1).rev() {
                             let (index, _) = self.input.char_indices().skip(i).next().unwrap();
                             self.input.remove(index);
@@ -309,14 +309,14 @@ impl InputTextData {
                         self.selection = Some(selection);
                     }
                 }
-                else if ui.ctx.key_state(KeyCode::Backspace).pressed() || !input_empty {
+                else if ui.win_ctx().key_state(KeyCode::Backspace).pressed() || !input_empty {
                     let start_count = self.input.char_indices().count();
                     for i in (selection.0..selection.1).rev() {
                         let (index, _) = self.input.char_indices().skip(i).next().unwrap();
                         self.input.remove(index);
                     }
                     let mut text_cursor_pos = selection.0;
-                    for text in ui.ctx.get_input_text().1 {
+                    for text in ui.win_ctx().get_input_text().1 {
                         if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter &&
                             text.0 != KeyCode::Escape
                         {
@@ -340,8 +340,8 @@ impl InputTextData {
                         cursor_move = CursorMove::Right;
                     }
                     self.input_text = None;
-                } else if ui.ctx.key_state(KeyCode::ArrowLeft).pressed() {
-                    if ui.ctx.key_state(KeyCode::ShiftLeft).held() {
+                } else if ui.win_ctx().key_state(KeyCode::ArrowLeft).pressed() {
+                    if ui.win_ctx().key_state(KeyCode::ShiftLeft).held() {
                         if self.selection_left() {
                             if selection.0 != 0 {
                                 selection.0 -= 1;
@@ -358,8 +358,8 @@ impl InputTextData {
                     }
                     self.flags |= Self::CURSOR_VISIBLE;
                     self.cursor_timer = 0.0;
-                } else if ui.ctx.key_state(KeyCode::ArrowRight).pressed() {
-                    if ui.ctx.key_state(KeyCode::ShiftLeft).held() {
+                } else if ui.win_ctx().key_state(KeyCode::ArrowRight).pressed() {
+                    if ui.win_ctx().key_state(KeyCode::ShiftLeft).held() {
                         if self.selection_left() {
                             if selection.0 != selection.1 {
                                 selection.0 += 1;
@@ -386,14 +386,14 @@ impl InputTextData {
                 let start_pos = text_cursor_pos;
                 let start_count = self.input.char_indices().count();
                 if text_cursor_pos != 0 {
-                    if ui.ctx.key_state(KeyCode::Backspace).pressed() {
+                    if ui.win_ctx().key_state(KeyCode::Backspace).pressed() {
                         let remove = text_cursor_pos - 1;
                         let (index, _) = self.input.char_indices().skip(remove).next().unwrap();
                         self.input.remove(index);
                         self.input_text = None;
                         text_cursor_pos = remove;
-                    } else if ui.ctx.key_state(KeyCode::ArrowLeft).pressed() {
-                        if ui.ctx.key_state(KeyCode::ShiftLeft).held() {
+                    } else if ui.win_ctx().key_state(KeyCode::ArrowLeft).pressed() {
+                        if ui.win_ctx().key_state(KeyCode::ShiftLeft).held() {
                             self.selection = Some((text_cursor_pos - 1, text_cursor_pos));
                             self.flags |= Self::SELECTION_LEFT;
                         }
@@ -402,9 +402,9 @@ impl InputTextData {
                         self.flags |= Self::CURSOR_VISIBLE;
                     }
                 }
-                if ui.ctx.key_state(KeyCode::ControlLeft).held()
+                if ui.win_ctx().key_state(KeyCode::ControlLeft).held()
                 {
-                    if ui.ctx.key_state(KeyCode::KeyV).pressed() && let Some(text) = ui.ctx.get_clipboard() {
+                    if ui.win_ctx().key_state(KeyCode::KeyV).pressed() && let Some(text) = ui.win_ctx().get_clipboard() {
                         self.input.insert_str(
                             self.input
                                 .char_indices()
@@ -418,7 +418,7 @@ impl InputTextData {
                         self.input_text = None;
                     }
                 } else {
-                    let input = ui.ctx.get_input_text();
+                    let input = ui.win_ctx().get_input_text();
                     if input.0 != 0 {
                         for text in input.1 {
                             if text.0 != KeyCode::Backspace &&
@@ -440,9 +440,9 @@ impl InputTextData {
                     }
                 }
                 let end_count = self.input.char_indices().count();
-                if ui.ctx.key_state(KeyCode::ArrowRight).pressed() {
+                if ui.win_ctx().key_state(KeyCode::ArrowRight).pressed() {
                     text_cursor_pos = (text_cursor_pos + 1).clamp(0, end_count);
-                    if text_cursor_pos != end_count && ui.ctx.key_state(KeyCode::ShiftLeft).held() {
+                    if text_cursor_pos != end_count && ui.win_ctx().key_state(KeyCode::ShiftLeft).held() {
                         self.selection  = Some((text_cursor_pos - 1, text_cursor_pos));
                     }
                     self.cursor_timer = 0.0;
@@ -461,71 +461,75 @@ impl InputTextData {
             self.flags &= !Self::CURSOR_VISIBLE;
             self.input_text_offset_x = 0.0;
         }
-        let item_pad_inner = ui.style.item_pad_inner();
+        let item_pad_inner = ui.style().item_pad_inner();
         let has_format_error = self.has_format_error();
         let text_col =
             if self.active() || self.parent_active() {
-                ui.style.active_text_col()
+                ui.style().active_text_col()
             } else if reaction.hovered() {
-                ui.style.focused_text_col()
+                ui.style().focused_text_col()
             } else {
-                ui.style.inactive_text_col()
+                ui.style().inactive_text_col()
             };
         self.input_text.get_or_insert_with(|| {
             self.formatted_row_offsets.offsets.clear();
-            if self.input.is_empty() {
-                let text = self.input_text_formatted.insert(ui.text_renderer
-                    .render_and_collect_offsets(&[text_segment(&self.empty_input_prompt, ui.style.font_regular())],
-                    false, 0.0,
-                    0.0,
-                    |offset| {
-                        self.formatted_row_offsets.offsets.push(offset);
-                    },
-                ).unwrap_or_default());
-                self.formatted_row_offsets.row_height = text.row_height;
-            } else {
-                let mut fmt = CompactString::default();
-                if has_format_error {
-                    fmt = "Format error!".into();
+            let mut input_text = Default::default();
+            ui.render_text(|style, renderer| {
+                if self.input.is_empty() {
+                    let text = self.input_text_formatted.insert(renderer
+                        .render_and_collect_offsets(&[text_segment(&self.empty_input_prompt, style.font_regular())],
+                        false, 0.0,
+                        0.0,
+                        |offset| {
+                            self.formatted_row_offsets.offsets.push(offset);
+                        },
+                    ).unwrap_or_default());
+                    self.formatted_row_offsets.row_height = text.row_height;
+                } else {
+                    let mut fmt = CompactString::default();
+                    if has_format_error {
+                        fmt = "Format error!".into();
+                    }
+                    else if let Err(e) = (self.format_input)(&mut fmt, &self.input) {
+                        fmt.clear();
+                        write!(fmt, "Format error: ! {}", e).ok();
+                    }
+                    let text = self.input_text_formatted.insert(renderer
+                        .render_and_collect_offsets(&[text_segment(&fmt, style.font_regular())],
+                        false, 0.0,
+                        0.0,
+                        |offset| {
+                            self.formatted_row_offsets.offsets.push(offset);
+                        },
+                    ).unwrap_or_default());
+                    self.formatted_row_offsets.row_height = text.row_height;
                 }
-                else if let Err(e) = (self.format_input)(&mut fmt, &self.input) {
-                    fmt.clear();
-                    write!(fmt, "Format error: ! {}", e).ok();
-                }
-                let text = self.input_text_formatted.insert(ui.text_renderer
-                    .render_and_collect_offsets(&[text_segment(&fmt, ui.style.font_regular())],
-                    false, 0.0,
-                    0.0,
-                    |offset| {
-                        self.formatted_row_offsets.offsets.push(offset);
-                    },
-                ).unwrap_or_default());
-                self.formatted_row_offsets.row_height = text.row_height;
-            }
-            self.input_offsets.clear();
-            self.row_offsets.offsets.clear();
-            let text = ui.text_renderer
-                .render_and_collect_offsets(
-                    &[text_segment(&self.input, ui.style.font_regular())],
-                    false, 0.0,
-                    0.0,
-                    |offset| {
-                        self.row_offsets.offsets.push(offset);
-                        self.input_offsets.push(vec2(offset.offset[0], offset.offset[1]) * font_scale);
-                    },
-                )
-                .unwrap_or_default();
-            self.row_offsets.row_height = text.row_height;
-            text
+                self.input_offsets.clear();
+                self.row_offsets.offsets.clear();
+                let text = renderer
+                    .render_and_collect_offsets(
+                        &[text_segment(&self.input, style.font_regular())],
+                        false, 0.0,
+                        0.0,
+                        |offset| {
+                            self.row_offsets.offsets.push(offset);
+                            self.input_offsets.push(vec2(offset.offset[0], offset.offset[1]) * font_scale);
+                        },
+                    )
+                    .unwrap_or_default();
+                self.row_offsets.row_height = text.row_height;
+                input_text = text
+            });
+            input_text
         });
         let input_text = unsafe {
             self.input_text
                 .as_ref()
                 .unwrap_unchecked()
         };
-        let text_height = ui.style.calc_font_height(ui.text_renderer);
+        let text_height = ui.font_height();
         let offset = reaction.offset;
-        let input_width = ui.style.calc_text_width(input_text);
+        let input_width = ui.style().calc_text_width(input_text);
         let width =
             if self.center_text() {
                 (input_width + item_pad_inner.x + item_pad_inner.x).max(self.width)
@@ -536,11 +540,11 @@ impl InputTextData {
             Default::default(),
             vec2(
                 width,
-                ui.style.calc_text_box_height(input_text).max(
-                    ui.style.calc_text_box_height_from_text_height(text_height)
+                ui.style().calc_text_box_height(input_text).max(
+                    ui.style().calc_text_box_height_from_text_height(text_height)
                 )
             ),
-            ui.style.rounding(),
+            ui.style().rounding(),
         );
         let input_text_offset = offset + item_pad_inner;
         let text_cursor_pos_x = self.input_offsets
@@ -579,18 +583,18 @@ impl InputTextData {
                 }
             }
         }
-        if ui.ctx.cursor_moved() {
+        if ui.win_ctx().cursor_moved() {
             self.flags |= Self::MOUSE_VISIBLE;
         }
         let mouse_visible = self.mouse_visible();
-        let override_cursor = ui.style.override_cursor();
-        let mouse_left_state = ui.ctx.mouse_button_state(MouseButton::Left);
-        let rel_cursor_pos = reaction.rel_cursor_pos);
+        let rel_cursor_pos = reaction.rel_cursor_pos();
+        let override_cursor = ui.style().override_cursor();
+        let mouse_left_state = ui.win_ctx().mouse_button_state(MouseButton::Left);
         if override_cursor {
             if self.active() {
-                ui.ctx.set_cursor_hide(!mouse_visible);
+                ui.win_ctx().set_cursor_hide(!mouse_visible);
             } else if self.active_last_frame() {
-                ui.ctx.set_cursor_hide(false);
+                ui.win_ctx().set_cursor_hide(false);
             }
         }
         self.flags &= !Self::ACTIVE_LAST_FRAME;
@@ -602,7 +606,7 @@ impl InputTextData {
                 (offset.x, offset.x + input_rect.max.x - item_pad_inner.x);
             let mut select_all = false;
             if reaction.clicked() {
-                if self.double_click_timer < ui.style.double_click_secs() {
+                if self.double_click_timer < ui.style().double_click_secs() {
                     select_all = true;
                 } else {
                     self.text_cursor_pos =
@@ -658,12 +662,12 @@ impl InputTextData {
                                 let offset = self.calc_cursor_offset(font_scale, selection.0).x;
                                 if offset < 0.0 {
                                     self.input_text_offset_x -=
-                                        ui.style.input_text_selection_scroll_speed() *
-                                        ui.ctx.delta_time_secs_f32();
+                                        ui.style().input_text_selection_scroll_speed() *
+                                        ui.win_ctx().delta_time_secs_f32();
                                 } else if offset > input_text_max_x {
                                     self.input_text_offset_x +=
-                                        ui.style.input_text_selection_scroll_speed() *
-                                        ui.ctx.delta_time_secs_f32();
+                                        ui.style().input_text_selection_scroll_speed() *
+                                        ui.win_ctx().delta_time_secs_f32();
                                 }
                                 if selection.1 < selection.0 {
                                     let tmp = selection.0;
@@ -676,12 +680,12 @@ impl InputTextData {
                                 let offset = self.calc_cursor_offset(font_scale, selection.1).x;
                                 if offset > input_text_max_x {
                                     self.input_text_offset_x +=
-                                        ui.style.input_text_selection_scroll_speed() *
-                                        ui.ctx.delta_time_secs_f32();
+                                        ui.style().input_text_selection_scroll_speed() *
+                                        ui.win_ctx().delta_time_secs_f32();
                                 } else if offset < 0.0 {
                                     self.input_text_offset_x -=
-                                        ui.style.input_text_selection_scroll_speed() *
-                                        ui.ctx.delta_time_secs_f32();
+                                        ui.style().input_text_selection_scroll_speed() *
+                                        ui.win_ctx().delta_time_secs_f32();
                                 }
                                 if selection.1 < selection.0 {
                                     let tmp = selection.0;
@@ -702,7 +706,7 @@ impl InputTextData {
                             self.text_cursor_pos = text_cursor_pos;
                         }
                         if override_cursor {
-                            ui.ctx.set_cursor(CursorIcon::Text);
+                            ui.win_ctx().set_cursor(CursorIcon::Text);
                         }
                     }
                 }
@@ -714,8 +718,8 @@ impl InputTextData {
             or_flag!(self.flags, Self::CLICKED_LAST_FRAME, mouse_left_state.pressed());
         }
         let deactivate =
-            ui.ctx.key_state(KeyCode::Enter).pressed() ||
-            ui.ctx.key_state(KeyCode::Escape).pressed() ||
+            ui.win_ctx().key_state(KeyCode::Enter).pressed() ||
+            ui.win_ctx().key_state(KeyCode::Escape).pressed() ||
             (mouse_left_state.pressed() && !reaction.held() && !reaction.hovered());
         if deactivate {
             self.flags &= !Self::ACTIVE;
@@ -723,16 +727,16 @@ impl InputTextData {
         }
         if self.center_text() {
             let text_width =  if self.active() {
-                ui.style.calc_text_width(self.input_text.as_ref().unwrap())
+                ui.style().calc_text_width(self.input_text.as_ref().unwrap())
             } else {
-                ui.style.calc_text_width(self.input_text_formatted.as_ref().unwrap())
+                ui.style().calc_text_width(self.input_text_formatted.as_ref().unwrap())
             };
             if text_width + item_pad_inner.x + item_pad_inner.x > self.width {
                 self.input_text_offset_x = 0.0;
-                input_rect.max.x = ui.style.calc_text_box_width_from_text_width(text_width);
+                input_rect.max.x = ui.style().calc_text_box_width_from_text_width(text_width);
             } else {
                 self.input_text_offset_x =
-                    text_width * 0.5 - self.width * 0.5 + ui.style.item_pad_inner().x;
+                    text_width * 0.5 - self.width * 0.5 + ui.style().item_pad_inner().x;
             }
         }
         if !self.active() {
@@ -753,22 +757,22 @@ impl InputTextData {
             self.flags &= !Self::SELECTION_LEFT;
         }
         let reaction_id = reaction.id();
-        let mut visuals = ui.style.interact_visuals(reaction);
+        let mut visuals = ui.style().interact_visuals(reaction);
         if self.active() {
-            visuals.bg_strokes[0].col = ui.style.input_text_active_stroke_col();
+            visuals.bg_strokes[0].col = ui.style().input_text_active_stroke_col();
             visuals.bg_stroke_idx = 0;
         }
         let fill_col =
             if self.has_bg_col_override() {
                 self.bg_col_override
             } else {
-                ui.style.input_text_bg_col()
+                ui.style().input_text_bg_col()
             };
-        let selection_bg_col = ui.style.input_text_selection_bg_col();
+        let selection_bg_col = ui.style().input_text_selection_bg_col();
         let cursor_off = offset + item_pad_inner + self.calc_cursor_offset(font_scale, self.text_cursor_pos);
         let cursor_size =
             if self.cursor_visible() {
-                vec2(ui.style.input_text_cursor_width(), text_height)
+                vec2(ui.style().input_text_cursor_width(), text_height)
             } else {
                 Default::default()
             };
@@ -797,7 +801,7 @@ impl InputTextData {
                     text_col,
                 );
         });
-        self.double_click_timer += ui.ctx.delta_time_secs_f32();
+        self.double_click_timer += ui.win_ctx().delta_time_secs_f32();
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
         or_flag!(self.flags, Self::ACTIVATED_LAST_FRAME, !active_this_frame && self.active());
         let text = Text::new(
@@ -808,7 +812,7 @@ impl InputTextData {
             },
             GlobalVec::with_len(1, if self.active() { self.row_offsets.clone() } else { self.formatted_row_offsets.clone() }),
             if self.input.is_empty() {
-                ui.style.input_text_empty_text_color()
+                ui.style().input_text_empty_text_color()
             } else {
                 text_col
             },
