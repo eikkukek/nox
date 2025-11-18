@@ -10,6 +10,181 @@ use nox_geom::*;
 
 use crate::*;
 
+pub struct DragValueData {
+    input_text: InputTextData,
+    last_cursor_x: f32,
+    delta_cursor_x: f32,
+    amount: f32,
+    flags: u32,
+}
+
+impl DragValueData {
+
+    const HELD: u32 = 0x1;
+    const HOVERED: u32 = 0x2;
+    const DRAGGED: u32 = 0x4;
+    const TRANSPARENT_INACTIVE_BG: u32 = 0x8;
+
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            input_text: InputTextData::new(),
+            last_cursor_x: 0.0,
+            delta_cursor_x: 0.0,
+            amount: 0.0,
+            flags: 0,
+        }
+    }
+
+    #[inline(always)]
+    pub fn held(&self) -> bool {
+        self.flags & Self::HELD == Self::HELD
+    }
+
+    #[inline(always)]
+    pub fn hovered(&self) -> bool {
+        self.flags & Self::HOVERED == Self::HOVERED
+    }
+
+    #[inline(always)]
+    pub fn dragged(&self) -> bool {
+        self.flags & Self::DRAGGED == Self::DRAGGED
+    }
+
+    #[inline(always)]
+    pub fn set_input_params(
+        &mut self,
+        style: &impl WindowStyle,
+        width: f32,
+        format_input: Option<fn(&mut dyn Write, &str) -> core::fmt::Result>,
+        transparent_inactive_bg: bool,
+    )
+    {
+        self.flags &= !Self::TRANSPARENT_INACTIVE_BG;
+        self.input_text.set_params(
+            width, Some(
+                if transparent_inactive_bg && (!self.held() && !self.hovered() && !self.input_text.active()) {
+                    self.flags |= Self::TRANSPARENT_INACTIVE_BG;
+                    ColorSRGBA::black(0.0)
+                } else {
+                    style.widget_bg_col()
+                }
+            ),
+            true, "", format_input, self.held()
+        );
+    }
+
+    #[inline(always)]
+    pub fn calc_value<T>(
+        &mut self,
+        style: &impl WindowStyle,
+        value: &mut T,
+        min: T,
+        max: T,
+        drag_speed: f32,
+    )
+        where
+            T: Sliderable
+    {
+        if !self.input_text.active() {
+            let tmp = *value;
+            let amount = self.delta_cursor_x * drag_speed;
+            value.drag(min, max, amount + self.amount);
+            if value == &tmp && self.held() {
+                self.amount += amount;
+            } else {
+                self.amount = 0.0;
+            }
+            self.input_text.set_input_sliderable(style, value);
+        } else {
+            self.amount = 0.0;
+            if let Some(v) = self.input_text.get_input() {
+                *value = v;
+            }
+        }
+    }
+
+
+    #[inline(always)]
+    pub fn calc_and_map_value<T, U>(
+        &mut self,
+        style: &impl WindowStyle,
+        value: &mut T,
+        min: T,
+        max: T,
+        drag_speed: f32,
+        mut map_to: impl FnMut(&T) -> U,
+        mut map_from: impl FnMut(U) -> T,
+    )
+        where
+            T: Sliderable,
+            U: Sliderable,
+    {
+        if !self.input_text.active() {
+            let tmp = *value;
+            let amount = self.delta_cursor_x * drag_speed;
+            value.drag(min, max, self.delta_cursor_x * drag_speed);
+            if value == &tmp {
+                self.amount += amount;
+            } else {
+                self.amount = 0.0;
+            }
+            let mapped = map_to(value);
+            self.input_text.set_input_sliderable(style, &mapped);
+        } else {
+            if let Some(v) = self.input_text.get_input() {
+                *value = map_from(v);
+            }
+        }
+    }
+
+    pub fn update<Style: WindowStyle>(
+        &mut self,
+        ui: &mut UiCtx<Style>,
+        reaction: &mut Reaction,
+        window_moving: bool,
+    ) -> Vec2
+    {
+        self.input_text.set_cursor_enable(self.input_text.active());
+        self.delta_cursor_x = Default::default();
+        self.flags &= !Self::HOVERED;
+        let rel_cursor_pos = reaction.rel_cursor_position;
+        let cursor_in_rect = reaction.hovered() || reaction.held();
+        let mouse_left_state = ui.ctx.mouse_button_state(MouseButton::Left);
+        if cursor_in_rect && !self.input_text.active() {
+            self.flags |= Self::HOVERED;
+            if self.held() {
+                if mouse_left_state.released() {
+                    if !self.dragged() {
+                        self.input_text.activate_and_select_all();
+                    }
+                    self.flags &= !Self::HELD;
+                }
+            } else {
+                self.flags &= !Self::HELD;
+                or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
+            }
+        }
+        if self.held() {
+            let delta_cursor_x = rel_cursor_pos.x - self.last_cursor_x;
+            if delta_cursor_x > f32::EPSILON {
+                self.flags |= Self::DRAGGED;
+            }
+            self.delta_cursor_x = delta_cursor_x;
+            if mouse_left_state.released() {
+                self.flags &= !Self::HELD;
+            }
+        } else {
+            self.flags &= !Self::DRAGGED;
+        }
+        self.last_cursor_x = rel_cursor_pos.x;
+        if cursor_in_rect || self.held()  {
+            reaction.set_cursor(CursorIcon::ColResize);
+        }
+        self.input_text.update(ui, reaction, window_moving)
+    }
+}
+
 pub struct DragValue<Style> {
     input_text: InputText<Style>,
     delta_cursor_x: f32,

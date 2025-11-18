@@ -51,6 +51,7 @@ impl InputTextData {
     const SELECT_ALL_LAST_FRAME: u32 = 0x400;
     const ACTIVATED_LAST_FRAME: u32 = 0x800;
     const PARENT_ACTIVE: u32 = 0x1000;
+    const ACTIVE_LAST_FRAME: u32 = 0x2000;
     
     #[inline(always)]
     pub fn new() -> Self {
@@ -213,12 +214,19 @@ impl InputTextData {
         }) - vec2(self.input_text_offset_x, 0.0)
     }
 
+    #[inline(always)]
+    pub fn set_cursor_enable(&mut self, value: bool) {
+        self.flags &= !Self::CURSOR_ENABLE;
+        or_flag!(self.flags, Self::CURSOR_ENABLE, value);
+    }
+
     pub fn update<Style: WindowStyle>(
         &mut self,
-        win: &mut UiCtx<Style>,
+        ui: &mut UiCtx<Style>,
         reaction: &mut Reaction,
         window_moving: bool,
-    ) -> Vec2 {
+    ) -> Vec2
+    {
         enum CursorMove {
             None,
             Left,
@@ -226,15 +234,15 @@ impl InputTextData {
             Backspace,
         }
         let mut cursor_move = CursorMove::None;
-        let font_scale = win.style.font_scale();
+        let font_scale = ui.style.font_scale();
         let start_width = self.input_text
             .as_ref()
-            .map(|v| win.style.calc_text_width(v))
+            .map(|v| ui.style.calc_text_width(v))
             .unwrap_or_default();
         let active_this_frame = self.active();
         if active_this_frame {
-            let mut cursor_timer = self.cursor_timer + win.ctx.delta_time_secs_f32();
-            if cursor_timer >= win.style.input_text_cursor_switch_speed() {
+            let mut cursor_timer = self.cursor_timer + ui.ctx.delta_time_secs_f32();
+            if cursor_timer >= ui.style.input_text_cursor_switch_speed() {
                 self.toggle_cursor_visible();
                 cursor_timer = 0.0;
             }
@@ -246,10 +254,10 @@ impl InputTextData {
                 } else {
                     self.text_cursor_pos = selection.1;
                 }
-                let input_empty = win.ctx.get_input_text().0 == 0;
-                if win.ctx.key_state(KeyCode::ControlLeft).held() {
-                    if win.ctx.key_state(KeyCode::KeyV).pressed() &&
-                        let Some(text) = win.ctx.get_clipboard()
+                let input_empty = ui.ctx.get_input_text().0 == 0;
+                if ui.ctx.key_state(KeyCode::ControlLeft).held() {
+                    if ui.ctx.key_state(KeyCode::KeyV).pressed() &&
+                        let Some(text) = ui.ctx.get_clipboard()
                     {
                         let start_count = self.input.char_indices().count();
                         for i in (selection.0..selection.1).rev() {
@@ -275,21 +283,21 @@ impl InputTextData {
                         } else {
                             cursor_move = CursorMove::Right;
                         }
-                    } else if win.ctx.key_state(KeyCode::KeyC).pressed() {
+                    } else if ui.ctx.key_state(KeyCode::KeyC).pressed() {
                         let mut text = CompactString::default();
                         let mut iter = self.input.char_indices().skip(selection.0);
                         for _ in selection.0..selection.1  {
                             text.push(iter.next().unwrap().1);
                         }
-                        win.ctx.set_clipboard(&text);
+                        ui.ctx.set_clipboard(&text);
                         self.selection = Some(selection);
-                    } else if win.ctx.key_state(KeyCode::KeyX).pressed() {
+                    } else if ui.ctx.key_state(KeyCode::KeyX).pressed() {
                         let mut text = CompactString::default();
                         let mut iter = self.input.char_indices().skip(selection.0);
                         for _ in selection.0..selection.1  {
                             text.push(iter.next().unwrap().1);
                         }
-                        win.ctx.set_clipboard(&text);
+                        ui.ctx.set_clipboard(&text);
                         for i in (selection.0..selection.1).rev() {
                             let (index, _) = self.input.char_indices().skip(i).next().unwrap();
                             self.input.remove(index);
@@ -301,14 +309,14 @@ impl InputTextData {
                         self.selection = Some(selection);
                     }
                 }
-                else if win.ctx.key_state(KeyCode::Backspace).pressed() || !input_empty {
+                else if ui.ctx.key_state(KeyCode::Backspace).pressed() || !input_empty {
                     let start_count = self.input.char_indices().count();
                     for i in (selection.0..selection.1).rev() {
                         let (index, _) = self.input.char_indices().skip(i).next().unwrap();
                         self.input.remove(index);
                     }
                     let mut text_cursor_pos = selection.0;
-                    for text in win.ctx.get_input_text().1 {
+                    for text in ui.ctx.get_input_text().1 {
                         if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter &&
                             text.0 != KeyCode::Escape
                         {
@@ -332,8 +340,8 @@ impl InputTextData {
                         cursor_move = CursorMove::Right;
                     }
                     self.input_text = None;
-                } else if win.ctx.key_state(KeyCode::ArrowLeft).pressed() {
-                    if win.ctx.key_state(KeyCode::ShiftLeft).held() {
+                } else if ui.ctx.key_state(KeyCode::ArrowLeft).pressed() {
+                    if ui.ctx.key_state(KeyCode::ShiftLeft).held() {
                         if self.selection_left() {
                             if selection.0 != 0 {
                                 selection.0 -= 1;
@@ -350,8 +358,8 @@ impl InputTextData {
                     }
                     self.flags |= Self::CURSOR_VISIBLE;
                     self.cursor_timer = 0.0;
-                } else if win.ctx.key_state(KeyCode::ArrowRight).pressed() {
-                    if win.ctx.key_state(KeyCode::ShiftLeft).held() {
+                } else if ui.ctx.key_state(KeyCode::ArrowRight).pressed() {
+                    if ui.ctx.key_state(KeyCode::ShiftLeft).held() {
                         if self.selection_left() {
                             if selection.0 != selection.1 {
                                 selection.0 += 1;
@@ -378,14 +386,14 @@ impl InputTextData {
                 let start_pos = text_cursor_pos;
                 let start_count = self.input.char_indices().count();
                 if text_cursor_pos != 0 {
-                    if win.ctx.key_state(KeyCode::Backspace).pressed() {
+                    if ui.ctx.key_state(KeyCode::Backspace).pressed() {
                         let remove = text_cursor_pos - 1;
                         let (index, _) = self.input.char_indices().skip(remove).next().unwrap();
                         self.input.remove(index);
                         self.input_text = None;
                         text_cursor_pos = remove;
-                    } else if win.ctx.key_state(KeyCode::ArrowLeft).pressed() {
-                        if win.ctx.key_state(KeyCode::ShiftLeft).held() {
+                    } else if ui.ctx.key_state(KeyCode::ArrowLeft).pressed() {
+                        if ui.ctx.key_state(KeyCode::ShiftLeft).held() {
                             self.selection = Some((text_cursor_pos - 1, text_cursor_pos));
                             self.flags |= Self::SELECTION_LEFT;
                         }
@@ -394,9 +402,9 @@ impl InputTextData {
                         self.flags |= Self::CURSOR_VISIBLE;
                     }
                 }
-                if win.ctx.key_state(KeyCode::ControlLeft).held()
+                if ui.ctx.key_state(KeyCode::ControlLeft).held()
                 {
-                    if win.ctx.key_state(KeyCode::KeyV).pressed() && let Some(text) = win.ctx.get_clipboard() {
+                    if ui.ctx.key_state(KeyCode::KeyV).pressed() && let Some(text) = ui.ctx.get_clipboard() {
                         self.input.insert_str(
                             self.input
                                 .char_indices()
@@ -410,7 +418,7 @@ impl InputTextData {
                         self.input_text = None;
                     }
                 } else {
-                    let input = win.ctx.get_input_text();
+                    let input = ui.ctx.get_input_text();
                     if input.0 != 0 {
                         for text in input.1 {
                             if text.0 != KeyCode::Backspace &&
@@ -432,9 +440,9 @@ impl InputTextData {
                     }
                 }
                 let end_count = self.input.char_indices().count();
-                if win.ctx.key_state(KeyCode::ArrowRight).pressed() {
+                if ui.ctx.key_state(KeyCode::ArrowRight).pressed() {
                     text_cursor_pos = (text_cursor_pos + 1).clamp(0, end_count);
-                    if text_cursor_pos != end_count && win.ctx.key_state(KeyCode::ShiftLeft).held() {
+                    if text_cursor_pos != end_count && ui.ctx.key_state(KeyCode::ShiftLeft).held() {
                         self.selection  = Some((text_cursor_pos - 1, text_cursor_pos));
                     }
                     self.cursor_timer = 0.0;
@@ -453,21 +461,21 @@ impl InputTextData {
             self.flags &= !Self::CURSOR_VISIBLE;
             self.input_text_offset_x = 0.0;
         }
-        let item_pad_inner = win.style.item_pad_inner();
+        let item_pad_inner = ui.style.item_pad_inner();
         let has_format_error = self.has_format_error();
         let text_col =
             if self.active() || self.parent_active() {
-                win.style.active_text_col()
+                ui.style.active_text_col()
             } else if reaction.hovered() {
-                win.style.focused_text_col()
+                ui.style.focused_text_col()
             } else {
-                win.style.inactive_text_col()
+                ui.style.inactive_text_col()
             };
         self.input_text.get_or_insert_with(|| {
             self.formatted_row_offsets.offsets.clear();
             if self.input.is_empty() {
-                let text = self.input_text_formatted.insert(win.text_renderer
-                    .render_and_collect_offsets(&[text_segment(&self.empty_input_prompt, win.style.font_regular())],
+                let text = self.input_text_formatted.insert(ui.text_renderer
+                    .render_and_collect_offsets(&[text_segment(&self.empty_input_prompt, ui.style.font_regular())],
                     false, 0.0,
                     0.0,
                     |offset| {
@@ -484,8 +492,8 @@ impl InputTextData {
                     fmt.clear();
                     write!(fmt, "Format error: ! {}", e).ok();
                 }
-                let text = self.input_text_formatted.insert(win.text_renderer
-                    .render_and_collect_offsets(&[text_segment(&fmt, win.style.font_regular())],
+                let text = self.input_text_formatted.insert(ui.text_renderer
+                    .render_and_collect_offsets(&[text_segment(&fmt, ui.style.font_regular())],
                     false, 0.0,
                     0.0,
                     |offset| {
@@ -496,9 +504,9 @@ impl InputTextData {
             }
             self.input_offsets.clear();
             self.row_offsets.offsets.clear();
-            let text = win.text_renderer
+            let text = ui.text_renderer
                 .render_and_collect_offsets(
-                    &[text_segment(&self.input, win.style.font_regular())],
+                    &[text_segment(&self.input, ui.style.font_regular())],
                     false, 0.0,
                     0.0,
                     |offset| {
@@ -515,9 +523,9 @@ impl InputTextData {
                 .as_ref()
                 .unwrap_unchecked()
         };
-        let text_height = win.style.calc_font_height(win.text_renderer);
+        let text_height = ui.style.calc_font_height(ui.text_renderer);
         let offset = reaction.offset;
-        let input_width = win.style.calc_text_width(input_text);
+        let input_width = ui.style.calc_text_width(input_text);
         let width =
             if self.center_text() {
                 (input_width + item_pad_inner.x + item_pad_inner.x).max(self.width)
@@ -528,11 +536,11 @@ impl InputTextData {
             Default::default(),
             vec2(
                 width,
-                win.style.calc_text_box_height(input_text).max(
-                    win.style.calc_text_box_height_from_text_height(text_height)
+                ui.style.calc_text_box_height(input_text).max(
+                    ui.style.calc_text_box_height_from_text_height(text_height)
                 )
             ),
-            win.style.rounding(),
+            ui.style.rounding(),
         );
         let input_text_offset = offset + item_pad_inner;
         let text_cursor_pos_x = self.input_offsets
@@ -571,16 +579,22 @@ impl InputTextData {
                 }
             }
         }
-        if win.ctx.cursor_moved() {
+        if ui.ctx.cursor_moved() {
             self.flags |= Self::MOUSE_VISIBLE;
         }
         let mouse_visible = self.mouse_visible();
-        let override_cursor = win.style.override_cursor();
-        let mouse_left_state = win.ctx.mouse_button_state(MouseButton::Left);
+        let override_cursor = ui.style.override_cursor();
+        let mouse_left_state = ui.ctx.mouse_button_state(MouseButton::Left);
         let rel_cursor_pos = reaction.rel_cursor_position;
         if override_cursor {
-            win.ctx.set_cursor_hide(!mouse_visible);
+            if self.active() {
+                ui.ctx.set_cursor_hide(!mouse_visible);
+            } else if self.active_last_frame() {
+                ui.ctx.set_cursor_hide(false);
+            }
         }
+        self.flags &= !Self::ACTIVE_LAST_FRAME;
+        or_flag!(self.flags, Self::ACTIVE_LAST_FRAME, self.active());
         if mouse_visible && self.cursor_enabled() {
             let input_min = offset.x + item_pad_inner.x - self.input_text_offset_x;
             let input_min_max = (input_min, input_min + input_width);
@@ -588,7 +602,7 @@ impl InputTextData {
                 (offset.x, offset.x + input_rect.max.x - item_pad_inner.x);
             let mut select_all = false;
             if reaction.clicked() {
-                if self.double_click_timer < win.style.double_click_secs() {
+                if self.double_click_timer < ui.style.double_click_secs() {
                     select_all = true;
                 } else {
                     self.text_cursor_pos =
@@ -644,12 +658,12 @@ impl InputTextData {
                                 let offset = self.calc_cursor_offset(font_scale, selection.0).x;
                                 if offset < 0.0 {
                                     self.input_text_offset_x -=
-                                        win.style.input_text_selection_scroll_speed() *
-                                        win.ctx.delta_time_secs_f32();
+                                        ui.style.input_text_selection_scroll_speed() *
+                                        ui.ctx.delta_time_secs_f32();
                                 } else if offset > input_text_max_x {
                                     self.input_text_offset_x +=
-                                        win.style.input_text_selection_scroll_speed() *
-                                        win.ctx.delta_time_secs_f32();
+                                        ui.style.input_text_selection_scroll_speed() *
+                                        ui.ctx.delta_time_secs_f32();
                                 }
                                 if selection.1 < selection.0 {
                                     let tmp = selection.0;
@@ -662,12 +676,12 @@ impl InputTextData {
                                 let offset = self.calc_cursor_offset(font_scale, selection.1).x;
                                 if offset > input_text_max_x {
                                     self.input_text_offset_x +=
-                                        win.style.input_text_selection_scroll_speed() *
-                                        win.ctx.delta_time_secs_f32();
+                                        ui.style.input_text_selection_scroll_speed() *
+                                        ui.ctx.delta_time_secs_f32();
                                 } else if offset < 0.0 {
                                     self.input_text_offset_x -=
-                                        win.style.input_text_selection_scroll_speed() *
-                                        win.ctx.delta_time_secs_f32();
+                                        ui.style.input_text_selection_scroll_speed() *
+                                        ui.ctx.delta_time_secs_f32();
                                 }
                                 if selection.1 < selection.0 {
                                     let tmp = selection.0;
@@ -688,7 +702,7 @@ impl InputTextData {
                             self.text_cursor_pos = text_cursor_pos;
                         }
                         if override_cursor {
-                            win.ctx.set_cursor(CursorIcon::Text);
+                            ui.ctx.set_cursor(CursorIcon::Text);
                         }
                     }
                 }
@@ -700,24 +714,25 @@ impl InputTextData {
             or_flag!(self.flags, Self::CLICKED_LAST_FRAME, mouse_left_state.pressed());
         }
         let deactivate =
-            win.ctx.key_state(KeyCode::Enter).pressed() |
-            win.ctx.key_state(KeyCode::Escape).pressed();
+            ui.ctx.key_state(KeyCode::Enter).pressed() ||
+            ui.ctx.key_state(KeyCode::Escape).pressed() ||
+            (mouse_left_state.pressed() && !reaction.held() && !reaction.hovered());
         if deactivate {
             self.flags &= !Self::ACTIVE;
             self.flags |= Self::MOUSE_VISIBLE;
         }
         if self.center_text() {
             let text_width =  if self.active() {
-                win.style.calc_text_width(self.input_text.as_ref().unwrap())
+                ui.style.calc_text_width(self.input_text.as_ref().unwrap())
             } else {
-                win.style.calc_text_width(self.input_text_formatted.as_ref().unwrap())
+                ui.style.calc_text_width(self.input_text_formatted.as_ref().unwrap())
             };
             if text_width + item_pad_inner.x + item_pad_inner.x > self.width {
                 self.input_text_offset_x = 0.0;
-                input_rect.max.x = win.style.calc_text_box_width_from_text_width(text_width);
+                input_rect.max.x = ui.style.calc_text_box_width_from_text_width(text_width);
             } else {
                 self.input_text_offset_x =
-                    text_width * 0.5 - self.width * 0.5 + win.style.item_pad_inner().x;
+                    text_width * 0.5 - self.width * 0.5 + ui.style.item_pad_inner().x;
             }
         }
         if !self.active() {
@@ -738,35 +753,51 @@ impl InputTextData {
             self.flags &= !Self::SELECTION_LEFT;
         }
         let reaction_id = reaction.id();
-        let mut visuals = win.style.interact_visuals(reaction);
+        let mut visuals = ui.style.interact_visuals(reaction);
         if self.active() {
-            visuals.bg_strokes[0].col = win.style.input_text_active_stroke_col();
+            visuals.bg_strokes[0].col = ui.style.input_text_active_stroke_col();
             visuals.bg_stroke_idx = 0;
         }
-        let fill_col = win.style.input_text_bg_col();
-        let selection_bg_col = win.style.input_text_selection_bg_col();
+        let fill_col =
+            if self.has_bg_col_override() {
+                self.bg_col_override
+            } else {
+                ui.style.input_text_bg_col()
+            };
+        let selection_bg_col = ui.style.input_text_selection_bg_col();
         let cursor_off = offset + item_pad_inner + self.calc_cursor_offset(font_scale, self.text_cursor_pos);
         let cursor_size =
             if self.cursor_visible() {
-                vec2(win.style.input_text_cursor_width(), text_height)
+                vec2(ui.style.input_text_cursor_width(), text_height)
             } else {
                 Default::default()
             };
-        win.paint(Box::new(move |painter, current_height| {
-            let height_half = current_height * 0.5;
+        ui.paint(move |painter, row| {
+            let off = vec2(0.0, row.height_halved - input_rect.max.y * 0.5);
             painter
                 .rect(
                     reaction_id,
                     input_rect,
-                    offset + vec2(0.0, height_half - input_rect.max.y * 0.5),
+                    offset + off,
                     fill_col,
                     visuals.bg_strokes.clone(),
                     visuals.bg_stroke_idx
                 )
-                .flat_rect(reaction_id, selection_rect.0, selection_rect.1, selection_bg_col)
-                .flat_rect(reaction_id, cursor_off, cursor_off + cursor_size, text_col);
-        }));
-        self.double_click_timer += win.ctx.delta_time_secs_f32();
+                .flat_rect(
+                    reaction_id,
+                    selection_rect.0, selection_rect.1,
+                    off,
+                    selection_bg_col
+                )
+                .flat_rect(
+                    reaction_id,
+                    cursor_off,
+                    cursor_off + cursor_size,
+                    off,
+                    text_col,
+                );
+        });
+        self.double_click_timer += ui.ctx.delta_time_secs_f32();
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
         or_flag!(self.flags, Self::ACTIVATED_LAST_FRAME, !active_this_frame && self.active());
         let text = Text::new(
@@ -777,7 +808,7 @@ impl InputTextData {
             },
             GlobalVec::with_len(1, if self.active() { self.row_offsets.clone() } else { self.formatted_row_offsets.clone() }),
             if self.input.is_empty() {
-                win.style.input_text_empty_text_color()
+                ui.style.input_text_empty_text_color()
             } else {
                 text_col
             },
@@ -787,9 +818,9 @@ impl InputTextData {
             0,
             1,
             Some(BoundingRect::from_min_max(offset + item_pad_inner, offset + input_rect.max - item_pad_inner)),
-            None
+            None,
         );
-        win.add_text(text);
+        ui.add_text(text);
         input_rect.max
     }
 
@@ -860,6 +891,11 @@ impl InputTextData {
     fn parent_active(&self) -> bool {
         self.flags & Self::PARENT_ACTIVE == Self::PARENT_ACTIVE
     }
+
+    #[inline(always)]
+    fn active_last_frame(&self) -> bool {
+        self.flags & Self::ACTIVE_LAST_FRAME == Self::ACTIVE_LAST_FRAME
+    }
 }
 
 pub struct InputText<Style> {
@@ -908,6 +944,7 @@ impl<Style> InputText<Style>
     const SELECT_ALL_LAST_FRAME: u32 = 0x1000;
     const ACTIVATED_LAST_FRAME: u32 = 0x2000;
     const PARENT_ACTIVE: u32 = 0x4000;
+    const ACTIVE_LAST_FRAME: u32 = 0x8000;
 
     const SELECTION_INDICES: [u32; 6] = [
         3, 1, 0,
@@ -1148,6 +1185,11 @@ impl<Style> InputText<Style>
     #[inline(always)]
     fn parent_active(&self) -> bool {
         self.flags & Self::PARENT_ACTIVE == Self::PARENT_ACTIVE
+    }
+
+    #[inline(always)]
+    fn active_last_frame(&self) -> bool {
+        self.flags & Self::ACTIVE_LAST_FRAME == Self::ACTIVE_LAST_FRAME
     }
 
     #[inline(always)]
@@ -1629,10 +1671,16 @@ impl<Style> Widget<Style> for InputText<Style>
         let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         let rel_cursor_pos = cursor_pos - window_pos;
         let error_margin = style.cursor_error_margin();
-        if !other_widget_active {
-            if override_cursor {
+        if override_cursor {
+            if self.active() {
                 ctx.set_cursor_hide(!mouse_visible);
+            } else if self.active_last_frame() {
+                ctx.set_cursor_hide(false);
             }
+        }
+        self.flags &= !Self::ACTIVE_LAST_FRAME;
+        or_flag!(self.flags, Self::ACTIVE_LAST_FRAME, self.active());
+        if !other_widget_active {
             if mouse_visible && self.cursor_enabled() {
                 let cursor_in_input = BoundingRect::from_position_size(
                     offset - vec2(error_margin, 0.0),

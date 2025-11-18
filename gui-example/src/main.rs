@@ -12,11 +12,11 @@ use nox::{
 use nox_gui::{geom::{shapes::circle, *}, *};
 
 pub fn my_widget_show<Style: WindowStyle>(
-    win: &mut UiCtx<Style>,
+    ui: &mut UiCtx<Style>,
     value: &mut bool,
 ) -> Reaction {
-    let size = win.standard_interact_height() * vec2(2.0, 1.0);
-    let reaction = win.reaction_from_value(
+    let size = ui.standard_interact_height() * vec2(2.0, 1.0);
+    let reaction = ui.reaction_from_value(
         value, size,
     );
     let offset = reaction.offset;
@@ -25,11 +25,11 @@ pub fn my_widget_show<Style: WindowStyle>(
     }
     let radius = size.y * 0.5;
     let rect = shapes::rect(Default::default(), size, radius);
-    let visuals = win.style.interact_visuals(&reaction);
+    let visuals = ui.style.interact_visuals(&reaction);
     let mut center = offset + vec2(radius, radius);
-    let t = win.animate_bool(reaction.id(), *value);
+    let t = ui.animate_bool(reaction.id(), *value);
     center.x += lerp(0.0, size.x - radius * 2.0, t);
-    win
+    ui
         .painter()
         .rect(reaction.id(), rect, offset, visuals.fill_col, visuals.bg_strokes, visuals.bg_stroke_idx)
         .circle(
@@ -48,7 +48,7 @@ pub fn my_widget<Style: WindowStyle>(
     value: &mut bool
 ) -> impl FnMut(&mut UiCtx<Style>) -> Reaction
 {
-    |win: &mut UiCtx<Style>| my_widget_show(win, value)
+    |ui: &mut UiCtx<Style>| my_widget_show(ui, value)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -209,71 +209,73 @@ impl<'a> Interface for Example<'a> {
     ) -> Result<(), Error> {
         self.workspace.begin(ctx)?;
         self.workspace.window(ctx, 0, "Widgets", [0.0, 0.0], [0.5, 0.5],
-            |win| {
-                win.checkbox(&mut self.resizeable, "Resizeable");
-                win.checkbox(&mut self.clamp_width, "Clamp width");
-                win.checkbox(&mut self.clamp_height, "Clamp height");
-                win.resizeable(self.resizeable);
-                win.clamp_height(self.clamp_height);
-                win.clamp_width(self.clamp_width);
-                win.collapsing("Show/hide widgets", |win| {
+            |ui| {
+                ui.checkbox(&mut self.resizeable, "Resizeable");
+                ui.checkbox(&mut self.clamp_width, "Clamp width");
+                ui.checkbox(&mut self.clamp_height, "Clamp height");
+                ui.resizeable(self.resizeable);
+                ui.clamp_height(self.clamp_height);
+                ui.clamp_width(self.clamp_width);
+                ui.collapsing("Show/hide widgets", |ui| {
 
-                    win.checkbox(&mut self.show_other_window, "Show other window");
-                    win.end_row();
+                    ui.checkbox(&mut self.show_other_window, "Show other window");
+                    ui.end_row();
 
-                    win.color_picker(&mut self.color);
-                    win.tag("Color picker");
-                    win.end_row();
+                    ui.color_picker(&mut self.color);
+                    ui.tag("Color picker");
+                    ui.end_row();
 
                     let image_source = image_source!("ferris.png");
-                    let image_size = win.standard_interact_height() * 2.0;
-                    win.image(&image_source, geom::vec2(image_size, image_size));
-                    if win.button("Print \"hello\"").clicked() {
+                    let image_size = ui.standard_interact_height() * 2.0;
+                    ui.image(&image_source, geom::vec2(image_size, image_size));
+                    if ui.button("Print \"hello\"").clicked() {
                         println!("hello");
                     }
-                    win.end_row();
+                    ui.drag_value_test(&mut self.drag_value_int, i8::MIN, i8::MAX, 500.0, 0.01, None);
+                    ui.input_text_test(&mut self.input_text, "Input text here", 0.2, None);
+                    ui.end_row();
 
-                    win.radio_button(&mut self.radio_value, MyEnum::First, "First");
-                    win.radio_button(&mut self.radio_value, MyEnum::Second, "Second");
-                    win.radio_button(&mut self.radio_value, MyEnum::Third, "Third");
+                    ui.radio_button(&mut self.radio_value, MyEnum::First, "First");
+                    ui.radio_button(&mut self.radio_value, MyEnum::Second, "Second");
+                    ui.radio_button(&mut self.radio_value, MyEnum::Third, "Third");
 
-                    win.end_row();
+                    ui.end_row();
 
-                    win.selectable_tag(&mut self.radio_value, MyEnum::First, "First");
-                    win.selectable_tag(&mut self.radio_value, MyEnum::Second, "Second");
-                    win.selectable_tag(&mut self.radio_value, MyEnum::Third, "Third");
+                    ui.selectable_tag(&mut self.radio_value, MyEnum::First, "First");
+                    ui.selectable_tag(&mut self.radio_value, MyEnum::Second, "Second");
+                    ui.selectable_tag(&mut self.radio_value, MyEnum::Third, "Third");
 
-                    win.end_row();
+                    ui.end_row();
 
-                    win.combo_box("My Combo", |builder| {
+                    ui.combo_box("My Combo", |builder| {
                         builder.item(&mut self.radio_value, MyEnum::First, "First");
                         builder.item(&mut self.radio_value, MyEnum::Second, "Second");
                         builder.item(&mut self.radio_value, MyEnum::Third, "Third");
                     });
 
-                    win.end_row();
+                    ui.end_row();
 
-                    win.input_text(
+                    ui.input_text(
                         &mut self.input_text,
                         "Input text here",
                         None,
                     );
 
-                    win.collapsing("Sliders", |win| {
-                        win.collapsing("Float", |win| {
-                            win.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
-                            win.tag("Float 1");
-                            win.end_row();
-                            win.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
-                            win.tag("Float 2");
+                    ui.collapsing("Sliders", |ui| {
+                        ui.collapsing("Float", |ui| {
+                            ui.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
+                            ui.tag("Float 1");
+                            ui.end_row();
+                            ui.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
+                            ui.tag("Float 2");
                         });
-                        win.collapsing("u8", |win| {
-                            //win.tag("Int");
-                            win.slider(&mut self.slider_value_uint, 0, 10, 20.0);
+                        ui.collapsing("u8", |ui| {
+                            //ui.tag("Int");
+                            ui.slider(&mut self.slider_value_uint, 0, 10, 20.0);
                         });
                     });
                   
-                    win.drag_value(
+                    ui.drag_value(
                         &mut self.drag_value_int,
                         i8::MIN,
                         i8::MAX,
@@ -281,22 +283,21 @@ impl<'a> Interface for Example<'a> {
                         0.01,
                         None,
                     );
-                    win.tag("Drag value");
-                    win.end_row();
-                    win.add(my_widget(&mut self.show_other_window))
+                    ui.tag("Drag value");
+                    ui.end_row();
+                    ui.add(my_widget(&mut self.show_other_window))
                         .hover_text("Simple custom widget");
                 });
-                win.input_text_test(&mut self.input_text, "Input text here", 0.2, None);
             }
         )?;
         if self.show_other_window {
             let mut fmt = String::new();
             <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / ctx.delta_time_secs_f32())).unwrap();
             self.workspace.window(ctx, 1, fmt.as_str(), [0.25, 0.25], [0.4, 0.4], 
-                |win| {
+                |ui| {
                     let mut fmt = String::new();
                     <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("Hue: {}°", (self.tag_color.hue * 180.0 / core::f32::consts::PI).round())).unwrap();
-                    win.text("Sample text", true, |builder| {
+                    ui.text("Sample text", true, |builder| {
                         builder
                             .with_text(None, |builder| {
                                 builder

@@ -352,6 +352,12 @@ struct ReactionData {
     drop_fn: Box<dyn FnMut(Option<NonNull<u8>>)>,
 }
 
+#[derive(Clone, Copy)]
+pub struct Row {
+    pub height: f32,
+    pub height_halved: f32,
+}
+
 pub struct Window<Style>
 {
     main_rect: Rect,
@@ -639,8 +645,7 @@ impl<Style> Window<Style>
         while !self.active_reactions.insert(id) {
             id.0.0 += 0.01;
         }
-        let reaction = self.reactions.entry(id).or_insert_with(|| Reaction::new(id));
-        reaction
+        self.reactions.entry(id).or_insert_with(|| Reaction::new(id))
     }
 
     #[inline(always)]
@@ -687,6 +692,18 @@ impl<Style> Window<Style>
         Some(entry.ptr?.cast())
     }
 
+    #[inline(always)]
+    pub unsafe fn tmp_data<T>(&self, count: usize) -> Option<NonNull<T>> {
+        let alloc =
+            if self.using_reaction_data_alloc_1() {
+                &self.reaction_data_alloc_1
+            } else {
+                &self.reaction_data_alloc_0
+            };
+        unsafe {
+            alloc.allocate_uninit(count)
+        }
+    }
     #[inline(always)]
     pub fn get_collapsing_headers(
         &mut self,
@@ -2050,7 +2067,7 @@ pub struct UiCtx<'a, 'b, Style>
     current_row_widgets: GlobalVec<(WidgetId, Vec2)>,
     current_row_text: GlobalVec<RowText>,
     current_row_reactions: GlobalVec<(ReactionId, Vec2)>,
-    current_row_paints: Option<GlobalVec<Box<dyn FnMut(&mut Painter, f32)>>>,
+    current_row_paints: Option<GlobalVec<NonNull<dyn FnMut(&mut Painter, Row)>>>,
     collapsing_header_id: Hashable<f64>,
     image_loader: &'a mut ImageLoader,
     widget_off: Vec2,
@@ -2172,6 +2189,11 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
     }
 
     #[inline(always)]
+    pub fn window_moving(&self) -> bool {
+        self.window.held() || self.window.any_resize()
+    }
+
+    #[inline(always)]
     pub fn font_height(&mut self) -> f32 {
         self.style.calc_font_height(self.text_renderer)
     }
@@ -2182,25 +2204,33 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         self.style.calc_text_box_height_from_text_height(
             font_height
         )
-    } 
+    }
+
+    pub fn paint(&mut self, f: impl FnMut(&mut Painter, Row) + 'static) {
+        unsafe {
+            if let Some(ptr) = self.window.tmp_data(1) {
+                ptr.write(f);
+                self.current_row_paints
+                    .as_mut()
+                    .unwrap()
+                    .push(ptr);
+            }
+        }
+    }
 
     #[inline(always)]
     pub fn painter<'c>(&'c mut self) -> Painter<'c> {
-        Painter::new(&mut self.window.painter_storage, self.style, self.text_renderer)
+        Painter::new(
+            &mut self.window.painter_storage,
+            self.style,
+            self.text_renderer,
+        )
     }
 
     #[inline(always)]
     pub fn add_text(&mut self, text: Text) {
         let index = self.window.add_text(text);
         self.current_row_text.push(RowText::new(index, 0, 0, None));
-    }
-
-    #[inline(always)]
-    pub fn paint(&mut self, f: Box<dyn FnMut(&mut Painter, f32)>) {
-        self.current_row_paints
-            .as_mut()
-            .unwrap()
-            .push(f);
     }
 
     #[inline(always)]
@@ -2331,28 +2361,34 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         self.beam_height += height_add;
         self.widget_off.y += height_add;
         let current_height = self.current_height;
-        let current_height_half = current_height * 0.5;
+        let current_height_halved = current_height * 0.5;
         let widgets = unsafe {
             self.window.widgets.as_mut().unwrap_unchecked()
         };
         for &(widget, size) in &self.current_row_widgets {
             let (_, widget) = widgets.get_widget_mut(widget);
             let offset = widget.get_offset();
-            widget.set_offset(vec2(offset.x, offset.y + current_height_half - size.y * 0.5));
+            widget.set_offset(vec2(offset.x, offset.y + current_height_halved - size.y * 0.5));
         }
         for &(reaction, size) in &self.current_row_reactions {
             let reaction = self.window.reactions.get_mut(&reaction).unwrap();
             let offset = reaction.offset;
-            reaction.offset = vec2(offset.x, offset.y + current_height_half - size.y * 0.5);
+            reaction.offset = vec2(offset.x, offset.y + current_height_halved - size.y * 0.5);
         }
         let mut paints = self.current_row_paints.take().unwrap();
         let mut painter = self.painter();
+        let row = Row {
+            height: current_height,
+            height_halved: current_height_halved,
+        };
         for paint in &mut paints {
-            paint(&mut painter, current_height);
+            unsafe {
+                paint.as_mut()(&mut painter, row);
+            }
         }
         paints.clear();
         self.current_row_paints = Some(paints);
-        let current_height_half_scaled = current_height_half / self.style.font_scale();
+        let current_height_halved_scaled = current_height_halved / self.style.font_scale();
         for &RowText { index, row_index, selectable_index, widget_id } in &self.current_row_text {
             let text = &mut self.window.get_text_mut(index);
             let row_height_halved = text.text.row_height * 0.5;
@@ -2360,10 +2396,13 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
             for &offset in &row.offsets {
                 if let Some(offset) = text.text.get_offset_mut(offset) {
                     let mut vec: Vec2 = offset.offset.into();
-                    vec.y += current_height_half_scaled - row_height_halved;
+                    vec.y += current_height_halved_scaled - row_height_halved;
                     offset.offset = vec.into();
                 }
             }
+            let delta_off = current_height_halved - row_height_halved * self.style.font_scale();
+            text.bounds.min.y += delta_off;
+            text.bounds.max.y += delta_off;
             if let Some(id) = widget_id {
                 self.window.edit_selectable_text(id, |text| {
                     let text = &mut text.as_text_mut()[selectable_index];
@@ -2375,7 +2414,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                     {
                         let row_height_halved = *row_height * 0.5;
                         for offset in offsets {
-                            offset.offset[1] += current_height_half_scaled - row_height_halved;
+                            offset.offset[1] += current_height_halved_scaled - row_height_halved;
                         }
                     }
                 });
@@ -2502,17 +2541,17 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_reactions.push((id, size));
         let rounding = self.style.rounding();
-        self.paint(Box::new(move |painter, current_height| {
+        self.paint(move |painter, row| {
             painter
                 .rect(
                     id,
                     rect(Default::default(), size, rounding),
-                    offset + vec2(0.0, current_height * 0.5 - size.y * 0.5),
+                    offset + vec2(0.0, row.height_halved - size.y * 0.5),
                     visuals.fill_col,
                     visuals.bg_strokes.clone(),
-                    visuals.bg_stroke_idx
+                    visuals.bg_stroke_idx,
                 );
-        }));
+        });
         let entry = self.window.reactions
             .get_mut(&id)
             .unwrap();
@@ -2552,8 +2591,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
             *value = !*value;
         }
         let value = *value;
-        self.paint(Box::new(move |painter, current_height| {
-            let height_half = current_height * 0.5;
+        self.paint(move |painter, row| {
             let checkbox_col =
                 if value {
                     fg_col
@@ -2564,7 +2602,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                 .rect(
                     id,
                     rect(Default::default(), rect_size, rounding),
-                    offset + vec2(0.0, height_half - size.y * 0.5),
+                    offset + vec2(0.0, row.height_halved - size.y * 0.5),
                     visuals.fill_col,
                     visuals.bg_strokes.clone(),
                     visuals.bg_stroke_idx
@@ -2572,12 +2610,12 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                 .checkmark(
                     id,
                     1.0,
-                    offset + rect_size * 0.5 + vec2(0.0, height_half - rect_size.y * 0.5),
+                    offset + rect_size * 0.5 + vec2(0.0, row.height_halved - rect_size.y * 0.5),
                     checkbox_col,
                     Default::default(),
                     0
                 );
-        }));
+        });
         let entry = self.window.reactions
             .get_mut(&id)
             .unwrap();
@@ -2707,7 +2745,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         let mut reaction = self.window.activate_reaction(value).clone();
         reaction.offset = offset;
         let id = reaction.id();
-        let window_moving = self.window.held() || self.window.any_resize();
+        let window_moving = self.window_moving();
         let data = self.window.reaction_data_or_insert_with(id, || {
             InputTextData::new()
         });
@@ -2735,7 +2773,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         }
         self.current_row_reactions.push((id, reaction.size));
         self.current_height = self.current_height.max(reaction.size.y);
-        self.widget_off.x += reaction.offset.x + self.style.item_pad_outer().x;
+        self.widget_off.x += reaction.size.x + self.style.item_pad_outer().x;
         let res = self.window.reactions.get_mut(&id).unwrap();
         *res = reaction;
         res
@@ -2767,6 +2805,46 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
         self.current_row_widgets.push((id, size));
+    }
+
+    #[inline(always)]
+    pub fn drag_value_test<T: Sliderable>(
+        &mut self,
+        value: &mut T,
+        min: T,
+        max: T,
+        drag_speed: f32,
+        min_width: f32,
+        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
+    ) -> &mut Reaction
+    {
+        let offset = self.widget_off;
+        let mut reaction = self.window.activate_reaction(value).clone();
+        reaction.offset = offset;
+        let id = reaction.id();
+        let window_moving = self.window_moving();
+        let data = self.window.reaction_data_or_insert_with(id, || {
+            DragValueData::new()
+        });
+        if let Some(mut data) = data {
+            let drag_value = unsafe {
+                data.as_mut()
+            };
+            drag_value.set_input_params(
+                self.style,
+                min_width,
+                format_input,
+                false,
+            );
+            drag_value.calc_value(self.style, value, min, max, drag_speed);
+            reaction.size = drag_value.update(self, &mut reaction, window_moving);
+        }
+        self.current_row_reactions.push((id, reaction.size));
+        self.current_height = self.current_height.max(reaction.size.y);
+        self.widget_off.x += reaction.size.x + self.style.item_pad_outer().x;
+        let res = self.window.reactions.get_mut(&id).unwrap();
+        *res = reaction;
+        res
     }
 
     #[inline(always)]
@@ -2802,8 +2880,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
             *value = radio_value.clone();
         }
         let value = value.clone();
-        self.paint(Box::new(move |painter, current_height| {
-            let height_half = current_height * 0.5;
+        self.paint(move |painter, row| {
             let size_y_half = size.y * 0.5;
             let radio_col =
                 if value == radio_value {
@@ -2817,7 +2894,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                     id,
                     circle(vec2(radius, radius), radius),
                     16,
-                    offset + vec2(0.0, height_half - size_y_half),
+                    offset + vec2(0.0, row.height_halved - size_y_half),
                     visuals.fill_col,
                     visuals.bg_strokes.clone(),
                     visuals.bg_stroke_idx
@@ -2826,12 +2903,12 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                     id,
                     circle(vec2(radius, radius), inner_radius),
                     16,
-                    offset + vec2(0.0, height_half - size_y_half),
+                    offset + vec2(0.0, row.height_halved - size_y_half),
                     radio_col,
                     Default::default(),
                     0
                 );
-        }));
+        });
         let entry = self.window.reactions
             .get_mut(&id)
             .unwrap();
@@ -2870,7 +2947,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         let rounding = self.style.rounding();
         let value = value.clone();
         let selected_col = self.style.selection_col();
-        self.paint(Box::new(move |painter, current_height| {
+        self.paint(move |painter, row| {
             let fill_col =
                 if value == target {
                     selected_col
@@ -2881,12 +2958,12 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
                 .rect(
                     id,
                     rect(Default::default(), size, rounding),
-                    offset + vec2(0.0, current_height * 0.5 - size.y * 0.5),
+                    offset + vec2(0.0, row.height_halved - size.y * 0.5),
                     fill_col,
                     visuals.bg_strokes.clone(),
                     visuals.bg_stroke_idx
                 );
-        }));
+        });
         let entry = self.window.reactions
             .get_mut(&id)
             .unwrap();

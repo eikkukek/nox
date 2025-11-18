@@ -1,6 +1,10 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use nox::mem::vec_types::{ArrayVec, GlobalVec, Vector};
+use nox::{
+    mem::{
+        vec_types::{ArrayVec, GlobalVec, Vector},
+    }
+};
 
 use nox_geom::{
     shapes::*,
@@ -83,7 +87,7 @@ impl ShapeParams {
             fill_col,
             shape_vertex_range: None,
             strokes: strokes.mapped(|&v| (v, None)),
-            stroke_idx
+            stroke_idx,
         }
     }
 
@@ -128,11 +132,12 @@ impl ShapeParams {
     fn new_flat_rect(
         min: Vec2,
         max: Vec2,
+        offset: Vec2,
         fill_col: ColorSRGBA,
     ) -> Self {
         Self {
             shape: Shape::FlatRect(min, max),
-            offset: Default::default(),
+            offset,
             fill_col,
             shape_vertex_range: None,
             strokes: Default::default(),
@@ -229,7 +234,9 @@ impl PainterStorage {
         self.active_reactions.clear();
     }
 
-    pub fn triangulate(&mut self) -> (&[Vertex], &[u32])
+    pub fn triangulate(
+        &mut self,
+    ) -> (&[Vertex], &[u32])
     {
         let mut requires_triangulation = false;
         for &id in &self.active_reactions {
@@ -245,7 +252,6 @@ impl PainterStorage {
         let indices_usize = &mut self.indices_usize;
         let indices = &mut self.indices;
         if requires_triangulation {
-            println!("here");
             vertices.clear();
             indices_usize.clear();
             indices.clear();
@@ -336,6 +342,7 @@ impl PainterStorage {
                     };
                     reaction_shapes
                         .rendered_shapes.push(shape.clone());
+                    self.shapes.push((*id, shape.clone()));
                     points.clear();
                     helper_points.clear();
                 }
@@ -343,6 +350,7 @@ impl PainterStorage {
             indices.append_map(&indices_usize, |&v| v as u32);
         }
         for (_, params) in self.shapes.iter().cloned() {
+            let offset = params.offset;
             if let Shape::FlatRect(min, max) = params.shape {
                 if min.x != max.x && min.y != max.y {
                     if let Some(range) = params.shape_vertex_range {
@@ -350,25 +358,29 @@ impl PainterStorage {
                         let start = range.start();
                         let mut vertex = &mut vertices[start];
                         vertex.pos = min;
+                        vertex.offset = offset;
                         vertex.color = color;
                         vertex = &mut vertices[start + 1];
                         vertex.pos = vec2(min.x, max.y);
+                        vertex.offset = offset;
                         vertex.color = color;
                         vertex = &mut vertices[start + 2];
                         vertex.pos = max;
+                        vertex.offset = offset;
                         vertex.color = color;
                         vertex = &mut vertices[start + 3];
                         vertex.pos = vec2(max.x, min.y);
+                        vertex.offset = offset;
                         vertex.color = color;
                     }
                 } else {
                     hide_vertices(vertices, params.shape_vertex_range);
                 }
             } else {
-                set_vertex_params(vertices, params.shape_vertex_range, params.offset, params.fill_col);
+                set_vertex_params(vertices, params.shape_vertex_range, offset, params.fill_col);
                 for (i, stroke) in params.strokes.iter().enumerate() {
                     if i as u32 == params.stroke_idx {
-                        set_vertex_params(vertices, stroke.1, params.offset, stroke.0.col);
+                        set_vertex_params(vertices, stroke.1, offset, stroke.0.col);
                     } else {
                         hide_vertices(vertices, stroke.1);
                     }
@@ -405,6 +417,7 @@ impl<'a> Painter<'a>
         }
     }
 
+    #[inline(always)]
     pub fn rect(
         &mut self,
         reaction_id: ReactionId,
@@ -418,11 +431,18 @@ impl<'a> Painter<'a>
         let entry = self.storage.reaction_shapes
             .entry(reaction_id)
             .or_default();
-        let shape_params = ShapeParams::new_rect(rect, offset, fill_col, strokes, stroke_idx);
+        let shape_params = ShapeParams::new_rect(
+            rect,
+            offset,
+            fill_col,
+            strokes,
+            stroke_idx,
+        );
         entry.shapes.push(shape_params);
         self
     }
 
+    #[inline(always)]
     pub fn circle(
         &mut self,
         reaction_id: ReactionId,
@@ -437,11 +457,19 @@ impl<'a> Painter<'a>
         let entry = self.storage.reaction_shapes
             .entry(reaction_id)
             .or_default();
-        let shape_params = ShapeParams::new_circle(circle, steps, offset, fill_col, strokes, stroke_idx);
+        let shape_params = ShapeParams::new_circle(
+            circle,
+            steps,
+            offset,
+            fill_col,
+            strokes,
+            stroke_idx,
+        );
         entry.shapes.push(shape_params);
         self
     }
 
+    #[inline(always)]
     pub fn checkmark(
         &mut self,
         reaction_id: ReactionId,
@@ -455,23 +483,36 @@ impl<'a> Painter<'a>
         let entry = self.storage.reaction_shapes
             .entry(reaction_id)
             .or_default();
-        let shape_params = ShapeParams::new_checkmark(scale, offset, fill_col, strokes, stroke_idx);
+        let shape_params = ShapeParams::new_checkmark(
+            scale,
+            offset,
+            fill_col,
+            strokes,
+            stroke_idx,
+        );
         entry.shapes.push(shape_params);
         self
     }
 
+    #[inline(always)]
     pub fn flat_rect(
         &mut self,
         reaction_id: ReactionId,
         min: Vec2,
         max: Vec2,
+        offset: Vec2,
         fill_col: ColorSRGBA
     ) -> &mut Self {
         self.storage.active_reactions.insert(reaction_id);
         let entry = self.storage.reaction_shapes
             .entry(reaction_id)
             .or_default();
-        let shape_params = ShapeParams::new_flat_rect(min, max, fill_col);
+        let shape_params = ShapeParams::new_flat_rect(
+            min,
+            max,
+            offset,
+            fill_col,
+        );
         entry.shapes.push(shape_params);
         self
     }
