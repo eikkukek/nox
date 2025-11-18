@@ -11,9 +11,9 @@ pub struct ReactionId(pub Hashable<f64>);
 
 #[derive(Clone)]
 pub struct Reaction {
-    pub offset: Vec2,
-    pub size: Vec2,
-    pub rel_cursor_position: Vec2,
+    pub(crate) offset: Vec2,
+    pub(crate) size: Vec2,
+    rel_cursor_pos: Vec2,
     cursor: Option<CursorIcon>,
     id: ReactionId,
     hover_text: Option<CompactString>,
@@ -35,7 +35,7 @@ impl Reaction {
         Self {
             offset: Default::default(),
             size: Default::default(),
-            rel_cursor_position: Default::default(),
+            rel_cursor_pos: Default::default(),
             cursor: None,
             id,
             hover_text: None,
@@ -79,8 +79,22 @@ impl Reaction {
     }
 
     #[inline(always)]
-    pub fn enable_animated_bool(&mut self) {
+    pub(crate) fn enable_animated_bool(&mut self) {
         self.flags |= Self::ANIMATED_BOOL;
+    }
+
+    #[inline(always)]
+    pub fn size(&self) -> Vec2 {
+        self.size
+    }
+
+    #[inline(always)]
+    pub fn offset(&self) -> Vec2 {
+        self.offset
+    }
+
+    pub fn rel_cursor_pos(&self) -> Vec2 {
+        self.rel_cursor_pos
     }
 
     #[inline(always)]
@@ -103,12 +117,17 @@ impl Reaction {
         hover_blocked: bool,
     ) -> Option<CompactString>
     {
-        self.flags &= !(Self::CLICKED | Self::HOVERED | Self::ANIMATED_BOOL | Self::HOVER_BLOCKED);
+        self.flags &= !(
+            Self::CLICKED |
+            Self::HOVERED |
+            Self::ANIMATED_BOOL |
+            Self::HOVER_BLOCKED
+        );
         or_flag!(self.flags, Self::HOVER_BLOCKED, hover_blocked);
-        self.rel_cursor_position = cursor_pos - window_pos;
+        self.rel_cursor_pos = cursor_pos - window_pos;
         let cursor_in_self = BoundingRect::from_position_size(
             self.offset, self.size
-        ).is_point_inside(self.rel_cursor_position);
+        ).is_point_inside(self.rel_cursor_pos);
         let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if self.held() {
             if mouse_left_state.released() {

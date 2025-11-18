@@ -19,7 +19,7 @@ pub fn my_widget_show<Style: WindowStyle>(
     let reaction = ui.reaction_from_value(
         value, size,
     );
-    let offset = reaction.offset;
+    let offset = reaction.offset();
     if reaction.clicked() {
         *value = !*value;
     }

@@ -585,7 +585,7 @@ impl InputTextData {
         let mouse_visible = self.mouse_visible();
         let override_cursor = ui.style.override_cursor();
         let mouse_left_state = ui.ctx.mouse_button_state(MouseButton::Left);
-        let rel_cursor_pos = reaction.rel_cursor_position;
+        let rel_cursor_pos = reaction.rel_cursor_pos);
         if override_cursor {
             if self.active() {
                 ui.ctx.set_cursor_hide(!mouse_visible);
