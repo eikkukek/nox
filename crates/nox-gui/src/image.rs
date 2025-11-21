@@ -215,7 +215,7 @@ impl ImageData {
     pub fn transfer_commands(
         &mut self,
         transfer_commands: &mut TransferCommands,
-        window_semaphore: Option<(TimelineSemaphoreId, u64)>,
+        window_semaphore: (TimelineSemaphoreId, u64),
         sampler: SamplerId,
         texture_pipeline_layout: PipelineLayoutId,
         tmp_alloc: &impl Allocator,
@@ -223,89 +223,87 @@ impl ImageData {
         if self.source_reset() {
             let source = self.source.as_ref().unwrap();
             transfer_commands.edit_resources(|mut cmd, r| {
-                if let Some((semaphore, value)) = window_semaphore {
-                    if r.wait_for_semaphores(
-                            &[(semaphore, value)],
-                            u64::MAX,
-                            tmp_alloc,
-                        )?
-                    {
-                        self.flags &= !Self::SOURCE_RESET;
-                        if let Some(image) = self.image {
-                            r.destroy_image(image);
-                        }
-                        let image = match source {
-                            ImageSourceInternal::Err => {
-                                let bytes =
-                                [
-                                    255, 0, 203, 255,
-                                    0, 0, 0, 255,
-                                    0, 0, 0, 255,
-                                    255, 0, 203, 255,
-                                ];
-                                let &mut image = self.image.insert(r.create_image(ResourceBinderImage::DefaultBinder, |builder| {
-                                    builder
-                                        .with_dimensions(Dimensions::new(2, 2, 1))
-                                        .with_format(self.render_format, false)
-                                        .with_usage(ImageUsage::Sampled)
-                                        .with_usage(ImageUsage::TransferDst);
-                                })?);
-                                cmd.copy_data_to_image(
-                                    r, image, &bytes, None, None, None
-                                )?;
-                                image
-                            }
-                            ImageSourceInternal::Path(buf) => {
-                                let (bytes, dim) = (buf.as_bytes(), buf.dimensions());
-                                let &mut image = self.image.insert(r.create_image(ResourceBinderImage::DefaultBinder, |builder| {
-                                    builder
-                                        .with_dimensions(Dimensions::new(dim.0, dim.1, 1))
-                                        .with_format(self.render_format, false)
-                                        .with_usage(ImageUsage::Sampled)
-                                        .with_usage(ImageUsage::TransferDst)
-                                        .with_usage(ImageUsage::TransferSrc)
-                                        .with_mip_levels((dim.0.max(dim.1) as f32).log2().floor() as u32);
-                                })?);
-                                cmd.copy_data_to_image(
-                                    r, image, bytes, None, None, None
-                                )?;
-                                cmd.gen_mip_maps(r, image, Filter::Linear)?;
-                                image
-                            },
-                            &ImageSourceInternal::Id(t) => {
-                                *self.image.insert(t)
-                            }
-                        };
-                        let resource =
-                            if let Some(resource) = self.shader_resource {
-                                resource
-                            } else {
-                                r.allocate_shader_resources(
-                                    &[
-                                        ShaderResourceInfo::new(texture_pipeline_layout, 0)
-                                    ],
-                                    |_, id| { self.shader_resource = Some(id); },
-                                    tmp_alloc,
-                                )?;
-                                self.shader_resource.unwrap()
-                            };
-                        r.update_shader_resources(
-                            &[
-                                ShaderResourceImageUpdate {
-                                    resource,
-                                    binding: 0,
-                                    starting_index: 0,
-                                    infos: &[
-                                        ShaderResourceImageInfo {
-                                            sampler,
-                                            image_source: (image, None),
-                                            storage_image: false,
-                                        }
-                                    ]
-                                }
-                            ], &[], &[], tmp_alloc
-                        )?;
+                if r.wait_for_semaphores(
+                        &[(window_semaphore.0, window_semaphore.1)],
+                        u64::MAX,
+                        tmp_alloc,
+                    )?
+                {
+                    self.flags &= !Self::SOURCE_RESET;
+                    if let Some(image) = self.image {
+                        r.destroy_image(image);
                     }
+                    let image = match source {
+                        ImageSourceInternal::Err => {
+                            let bytes =
+                            [
+                                255, 0, 203, 255,
+                                0, 0, 0, 255,
+                                0, 0, 0, 255,
+                                255, 0, 203, 255,
+                            ];
+                            let &mut image = self.image.insert(r.create_image(ResourceBinderImage::DefaultBinder, |builder| {
+                                builder
+                                    .with_dimensions(Dimensions::new(2, 2, 1))
+                                    .with_format(self.render_format, false)
+                                    .with_usage(ImageUsage::Sampled)
+                                    .with_usage(ImageUsage::TransferDst);
+                            })?);
+                            cmd.copy_data_to_image(
+                                r, image, &bytes, None, None, None
+                            )?;
+                            image
+                        }
+                        ImageSourceInternal::Path(buf) => {
+                            let (bytes, dim) = (buf.as_bytes(), buf.dimensions());
+                            let &mut image = self.image.insert(r.create_image(ResourceBinderImage::DefaultBinder, |builder| {
+                                builder
+                                    .with_dimensions(Dimensions::new(dim.0, dim.1, 1))
+                                    .with_format(self.render_format, false)
+                                    .with_usage(ImageUsage::Sampled)
+                                    .with_usage(ImageUsage::TransferDst)
+                                    .with_usage(ImageUsage::TransferSrc)
+                                    .with_mip_levels((dim.0.max(dim.1) as f32).log2().floor() as u32);
+                            })?);
+                            cmd.copy_data_to_image(
+                                r, image, bytes, None, None, None
+                            )?;
+                            cmd.gen_mip_maps(r, image, Filter::Linear)?;
+                            image
+                        },
+                        &ImageSourceInternal::Id(t) => {
+                            *self.image.insert(t)
+                        }
+                    };
+                    let resource =
+                        if let Some(resource) = self.shader_resource {
+                            resource
+                        } else {
+                            r.allocate_shader_resources(
+                                &[
+                                    ShaderResourceInfo::new(texture_pipeline_layout, 0)
+                                ],
+                                |_, id| { self.shader_resource = Some(id); },
+                                tmp_alloc,
+                            )?;
+                            self.shader_resource.unwrap()
+                        };
+                    r.update_shader_resources(
+                        &[
+                            ShaderResourceImageUpdate {
+                                resource,
+                                binding: 0,
+                                starting_index: 0,
+                                infos: &[
+                                    ShaderResourceImageInfo {
+                                        sampler,
+                                        image_source: (image, None),
+                                        storage_image: false,
+                                    }
+                                ]
+                            }
+                        ], &[], &[], tmp_alloc
+                    )?;
                 }
                 Ok(())
             })?;

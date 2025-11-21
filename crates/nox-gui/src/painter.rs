@@ -294,7 +294,7 @@ impl PainterStorage {
             active_reactions: FxHashSet::default(),
             prev_active_reactions: Default::default(),
             shapes: Default::default(),
-            stack: ArenaAlloc::new(1 << 20).unwrap(),
+            stack: ArenaAlloc::new(1 << 16).unwrap(),
             flags: 0,
         }
     } 
@@ -505,7 +505,7 @@ impl PainterStorage {
     pub fn transfer_commands(
         &mut self,
         transfer_commands: &mut TransferCommands,
-        window_semaphore: Option<(TimelineSemaphoreId, u64)>,
+        window_semaphore: (TimelineSemaphoreId, u64),
         sampler: SamplerId,
         texture_pipeline_layout: PipelineLayoutId,
         tmp_alloc: &impl Allocator,
@@ -614,8 +614,6 @@ impl PainterStorage {
         }
         Ok(())
     }
-
-
 }
 
 pub struct Painter<'a> {

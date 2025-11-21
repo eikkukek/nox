@@ -2007,7 +2007,7 @@ impl<Style> Window<Style>
         }
         self.painter_storage.transfer_commands(
             transfer_commands,
-            self.signal_semaphore.map(|v| (v, self.signal_semaphore_value)),
+            self.signal_semaphore.map(|v| (v, self.signal_semaphore_value)).unwrap(),
             sampler,
             texture_pipeline_layout,
             tmp_alloc
