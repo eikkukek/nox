@@ -193,7 +193,7 @@ pub fn calc_bounds(
 }
 
 #[inline(always)]
-pub fn load_rgba_image(path: &std::path::Path) -> Result<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>, ::image::ImageError> {
+pub fn load_rgba_image(path: &str) -> Result<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>, ::image::ImageError> {
     let image = ::image::ImageReader::open(path)?.decode()?;
     Ok(image.to_rgba8())
 }

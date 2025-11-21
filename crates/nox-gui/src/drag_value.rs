@@ -179,7 +179,7 @@ impl DragValueData {
         }
         self.last_cursor_x = rel_cursor_pos.x;
         if cursor_in_rect || self.held()  {
-            reaction.set_cursor(CursorIcon::ColResize);
+            reaction.cursor(CursorIcon::ColResize);
         }
         self.input_text.update(ui, reaction, window_moving)
     }

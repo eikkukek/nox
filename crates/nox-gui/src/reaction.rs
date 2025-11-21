@@ -49,6 +49,11 @@ impl Reaction {
     }
 
     #[inline(always)]
+    pub fn take_hover_text(&mut self) -> Option<CompactString> {
+        self.hover_text.take()
+    }
+
+    #[inline(always)]
     pub fn id(&self) -> ReactionId {
         self.id
     }
@@ -93,12 +98,13 @@ impl Reaction {
         self.offset
     }
 
+    #[inline(always)]
     pub fn rel_cursor_pos(&self) -> Vec2 {
         self.rel_cursor_pos
     }
 
     #[inline(always)]
-    pub fn set_cursor(&mut self, cursor: CursorIcon) {
+    pub fn cursor(&mut self, cursor: CursorIcon) {
         self.cursor = Some(cursor);
     }
 

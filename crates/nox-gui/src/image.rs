@@ -1,12 +1,19 @@
-use std::rc::Rc;
+use std::{
+    fs,
+    rc::Rc,
+};
 
-use core::marker::PhantomData;
+use core::{
+    ptr::NonNull,
+    slice,
+};
+
+use rustc_hash::FxHashMap;
 
 use ::image::EncodableLayout;
 
 use nox::{
-    alloc::arena_alloc::ArenaGuard,
-    mem::vec_types::GlobalVec,
+    mem::Allocator,
     *
 };
 
@@ -14,17 +21,54 @@ use nox_geom::*;
 
 use crate::*;
 
-#[derive(Clone, PartialEq, Eq)]
-pub enum ImageSource {
-    Path(std::path::PathBuf),
-    Texture(ImageId),
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum ImageSource<'a> {
+    Path(&'a str),
+    Id(ImageId),
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub enum ImageSourceOwned {
+    Path(CompactString),
+    Id(ImageId),
+}
+
+#[derive(Clone, Copy)]
+pub enum ImageSourceUnsafe {
+    Path(NonNull<u8>, usize),
+    Id(ImageId),
+}
+
+impl ImageSourceUnsafe {
+
+    pub unsafe fn as_image_source<'a>(&'a self) -> ImageSource<'a> {
+        match self {
+            &Self::Path(data, len) => unsafe {
+                ImageSource::Path(str
+                    ::from_utf8(slice::from_raw_parts(data.as_ptr(), len))
+                    .unwrap_or_default()
+                )
+            },
+            &Self::Id(id) => ImageSource::Id(id)
+        }
+    }
+}
+
+impl<'a> From<ImageSource<'a>> for ImageSourceOwned {
+
+    fn from(value: ImageSource<'a>) -> Self {
+        match value {
+            ImageSource::Path(p) => Self::Path(p.into()),
+            ImageSource::Id(id) => Self::Id(id),
+        }
+    }
 }
 
 #[derive(Clone, Eq)]
 pub enum ImageSourceInternal {
     Err,
-    Path(Rc< ::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>>),
-    Texture(ImageId),
+    Path(Rc<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>>),
+    Id(ImageId),
 }
 
 impl PartialEq for ImageSourceInternal {
@@ -36,13 +80,13 @@ impl PartialEq for ImageSourceInternal {
                 match other {
                     Self::Err => false,
                     Self::Path(other) => Rc::ptr_eq(this, other),
-                    Self::Texture(_) => false,
+                    Self::Id(_) => false,
                 },
-            Self::Texture(this) => 
+            Self::Id(this) => 
                 match other {
                     Self::Err => false,
                     Self::Path(_) => false,
-                    Self::Texture(other) => this == other,
+                    Self::Id(other) => this == other,
                 }
 
         }
@@ -52,51 +96,97 @@ impl PartialEq for ImageSourceInternal {
 #[macro_export]
 macro_rules! image_source {
     ($path:tt) => {
-        ImageSource::Path(<std::path::PathBuf as std::str::FromStr>::from_str($path).unwrap_or_default())
+        ImageSource::Path(&$path)
     };
     ($texture:expr) => {
-        ImageSource::Texture($texture)
+        ImageSource::Id($texture)
     };
 }
 
-pub struct Image<Style> {
+
+pub struct ImageLoader {
+    images: FxHashMap<CompactString, (std::time::SystemTime, Rc<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>>)>,
+}
+
+impl ImageLoader {
+
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            images: FxHashMap::default(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn load_image(&mut self, path: &str) -> ImageSourceInternal {
+        if let Some((last_modified, source)) = self.images.get_mut(path) {
+            if let Ok(meta) = fs::metadata(path) {
+                if let Ok(modified) = meta.modified() {
+                    if modified == *last_modified {
+                        return ImageSourceInternal::Path(source.clone())
+                    }
+                    if let Ok(new_img) = load_rgba_image(path) {
+                        *source = Rc::new(new_img);
+                        *last_modified = modified;
+                    } else {
+                        return ImageSourceInternal::Err
+                    }
+                }
+            }
+            return ImageSourceInternal::Err
+        }
+        if let Ok(meta) = fs::metadata(path) {
+            if let Ok(modified) = meta.modified() {
+                if let Ok(new_img) = load_rgba_image(path) {
+                    return ImageSourceInternal::Path(
+                        self.images
+                            .entry(path.into())
+                            .or_insert((modified, Rc::new(new_img)))
+                            .1
+                            .clone()
+                    )
+                }
+            }
+        }
+        ImageSourceInternal::Err
+    }
+}
+
+#[derive(Default)]
+pub struct ImageData {
     offset: Vec2,
     size: Vec2,
     source: Option<ImageSourceInternal>,
     render_format: ColorFormat,
     image: Option<ImageId>,
-    shader_resource: core::cell::RefCell<Option<ShaderResourceId>>,
+    shader_resource: Option<ShaderResourceId>,
     flags: u32,
-    _marker: PhantomData<Style>
 }
 
-impl<Style> Image<Style> {
+impl ImageData {
 
     const SOURCE_RESET: u32 = 0x1;
 
     #[inline(always)]
-    pub fn new() -> Self {
-        Self {
-            offset: Default::default(),
-            size: Default::default(),
-            source: None,
-            render_format: Default::default(),
-            image: None,
-            shader_resource: core::cell::RefCell::new(None),
-            flags: 0,
-            _marker: PhantomData,
-        }
+    pub fn requires_transfer_commands(&self) -> bool {
+        self.flags & Self::SOURCE_RESET == Self::SOURCE_RESET
+    }
+
+    #[inline(always)]
+    fn source_reset(&self) -> bool {
+        self.flags & Self::SOURCE_RESET == Self::SOURCE_RESET
     }
 
     #[inline(always)]
     pub fn update_source(
         &mut self,
-        source: &ImageSourceInternal,
+        source: ImageSourceInternal,
+        offset: Vec2,
         size: Vec2,
     )
     {
         if let Some(cur) = &self.source {
-            if cur != source {
+            if cur != &source {
                 self.flags |= Self::SOURCE_RESET;
                 self.source = Some(source.clone());
             }
@@ -104,83 +194,15 @@ impl<Style> Image<Style> {
             self.flags |= Self::SOURCE_RESET;
             self.source = Some(source.clone());
         }
+        self.offset = offset;
         self.size = size;
     }
 
-    #[inline(always)]
-    fn source_reset(&self) -> bool {
-        self.flags & Self::SOURCE_RESET == Self::SOURCE_RESET
-    }
-}
-
-impl<Style> Widget<Style> for Image<Style>
-    where 
-        Style: WindowStyle,
-{
-
-    fn get_offset(&self) -> Vec2 {
-        self.offset
-    }
-
-    fn set_offset(&mut self, offset: Vec2) {
-        self.offset = offset;
-    }
-
-    fn set_scroll_offset(&mut self, offset: Vec2) {
-        self.offset += offset;
-    }
-
-    fn calc_size(
-        &mut self,
-        _style: &Style,
-        _text_renderer: &mut TextRenderer,
-    ) -> Vec2 {
-        self.size
-    }
-
-    fn status<'a>(
-        &'a self,
-        _ctx: &WindowCtx,
-        _style: &Style,
-        _window_pos: Vec2,
-        _cursor_pos: Vec2,
-    ) -> WidgetStatus<'a> {
-        WidgetStatus::Inactive
-    }
-
-    fn update(
-        &mut self,
-        _ctx: &mut WindowCtx,
-        _style: &Style,
-        _text_renderer: &mut TextRenderer,
-        _window_size: Vec2,
-        _window_pos: Vec2,
-        _content_offset: Vec2,
-        _cursor_pos: Vec2,
-        _delta_cursor_pos: Vec2,
-        _cursor_in_this_window: bool,
-        _other_widget_active: bool,
-        _cursor_in_other_widget: bool,
-        _window_moving: bool,
-        _hover_blocked: bool,
-        _collect_text: &mut dyn FnMut(&nox_font::RenderedText, Vec2, BoundedTextInstance),
-    ) -> UpdateResult {
-        UpdateResult {
-            requires_triangulation: false,
-            requires_transfer_commands: self.source_reset(),
-            cursor_in_widget: false,
-        }
-    }
-
-    fn render(
+    pub fn render(
         &mut self,
         frame_graph: &mut dyn FrameGraph,
-        _msaa_samples: MSAA, 
         render_format: ColorFormat,
-        _resolve_mode: Option<ResolveMode>,
         add_read: &mut dyn FnMut(ReadInfo),
-        _add_signal_semaphore: &mut dyn FnMut(TimelineSemaphoreId, u64),
-        _collect_pass: &mut dyn FnMut(PassId),
     ) -> Result<(), Error> {
         self.render_format = render_format;
         if !self.source_reset() && let Some(image) = self.image {
@@ -190,84 +212,13 @@ impl<Style> Widget<Style> for Image<Style>
         Ok(())
     }
 
-    fn render_commands(
-        &self,
-        render_commands: &mut RenderCommands,
-        _style: &Style,
-        sampler: SamplerId,
-        _base_pipeline: GraphicsPipelineId,
-        _text_pipeline: GraphicsPipelineId,
-        texture_pipeline: GraphicsPipelineId,
-        texture_pipeline_layout: PipelineLayoutId,
-        _vertex_buffer: &mut RingBuf,
-        _index_buffer: &mut RingBuf,
-        window_pos: Vec2,
-        content_area: BoundingRect,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
-        tmp_alloc: &ArenaGuard,
-        _get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<Option<&dyn HoverContents<Style>>, Error> {
-        let mut shader_resource = self.shader_resource.borrow_mut();
-        if shader_resource.is_none() {
-            render_commands.edit_resources(|r| {
-                r.allocate_shader_resources(
-                    &[
-                        ShaderResourceInfo::new(texture_pipeline_layout, 0)
-                    ],
-                    |_, id| { *shader_resource = Some(id); },
-                    tmp_alloc
-                )?;
-                r.update_shader_resources(
-                    &[
-                        ShaderResourceImageUpdate {
-                            resource: shader_resource.unwrap(),
-                            binding: 0,
-                            starting_index: 0,
-                            infos: &[
-                                ShaderResourceImageInfo {
-                                    sampler,
-                                    image_source: (self.image.unwrap(), None),
-                                    storage_image: false,
-                                }
-                        ]
-                        }
-                    ], &[], &[], tmp_alloc
-                )?;
-                Ok(())
-            })?;
-        }
-        render_commands.bind_pipeline(texture_pipeline)?;
-        render_commands.bind_shader_resources(|_| {
-            shader_resource.unwrap()
-        })?;
-        let pc_vertex = calc_texture_push_constants_vertex(
-            window_pos + self.offset,
-            self.size,
-            inv_aspect_ratio,
-            unit_scale
-        );
-        let pc_fragment = base_push_constants_fragment(
-            content_area.min, content_area.max
-        );
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        render_commands.draw_bufferless(6, 1);
-        Ok(None)
-    }
-
-    fn transfer_commands(
+    pub fn transfer_commands(
         &mut self,
         transfer_commands: &mut TransferCommands,
         window_semaphore: Option<(TimelineSemaphoreId, u64)>,
         sampler: SamplerId,
         texture_pipeline_layout: PipelineLayoutId,
-        tmp_alloc: &ArenaGuard,
+        tmp_alloc: &impl Allocator,
     ) -> Result<(), Error> {
         if self.source_reset() {
             let source = self.source.as_ref().unwrap();
@@ -321,23 +272,22 @@ impl<Style> Widget<Style> for Image<Style>
                                 cmd.gen_mip_maps(r, image, Filter::Linear)?;
                                 image
                             },
-                            &ImageSourceInternal::Texture(t) => {
+                            &ImageSourceInternal::Id(t) => {
                                 *self.image.insert(t)
                             }
                         };
-                        let mut shader_resource = self.shader_resource.borrow_mut();
                         let resource =
-                            if let Some(resource) = *shader_resource {
+                            if let Some(resource) = self.shader_resource {
                                 resource
                             } else {
                                 r.allocate_shader_resources(
                                     &[
                                         ShaderResourceInfo::new(texture_pipeline_layout, 0)
                                     ],
-                                    |_, id| { *shader_resource = Some(id); },
+                                    |_, id| { self.shader_resource = Some(id); },
                                     tmp_alloc,
                                 )?;
-                                shader_resource.unwrap()
+                                self.shader_resource.unwrap()
                             };
                         r.update_shader_resources(
                             &[
@@ -363,25 +313,75 @@ impl<Style> Widget<Style> for Image<Style>
         Ok(())
     }
 
-    fn triangulate(
+    pub fn render_commands(
         &mut self,
-        _points: &mut GlobalVec<[f32; 2]>,
-        _helper_points: &mut GlobalVec<[f32; 2]>,
-        _tri: &mut dyn FnMut(&[[f32; 2]]) -> Option<VertexRange>,
-    ) {}
+        render_commands: &mut RenderCommands,
+        sampler: SamplerId,
+        texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
+        content_off: Vec2,
+        content_area: BoundingRect,
+        inv_aspect_ratio: f32,
+        unit_scale: f32,
+        tmp_alloc: &impl Allocator,
+    ) -> Result<(), Error> {
+        if self.shader_resource.is_none() {
+            render_commands.edit_resources(|r| {
+                r.allocate_shader_resources(
+                    &[
+                        ShaderResourceInfo::new(texture_pipeline_layout, 0)
+                    ],
+                    |_, id| { self.shader_resource = Some(id); },
+                    tmp_alloc
+                )?;
+                r.update_shader_resources(
+                    &[
+                        ShaderResourceImageUpdate {
+                            resource: self.shader_resource.unwrap(),
+                            binding: 0,
+                            starting_index: 0,
+                            infos: &[
+                                ShaderResourceImageInfo {
+                                    sampler,
+                                    image_source: (self.image.unwrap(), None),
+                                    storage_image: false,
+                                }
+                        ]
+                        }
+                    ], &[], &[], tmp_alloc
+                )?;
+                Ok(())
+            })?;
+        }
+        render_commands.bind_pipeline(texture_pipeline)?;
+        render_commands.bind_shader_resources(|_| {
+            self.shader_resource.unwrap()
+        })?;
+        let pc_vertex = calc_texture_push_constants_vertex(
+            content_off + self.offset,
+            self.size,
+            inv_aspect_ratio,
+            unit_scale
+        );
+        let pc_fragment = base_push_constants_fragment(
+            content_area.min, content_area.max
+        );
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
+        })?;
+        render_commands.draw_bufferless(6, 1);
+        Ok(())
+    }
 
-    fn set_vertex_params(
+    pub fn hide(
         &mut self,
-        _style: &Style,
-        _vertices: &mut [Vertex],
-    ) {}
-
-    fn hide(
-        &mut self,
-        _vertices: &mut [Vertex],
         window_semaphore: (TimelineSemaphoreId, u64),
         global_resources: &mut GlobalResources,
-        tmp_alloc: &ArenaGuard,
+        tmp_alloc: &impl Allocator,
     ) -> Result<(), Error> {
         if let Some(resource) = self.shader_resource.take() {
             if global_resources.wait_for_semaphores(

@@ -18,8 +18,9 @@ mod hover_window;
 mod drop_down;
 mod scroll_bar;
 pub mod image;
-mod window;
+mod on_top_contents;
 mod painter;
+mod window;
 mod reaction;
 mod workspace;
 
@@ -38,6 +39,7 @@ pub use hover_window::*;
 pub use drop_down::*;
 pub use window::*;
 pub use workspace::*;
+pub use on_top_contents::*;
 pub use painter::*;
 
 pub use nox_font as font;
@@ -49,7 +51,7 @@ pub use input_text::{InputText, InputTextData};
 pub use color_picker::ColorPicker;
 pub use selectable_tag::SelectableTag;
 pub use combo_box::{ComboBox, ComboBoxBuilder};
-pub use image::{Image, ImageSource};
+pub use image::{ImageSource, ImageLoader};
 pub use reaction::{ReactionId, Reaction};
 pub use helpers::*;
 

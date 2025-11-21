@@ -1,8 +1,3 @@
-use std::{
-    fs,
-    rc::Rc
-};
-
 use rustc_hash::FxHashMap;
 
 use nox::{
@@ -17,10 +12,7 @@ use nox_font::{text_segment, Face};
 
 use nox_geom::*;
 
-use crate::{
-    image::ImageSourceInternal,
-    *
-};
+use crate::*;
 
 pub(crate) const COLOR_PICKER_PIPELINE_HASH: &str = "nox_gui color picker";
 pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: &str = "nox_gui color picker hue";
@@ -76,54 +68,6 @@ impl CustomPipeline {
         r.destroy_shader(self.fragment_shader);
         r.destroy_pipeline_layout(self.pipeline_layout);
         r.destroy_graphics_pipeline(self.pipeline);
-    }
-}
-
-pub struct ImageLoader {
-    images: FxHashMap<std::path::PathBuf, (std::time::SystemTime, Rc<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>>)>,
-}
-
-impl ImageLoader {
-
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self {
-            images: FxHashMap::default(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn load_image(&mut self, path: &std::path::PathBuf) -> ImageSourceInternal {
-        if let Some((last_modified, source)) = self.images.get_mut(path) {
-            if let Ok(meta) = fs::metadata(path) {
-                if let Ok(modified) = meta.modified() {
-                    if modified == *last_modified {
-                        return ImageSourceInternal::Path(source.clone())
-                    }
-                    if let Ok(new_img) = load_rgba_image(path) {
-                        *source = Rc::new(new_img);
-                        *last_modified = modified;
-                    } else {
-                        return ImageSourceInternal::Err
-                    }
-                }
-            }
-            return ImageSourceInternal::Err
-        }
-        if let Ok(meta) = fs::metadata(path) {
-            if let Ok(modified) = meta.modified() {
-                if let Ok(new_img) = load_rgba_image(path) {
-                    return ImageSourceInternal::Path(
-                        self.images
-                            .entry(path.clone())
-                            .or_insert((modified, Rc::new(new_img)))
-                            .1
-                            .clone()
-                    )
-                }
-            }
-        }
-        ImageSourceInternal::Err
     }
 }
 

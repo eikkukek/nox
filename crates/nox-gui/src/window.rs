@@ -25,7 +25,7 @@ use nox_geom::{
     shapes::*, *
 };
 
-use crate::{image::ImageSourceInternal, *};
+use crate::{image::ImageSourceUnsafe, *};
 
 pub struct WindowUpdateResult {
     pub cursor_in_window: bool,
@@ -41,7 +41,6 @@ pub enum WidgetId {
     DragValue(Hashable<f64>),
     SelectabelTag(Hashable<f64>),
     ComboBox(Hashable<f64>),
-    Image(Hashable<f64>),
 }
 
 pub struct CollapsingHeader {
@@ -243,7 +242,6 @@ struct WidgetTables<Style> {
     color_pickers: FxHashMap<Hashable<f64>, (u64, ColorPicker<Style>)>,
     selectable_tags: FxHashMap<Hashable<f64>, (u64, SelectableTag<Style>)>,
     combo_boxes: FxHashMap<Hashable<f64>, (u64, ComboBox<Style>)>,
-    images: FxHashMap<Hashable<f64>, (u64, Image<Style>)>,
 }
 
 impl<Style> WidgetTables<Style>
@@ -260,7 +258,6 @@ impl<Style> WidgetTables<Style>
             color_pickers: FxHashMap::default(),
             selectable_tags: FxHashMap::default(),
             combo_boxes: FxHashMap::default(),
-            images: FxHashMap::default(),
         }
     }
 
@@ -293,10 +290,6 @@ impl<Style> WidgetTables<Style>
                 ).unwrap(),
             WidgetId::ComboBox(id) =>
                  self.combo_boxes.get(&id).map(
-                    |(l, w)| (*l, w as &dyn Widget<Style>)
-                ).unwrap(),
-            WidgetId::Image(id) =>
-                 self.images.get(&id).map(
                     |(l, w)| (*l, w as &dyn Widget<Style>)
                 ).unwrap(),
         }
@@ -335,10 +328,6 @@ impl<Style> WidgetTables<Style>
                 ).unwrap(),
             WidgetId::ComboBox(id) =>
                  self.combo_boxes.get_mut(&id).map(
-                    |(l, w)| (l, w as &mut dyn Widget<Style>)
-                ).unwrap(),
-            WidgetId::Image(id) =>
-                 self.images.get_mut(&id).map(
                     |(l, w)| (l, w as &mut dyn Widget<Style>)
                 ).unwrap(),
         }
@@ -389,8 +378,6 @@ pub struct Window<Style>
     active_collapsing_headers: FxHashSet<Hashable<f64>>,
     prev_active_collapsing_headers: GlobalVec<Hashable<f64>>,
     painter_storage: PainterStorage,
-    painter_vertex_off: u32,
-    painter_index_off: u32,
     hover_window: HoverWindow,
     scroll_bar_vertices: GlobalVec<Vertex>,
     scroll_bar_indices: GlobalVec<u32>,
@@ -497,8 +484,6 @@ impl<Style> Window<Style>
             active_collapsing_headers: Default::default(),
             prev_active_collapsing_headers: Default::default(),
             painter_storage: PainterStorage::new(),
-            painter_vertex_off: 0,
-            painter_index_off: 0,
             hover_window: HoverWindow::new(),
             scroll_bar_vertices: Default::default(),
             scroll_bar_indices: Default::default(),
@@ -616,7 +601,6 @@ impl<Style> Window<Style>
     impl_get_widget!(get_color_picker, color_pickers, ColorPicker);
     impl_get_widget!(get_selectable_tag, selectable_tags, SelectableTag);
     impl_get_widget!(get_combo_box, combo_boxes, ComboBox);
-    impl_get_widget!(get_image, images, Image);
 
     #[inline(always)]
     pub fn activate_collapsing_headers(
@@ -1014,15 +998,17 @@ impl<Style> Window<Style>
         };
         if let Some(semaphore) = self.signal_semaphore {
             renderer.edit_resources(|r| {
+                let semaphore_value = self.signal_semaphore_value;
                 for &widget in &self.prev_active_widgets {
                     let (_, widget) = widgets.get_widget_mut(widget);
                     widget.hide(
                         &mut self.vertices,
-                        (semaphore, self.signal_semaphore_value),
+                        (semaphore, semaphore_value),
                         r,
                         &tmp_alloc,
                     )?;
                 }
+                self.painter_storage.end((semaphore, semaphore_value), r, &tmp_alloc)?;
                 Ok(())
             })?;
         }
@@ -1551,6 +1537,7 @@ impl<Style> Window<Style>
         let mut norm_size = self.main_rect.max * unit_scale;
         norm_size.x /= aspect_ratio;
         norm_size *= 0.5;
+        transfer_commands_required |= self.painter_storage.requires_transfer_commands();
         Ok(WindowUpdateResult {
             cursor_in_window: cursor_in_this_window || self.any_resize(),
             requires_transfer_commands: transfer_commands_required,
@@ -1699,24 +1686,8 @@ impl<Style> Window<Style>
                 index_count: indices_usize.len() as u32 - first_index,
                 ..Default::default()
             };
-            self.painter_vertex_off = self.vertices.len() as u32;
-            self.painter_index_off = self.indices.len() as u32;
         }
-        let painter_vertex_off = self.painter_vertex_off as usize;
-        let painter_index_off = self.painter_index_off as usize;
-        let index_delta = self.indices.len() - painter_index_off;
-        self.content_draw_info.index_count -= index_delta as u32;
-        self.vertices.resize(painter_vertex_off, Default::default());
-        self.indices.resize(painter_index_off, Default::default());
-        let (painter_vertices, painter_indices_usize) = self.painter_storage.triangulate();
-        self.content_draw_info.index_count += painter_indices_usize.len() as u32;
-        let n = painter_vertex_off as u32;
-        self.indices.append_map(painter_indices_usize, |&i| n + i);
-        self.vertices.append(painter_vertices);
-        if !painter_vertices.is_empty() {
-            let range = VertexRange::new(painter_vertex_off..self.vertices.len());
-            add_offset_vertices(&mut self.vertices, range, self.widget_scroll_off);
-        }
+        self.painter_storage.triangulate();
     }
 
     pub fn render(
@@ -1752,6 +1723,7 @@ impl<Style> Window<Style>
                 add_pass,
             )?;
         }
+        self.painter_storage.render(frame_graph, render_format, add_read)?;
         Ok(())
     }
 
@@ -1859,9 +1831,13 @@ impl<Style> Window<Style>
                 offset: idx_mem.offset,
             },
         )?;
-        let pc_fragment = base_push_constants_fragment(
+        let content_bounds = BoundingRect::from_min_max(
             pos + vec2(item_pad_inner.x, self.title_bar_rect.max.y + item_pad_inner.y),
             pos + self.main_rect.max - item_pad_inner,
+        );
+        let pc_fragment = base_push_constants_fragment(
+            content_bounds.min,
+            content_bounds.max,
         );
         render_commands.push_constants(|pc| unsafe {
             if pc.stage == ShaderStage::Vertex {
@@ -1879,6 +1855,17 @@ impl<Style> Window<Style>
                 id: index_buffer.id(),
                 offset: idx_mem.offset,
             },
+        )?;
+        self.painter_storage.render_commands(
+            render_commands,
+            style, sampler,
+            pos + self.widget_scroll_off,
+            content_bounds, base_pipeline,
+            text_pipeline, texture_pipeline,
+            texture_pipeline_layout, vertex_buffer,
+            index_buffer, inv_aspect_ratio,
+            unit_scale, tmp_alloc,
+            get_custom_pipeline
         )?;
         let size = self.size();
         let mut on_top_contents = None;
@@ -2018,6 +2005,13 @@ impl<Style> Window<Style>
                 sampler, texture_pipeline_layout, tmp_alloc
             )?;
         }
+        self.painter_storage.transfer_commands(
+            transfer_commands,
+            self.signal_semaphore.map(|v| (v, self.signal_semaphore_value)),
+            sampler,
+            texture_pipeline_layout,
+            tmp_alloc
+        )?;
         self.signal_semaphore_value += 1;
         Ok(())
     }
@@ -2239,6 +2233,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
             &mut self.window.painter_storage,
             self.style,
             self.text_renderer,
+            self.image_loader,
         )
     }
 
@@ -2250,10 +2245,16 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
 
     #[inline(always)]
     pub fn add(&mut self, mut f: impl FnMut(&mut Self) -> Reaction) -> &mut Reaction {
-        let reaction = f(self);
+        let mut reaction = f(self);
         let entry = self.window.reactions
             .entry(reaction.id())
             .or_insert_with(|| reaction.clone());
+        if let Some(text) = reaction.take_hover_text() {
+            entry.hover_text(&text);
+        }
+        if let Some(cursor) = reaction.take_cursor() {
+            reaction.cursor(cursor);
+        }
         entry
     }
 
@@ -2692,6 +2693,7 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         self.current_row_widgets.push((id, size));
     }
 
+
     #[inline(always)]
     fn input_text_internal<T: core::fmt::Display + core::str::FromStr>(
         &mut self,
@@ -2699,30 +2701,44 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
         empty_input_prompt: &str,
         width: f32,
         center_text: bool,
-        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>
-    )
-    {
-        let (input_text, id) = self.window.activate_widget(
-            value,
-            |id| WidgetId::InputText(id),
-            |win, id| win.get_input_text(id)
-        );
-        let size = input_text.calc_size(self.style, self.text_renderer);
-        input_text.set_params(
-            width, None, center_text,
-            empty_input_prompt, format_input, false
-        );
-        if input_text.active() {
-            if let Some(v) = input_text.get_input() {
-                *value = v;
+        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
+    ) -> &mut Reaction {
+        let offset = self.widget_off;
+        let mut reaction = self.window.activate_reaction(value).clone();
+        reaction.offset = offset;
+        let id = reaction.id();
+        let window_moving = self.window_moving();
+        let data = self.window.reaction_data_or_insert_with(id, || {
+            InputTextData::new()
+        });
+        if let Some(mut data) = data {
+            let input_text = unsafe {
+                data.as_mut()
+            };
+            input_text.set_params(
+                width, None, center_text,
+                empty_input_prompt, format_input,
+                false,
+            );
+            if input_text.active() {
+                if let Some(v) = input_text.get_input() {
+                    *value = v;
+                }
+            } else {
+                input_text.set_input(value);
             }
-        } else {
-            input_text.set_input(value);
+            reaction.size = input_text.update(
+                self,
+                &mut reaction,
+                window_moving,
+            )
         }
-        input_text.set_offset(self.widget_off);
-        self.current_height = self.current_height.max(size.y);
-        self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_widgets.push((id, size));
+        self.current_row_reactions.push((id, reaction.size));
+        self.current_height = self.current_height.max(reaction.size.y);
+        self.widget_off.x += reaction.size.x + self.style.item_pad_outer().x;
+        let res = self.window.reactions.get_mut(&id).unwrap();
+        *res = reaction;
+        res
     }
 
     #[inline(always)]
@@ -2752,52 +2768,6 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
             value, empty_input_prompt,
             width, true, format_input
         );
-    }
-
-    #[inline(always)]
-    pub fn input_text_test<T: core::fmt::Display + core::str::FromStr>(
-        &mut self,
-        value: &mut T,
-        empty_input_prompt: &str,
-        width: f32,
-        format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
-    ) -> &mut Reaction {
-        let offset = self.widget_off;
-        let mut reaction = self.window.activate_reaction(value).clone();
-        reaction.offset = offset;
-        let id = reaction.id();
-        let window_moving = self.window_moving();
-        let data = self.window.reaction_data_or_insert_with(id, || {
-            InputTextData::new()
-        });
-        if let Some(mut data) = data {
-            let input_text = unsafe {
-                data.as_mut()
-            };
-            input_text.set_params(
-                width, None, false,
-                empty_input_prompt, format_input,
-                false,
-            );
-            if input_text.active() {
-                if let Some(v) = input_text.get_input() {
-                    *value = v;
-                }
-            } else {
-                input_text.set_input(value);
-            }
-            reaction.size = input_text.update(
-                self,
-                &mut reaction,
-                window_moving,
-            )
-        }
-        self.current_row_reactions.push((id, reaction.size));
-        self.current_height = self.current_height.max(reaction.size.y);
-        self.widget_off.x += reaction.size.x + self.style.item_pad_outer().x;
-        let res = self.window.reactions.get_mut(&id).unwrap();
-        *res = reaction;
-        res
     }
 
     #[inline(always)]
@@ -3014,28 +2984,41 @@ impl<'a, 'b, Style> UiCtx<'a, 'b, Style>
     #[inline(always)]
     pub fn image(
         &mut self,
-        source: &ImageSource,
+        label: &str,
+        source: ImageSource,
         size: Vec2,
-    ) {
-        let (image, id) = self.window.activate_widget(
-            source,
-            |id| WidgetId::Image(id),
-            |win, id| win.get_image(id)
-        );
-        let source_internal = match source {
-            ImageSource::Path(p) => {
-                self.image_loader.load_image(p)
+    ) -> &mut Reaction {
+        let reaction = self.window.activate_reaction(label);
+        let id = reaction.id();
+        let offset = self.widget_off;
+        reaction.offset = offset;
+        reaction.size = size;
+        let source = match source {
+            ImageSource::Path(p) => unsafe {
+                let len = p.len();
+                if let Some(data) = self.window.tmp_data(len) {
+                    p.as_ptr()
+                        .copy_to_nonoverlapping(data.as_ptr(), len);
+                    ImageSourceUnsafe::Path(data, len)
+                } else {
+                    ImageSourceUnsafe::Path(NonNull::dangling(), 0)
+                }
             },
-            &ImageSource::Texture(id) => {
-                ImageSourceInternal::Texture(id)
-            }
+            ImageSource::Id(id) => ImageSourceUnsafe::Id(id)
         };
-        image.update_source(&source_internal, size);
-        let size = image.calc_size(self.style, self.text_renderer);
-        image.set_offset(self.widget_off);
+        self.paint(move |painter, row| {
+            painter
+                .image(
+                    id,
+                    unsafe { source.as_image_source() },
+                    offset + vec2(0.0, row.height * 0.5 - size.y * 0.5),
+                    size
+                );
+        });
         self.current_height = self.current_height.max(size.y);
         self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_widgets.push((id, size));
+        self.current_row_reactions.push((id, size));
+        self.window.reactions.get_mut(&id).unwrap()
     }
 
     #[inline(always)]

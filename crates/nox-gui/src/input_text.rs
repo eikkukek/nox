@@ -620,7 +620,7 @@ impl InputTextData {
                 self.double_click_timer = 0.0;
             }
             if reaction.held() || reaction.hovered() {
-                reaction.set_cursor(CursorIcon::Text);
+                reaction.cursor(CursorIcon::Text);
             }
             select_all &= self.selection.is_none();
             if select_all || self.select_all() {

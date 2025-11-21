@@ -1,9 +1,17 @@
+use core::{
+    cell::UnsafeCell,
+    ptr::NonNull,
+};
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use nox::{
     mem::{
         vec_types::{ArrayVec, GlobalVec, Vector},
-    }
+        Allocator,
+    },
+    alloc::arena_alloc::ArenaAlloc,
+    *,
 };
 
 use nox_geom::{
@@ -11,7 +19,7 @@ use nox_geom::{
     *,
 };
 
-use crate::*;
+use crate::{image::{ImageSourceInternal, ImageSourceUnsafe, ImageData}, *};
 
 #[derive(Default, Clone, Copy)]
 pub struct Stroke {
@@ -151,6 +159,10 @@ struct ReactionShapes {
     shapes: GlobalVec<ShapeParams>,
     rendered_shapes: GlobalVec<ShapeParams>,
     prev_shapes: GlobalVec<(Shape, ArrayVec<f32, 4>)>,
+    images_by_path: FxHashMap<CompactString, UnsafeCell<ImageData>>,
+    images_by_id: FxHashMap<ImageId, UnsafeCell<ImageData>>,
+    prev_active_images: GlobalVec<ImageSourceUnsafe>,
+    active_images: GlobalVec<ImageSourceUnsafe>,
 }
 
 impl ReactionShapes {
@@ -165,13 +177,66 @@ impl ReactionShapes {
     }
 
     #[inline(always)]
-    fn hide(&self, vertices: &mut [Vertex]) {
+    fn active_image_iter(&self) -> impl Iterator<Item = Option<&mut ImageData>> {
+        self.active_images
+            .iter()
+            .map(|source| unsafe {
+                match source.as_image_source() {
+                    ImageSource::Path(p) => {
+                        self.images_by_path
+                            .get(p)
+                            .map(|i| &mut *i.get())
+                    },
+                    ImageSource::Id(id) => {
+                        self.images_by_id
+                            .get(&id)
+                            .map(|i| &mut *i.get())
+                    },
+                }
+            })
+    }
+
+    #[inline(always)]
+    fn prev_image_iter(&self) -> impl Iterator<Item = Option<&mut ImageData>> {
+        self.prev_active_images
+            .iter()
+            .map(|source| unsafe {
+                match source.as_image_source() {
+                    ImageSource::Path(p) => {
+                        self.images_by_path
+                            .get(p)
+                            .map(|i| &mut *i.get())
+                    },
+                    ImageSource::Id(id) => {
+                        self.images_by_id
+                            .get(&id)
+                            .map(|i| &mut *i.get())
+                    },
+                }
+            })
+    }
+
+    #[inline(always)]
+    fn hide(
+        &self,
+        vertices: &mut [Vertex],
+        window_semaphore: (TimelineSemaphoreId, u64),
+        global_resources: &mut GlobalResources,
+        tmp_alloc: &impl Allocator,
+    ) -> Result<(), Error>
+    {
         for params in &self.rendered_shapes {
             hide_vertices(vertices, params.shape_vertex_range);
             for &(_, range) in &params.strokes {
                 hide_vertices(vertices, range);
             }
         }
+        for data in self.prev_image_iter() {
+            if let Some(data) = data {
+                data.hide(window_semaphore, global_resources, tmp_alloc)?;
+            }
+        }
+        Ok(())
     }
 
     #[inline(always)]
@@ -191,6 +256,9 @@ impl ReactionShapes {
             }
         }
         self.shapes.clear();
+        self.prev_active_images.clear();
+        self.prev_active_images.append(&self.active_images);
+        self.active_images.clear();
     }
 }
 
@@ -205,9 +273,13 @@ pub struct PainterStorage {
     active_reactions: FxHashSet<ReactionId>,
     prev_active_reactions: GlobalVec<ReactionId>,
     shapes: GlobalVec<(ReactionId, ShapeParams)>,
+    stack: ArenaAlloc,
+    flags: u32,
 }
 
 impl PainterStorage {
+
+    const REQUIRES_TRANSFER_COMMANDS: u32 = 0x1;
 
     #[inline(always)]
     pub fn new() -> Self {
@@ -222,8 +294,10 @@ impl PainterStorage {
             active_reactions: FxHashSet::default(),
             prev_active_reactions: Default::default(),
             shapes: Default::default(),
+            stack: ArenaAlloc::new(1 << 20).unwrap(),
+            flags: 0,
         }
-    }
+    } 
 
     pub fn begin(&mut self) {
         self.prev_active_reactions.clear();
@@ -232,11 +306,30 @@ impl PainterStorage {
             self.prev_active_reactions.push(id);
         }
         self.active_reactions.clear();
+        self.flags &= !Self::REQUIRES_TRANSFER_COMMANDS;
     }
 
-    pub fn triangulate(
+    pub fn end(
         &mut self,
-    ) -> (&[Vertex], &[u32])
+        window_semaphore: (TimelineSemaphoreId, u64),
+        global_resources: &mut GlobalResources,
+        tmp_alloc: &impl Allocator,
+    ) -> Result<(), Error>
+    {
+        self.prev_active_reactions.retain(|v| !self.active_reactions.contains(v));
+        for reaction in &self.prev_active_reactions {
+            let shapes = self.reaction_shapes.get(reaction).unwrap();
+            shapes.hide(&mut self.vertices, window_semaphore, global_resources, tmp_alloc)?;
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn requires_transfer_commands(&self) -> bool {
+        self.flags & Self::REQUIRES_TRANSFER_COMMANDS == Self::REQUIRES_TRANSFER_COMMANDS
+    }
+
+    pub fn triangulate(&mut self)
     {
         let mut requires_triangulation = false;
         for &id in &self.active_reactions {
@@ -387,18 +480,147 @@ impl PainterStorage {
                 }
             }
         }
-        self.prev_active_reactions.retain(|v| !self.active_reactions.contains(v));
-        for reaction in &self.prev_active_reactions {
-            let shapes = self.reaction_shapes.get(reaction).unwrap();
-            shapes.hide(vertices);
-        }
         self.shapes.clear();
-        (vertices, &self.indices)
     }
+
+    pub fn render(
+        &mut self,
+        frame_graph: &mut dyn FrameGraph,
+        render_format: ColorFormat,
+        add_read: &mut dyn FnMut(ReadInfo),
+    ) -> Result<(), Error> {
+        for id in &self.active_reactions {
+            if let Some(shapes) = self.reaction_shapes.get_mut(id) {
+                for data in shapes.active_image_iter() {
+                    if let Some(data) = data {
+                        data.render(frame_graph, render_format, add_read)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(unused_variables)]
+    pub fn transfer_commands(
+        &mut self,
+        transfer_commands: &mut TransferCommands,
+        window_semaphore: Option<(TimelineSemaphoreId, u64)>,
+        sampler: SamplerId,
+        texture_pipeline_layout: PipelineLayoutId,
+        tmp_alloc: &impl Allocator,
+    ) -> Result<(), Error>
+    {
+        for id in &self.active_reactions {
+            let shapes= self.reaction_shapes
+                .get_mut(id)
+                .unwrap();
+            for data in shapes.active_image_iter() {
+                if let Some(data) = data {
+                    data.transfer_commands(
+                        transfer_commands,
+                        window_semaphore,
+                        sampler,
+                        texture_pipeline_layout,
+                        tmp_alloc
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn render_commands(
+        &mut self,
+        render_commands: &mut RenderCommands,
+        style: &impl WindowStyle,
+        sampler: SamplerId,
+        offset: Vec2,
+        bounds: BoundingRect,
+        base_pipeline: GraphicsPipelineId,
+        text_pipeline: GraphicsPipelineId,
+        texture_pipeline: GraphicsPipelineId,
+        texture_pipeline_layout: PipelineLayoutId,
+        vertex_buffer: &mut RingBuf,
+        index_buffer: &mut RingBuf,
+        inv_aspect_ratio: f32,
+        unit_scale: f32,
+        tmp_alloc: &impl Allocator,
+        get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
+    ) -> Result<(), Error>
+    {
+        let vert_count = self.vertices.len();
+        let idx_count = self.indices.len();
+        let vert_mem = unsafe {
+            vertex_buffer.allocate(render_commands, vert_count)?
+        };
+        let idx_mem = unsafe {
+            index_buffer.allocate(render_commands, idx_count)?
+        };
+        unsafe {
+            self.vertices
+                .as_ptr()
+                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count);
+            self.indices
+                .as_ptr()
+                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
+        }
+        let draw_info = DrawInfo {
+            index_count: idx_count as u32,
+            ..Default::default()
+        };
+        render_commands.bind_pipeline(base_pipeline)?;
+        let pc_vertex = push_constants_vertex(
+            offset,
+            vec2(1.0, 1.0),
+            inv_aspect_ratio,
+            unit_scale,
+        );
+        let pc_fragment = base_push_constants_fragment(
+            bounds.min,
+            bounds.max,
+        );
+        render_commands.push_constants(|pc| unsafe {
+            if pc.stage == ShaderStage::Vertex {
+                pc_vertex.as_bytes()
+            } else {
+                pc_fragment.as_bytes()
+            }
+        })?;
+        render_commands.draw_indexed(
+            draw_info,
+            [
+                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
+            ],
+            DrawBufferInfo {
+                id: index_buffer.id(),
+                offset: idx_mem.offset,
+            },
+        )?;
+        for id in &self.active_reactions {
+            let shapes = self.reaction_shapes
+                .get_mut(id)
+                .unwrap();
+            for data in shapes.active_image_iter() {
+                if let Some(data) = data {
+                    data.render_commands(
+                        render_commands, sampler,
+                        texture_pipeline, texture_pipeline_layout,
+                        offset, bounds,
+                        inv_aspect_ratio, unit_scale, tmp_alloc
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+
 }
 
 pub struct Painter<'a> {
     storage: &'a mut PainterStorage,
+    image_loader: &'a mut ImageLoader,
 }
 
 impl<'a> Painter<'a>
@@ -409,11 +631,13 @@ impl<'a> Painter<'a>
         storage: &'a mut PainterStorage,
         style: &impl WindowStyle,
         text_renderer: &mut TextRenderer,
+        image_loader: &'a mut ImageLoader,
     ) -> Self {
         storage.checkmark_points.clear();
         style.get_checkmark_points(text_renderer, &mut storage.checkmark_points);
         Self {
             storage,
+            image_loader,
         }
     }
 
@@ -514,6 +738,66 @@ impl<'a> Painter<'a>
             fill_col,
         );
         entry.shapes.push(shape_params);
+        self
+    }
+
+    #[inline(always)]
+    pub fn image(
+        &mut self,
+        reaction_id: ReactionId,
+        source: ImageSource,
+        offset: Vec2,
+        size: Vec2,
+    ) -> &mut Self {
+        self.storage.active_reactions.insert(reaction_id);
+        let entry = self.storage.reaction_shapes
+            .entry(reaction_id)
+            .or_default();
+        let source = match source {
+            ImageSource::Path(p) => unsafe {
+                let src = self.image_loader.load_image(p);
+                if let Some(data) = entry.images_by_path
+                    .get_mut(p)
+                {
+                    let data = data.get_mut();
+                    data.update_source(src, offset, size);
+                    if data.requires_transfer_commands() {
+                        self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
+                    }
+                } else
+                {
+                    let data = entry.images_by_path
+                        .entry(p.into())
+                        .or_default();
+                    let data = data.get_mut();
+                    data.update_source(src, offset, size);
+                    if data.requires_transfer_commands() {
+                        self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
+                    }
+                }
+                let len = p.len();
+                if let Some(data) = self.storage.stack.allocate_uninit(len) {
+                    p.as_ptr()
+                        .copy_to_nonoverlapping(data.as_ptr(), len);
+                    ImageSourceUnsafe::Path(data, len)
+                } else {
+                    ImageSourceUnsafe::Path(NonNull::dangling(), 0)
+                }
+            },
+            ImageSource::Id(id) => {
+                let src = ImageSourceInternal::Id(id);
+                let data = entry.images_by_id
+                    .entry(id)
+                    .or_default();
+                let data = data.get_mut();
+                data.update_source(src, offset, size);
+                if data.requires_transfer_commands() {
+                    self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
+                }
+                ImageSourceUnsafe::Id(id)
+            },
+        };
+        entry.active_images.push(source);
         self
     }
 }

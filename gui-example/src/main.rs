@@ -227,12 +227,12 @@ impl<'a> Interface for Example<'a> {
 
                     let image_source = image_source!("ferris.png");
                     let image_size = ui.standard_interact_height() * 2.0;
-                    ui.image(&image_source, geom::vec2(image_size, image_size));
+                    ui
+                        .image("ferris", image_source, geom::vec2(image_size, image_size))
+                        .hover_text("ferris!");
                     if ui.button("Print \"hello\"").clicked() {
                         println!("hello");
                     }
-                    ui.drag_value_test(&mut self.drag_value_int, i8::MIN, i8::MAX, 500.0, 0.01, None);
-                    ui.input_text_test(&mut self.input_text, "Input text here", 0.2, None);
                     ui.end_row();
 
                     ui.radio_button(&mut self.radio_value, MyEnum::First, "First");
@@ -255,28 +255,24 @@ impl<'a> Interface for Example<'a> {
 
                     ui.end_row();
 
-                    /*
                     ui.input_text(
                         &mut self.input_text,
                         "Input text here",
                         None,
                     );
-                    */
 
                     ui.collapsing("Sliders", |ui| {
-                        ui.collapsing("Float", |ui| {
+                        ui.collapsing("f32", |ui| {
                             ui.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
-                            ui.tag("Float 1");
+                            ui.tag("f32 1");
                             ui.end_row();
                             ui.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
-                            ui.tag("Float 2");
+                            ui.tag("f32 2");
                         });
                         ui.collapsing("u8", |ui| {
-                            //ui.tag("Int");
                             ui.slider(&mut self.slider_value_uint, 0, 10, 20.0);
                         });
                     });
-                  
                     ui.drag_value(
                         &mut self.drag_value_int,
                         i8::MIN,
@@ -391,7 +387,7 @@ fn main() {
         Example::new(Workspace::new(
             [("regular", font::Face::parse(&font, 0).unwrap())], 
             DefaultStyle::new("regular"),
-            0.1,
+            0.2,
             1 << 26
         ));
     Nox::new(example, &mut Default::default()).run();
