@@ -72,14 +72,51 @@ impl<'a, Surface: UiReactSurface> DerefMut for ReactionRef<'a, Surface> {
     }
 }
 
-pub struct UiCtx<'a, 'b, Surface, Style>
+enum CtxSurface<'a, 'b, Surface> {
+    Regular(Option<&'a mut Surface>),
+    Collapsing(&'b mut Option<&'a mut Surface>),
+}
+
+impl<'a, 'b, Surface> CtxSurface<'a, 'b, Surface> {
+
+    fn insert(&mut self, surface: &'a mut Surface) {
+        match self {
+            Self::Regular(s) => s.insert(surface),
+            Self::Collapsing(s) => s.insert(surface),
+        };
+    }
+}
+
+impl<'a, 'b, Surface> Deref for CtxSurface<'a, 'b, Surface> {
+
+    type Target = Option<&'a mut Surface>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Regular(s) => s,
+            Self::Collapsing(s) => s,
+        }
+    }
+}
+
+impl<'a, 'b, Surface> DerefMut for CtxSurface<'a, 'b, Surface> {
+
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Regular(s) => s,
+            Self::Collapsing(s) => s,
+        }
+    }
+}
+
+pub struct UiCtx<'a, 'b, 'c, Surface, Style>
     where
         Surface: UiReactSurface,
         Style: UiStyle,
 {
     win_ctx: &'a mut WindowCtx,
     style: &'a Style,
-    surface: Option<&'a mut Surface>,
+    surface: CtxSurface<'a, 'c, Surface>,
     text_renderer: &'a mut TextRenderer<'b>,
     current_row_text: GlobalVec<RowText>,
     current_row_reactions: GlobalVec<(ReactionId, Vec2)>,
@@ -97,7 +134,7 @@ pub struct UiCtx<'a, 'b, Surface, Style>
     flags: u32,
 }
 
-impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
+impl<'a, 'b, 'c, Surface, Style> UiCtx<'a, 'b, 'c, Surface, Style>
     where
         Surface: UiReactSurface,
         Style: UiStyle,
@@ -116,7 +153,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     ) -> Self {
         Self {
             win_ctx,
-            surface: Some(surface),
+            surface: CtxSurface::Regular(Some(surface)),
             style,
             text_renderer: text_renderer,
             current_row_text: Default::default(),
@@ -138,7 +175,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
 
     fn new_collapsing(
         label: &str,
-        surface: &'a mut Surface,
+        surface: &'a mut Option<&'a mut Surface>,
         win_ctx: &'a mut WindowCtx,
         style: &'a Style,
         text_renderer: &'a mut TextRenderer<'b>,
@@ -147,7 +184,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         input_text_width: f32,
         image_loader: &'a mut ImageLoader,
     ) -> Self {
-        let (collapsing_headers, id) = surface.ui_surface().activate_collapsing_header(label);
+        let (collapsing_headers, id) = surface.as_mut().unwrap().ui_surface_mut().activate_collapsing_header(label);
         collapsing_headers.set_label(style, text_renderer, label);
         collapsing_headers.offset = widget_off;
         let collapsed = collapsing_headers.collapsed();
@@ -160,7 +197,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
             widget_off: base_off,
             row_widget_off_x: widget_off.x + item_pad_outer.x,
             win_ctx,
-            surface: Some(surface),
+            surface: CtxSurface::Collapsing(surface),
             style,
             text_renderer: text_renderer,
             current_row_text: Default::default(),
@@ -214,16 +251,32 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     }
 
     #[inline(always)]
+    fn painter(&mut self) -> Painter {
+        Painter::new(
+            self.surface.take().unwrap().ui_surface_mut().painter_storage(),
+            self.style,
+            self.text_renderer,
+            self.image_loader
+        )
+    }
+
+    #[inline(always)]
     pub fn add_from_mut<T: ?Sized>(
         &mut self,
         value: &mut T,
-        mut f: impl FnMut(UiReactContext<Surface, Style>, &mut T, &mut Reaction)
+        mut f: impl FnMut(&mut UiReactCtx<Surface, Style>, &mut T, &mut ReactionEntry)
     ) -> ReactionRef<Surface>
     {
         let surface = self.surface.take().unwrap();
-        let reaction = surface.reaction_from_mut(value, |surface, value, reaction| f(UiReactContext { ui: self, surface }, value, reaction));
+        let reaction = surface.reaction_from_mut(value, |surface, value, reaction| {
+            f(&mut UiReactCtx { ui: self, surface }, value, reaction)
+        });
+        let size = reaction.size;
+        self.current_height = self.current_height.max(size.y);
+        self.widget_off.x += size.x + self.style.item_pad_outer().x;
+        self.current_row_reactions.push((reaction.id(), size));
         let ptr = reaction as _;
-        self.surface = Some(surface);
+        self.surface.insert(surface);
         ReactionRef { ptr, _marker: PhantomData }
     }
 
@@ -231,25 +284,16 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     pub fn add_from_ref<T: ?Sized>(
         &mut self,
         value: &T,
-        mut f: impl FnMut(UiReactContext<Surface, Style>, &T, &mut Reaction)
+        mut f: impl FnMut(&mut UiReactCtx<Surface, Style>, &T, &mut ReactionEntry)
     ) -> ReactionRef<Surface>
     {
         let surface = self.surface.take().unwrap();
-        let reaction = surface.reaction_from_ref(value, |surface, value, reaction| f(UiReactContext { ui: self, surface }, value, reaction));
+        let reaction = surface.reaction_from_ref(value, |surface, value, reaction|
+            f(&mut UiReactCtx { ui: self, surface }, value, reaction)
+        );
         let ptr = reaction as _;
-        self.surface = Some(surface);
+        self.surface.insert(surface);
         ReactionRef { ptr, _marker: PhantomData }
-    }
-
-    #[inline(always)]
-    pub fn add_text(&mut self, text: Text) {
-        let index = self.surface.as_mut().unwrap().ui_surface_mut().add_text(text);
-        self.current_row_text.push(RowText::new(index, 0, 0, None));
-    }
-
-    #[inline(always)]
-    pub fn font_height(&mut self) -> f32 {
-        self.style.calc_font_height(self.text_renderer)
     }
 
     #[inline(always)]
@@ -257,9 +301,10 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         f(self.style, self.text_renderer);
     }
 
-    pub fn collapsing<F>(&mut self, label: &str, mut f: F)
+    pub fn collapsing<F>(&'c mut self, label: &str, mut f: F)
         where 
-            F: FnMut(&mut UiCtx<Surface, Style>)
+            F: FnMut(&mut UiCtx<'a, 'b, 'c, Surface, Style>),
+            'c: 'a,
     {
         if self.is_collapsed() {
             return
@@ -269,9 +314,8 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         }
         self.widget_off.x = self.row_widget_off_x;
         let item_pad_outer = self.style.item_pad_outer();
-        let surface = self.surface.take().unwrap();
         let mut collapsing = UiCtx::new_collapsing(
-            label, surface, self.win_ctx, self.style, self.text_renderer,
+            label, &mut self.surface, self.win_ctx, self.style, self.text_renderer,
             self.widget_off, self.slider_width, self.input_text_width,
             self.image_loader,
         );
@@ -290,7 +334,6 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
                 c.set_beam_height(0.0);
             }
         }
-        self.surface = collapsing.surface.take();
         self.min_width = self.min_width.max(collapsing.widget_off.x.max(collapsing.min_width));
         self.beam_height += collapsing.widget_off.y - self.widget_off.y;
         self.widget_off.y = collapsing.widget_off.y;
@@ -313,8 +356,9 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         self.widget_off.y += height_add;
         let current_height = self.current_height;
         let current_height_halved = current_height * 0.5;
+        let surface = self.surface.as_mut().unwrap();
         for &(reaction, size) in &self.current_row_reactions {
-            if let Some(reaction) = self.surface.get_reaction_mut(reaction) {
+            if let Some(reaction) = surface.get_reaction_mut(reaction) {
                 let offset = reaction.offset;
                 reaction.offset = vec2(offset.x, offset.y + current_height_halved - size.y * 0.5);
             }
@@ -333,10 +377,12 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         paints.clear();
         self.current_row_paints = Some(paints);
         let current_height_halved_scaled = current_height_halved / self.style.font_scale();
+        let surface = self.surface.as_mut().unwrap();
         for &RowText { index, row_index, selectable_index, reaction_id } in &self.current_row_text {
-            if let Some(text) = &mut self.surface.get_text_mut(index) {
+            if let Some(text) = surface.ui_surface_mut().get_text(index) {
+                let text = &mut *text.borrow_mut();
                 let row_height_halved = text.text.row_height * 0.5;
-                let row = &text.rows[row_index - text.row_offset as usize];
+                let row = text.rows[row_index - text.row_offset as usize].clone();
                 for &offset in &row.offsets {
                     if let Some(offset) = text.text.get_offset_mut(offset) {
                         let mut vec: Vec2 = offset.offset.into();
@@ -480,25 +526,20 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         label: &str,
     ) -> ReactionRef<Surface>
     {
-        let surface = self.surface.take().unwrap();
         self.add_from_ref(label, |ui, label, reaction| {
             let id = reaction.id();
-            let offset = self.widget_off;
-            reaction.offset = offset;
-            let visuals = self.style.interact_visuals(&reaction);
-            let mut text = ui.reaction_text(id, label).clone();
-            text.offset = offset;
-            text.offset.x += self.style.item_pad_inner().x;
-            text.color = visuals.fg_stroke_col();
-            let size = self.style.calc_text_box_size(&text.text);
+            let offset = reaction.offset();
+            let visuals = ui.style().interact_visuals(&reaction);
+            let text = ui.reaction_text(id, label);
+            let mut borrow = text.borrow_mut();
+            borrow.offset = offset;
+            borrow.offset.x += self.style.item_pad_inner().x;
+            borrow.color = visuals.fg_stroke_col();
+            let size = self.style.calc_text_box_size(&borrow.text);
             reaction.size = size;
-            let text_index = surface.add_text(text);
-            self.current_row_text.push(RowText::new(text_index, 0, 0, None));
-            self.current_height = self.current_height.max(size.y);
-            self.widget_off.x += size.x + self.style.item_pad_outer().x;
-            self.current_row_reactions.push((id, size));
+            ui.render_text(text.clone());
             let rounding = self.style.rounding();
-            self.paint(move |painter, row| {
+            ui.paint(move |painter, row| {
                 painter
                     .rect(
                         id,
@@ -518,34 +559,29 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         label: &str,
     ) -> bool
     {
-        let item_pad_inner = self.style.item_pad_inner();
-        let surface = self.surface.take().unwrap();
-        surface.reaction_from_mut(value, |value, surface, reaction| {
+        self.add_from_mut(value, |ui, value, reaction| {
+            let item_pad_inner = ui.style().item_pad_inner();
             let id = reaction.id();
-            let offset = self.widget_off;
-            let size_max = self.font_height();
+            let offset = reaction.offset();
+            let size_max = ui.font_height();
             let rect_size = vec2(size_max, size_max);
-            reaction.offset = offset;
-            let visuals = self.style.interact_visuals(&reaction);
-            let mut text = self.reaction_text(id, label).clone();
-            let text_width = self.style.calc_text_width(&text.text);
-            text.offset = offset;
-            text.offset.x += size_max + item_pad_inner.x;
+            let text = ui.reaction_text(id, label);
+            let mut borrow = text.borrow_mut();
+            let text_width = ui.style().calc_text_width(&borrow.text);
+            borrow.offset = offset;
+            borrow.offset.x += size_max + item_pad_inner.x;
+            let visuals = ui.style().interact_visuals(&reaction);
             let fg_col = visuals.fg_stroke_col();
-            text.color = fg_col;
+            borrow.color = fg_col;
+            ui.render_text(text.clone());
             let size = vec2(size_max + text_width + item_pad_inner.x, size_max);
             reaction.size = size;
-            let text_index = surface.add_text(text);
-            self.current_row_text.push(RowText::new(text_index, 0, 0, None));
-            self.current_height = self.current_height.max(size.y);
-            self.widget_off.x += size.x + self.style.item_pad_outer().x;
-            self.current_row_reactions.push((id, size));
-            let rounding = self.style.rounding();
+            let rounding = ui.style().rounding();
             if reaction.clicked() {
                 *value = !*value;
             }
             let value = *value;
-            self.paint(move |painter, row| {
+            ui.paint(move |painter, row| {
                 let checkbox_col =
                     if value {
                         fg_col
@@ -571,7 +607,6 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
                     );
             });
         });
-        self.surface = Some(surface);
         *value
     }
 
@@ -585,40 +620,15 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         min: T,
         max: T,
         drag_speed: f32,
-    ) -> &mut Reaction
+    ) -> ReactionRef<Surface>
     { 
-        let mut reaction = self.surface.reaction(self, value, |ctx, surface, reaction| {
-            let data = surface.reaction_data_or_insert_with(reaction.id(), || SliderData::new());
-            if let Some(mut data) = data {
-                let slider = unsafe {
-                    data.as_mut()
-                };
-                if reaction.subreactions().contains(slider.0) {
-                }
-                slider.update_value(self.style(), self.slider_width, value, min, max, drag_speed);
-                let (slider_size, drag_value_size) = slider.update(
-                    self.style(),
-                    &mut slider_reaction,
-                    &mut drag_value_reaction,
-                    self.surface_moving()
-                );
-                slider_reaction.size = slider_size;
-                drag_value_reaction.size = drag_value_size;
-            }
-            self.current_height = self.current_height.max(slider_reaction.size.y.max(drag_value_reaction.size.y));
-            let offset = self.widget_off;
-            let drag_value_offset = vec2(slider_reaction.size.x + self.style.item_pad_inner().x, 0.0);
-            slider_reaction.offset = offset;
-            drag_value_reaction.offset = offset + drag_value_offset;
-            self.current_row_reactions.push((slider_id, slider_reaction.size));
-            self.current_row_reactions.push((drag_value_id, drag_value_reaction.size));
-            self.widget_off.x +=
-                drag_value_offset.x + drag_value_reaction.size.x +
-                self.style.item_pad_outer().x;
-            let entry = self.surface.get_reaction_mut(drag_value_reaction.id()).unwrap();
-            *entry = drag_value_reaction;
-        });
-        reaction
+        self.add_from_mut(value, |ui, value, reaction| {
+            let id = reaction.id();
+            ui.reaction_data(id, || SliderData::new(), |ui, slider| {
+                slider.update_value(ui.style(), ui.ui.slider_width, value, min, max, drag_speed);
+                slider.update(ui, reaction);
+            });
+        })
     }
 
 /*
@@ -654,42 +664,28 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         width: f32,
         center_text: bool,
         format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
-    ) -> &mut Reaction {
-        let offset = self.widget_off;
-        let mut reaction = self.surface.activate_reaction(value);
-        reaction.offset = offset;
-        let id = reaction.id();
-        let surface_moving = self.surface_moving();
-        let data = self.surface.reaction_data_or_insert_with(id, || {
-            InputTextData::new()
-        });
-        if let Some(mut data) = data {
-            let input_text = unsafe {
-                data.as_mut()
-            };
-            input_text.set_params(
-                width, None, center_text,
-                empty_input_prompt, format_input,
-                false,
-            );
-            if input_text.active() {
-                if let Some(v) = input_text.get_input() {
-                    *value = v;
+    ) -> ReactionRef<Surface> {
+        self.add_from_mut(value, |ui, value, reaction| {
+            let id = reaction.id();
+            ui.reaction_data(id, || InputTextData::new(), |ui, input_text| {
+                input_text.set_params(
+                    width, None, center_text,
+                    empty_input_prompt, format_input,
+                    false,
+                );
+                if input_text.active() {
+                    if let Some(v) = input_text.get_input() {
+                        *value = v;
+                    }
+                } else {
+                    input_text.set_input(value);
                 }
-            } else {
-                input_text.set_input(value);
-            }
-            reaction.size = input_text.update(
-                self,
-                &mut reaction,
-            )
-        }
-        self.current_row_reactions.push((id, reaction.size));
-        self.current_height = self.current_height.max(reaction.size.y);
-        self.widget_off.x += reaction.size.x + self.style.item_pad_outer().x;
-        let res = self.surface.get_reaction_mut(id).unwrap();
-        *res = reaction;
-        res
+                input_text.update(
+                    ui,
+                    reaction,
+                )
+            });
+        })
     }
 
     #[inline(always)]
@@ -730,33 +726,21 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         drag_speed: f32,
         min_width: f32,
         format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
-    ) -> &mut Reaction
+    ) -> ReactionRef<Surface>
     {
-        let offset = self.widget_off;
-        let reaction = self.surface.activate_reaction(value);
-        reaction.offset = offset;
-        let id = reaction.id();
-        let surface_moving = self.surface_moving();
-        let data = self.surface.reaction_data_or_insert_with(id, || {
-            DragValueData::new()
-        });
-        if let Some(mut data) = data {
-            let drag_value = unsafe {
-                data.as_mut()
-            };
-            drag_value.set_input_params(
-                self.style,
-                min_width,
-                format_input,
-                false,
-            );
-            drag_value.calc_value(self.style, value, min, max, drag_speed);
-            reaction.size = drag_value.update(self, reaction);
-        }
-        self.current_row_reactions.push((id, reaction.size));
-        self.current_height = self.current_height.max(reaction.size.y);
-        self.widget_off.x += reaction.size.x + self.style.item_pad_outer().x;
-        reaction
+        self.add_from_mut(value, |ui, value, reaction| {
+            let id = reaction.id();
+            ui.reaction_data(id, || DragValueData::new(), |ui, drag_value| {
+                drag_value.set_input_params(
+                    ui.style(),
+                    min_width,
+                    format_input,
+                    false
+                );
+                drag_value.calc_value(ui.style(), value, min, max, drag_speed);
+                drag_value.update(ui, reaction);
+            });
+        })
     }
 
     #[inline(always)]
@@ -830,53 +814,46 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         value: &mut T,
         target: T,
         label: &str,
-    ) -> &mut Reaction
+    ) -> ReactionRef<Surface>
     {
-        let item_pad_inner = self.style.item_pad_inner();
-        let mut reaction = self.surface.activate_reaction(value).clone();
-        let id = reaction.id();
-        let offset = self.widget_off;
-        reaction.offset = offset;
-        let visuals = self.style.interact_visuals(&reaction);
-        let mut text = self.reaction_text(id, label).clone();
-        let size = self.style.calc_text_box_size(&text.text);
-        text.offset = offset;
-        text.offset.x += item_pad_inner.x;
-        text.color = visuals.fg_stroke_col();
-        reaction.size = size;
-        let text_index = self.surface.add_text(text);
-        self.current_row_text.push(RowText::new(text_index, 0, 0, None));
-        self.current_height = self.current_height.max(size.y);
-        self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_reactions.push((id, size));
-        if reaction.clicked() {
-            *value = target.clone();
-        }
-        let rounding = self.style.rounding();
-        let value = value.clone();
-        let selected_col = self.style.selection_col();
-        self.paint(move |painter, row| {
-            let fill_col =
-                if value == target {
-                    selected_col
-                } else {
-                    visuals.fill_col
-                };
-            painter
-                .rect(
-                    id,
-                    rect(Default::default(), size, rounding),
-                    offset + vec2(0.0, row.height_halved - size.y * 0.5),
-                    fill_col,
-                    visuals.bg_strokes.clone(),
-                    visuals.bg_stroke_idx
-                );
-        });
-        let entry = self.window.reactions
-            .get_mut(&id)
-            .unwrap();
-        *entry = reaction;
-        entry
+        self.add_from_mut(value, |ui, value, reaction| {
+            let item_pad_inner = ui.style().item_pad_inner();
+            let id = reaction.id();
+            let visuals = ui.style().interact_visuals(reaction);
+            let text = ui.reaction_text(id, label).clone();
+            let mut borrow = text.borrow_mut();
+            let size = ui.style().calc_text_box_size(&borrow.text);
+            borrow.offset = reaction.offset();
+            borrow.offset.x += item_pad_inner.x;
+            borrow.color = visuals.fg_stroke_col();
+            reaction.size = size;
+            ui.render_text(text.clone());
+            if reaction.clicked() {
+                *value = target.clone();
+            }
+            let rounding = ui.style().rounding();
+            let value = value.clone();
+            let selected_col = ui.style().selection_col();
+            let offset = reaction.offset();
+            let target = target.clone();
+            ui.paint(move |painter, row| {
+                let fill_col =
+                    if value == target {
+                        selected_col
+                    } else {
+                        visuals.fill_col
+                    };
+                painter
+                    .rect(
+                        id,
+                        rect(Default::default(), size, rounding),
+                        offset + vec2(0.0, row.height_halved - size.y * 0.5),
+                        fill_col,
+                        visuals.bg_strokes.clone(),
+                        visuals.bg_stroke_idx
+                    );
+            });
+        })
     }
 
     /*
@@ -907,43 +884,40 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         label: &str,
         source: ImageSource,
         size: Vec2,
-    ) -> &mut Reaction {
-        let reaction = self.add_from_mut(label, ||)
-        let reaction = self.surface.activate_reaction(label);
-        let id = reaction.id();
+    ) -> ReactionRef<Surface> {
         let offset = self.widget_off;
-        reaction.offset = offset;
-        reaction.size = size;
-        let source = match source {
-            ImageSource::Path(p) => unsafe {
-                let len = p.len();
-                if let Some(data) = self.surface.tmp_data(len) {
-                    p.as_ptr()
-                        .copy_to_nonoverlapping(data.as_ptr(), len);
-                    ImageSourceUnsafe::Path(data, len)
-                } else {
-                    ImageSourceUnsafe::Path(NonNull::dangling(), 0)
-                }
-            },
-            ImageSource::Id(id) => ImageSourceUnsafe::Id(id)
-        };
-        self.paint(move |painter, row| {
-            painter
-                .image(
-                    id,
-                    unsafe { source.as_image_source() },
-                    offset + vec2(0.0, row.height * 0.5 - size.y * 0.5),
-                    size
-                );
+        let reaction = self.add_from_ref(label, |ui, _label, reaction| {
+            reaction.offset = offset;
+            reaction.size = size;
+            let source = match source {
+                ImageSource::Path(p) => unsafe {
+                    let len = p.len();
+                    if let Some(data) = ui.tmp_data(len) {
+                        p.as_ptr()
+                            .copy_to_nonoverlapping(data.as_ptr(), len);
+                        ImageSourceUnsafe::Path(data, len)
+                    } else {
+                        ImageSourceUnsafe::Path(NonNull::dangling(), 0)
+                    }
+                },
+                ImageSource::Id(id) => ImageSourceUnsafe::Id(id)
+            };
+            let id = reaction.id();
+            ui.paint(move |painter, row| {
+                painter
+                    .image(
+                        id,
+                        unsafe { source.as_image_source() },
+                        offset + vec2(0.0, row.height * 0.5 - size.y * 0.5),
+                        size
+                    );
+            });
         });
-        self.current_height = self.current_height.max(size.y);
-        self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_reactions.push((id, size));
         reaction
     } 
 }
 
-impl<'a, 'b, Surface, Style> Drop for UiCtx<'a, 'b, Surface, Style>
+impl<'a, 'b, 'c, Surface, Style> Drop for UiCtx<'a, 'b, 'c, Surface, Style>
     where 
         Surface: UiReactSurface,
         Style: UiStyle,
@@ -956,20 +930,40 @@ impl<'a, 'b, Surface, Style> Drop for UiCtx<'a, 'b, Surface, Style>
     }
 }
 
-struct UiReactContext<'a, 'b, 'c, Surface, Style>
+pub struct UiReactCtx<'a, 'b, 'c, 'd, Surface, Style>
     where 
         Surface: UiReactSurface,
         Style: UiStyle,
 {
-    ui: &'a mut UiCtx<'b, 'c, Surface, Style>,
+    ui: &'a mut UiCtx<'b, 'c, 'd, Surface, Style>,
     surface: &'a mut Surface::Surface
 }
 
-impl<'a, 'b, 'c, Surface, Style> UiReactContext<'a, 'b, 'c, Surface, Style>
+impl<'a, 'b, 'c, 'd, Surface, Style> UiReactCtx<'a, 'b, 'c, 'd, Surface, Style>
     where 
         Surface: UiReactSurface,
         Style: UiStyle,
 {
+
+    #[inline(always)]
+    pub fn win_ctx(&mut self) -> &mut WindowCtx {
+        self.win_ctx
+    }
+
+    #[inline(always)]
+    pub fn style(&self) -> &Style {
+        self.ui.style
+    }
+
+    #[inline(always)]
+    pub fn font_height(&mut self) -> f32 {
+        self.ui.style.calc_font_height(self.ui.text_renderer)
+    }
+
+    #[inline(always)]
+    pub fn standard_interact_height(&self) -> f32 {
+        (self.ui.style.default_handle_radius() + self.ui.style.item_pad_inner().y) * 2.0
+    }
 
     #[inline(always)]
     pub fn paint(&mut self, f: impl FnMut(&mut Painter, Row) + 'static) {
@@ -984,11 +978,47 @@ impl<'a, 'b, 'c, Surface, Style> UiReactContext<'a, 'b, 'c, Surface, Style>
         }
     }
 
-    fn reaction_text(
+    #[inline(always)]
+    pub fn reaction_text(
         &mut self,
-        style: &impl UiStyle,
-        text_renderer: &mut TextRenderer,
         id: ReactionId,
         text: &str,
-    ) -> &mut Text;
+    ) -> SharedText
+    {
+        self.surface.reaction_text(self.ui.style, self.ui.text_renderer, id, text)
+    }
+
+    #[inline(always)]
+    pub fn render_text(&mut self, text: SharedText) {
+        let index = self.surface.render_text(text);
+        self.ui.current_row_text.push(RowText::new(index, 0, 0, None));
+    }
+
+    #[inline(always)]
+    pub fn reaction_data<T: 'static>(
+        &mut self,
+        id: ReactionId,
+        new: impl FnMut() -> T,
+        mut modify: impl FnMut(&mut Self, &mut T)
+    )
+    {
+        if let Some(data) = unsafe {
+            self.surface
+                .reaction_data_or_insert_with(id, new)
+                .map(|mut v| v.as_mut())
+            }
+        {
+            modify(self, data);
+        }
+    }
+
+    #[inline(always)]
+    pub fn tmp_data<T>(&mut self, count: usize) -> Option<NonNull<T>> {
+        self.surface.tmp_data(count)
+    }
+
+    #[inline(always)]
+    pub fn animated_bool(&mut self, id: ReactionId, value: bool) -> f32 {
+        self.surface.animated_bool(id, value)
+    }
 }

@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
-use core::marker::PhantomData;
+use core::{
+    cell::RefCell,
+    marker::PhantomData,
+};
 
 use nox_font::{text_segment_owned, RenderedText, TextOffset, TextSegmentOwned};
 
@@ -83,6 +86,8 @@ impl Text {
         }
     }
 }
+
+pub type SharedText = Rc<RefCell<Text>>;
 
 pub struct SelectableTextData {}
 

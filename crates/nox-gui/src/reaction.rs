@@ -11,7 +11,7 @@ use crate::*;
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReactionId(pub Hashable<f64>);
 
-pub type SubreactionId = SlotIndex<Reaction>;
+pub type SubreactionId = SlotIndex<Subreaction>;
 
 #[derive(Clone)]
 pub struct Reaction {
@@ -24,21 +24,125 @@ pub struct Reaction {
     flags: u32,
 }
 
+#[derive(Clone, Copy)]
+pub struct Subreaction {
+    pub rel_offset: Vec2,
+    pub size: Vec2,
+    rel_cursor_pos: Vec2,
+    flags: u32,
+}
+
+impl Subreaction {
+
+    const CLICKED: u32 = 0x1;
+    const HELD: u32 = 0x2;
+    const HOVERED: u32 = 0x4;
+
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            rel_offset: Default::default(),
+            size: Default::default(),
+            rel_cursor_pos: Default::default(),
+            flags: 0,
+        }
+    }
+
+    #[inline(always)]
+    pub fn clicked(&self) -> bool {
+        self.flags & Self::CLICKED == Self::CLICKED
+    }
+
+    #[inline(always)]
+    pub fn held(&self) -> bool {
+        self.flags & Self::HELD == Self::HELD
+    }
+
+    #[inline(always)]
+    pub fn hovered(&self) -> bool {
+        self.flags & Self::HOVERED == Self::HOVERED
+    }
+
+    #[inline(always)]
+    pub fn update(
+        &mut self,
+        ctx: &WindowCtx,
+        cursor_pos: Vec2,
+        surface_pos: Vec2,
+        parent_offset: Vec2,
+        cursor_in_window: bool,
+        hover_blocked: bool,
+    )
+    {
+        self.flags &= !(
+            Self::CLICKED |
+            Self::HOVERED
+        );
+        self.rel_cursor_pos = cursor_pos - surface_pos;
+        let offset = parent_offset + self.rel_offset;
+        let cursor_in_self = BoundingRect::from_position_size(
+            offset, self.size
+        ).is_point_inside(self.rel_cursor_pos);
+        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
+        if self.held() {
+            if mouse_left_state.released() {
+                self.flags &= !Self::HELD;
+                or_flag!(self.flags, Self::CLICKED, cursor_in_self);
+            }
+        } else if cursor_in_self && !hover_blocked && cursor_in_window {
+            self.flags |= Self::HOVERED;
+            or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
+        }
+    }
+}
+
 pub struct ReactionEntry {
     reaction: Reaction,
-    subreactions: GlobalSlotMap<Reaction>,
+    subreactions: GlobalSlotMap<Subreaction>,
 }
 
 impl ReactionEntry {
 
     #[inline(always)]
-    pub fn subreactions(&self) -> &GlobalSlotMap<Reaction> {
+    pub fn new(id: ReactionId) -> Self {
+        Self {
+            reaction: Reaction::new(id),
+            subreactions: Default::default(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn subreactions(&self) -> &GlobalSlotMap<Subreaction> {
         &self.subreactions
     }
 
     #[inline(always)]
-    pub fn subreactions_mut(&mut self) -> &mut GlobalSlotMap<Reaction> {
+    pub fn subreactions_mut(&mut self) -> &mut GlobalSlotMap<Subreaction> {
         &mut self.subreactions
+    }
+
+    #[inline(always)]
+    pub fn update(
+        &mut self,
+        ctx: &WindowCtx,
+        cursor_pos: Vec2,
+        surface_pos: Vec2,
+        cursor_in_window: bool,
+        hover_blocked: bool,
+    ) -> Option<CompactString> {
+        let hover_text = self.reaction.update(
+            ctx, cursor_pos,
+            surface_pos, cursor_in_window,
+            hover_blocked
+        );
+        for (_, reaction) in &mut self.subreactions {
+            reaction.update(
+                ctx, cursor_pos,
+                surface_pos, cursor_in_window,
+                hover_blocked
+            );
+        }
+        hover_text
     }
 }
 
@@ -140,7 +244,7 @@ impl Reaction {
         &mut self,
         ctx: &WindowCtx,
         cursor_pos: Vec2,
-        window_pos: Vec2,
+        surface_pos: Vec2,
         cursor_in_window: bool,
         hover_blocked: bool,
     ) -> Option<CompactString>
@@ -152,7 +256,7 @@ impl Reaction {
             Self::HOVER_BLOCKED
         );
         or_flag!(self.flags, Self::HOVER_BLOCKED, hover_blocked);
-        self.rel_cursor_pos = cursor_pos - window_pos;
+        self.rel_cursor_pos = cursor_pos - surface_pos;
         let cursor_in_self = BoundingRect::from_position_size(
             self.offset, self.size
         ).is_point_inside(self.rel_cursor_pos);

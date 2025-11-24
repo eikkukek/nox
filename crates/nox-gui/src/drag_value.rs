@@ -9,7 +9,7 @@ use nox_font::RenderedText;
 use nox_geom::*;
 
 use crate::{
-    surface::UiSurface,
+    surface::*,
     *,
 };
 
@@ -141,11 +141,11 @@ impl DragValueData {
         }
     }
 
-    pub fn update<Surface: UiSurface, Style: UiStyle>(
+    pub fn update<Surface: UiReactSurface, Style: UiStyle>(
         &mut self,
-        ui: &mut UiCtx<Surface, Style>,
+        ui: &mut UiReactCtx<Surface, Style>,
         reaction: &mut Reaction,
-    ) -> Vec2
+    )
     {
         self.input_text.set_cursor_enable(self.input_text.active());
         self.delta_cursor_x = Default::default();
@@ -183,7 +183,7 @@ impl DragValueData {
         if cursor_in_rect || self.held()  {
             reaction.cursor(CursorIcon::ColResize);
         }
-        self.input_text.update(ui, reaction)
+        self.input_text.update(ui, reaction);
     }
 }
 

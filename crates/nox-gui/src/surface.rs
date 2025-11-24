@@ -19,7 +19,7 @@ pub trait UiSurface {
 
     fn set_widget_rect_max(&mut self, max: Vec2);
 
-    fn painter_storage(&self) -> &mut PainterStorage;
+    fn painter_storage(&mut self) -> &mut PainterStorage;
 
     fn activate_collapsing_header(
         &mut self,
@@ -30,12 +30,12 @@ pub trait UiSurface {
 
     fn get_collapsing_header_mut(&mut self, id: CollapsingHeaderId) -> Option<&mut CollapsingHeader>;
     
-    fn add_text(
+    fn render_text(
         &mut self,
-        text: Text
+        text: SharedText,
     ) -> usize;
 
-    fn get_text_mut(&mut self, index: usize) -> Option<&mut Text>;
+    fn get_text(&mut self, index: usize) -> Option<SharedText>;
 
     fn reaction_text(
         &mut self,
@@ -43,11 +43,17 @@ pub trait UiSurface {
         text_renderer: &mut TextRenderer,
         id: ReactionId,
         text: &str,
-    ) -> &mut Text;
+    ) -> SharedText;
+
+    fn reaction_data_or_insert_with<T: 'static>(
+        &mut self,
+        id: ReactionId,
+        f: impl FnMut() -> T,
+    ) -> Option<NonNull<T>>;
 
     fn animated_bool(&mut self, id: ReactionId, value: bool) -> f32;
 
-    unsafe fn tmp_data<T>(&self, count: usize) -> Option<NonNull<T>>;
+    fn tmp_data<T>(&self, count: usize) -> Option<NonNull<T>>;
 }
 
 pub trait UiReactSurface {
@@ -59,7 +65,7 @@ pub trait UiReactSurface {
     fn ui_surface_mut(&mut self) -> &mut Self::Surface;
 
     fn reaction_from_ref<T: ?Sized>(
-        &self,
+        &mut self,
         value: &T,
         f: impl FnMut(&mut Self::Surface, &T, &mut ReactionEntry),
     ) -> &mut Reaction;

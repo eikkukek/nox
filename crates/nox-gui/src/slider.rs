@@ -6,7 +6,7 @@ use core::{
 
 use nox::{
     alloc::arena_alloc::ArenaGuard,
-    mem::{slot_map::SlotIndex, vec_types::{GlobalVec, Vector}},
+    mem::vec_types::{GlobalVec, Vector},
     *,
 };
 
@@ -17,7 +17,10 @@ use nox_geom::{
     shapes::*,
 };
 
-use crate::*;
+use crate::{
+    surface::*,
+    *,
+};
 
 pub trait Sliderable: Copy + FromStr + PartialEq {
 
@@ -39,7 +42,8 @@ pub trait Sliderable: Copy + FromStr + PartialEq {
 
 pub struct SliderData {
     pub drag_value: DragValueData,
-    drag_value_id: SubreactionId,
+    pub slider_id: SubreactionId,
+    pub drag_value_id: SubreactionId,
     width: f32,
     t: f32,
     quantized_t: f32,
@@ -54,6 +58,7 @@ impl SliderData {
     pub fn new() -> Self {
         Self {
             drag_value: DragValueData::new(),
+            slider_id: Default::default(),
             drag_value_id: Default::default(),
             t: 0.0,
             quantized_t: 0.0,
@@ -90,13 +95,11 @@ impl SliderData {
     }
 
     #[inline(always)]
-    pub fn update(
+    pub fn update<Surface: UiReactSurface, Style: UiStyle>(
         &mut self,
-        style: &impl UiStyle,
-        slider_reaction: &mut Reaction,
-        darg_value_reaction: &mut Reaction,
-        surface_moving: bool,
-    ) -> (Vec2, Vec2)
+        ui: &mut UiReactCtx<Surface, Style>,
+        reaction: &mut ReactionEntry,
+    )
     {
         todo!()
     }

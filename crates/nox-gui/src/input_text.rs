@@ -1,7 +1,10 @@
+use std::rc::Rc;
+
 use core::{
     marker::PhantomData,
     fmt::{Display, Write},
     str::FromStr,
+    cell::RefCell,
 };
 
 use compact_str::CompactString;
@@ -16,7 +19,7 @@ use nox_geom::{
 use nox_font::{text_segment, RenderedText};
 
 use crate::{
-    surface::UiSurface,
+    surface::*,
     *
 };
 
@@ -223,11 +226,11 @@ impl InputTextData {
         or_flag!(self.flags, Self::CURSOR_ENABLE, value);
     }
 
-    pub fn update<Surface: UiSurface, Style: UiStyle>(
+    pub fn update<Surface: UiReactSurface, Style: UiStyle>(
         &mut self,
-        ui: &mut UiCtx<Surface, Style>,
+        ui: &mut UiReactCtx<Surface, Style>,
         reaction: &mut Reaction,
-    ) -> Vec2
+    )
     {
         enum CursorMove {
             None,
@@ -807,7 +810,7 @@ impl InputTextData {
         self.double_click_timer += ui.win_ctx().delta_time_secs_f32();
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
         or_flag!(self.flags, Self::ACTIVATED_LAST_FRAME, !active_this_frame && self.active());
-        let text = Text::new(
+        let text = Rc::new(RefCell::new(Text::new(
             if self.active() {
                 self.input_text.clone().unwrap()
             } else {
@@ -826,9 +829,9 @@ impl InputTextData {
             1,
             Some(BoundingRect::from_min_max(offset + item_pad_inner, offset + input_rect.max - item_pad_inner)),
             None,
-        );
-        ui.add_text(text);
-        input_rect.max
+        )));
+        ui.render_text(text);
+        reaction.size = input_rect.max;
     }
 
     #[inline(always)]

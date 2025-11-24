@@ -1,6 +1,9 @@
+use std::rc::Rc;
+
 use core::{
     ptr::NonNull,
     any::TypeId,
+    cell::RefCell,
 };
 
 use nox::{
@@ -25,7 +28,7 @@ use nox_geom::{
 
 use crate::{
     collapsing_header::*,
-    surface::UiSurface,
+    surface::*,
     *
 };
 
@@ -64,16 +67,16 @@ pub struct Window
     combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
-    text: GlobalVec<Text>,
+    text: GlobalVec<SharedText>,
     reactions: FxHashMap<ReactionId, ReactionEntry>,
     active_reactions: FxHashSet<ReactionId>,
     prev_active_reactions: GlobalVec<ReactionId>,
     reaction_data: FxHashMap<ReactionId, ReactionData>,
-    reaction_text: FxHashMap<ReactionId, (CompactString, Text)>,
+    reaction_text: FxHashMap<ReactionId, (CompactString, SharedText)>,
     animated_bools: FxHashMap<ReactionId, (f32, bool)>,
     collapsing_headers: FxHashMap<CollapsingHeaderId, (u64, CollapsingHeader)>,
-    active_collapsing_headers: FxHashSet<Hashable<f64>>,
-    prev_active_collapsing_headers: GlobalVec<Hashable<f64>>,
+    active_collapsing_headers: FxHashSet<CollapsingHeaderId>,
+    prev_active_collapsing_headers: GlobalVec<CollapsingHeaderId>,
     painter_storage: PainterStorage,
     hover_window: HoverWindow,
     scroll_bar_vertices: GlobalVec<Vertex>,
@@ -184,11 +187,16 @@ impl Window
     }
 
     #[inline(always)]
-    pub fn get_collapsing_headers(
+    fn activate_reaction<T: ?Sized>(
         &mut self,
-        id: Hashable<f64>,
-    ) -> &mut CollapsingHeader {
-        self.collapsing_headers.get_mut(&id).map(|(_, c)| c).unwrap()
+        value: &T,
+    ) -> &mut ReactionEntry
+    {
+        let mut id = ReactionId(Hashable((value as *const T).addr() as f64));
+        while !self.active_reactions.insert(id) {
+            id.0.0 += 0.01;
+        }
+        self.reactions.entry(id).or_insert_with(|| ReactionEntry::new(id))
     }
 
     #[inline(always)]
@@ -350,10 +358,6 @@ impl Window
 
     #[inline(always)]
     pub fn begin(&mut self) {
-        self.prev_active_widgets.clear();
-        for &id in &self.active_widgets {
-            self.prev_active_widgets.push(id);
-        }
         self.prev_active_collapsing_headers.clear();
         for &id in &self.active_collapsing_headers {
             self.prev_active_collapsing_headers.push(id);
@@ -362,7 +366,6 @@ impl Window
         for &id in &self.active_reactions {
             self.prev_active_reactions.push(id);
         }
-        self.active_widgets.clear();
         self.active_collapsing_headers.clear();
         self.active_reactions.clear();
         self.painter_storage.begin();
@@ -464,26 +467,6 @@ impl Window
                 item_pad_outer.x;
         }
         let pos = self.position;
-        self.prev_active_widgets.retain(|v| !self.active_widgets.contains(v));
-        let mut widgets = unsafe {
-            self.widgets.take().unwrap_unchecked()
-        };
-        if let Some(semaphore) = self.signal_semaphore {
-            renderer.edit_resources(|r| {
-                let semaphore_value = self.signal_semaphore_value;
-                for &widget in &self.prev_active_widgets {
-                    let (_, widget) = widgets.get_widget_mut(widget);
-                    widget.hide(
-                        &mut self.vertices,
-                        (semaphore, semaphore_value),
-                        r,
-                        &tmp_alloc,
-                    )?;
-                }
-                self.painter_storage.end((semaphore, semaphore_value), r, &tmp_alloc)?;
-                Ok(())
-            })?;
-        }
         self.prev_active_collapsing_headers.retain(|v| !self.active_collapsing_headers.contains(v));
         for collapsing_headers in &self.prev_active_collapsing_headers {
             let (_, collapsing_headers) = &self.collapsing_headers[collapsing_headers];
@@ -497,35 +480,14 @@ impl Window
         }
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.combined_text.clear();
-        let mut active_widget = None;
-        let mut hovered_widget = None;
         let mut cursor_in_some_widget = false;
-        for (i, &widget) in self.active_widgets.iter().enumerate() {
-            let (_, widget) = widgets.get_widget(widget);
-            match widget.status(ctx, style, pos, cursor_pos) {
-                WidgetStatus::Inactive => {},
-                WidgetStatus::Hovered(text) => {
-                    if let Some(text) = text {
-                        self.hover_window.update(style, text_renderer, cursor_pos, text);
-                        self.flags |= Self::HOVER_WINDOW_ACTIVE;
-                    }
-                    cursor_in_some_widget = true;
-                    hovered_widget = Some(i)
-                },
-                WidgetStatus::Active => {
-                    cursor_in_some_widget = true;
-                    active_widget = Some(i)
-                },
-            }
-        }
         let mut hover_blocked =
             !cursor_in_this_window &&
-            active_widget.is_none() ||
             self.ver_scroll_bar.held() ||
             self.hor_scroll_bar.held();
         let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
         if !self.held() && !self.any_resize() {
-            if cursor_in_this_window && active_widget.is_none() {
+            if cursor_in_this_window {
                 let mut flags = self.flags;
                 flags &= !Self::RESIZE_BLOCKED_COL;
                 flags &= !Self::RESIZE_BLOCKED_ROW;
@@ -559,7 +521,6 @@ impl Window
                         ::from_position_size(self.position, self.title_bar_rect.max)
                         .is_point_inside(cursor_pos)
                     {
-                        hovered_widget = Some(self.active_widgets.len());
                         hover_blocked = true;
                         or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
                     }
@@ -568,7 +529,6 @@ impl Window
                     }
                 }
                 else {
-                    hovered_widget = Some(self.active_widgets.len());
                     hover_blocked = true;
                     if override_cursor {
                         if self.resize_nw() {
@@ -605,11 +565,9 @@ impl Window
                     );
             }
         } else {
-            hovered_widget = Some(self.active_widgets.len());
-            active_widget = Some(self.active_widgets.len());
             hover_blocked = true;
         }
-        let reaction_blocked = hover_blocked || active_widget.is_some() || hovered_widget.is_some();
+        let reaction_blocked = hover_blocked;
         let mut held_reaction = None;
         for &id in &self.active_reactions {
             let reaction = self.reactions.get_mut(&id).unwrap();
@@ -668,7 +626,6 @@ impl Window
                 }
             }
             if reaction.held() {
-                active_widget = Some(self.active_widgets.len());
                 cursor_in_this_window = true;
             }
         }
@@ -684,59 +641,17 @@ impl Window
             let width = collapsing_header.update(
                 ctx, pos,
                 content_area.0, content_area.1,
-                cursor_pos, style, active_widget.is_some() || window_moving,
+                cursor_pos, style, window_moving,
                 |text, offset, bounded_text_instance| {
                     self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
                 }
             );
-            if collapsing_header.hovered() && active_widget.is_none() {
-                hovered_widget = Some(self.active_widgets.len());
-            }
             if self.clamping_width() {
                 min_size.x = min_size.x.max(width);
             }
         }
         let scroll_bar_hovered = self.ver_scroll_bar.hovering() || self.hor_scroll_bar.hovering();
         let mut transfer_commands_required = false;
-        for (i, &widget) in self.active_widgets.iter().enumerate() {
-            let (_, widget) = widgets.get_widget_mut(widget);
-            widget.set_scroll_offset(widget_off);
-            let UpdateResult {
-                requires_triangulation,
-                requires_transfer_commands,
-                cursor_in_widget,
-            } = widget.update(
-                ctx,
-                style,
-                text_renderer,
-                size,
-                pos,
-                vec2(0.0, title_bar_rect.max.y),
-                cursor_pos,
-                delta_cursor_pos,
-                cursor_in_this_window,
-                if let Some(w) = active_widget {
-                    w != i
-                } else {
-                    false
-                },
-                if let Some(w) = hovered_widget {
-                    w != i
-                } else {
-                    false
-                },
-                window_moving,
-                hover_blocked || scroll_bar_hovered,
-                &mut |text, offset, mut bounded_text_instance| {
-                    bounded_text_instance.min_bounds = bounded_text_instance.min_bounds.max(content_area.0);
-                    bounded_text_instance.max_bounds = bounded_text_instance.max_bounds.min(content_area.1);
-                    self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
-                },
-            );
-            or_flag!(self.flags, Self::REQUIRES_TRIANGULATION, requires_triangulation);
-            transfer_commands_required |= requires_transfer_commands;
-            cursor_in_some_widget |= cursor_in_widget;
-        }
         self.widget_scroll_off = widget_off;
         let ver_scroll_bar_width = self.ver_scroll_bar.calc_width(style);
         let hor_scroll_bar_height = self.hor_scroll_bar.calc_height(style);
@@ -747,7 +662,6 @@ impl Window
             min_size.y += hor_scroll_bar_height + item_pad_outer.y;
         }
         cursor_in_this_window |= cursor_in_some_widget;
-        self.widgets = Some(widgets);
         or_flag!(self.flags, Self::CURSOR_IN_WINDOW, cursor_in_this_window);
         if self.main_rect.max.x < min_size.x {
             self.main_rect.max.x = min_size.x;
@@ -948,8 +862,6 @@ impl Window
             }
         } else if
             !hover_blocked &&
-            active_widget.is_none() &&
-            hovered_widget.is_none() &&
             cursor_in_this_window &&
             mouse_left_state.pressed()
         {
@@ -1113,26 +1025,6 @@ impl Window
             };
             let first_index = indices_usize.len() as u32;
             let mut flags = self.flags;
-            let mut widgets = unsafe {
-                self.widgets.take().unwrap_unchecked()
-            };
-            for &widget in &self.active_widgets  {
-                let (last_triangulation, widget) = widgets.get_widget_mut(widget);
-                *last_triangulation = new_triangulation;
-                points.clear();
-                helper_points.clear();
-                widget.triangulate(
-                    &mut points,
-                    &mut helper_points,
-                    &mut |points: &[[f32; 2]]| {
-                        let vertex_begin = self.vertices.len();
-                        if !earcut::earcut(points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
-                            flags &= !Self::RENDERABLE;
-                        }
-                        VertexRange::new(vertex_begin..self.vertices.len())
-                    }
-                );
-            }
             for collapsing_headers in &self.active_collapsing_headers {
                 let (last_triangulation, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
                 *last_triangulation = new_triangulation;
@@ -1148,7 +1040,6 @@ impl Window
                 ]);
                 collapsing_headers.beam_vertex_range = VertexRange::new(n - 4..n);
             }
-            self.widgets = Some(widgets);
             self.flags = flags;
             self.flags &= !Self::REQUIRES_TRIANGULATION;
             self.indices.append_map(&indices_usize, |&i| i as u32);
@@ -1184,17 +1075,6 @@ impl Window
             Ok(())
         })?;
         add_signal_semaphore(unsafe { self.signal_semaphore.unwrap_unchecked() }, self.signal_semaphore_value + 1);
-        let widgets = unsafe {
-            self.widgets.as_mut().unwrap_unchecked()
-        };
-        for &widget in &self.active_widgets {
-            let (_, widget) = widgets.get_widget_mut(widget);
-            widget.render(
-                frame_graph, msaa_samples, render_format,
-                resolve_mode, add_read, add_signal_semaphore,
-                add_pass,
-            )?;
-        }
         self.painter_storage.render(frame_graph, render_format, add_read)?;
         Ok(())
     }
@@ -1231,13 +1111,6 @@ impl Window
         };
         let vert_id = vertex_buffer.id();
         let idx_id = index_buffer.id();
-        let mut widgets = unsafe {
-            self.widgets.take().unwrap_unchecked()
-        };
-        for &widget in &self.active_widgets {
-            let (_, widget) = widgets.get_widget_mut(widget);
-            widget.set_vertex_params(style, &mut self.vertices);
-        }
         if self.ver_scroll_bar_visible() {
             self.ver_scroll_bar.set_vertex_params(style, &mut self.scroll_bar_vertices);
         }
@@ -1345,28 +1218,6 @@ impl Window
             pos + vec2(item_pad_inner.x, self.title_bar_rect.max.y + item_pad_inner.y),
             pos + size - item_pad_inner,
         );
-        for &widget in &self.active_widgets {
-            let (_, widget) = widgets.get_widget(widget);
-            if let Some(contents) = widget.render_commands(
-                render_commands,
-                style,
-                sampler,
-                base_pipeline,
-                text_pipeline,
-                texture_pipeline,
-                texture_pipeline_layout,
-                vertex_buffer,
-                index_buffer,
-                pos,
-                content_area,
-                inv_aspect_ratio,
-                unit_scale,
-                tmp_alloc,
-                get_custom_pipeline,
-            )? {
-                on_top_contents = Some(contents);
-            }
-        }
         render_commands.bind_pipeline(text_pipeline)?;
         let font_scale = style.font_scale();
         let pc_vertex = push_constants_vertex(
@@ -1426,24 +1277,6 @@ impl Window
                 DrawBufferInfo::new(idx_id, idx_mem.offset)
             )?;
         }
-        if let Some(contents) = on_top_contents {
-            contents.render_commands(
-                render_commands,
-                style,
-                sampler,
-                base_pipeline,
-                text_pipeline,
-                texture_pipeline,
-                texture_pipeline_layout,
-                vertex_buffer,
-                index_buffer,
-                pos,
-                inv_aspect_ratio,
-                unit_scale,
-                tmp_alloc,
-                get_custom_pipeline
-            )?;
-        }
         if self.hover_window_active() {
             self.hover_window.set_vertex_params(style);
             self.hover_window.render_commands(
@@ -1457,7 +1290,6 @@ impl Window
                 unit_scale,
             )?;
         }
-        self.widgets = Some(widgets);
         Ok(())
     }
 
@@ -1468,15 +1300,6 @@ impl Window
         texture_pipeline_layout: PipelineLayoutId,
         tmp_alloc: &ArenaGuard,
     ) -> Result<(), Error> {
-        let widgets = self.widgets.as_mut().unwrap();
-        for &widget in &self.active_widgets {
-            let (_, widget) = widgets.get_widget_mut(widget);
-            widget.transfer_commands(
-                transfer_commands,
-                self.signal_semaphore.map(|v| (v, self.signal_semaphore_value)),
-                sampler, texture_pipeline_layout, tmp_alloc
-            )?;
-        }
         self.painter_storage.transfer_commands(
             transfer_commands,
             self.signal_semaphore.map(|v| (v, self.signal_semaphore_value)).unwrap(),
@@ -1521,7 +1344,7 @@ impl UiSurface for Window
     }
 
     #[inline(always)]
-    fn painter_storage(&self) -> &mut PainterStorage {
+    fn painter_storage(&mut self) -> &mut PainterStorage {
         &mut self.painter_storage
     }
 
@@ -1531,9 +1354,9 @@ impl UiSurface for Window
         label: &str,
     ) -> (&mut CollapsingHeader, CollapsingHeaderId)
     {
-        let mut id = Hashable((label as *const str).addr() as f64);
+        let mut id = CollapsingHeaderId(Hashable((label as *const str).addr() as f64));
         while !self.active_collapsing_headers.insert(id) {
-            id.0 += 0.01;
+            id.0.0 += 0.01;
         }
         let (last_triangulation, collapsing_headers) =
             self.collapsing_headers.entry(id).or_insert_with(|| (0, CollapsingHeader::new()));
@@ -1545,47 +1368,12 @@ impl UiSurface for Window
 
     #[inline(always)]
     fn get_collapsing_header(&self, id: CollapsingHeaderId) -> Option<&CollapsingHeader> {
-        self.collapsing_headers.get(&id.0)
+        self.collapsing_headers.get(&id).map(|v| &v.1)
     }
 
     #[inline(always)]
     fn get_collapsing_header_mut(&mut self, id: CollapsingHeaderId) -> Option<&mut CollapsingHeader> {
-        self.collapsing_headers.get_mut(&id.0)
-    }
-
-    #[inline(always)]
-    fn activate_reaction<T: ?Sized>(
-        &mut self,
-        value: &T,
-    ) -> &mut ReactionEntry
-    {
-        let mut id = ReactionId(Hashable((value as *const T).addr() as f64));
-        while !self.active_reactions.insert(id) {
-            id.0.0 += 0.01;
-        }
-        self.reactions.entry(id).or_insert_with(|| Reaction::new(id))
-    }
-
-    #[inline(always)]
-    fn get_or_insert_reaction_with(
-        &mut self,
-        id: ReactionId,
-        mut f: impl FnMut() -> Reaction,
-    ) -> &mut ReactionEntry
-    {
-        self.reactions
-            .entry(id)
-            .or_insert_with(f)
-    }
-
-    #[inline(always)]
-    fn get_reaction(&self, id: ReactionId) -> Option<&ReactionEntry> {
-        self.reactions.get(id)
-    }
-
-    #[inline(always)]
-    fn get_reaction_mut(&mut self, id: ReactionId) -> Option<&mut ReactionEntry> {
-        self.reactions.get_mut(id)
+        self.collapsing_headers.get_mut(&id).map(|v| &mut v.1)
     }
 
     fn reaction_text(
@@ -1594,7 +1382,7 @@ impl UiSurface for Window
         text_renderer: &mut TextRenderer,
         id: ReactionId,
         text: &str,
-    ) -> &mut Text
+    ) -> SharedText
     {
         let entry = self.reaction_text
             .entry(id)
@@ -1614,7 +1402,7 @@ impl UiSurface for Window
                 )
                 .unwrap_or_default();
             row.row_height = text.row_height;
-            entry.1 = Text::new(
+            entry.1 = Rc::new(RefCell::new(Text::new(
                 text,
                 GlobalVec::with_len(1, row),
                 Default::default(),
@@ -1625,9 +1413,9 @@ impl UiSurface for Window
                 1, 
                 None,
                 None
-            );
+            )));
         }
-        &mut entry.1
+        entry.1.clone()
     }
 
     fn reaction_data_or_insert_with<T: 'static>(
@@ -1703,7 +1491,7 @@ impl UiSurface for Window
     #[inline(always)]
     fn add_text(
         &mut self,
-        text: Text
+        text: SharedText,
     ) -> usize
     {
         self.text.push(text);
@@ -1711,15 +1499,15 @@ impl UiSurface for Window
     }
 
     #[inline(always)]
-    fn get_text_mut(&mut self, index: usize) -> Option<&mut Text> {
-        self.text.get_mut(index)
+    fn get_text(&mut self, index: usize) -> Option<SharedText> {
+        self.text.get(index).cloned()
     }
 
     #[inline(always)]
-    fn modify_or_insert_animated_bool(&mut self, id: ReactionId, value: bool) -> f32 {
+    fn animated_bool(&mut self, id: ReactionId, value: bool) -> f32 {
         let entry = self.animated_bools
             .entry(id)
-            .or_insert(|| (
+            .or_insert_with(|| (
                 if value {
                     1.0
                 } else {
@@ -1731,7 +1519,7 @@ impl UiSurface for Window
     }
 
     #[inline(always)]
-    unsafe fn tmp_data<T>(&self, count: usize) -> Option<NonNull<T>> {
+    fn tmp_data<T>(&self, count: usize) -> Option<NonNull<T>> {
         let alloc =
             if self.using_reaction_data_alloc_1() {
                 &self.reaction_data_alloc_1
@@ -1741,6 +1529,47 @@ impl UiSurface for Window
         unsafe {
             alloc.allocate_uninit(count)
         }
+    }
+}
+
+impl UiReactSurface for Window {
+
+    type Surface = Self;
+
+    fn ui_surface(&self) -> &Self::Surface {
+        self
+    }
+
+    fn ui_surface_mut(&mut self) -> &mut Self::Surface {
+        self
+    }
+
+    fn reaction_from_ref<T: ?Sized>(
+        &mut self,
+        value: &T,
+        mut f: impl FnMut(&mut Self::Surface, &T, &mut ReactionEntry),
+    ) -> &mut Reaction {
+        let reaction = self.activate_reaction(value) as *mut ReactionEntry;
+        f(self, value, unsafe { &mut *reaction });
+        unsafe { &mut *reaction }
+    }
+
+    fn reaction_from_mut<T: ?Sized>(
+        &mut self,
+        value: &mut T,
+        mut f: impl FnMut(&mut Self::Surface, &mut T, &mut ReactionEntry),
+    ) -> &mut Reaction {
+        let reaction = self.activate_reaction(value) as *mut ReactionEntry;
+        f(self, value, unsafe { &mut *reaction });
+        unsafe { &mut *reaction }
+    }
+
+    fn get_reaction(&self, id: ReactionId) -> Option<&ReactionEntry> {
+        self.reactions.get(&id)
+    }
+
+    fn get_reaction_mut(&mut self, id: ReactionId) -> Option<&mut ReactionEntry> {
+        self.reactions.get_mut(&id)
     }
 }
 
