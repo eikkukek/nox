@@ -15,7 +15,10 @@ use nox_geom::{
 
 use nox_font::{text_segment, RenderedText};
 
-use crate::*;
+use crate::{
+    surface::UiSurface,
+    *
+};
 
 pub struct InputTextData {
     input: CompactString,
@@ -111,7 +114,7 @@ impl InputTextData {
     #[inline(always)]
     pub fn set_input_sliderable<T>(
         &mut self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         input: &T
     )
         where 
@@ -220,11 +223,10 @@ impl InputTextData {
         or_flag!(self.flags, Self::CURSOR_ENABLE, value);
     }
 
-    pub fn update<Style: WindowStyle>(
+    pub fn update<Surface: UiSurface, Style: UiStyle>(
         &mut self,
-        ui: &mut UiCtx<Style>,
+        ui: &mut UiCtx<Surface, Style>,
         reaction: &mut Reaction,
-        window_moving: bool,
     ) -> Vec2
     {
         enum CursorMove {
@@ -599,6 +601,7 @@ impl InputTextData {
         }
         self.flags &= !Self::ACTIVE_LAST_FRAME;
         or_flag!(self.flags, Self::ACTIVE_LAST_FRAME, self.active());
+        let surface_moving = ui.surface_moving();
         if mouse_visible && self.cursor_enabled() {
             let input_min = offset.x + item_pad_inner.x - self.input_text_offset_x;
             let input_min_max = (input_min, input_min + input_width);
@@ -629,11 +632,11 @@ impl InputTextData {
                 self.flags |= Self::CURSOR_VISIBLE;
                 self.cursor_timer = 0.0;
             }
-            if !reaction.hovered() && !reaction.held() && !window_moving && mouse_left_state.released() {
+            if !reaction.hovered() && !reaction.held() && !surface_moving && mouse_left_state.released() {
                 self.flags &= !Self::ACTIVE;
                 self.flags |= Self::MOUSE_VISIBLE;
             }
-            if !select_all && !window_moving {
+            if !select_all && !surface_moving {
                 if self.clicked_last_frame() &&
                     !self.select_all_last_frame() &&
                     !self.activated_last_frame()
@@ -930,7 +933,7 @@ pub struct InputText<Style> {
 
 impl<Style> InputText<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     const HOVERED: u32 = 0x1;
@@ -1253,7 +1256,7 @@ impl<Style> InputText<Style>
 
 impl<Style> Widget<Style> for InputText<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     fn get_offset(&self) -> Vec2 {

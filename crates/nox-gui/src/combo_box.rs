@@ -45,7 +45,7 @@ pub struct ComboBox<Style> {
 
 impl<Style> ComboBox<Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     const CONTENT_REQUIRES_TRIANGULATION: u32 = 0x1;
@@ -212,7 +212,7 @@ pub struct ComboBoxBuilder<'a, 'b, T, Style> {
 
 impl<'a, 'b, T: Eq, Style> ComboBoxBuilder<'a, 'b, T, Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     pub fn item(&mut self, value: &mut T, target: T, label: &str) {
@@ -231,7 +231,7 @@ impl<'a, 'b, T: Eq, Style> ComboBoxBuilder<'a, 'b, T, Style>
 
 impl<Style> Widget<Style> for ComboBox<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     fn get_offset(&self) -> Vec2 {
@@ -608,7 +608,7 @@ impl<Style> Widget<Style> for ComboBox<Style>
 
 impl<Style> HoverContents<Style> for ComboBox<Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     fn render_commands(

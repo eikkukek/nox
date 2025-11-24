@@ -1,13 +1,17 @@
+use core::ops::{Deref, DerefMut};
+
 use compact_str::CompactString;
 
-use nox::{mem::Hashable, *};
+use nox::{mem::{Hashable, slot_map::*}, *};
 
 use nox_geom::*;
 
 use crate::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReactionId(pub Hashable<f64>);
+
+pub type SubreactionId = SlotIndex<Reaction>;
 
 #[derive(Clone)]
 pub struct Reaction {
@@ -18,6 +22,24 @@ pub struct Reaction {
     id: ReactionId,
     hover_text: Option<CompactString>,
     flags: u32,
+}
+
+pub struct ReactionEntry {
+    reaction: Reaction,
+    subreactions: GlobalSlotMap<Reaction>,
+}
+
+impl ReactionEntry {
+
+    #[inline(always)]
+    pub fn subreactions(&self) -> &GlobalSlotMap<Reaction> {
+        &self.subreactions
+    }
+
+    #[inline(always)]
+    pub fn subreactions_mut(&mut self) -> &mut GlobalSlotMap<Reaction> {
+        &mut self.subreactions
+    }
 }
 
 impl Reaction {
@@ -150,5 +172,21 @@ impl Reaction {
             }
         }
         None
+    }
+}
+
+impl Deref for ReactionEntry {
+
+    type Target = Reaction;
+
+    fn deref(&self) -> &Self::Target {
+        &self.reaction
+    }
+}
+
+impl DerefMut for ReactionEntry {
+
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.reaction
     }
 }

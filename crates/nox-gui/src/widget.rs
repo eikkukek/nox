@@ -22,7 +22,7 @@ pub enum WidgetStatus<'a> {
     Active,
 }
 
-pub trait HoverContents<Style: WindowStyle>
+pub trait HoverContents<Style: UiStyle>
 {
 
     fn render_commands(
@@ -46,7 +46,7 @@ pub trait HoverContents<Style: WindowStyle>
 
 pub trait Widget<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     fn get_offset(&self) -> Vec2;

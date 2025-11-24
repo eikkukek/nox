@@ -73,11 +73,11 @@ impl CustomPipeline {
 
 pub struct Workspace<'a, Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
     text_renderer: TextRenderer<'a>,
     style: Style,
-    windows: FxHashMap<u32, Window<Style>>,
+    windows: FxHashMap<u32, Window>,
     active_windows: GlobalVec<u32>,
     main_pass_id: PassId,
     window_passes: FxHashMap<PassId, u32>,
@@ -102,7 +102,7 @@ pub struct Workspace<'a, Style>
 
 impl<'a, Style> Workspace<'a, Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     const BEGAN: u32 = 0x1;
@@ -469,7 +469,7 @@ impl<'a, Style> Workspace<'a, Style>
         mut f: F,
     ) -> Result<(), Error>
         where
-            F: FnMut(&mut UiCtx<Style>),
+            F: FnMut(&mut UiCtx<Window, Style>),
     {
         if !self.began() {
             return Err(Error::UserError(
@@ -482,6 +482,22 @@ impl<'a, Style> Workspace<'a, Style>
             initial_size,
         ));
         window.set_last_frame(self.frame);
+        if title != window.title {
+            window.title = title.into();
+            window.title_text = None;
+        }
+        window.begin();
+        let title_text = window.title_text.get_or_insert_with(|| self.text_renderer.render(
+            &[text_segment(window.title.as_str(), self.style.font_regular())],
+            false,
+            0.0,
+        ).unwrap_or_default());
+        let start_off = vec2(
+            self.style.item_pad_outer().x,
+            self.style.calc_text_box_height_from_text_height(
+                title_text.row_height * self.style.font_scale() * self.style.title_add_scale()) +
+                self.style.item_pad_outer().y,
+        );
         f(&mut UiCtx::new(
             title,
             ctx,

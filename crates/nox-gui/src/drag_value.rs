@@ -8,7 +8,10 @@ use nox::{alloc::arena_alloc::ArenaGuard, mem::vec_types::Vector, *};
 use nox_font::RenderedText;
 use nox_geom::*;
 
-use crate::*;
+use crate::{
+    surface::UiSurface,
+    *,
+};
 
 pub struct DragValueData {
     input_text: InputTextData,
@@ -54,7 +57,7 @@ impl DragValueData {
     #[inline(always)]
     pub fn set_input_params(
         &mut self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         width: f32,
         format_input: Option<fn(&mut dyn Write, &str) -> core::fmt::Result>,
         transparent_inactive_bg: bool,
@@ -77,7 +80,7 @@ impl DragValueData {
     #[inline(always)]
     pub fn calc_value<T>(
         &mut self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         value: &mut T,
         min: T,
         max: T,
@@ -108,7 +111,7 @@ impl DragValueData {
     #[inline(always)]
     pub fn calc_and_map_value<T, U>(
         &mut self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         value: &mut T,
         min: T,
         max: T,
@@ -138,11 +141,10 @@ impl DragValueData {
         }
     }
 
-    pub fn update<Style: WindowStyle>(
+    pub fn update<Surface: UiSurface, Style: UiStyle>(
         &mut self,
-        ui: &mut UiCtx<Style>,
+        ui: &mut UiCtx<Surface, Style>,
         reaction: &mut Reaction,
-        window_moving: bool,
     ) -> Vec2
     {
         self.input_text.set_cursor_enable(self.input_text.active());
@@ -181,7 +183,7 @@ impl DragValueData {
         if cursor_in_rect || self.held()  {
             reaction.cursor(CursorIcon::ColResize);
         }
-        self.input_text.update(ui, reaction, window_moving)
+        self.input_text.update(ui, reaction)
     }
 }
 
@@ -199,7 +201,7 @@ pub struct DragValue<Style> {
 
 impl<Style> DragValue<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     const HOVERED: u32 = 0x1;
@@ -341,7 +343,7 @@ impl<Style> DragValue<Style>
 
 impl<Style> Widget<Style> for DragValue<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     #[inline(always)]

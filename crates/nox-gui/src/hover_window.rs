@@ -42,7 +42,7 @@ impl HoverWindow {
 
     pub fn update(
         &mut self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         text_renderer: &mut TextRenderer,
         cursor_pos: Vec2,
         text: &str,
@@ -100,7 +100,7 @@ impl HoverWindow {
 
     pub fn set_vertex_params(
         &mut self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
     ) {
         color_vertices(&mut self.vertices, self.rect_stroke_vertex_range, style.window_stroke_col());
         color_vertices(&mut self.vertices, self.rect_vertex_range, style.hover_window_bg_col());
@@ -109,7 +109,7 @@ impl HoverWindow {
     pub fn render_commands(
         &self,
         render_commands: &mut RenderCommands,
-        style: & impl WindowStyle,
+        style: & impl UiStyle,
         base_pipeline_id: GraphicsPipelineId,
         text_pipeline_id: GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,

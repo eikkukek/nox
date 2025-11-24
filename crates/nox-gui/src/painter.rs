@@ -501,7 +501,6 @@ impl PainterStorage {
         Ok(())
     }
 
-    #[allow(unused_variables)]
     pub fn transfer_commands(
         &mut self,
         transfer_commands: &mut TransferCommands,
@@ -533,7 +532,7 @@ impl PainterStorage {
     pub fn render_commands(
         &mut self,
         render_commands: &mut RenderCommands,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         sampler: SamplerId,
         offset: Vec2,
         bounds: BoundingRect,
@@ -627,7 +626,7 @@ impl<'a> Painter<'a>
     #[inline(always)]
     pub fn new(
         storage: &'a mut PainterStorage,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         text_renderer: &mut TextRenderer,
         image_loader: &'a mut ImageLoader,
     ) -> Self {

@@ -27,7 +27,7 @@ impl InteractVisuals {
     }
 }
 
-pub trait WindowStyle {
+pub trait UiStyle {
 
     fn font_regular(&self) -> &CompactString;
 
@@ -440,7 +440,7 @@ impl DefaultStyle {
     }
 }
 
-impl WindowStyle for DefaultStyle {
+impl UiStyle for DefaultStyle {
 
     #[inline(always)]
     fn font_regular(&self) -> &CompactString {

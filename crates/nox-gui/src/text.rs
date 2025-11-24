@@ -84,6 +84,21 @@ impl Text {
     }
 }
 
+pub struct SelectableTextData {}
+
+impl SelectableTextData {
+
+    #[inline(always)]
+    pub fn as_text(&self) -> &[Text] {
+        todo!()
+    }
+
+    #[inline(always)]
+    pub fn as_text_mut(&mut self) -> &mut [Text] {
+        todo!()
+    }
+}
+
 pub struct SelectableText<Style>
 {
     text: GlobalVec<Text>,
@@ -110,7 +125,7 @@ pub struct SelectableText<Style>
 
 impl<Style> SelectableText<Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     const TRUNC_TO_WINDOW_WIDTH: u32 = 0x1;
@@ -389,7 +404,7 @@ impl<Style> SelectableText<Style>
 
 pub struct SelectableTextBuilder<'a, 'b, Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
     style: &'a Style,
     text_renderer: &'a mut TextRenderer<'b>,
@@ -401,7 +416,7 @@ pub struct SelectableTextBuilder<'a, 'b, Style>
 
 impl<'a, 'b, Style> SelectableTextBuilder<'a, 'b, Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     #[inline(always)]
@@ -578,7 +593,7 @@ impl TextSegmentBuilder
 
 impl<Style> Widget<Style> for SelectableText<Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     #[inline(always)]

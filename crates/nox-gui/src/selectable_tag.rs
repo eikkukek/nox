@@ -32,7 +32,7 @@ pub struct SelectableTag<Style> {
 
 impl<Style> SelectableTag<Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     const HELD: u32 = 0x1;
@@ -145,7 +145,7 @@ impl<Style> SelectableTag<Style>
 
 impl<Style> Widget<Style> for SelectableTag<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     #[inline(always)]

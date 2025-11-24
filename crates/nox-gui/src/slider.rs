@@ -6,7 +6,7 @@ use core::{
 
 use nox::{
     alloc::arena_alloc::ArenaGuard,
-    mem::vec_types::{GlobalVec, Vector},
+    mem::{slot_map::SlotIndex, vec_types::{GlobalVec, Vector}},
     *,
 };
 
@@ -32,9 +32,74 @@ pub trait Sliderable: Copy + FromStr + PartialEq {
 
     fn display(
         &self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         to: &mut impl Write, 
     ) -> core::fmt::Result;
+}
+
+pub struct SliderData {
+    pub drag_value: DragValueData,
+    drag_value_id: SubreactionId,
+    width: f32,
+    t: f32,
+    quantized_t: f32,
+    flags: u32,
+}
+
+impl SliderData {
+
+    const HELD: u32 = 0x1;
+
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            drag_value: DragValueData::new(),
+            drag_value_id: Default::default(),
+            t: 0.0,
+            quantized_t: 0.0,
+            width: 0.0,
+            flags: 0,
+        }
+    }
+
+    #[inline(always)]
+    pub fn held(&self) -> bool {
+        self.flags & Self::HELD == Self::HELD
+    }
+
+    #[inline(always)]
+    pub fn update_value<T: Sliderable>(
+        &mut self,
+        style: &impl UiStyle,
+        slider_width: f32,
+        value: &mut T,
+        min: T,
+        max: T,
+        drag_speed: f32,
+    )
+    {
+        self.drag_value.set_input_params(style, style.min_input_text_width(), None, false);
+        self.width = slider_width;
+        self.drag_value.calc_value(style, value, T::MIN, T::MAX, drag_speed);
+        if self.held() {
+            self.quantized_t = value.slide_and_quantize_t(min, max, self.t);
+        } else {
+            self.t = value.calc_t(min, max);
+            self.quantized_t = self.t;
+        }
+    }
+
+    #[inline(always)]
+    pub fn update(
+        &mut self,
+        style: &impl UiStyle,
+        slider_reaction: &mut Reaction,
+        darg_value_reaction: &mut Reaction,
+        surface_moving: bool,
+    ) -> (Vec2, Vec2)
+    {
+        todo!()
+    }
 }
 
 pub struct Slider<Style>
@@ -59,7 +124,7 @@ pub struct Slider<Style>
 
 impl<Style> Slider<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     const HELD: u32 = 0x1;
@@ -156,7 +221,7 @@ impl<Style> Slider<Style>
 
 impl<Style> Widget<Style> for Slider<Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
     #[inline(always)]
     fn get_offset(&self) -> Vec2 {
@@ -431,7 +496,7 @@ impl Sliderable for f32 {
     #[inline(always)]
     fn display(
         &self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         to: &mut impl Write,
     ) -> core::fmt::Result
     {
@@ -468,7 +533,7 @@ impl Sliderable for f64 {
     #[inline(always)]
     fn display(
         &self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         to: &mut impl Write,
     ) -> core::fmt::Result
     {
@@ -535,7 +600,7 @@ macro_rules! impl_sliderable_int {
                 #[inline(always)]
                 fn display(
                     &self,
-                    _style: &impl WindowStyle,
+                    _style: &impl UiStyle,
                     to: &mut impl Write,
                 ) -> core::fmt::Result
                 {
@@ -603,7 +668,7 @@ macro_rules! impl_sliderable_uint {
                 #[inline(always)]
                 fn display(
                     &self,
-                    _style: &impl WindowStyle,
+                    _style: &impl UiStyle,
                     to: &mut impl Write,
                 ) -> core::fmt::Result
                 {

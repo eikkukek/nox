@@ -58,7 +58,7 @@ struct Contents<Style> {
 
 impl<Style> Contents<Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     const WIDGET_HOVERED: u32 = 0x1;
@@ -807,7 +807,7 @@ impl<Style> Contents<Style>
 
 impl<Style> HoverContents<Style> for Contents<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     fn render_commands(
@@ -1020,7 +1020,7 @@ pub struct ColorPicker<Style> {
 
 impl<Style> ColorPicker<Style>
     where
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     #[inline(always)]
@@ -1071,7 +1071,7 @@ impl<Style> ColorPicker<Style>
 
 impl<Style> Widget<Style> for ColorPicker<Style>
     where 
-        Style: WindowStyle,
+        Style: UiStyle,
 {
 
     #[inline(always)]

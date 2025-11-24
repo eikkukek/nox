@@ -12,43 +12,58 @@ use nox::{
 use nox_gui::{geom::{shapes::circle, *}, *};
 
 pub fn my_widget_show<Style: WindowStyle>(
-    ui: &mut UiCtx<Style>,
+    ui: &mut impl UiCtx<Style>,
     value: &mut bool,
 ) -> Reaction {
     let size = ui.standard_interact_height() * vec2(2.0, 1.0);
     let reaction = ui.reaction_from_value(
         value, size,
     );
+    let id = reaction.id();
     let offset = reaction.offset();
     if reaction.clicked() {
         *value = !*value;
     }
     let radius = size.y * 0.5;
     let rect = shapes::rect(Default::default(), size, radius);
-    let visuals = ui.style().interact_visuals(&reaction);
     let mut center = offset + vec2(radius, radius);
     let t = ui.animate_bool(reaction.id(), *value);
     center.x += lerp(0.0, size.x - radius * 2.0, t);
-    ui
-        .painter()
-        .rect(reaction.id(), rect, offset, visuals.fill_col, visuals.bg_strokes, visuals.bg_stroke_idx)
-        .circle(
-            reaction.id(),
-            circle(Vec2::default(), radius * 0.75),
-            18,
-            center,
-            visuals.fill_col,
-            visuals.fg_strokes,
-            visuals.fg_stroke_idx,
-        );
+    let visuals = ui.style().interact_visuals(&reaction);
+    ui.paint(move |painter, row| {
+        let off =
+            if let Some(row) = row {
+                vec2(0.0, row.height_halved - size.y * 0.5)
+            } else {
+                vec2(0.0, 0.0)
+            };
+        painter
+            .rect(
+                id,
+                rect,
+                offset + off,
+                visuals.fill_col,
+                visuals.bg_strokes.clone(),
+                visuals.bg_stroke_idx
+            )
+            .circle(
+                id,
+                circle(Vec2::default(), radius * 0.75),
+                18,
+                center + off,
+                visuals.fill_col,
+                visuals.fg_strokes.clone(),
+                visuals.fg_stroke_idx,
+            );
+    });
     reaction
 }
 
-pub fn my_widget<Style: WindowStyle>(
+pub fn my_widget<Style: WindowStyle, Ui: UiCtx<Style>>(
     value: &mut bool
-) -> impl FnMut(&mut UiCtx<Style>) -> Reaction
+) -> impl FnMut(&mut Ui) -> Reaction
 {
-    |ui: &mut UiCtx<Style>| my_widget_show(ui, value)
+    |ui: &mut Ui| my_widget_show(ui, value)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -109,7 +109,7 @@ impl VerScrollBar {
     }
 
     #[inline(always)]
-    pub fn calc_width(&mut self, style: &impl WindowStyle) -> f32 {
+    pub fn calc_width(&mut self, style: &impl UiStyle) -> f32 {
         self.width = lerp(style.scroll_bar_width(), style.scroll_bar_fat_width(), self.width_t);
         self.width
     }
@@ -117,7 +117,7 @@ impl VerScrollBar {
     pub fn update(
         &mut self,
         ctx: &mut WindowCtx,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         current_t: f32,
         offset: Vec2,
         window_pos: Vec2,
@@ -204,7 +204,7 @@ impl VerScrollBar {
 
     pub fn set_vertex_params(
         &self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         vertices: &mut [Vertex],
     ) {
         let (mut bar_col, mut handle_col) =
@@ -289,7 +289,7 @@ impl HorScrollBar {
     }
 
     #[inline(always)]
-    pub fn calc_height(&mut self, style: &impl WindowStyle) -> f32 {
+    pub fn calc_height(&mut self, style: &impl UiStyle) -> f32 {
         self.height = lerp(style.scroll_bar_width(), style.scroll_bar_fat_width(), self.height_t);
         self.height
     }
@@ -334,7 +334,7 @@ impl HorScrollBar {
     pub fn update(
         &mut self,
         ctx: &mut WindowCtx,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         current_t: f32,
         offset: Vec2,
         window_pos: Vec2,
@@ -421,7 +421,7 @@ impl HorScrollBar {
 
     pub fn set_vertex_params(
         &self,
-        style: &impl WindowStyle,
+        style: &impl UiStyle,
         vertices: &mut [Vertex],
     ) {
         let (mut bar_col, mut handle_col) =
