@@ -90,7 +90,6 @@ impl OnTopContents {
     pub fn render_commands(
         &mut self,
         render_commands: &mut RenderCommands,
-        style: &impl UiStyle,
         sampler: SamplerId,
         offset: Vec2,
         bounds: BoundingRect,
@@ -107,7 +106,7 @@ impl OnTopContents {
     ) -> Result<(), Error>
     {
         self.painter_storage.render_commands(
-            render_commands, style, sampler,
+            render_commands, sampler,
             offset, bounds, base_pipeline,
             text_pipeline, texture_pipeline,
             texture_pipeline_layout, vertex_buffer,

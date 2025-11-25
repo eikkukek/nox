@@ -306,6 +306,9 @@ impl PainterStorage {
             self.prev_active_reactions.push(id);
         }
         self.active_reactions.clear();
+        unsafe {
+            self.stack.clear();
+        }
         self.flags &= !Self::REQUIRES_TRANSFER_COMMANDS;
     }
 
@@ -532,7 +535,6 @@ impl PainterStorage {
     pub fn render_commands(
         &mut self,
         render_commands: &mut RenderCommands,
-        style: &impl UiStyle,
         sampler: SamplerId,
         offset: Vec2,
         bounds: BoundingRect,

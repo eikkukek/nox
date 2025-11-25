@@ -16,7 +16,7 @@ pub type SubreactionId = SlotIndex<Subreaction>;
 #[derive(Clone)]
 pub struct Reaction {
     pub(crate) offset: Vec2,
-    pub(crate) size: Vec2,
+    pub size: Vec2,
     rel_cursor_pos: Vec2,
     cursor: Option<CursorIcon>,
     id: ReactionId,
@@ -135,10 +135,14 @@ impl ReactionEntry {
             surface_pos, cursor_in_window,
             hover_blocked
         );
+        let offset = self.reaction.offset();
         for (_, reaction) in &mut self.subreactions {
             reaction.update(
-                ctx, cursor_pos,
-                surface_pos, cursor_in_window,
+                ctx,
+                cursor_pos,
+                surface_pos,
+                offset,
+                cursor_in_window,
                 hover_blocked
             );
         }
@@ -292,5 +296,12 @@ impl DerefMut for ReactionEntry {
 
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.reaction
+    }
+}
+
+impl<'a> From<&'a mut ReactionEntry> for &'a mut Reaction {
+
+    fn from(value: &'a mut ReactionEntry) -> Self {
+        value.deref_mut()
     }
 }

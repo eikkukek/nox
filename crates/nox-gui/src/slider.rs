@@ -97,8 +97,8 @@ impl SliderData {
     #[inline(always)]
     pub fn update<Surface: UiReactSurface, Style: UiStyle>(
         &mut self,
-        ui: &mut UiReactCtx<Surface, Style>,
-        reaction: &mut ReactionEntry,
+        _ui: &mut UiReactCtx<Surface, Style>,
+        _reaction: &mut ReactionEntry,
     )
     {
         todo!()

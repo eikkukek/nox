@@ -40,6 +40,7 @@ pub use drag_value::*;
 pub use scroll_bar::*;
 pub use hover_window::*;
 pub use drop_down::*;
+pub use surface::UiReactSurface;
 pub use ui_ctx::*;
 pub use window::*;
 pub use workspace::*;

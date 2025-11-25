@@ -148,6 +148,11 @@ impl<'a> ArenaGuard<'a> {
     }
 
     #[inline(always)]
+    pub fn used(&self) -> usize {
+        self.stack.used()
+    }
+
+    #[inline(always)]
     pub fn remaining(&self) -> usize {
         self.stack.remaining()
     }

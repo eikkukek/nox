@@ -30,7 +30,7 @@ pub trait UiSurface {
 
     fn get_collapsing_header_mut(&mut self, id: CollapsingHeaderId) -> Option<&mut CollapsingHeader>;
     
-    fn render_text(
+    fn add_text(
         &mut self,
         text: SharedText,
     ) -> usize;
@@ -64,16 +64,16 @@ pub trait UiReactSurface {
 
     fn ui_surface_mut(&mut self) -> &mut Self::Surface;
 
-    fn reaction_from_ref<T: ?Sized>(
+    fn reaction_from_ref<'a, T: ?Sized>(
         &mut self,
-        value: &T,
-        f: impl FnMut(&mut Self::Surface, &T, &mut ReactionEntry),
+        value: &'a T,
+        f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, &'a T),
     ) -> &mut Reaction;
 
-    fn reaction_from_mut<T: ?Sized>(
+    fn reaction_from_mut<'a, T: ?Sized>(
         &mut self,
-        value: &mut T,
-        f: impl FnMut(&mut Self::Surface, &mut T, &mut ReactionEntry),
+        value: &'a mut T,
+        f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, &'a mut T),
     ) -> &mut Reaction;
 
     fn get_reaction(&self, id: ReactionId) -> Option<&ReactionEntry>;

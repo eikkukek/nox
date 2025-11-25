@@ -1,9 +1,6 @@
-use std::rc::Rc;
-
 use core::{
     ptr::NonNull,
     any::TypeId,
-    cell::RefCell,
 };
 
 use nox::{
@@ -383,7 +380,7 @@ impl Window
         win_size: Vec2,
         aspect_ratio: f32,
         unit_scale: f32,
-        tmp_alloc: ArenaGuard,
+        tmp_alloc: &ArenaGuard,
     ) -> Result<WindowUpdateResult, Error>
     {
         let override_cursor = style.override_cursor();
@@ -480,7 +477,6 @@ impl Window
         }
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.combined_text.clear();
-        let mut cursor_in_some_widget = false;
         let mut hover_blocked =
             !cursor_in_this_window &&
             self.ver_scroll_bar.held() ||
@@ -576,6 +572,8 @@ impl Window
                 break;
             }
         }
+        self.flags &= !(Self::HELD & (held_reaction.is_some() as u32) << Self::HELD.trailing_zeros());
+        cursor_in_this_window |= held_reaction.is_some();
         self.flags ^= Self::USING_REACTION_DATA_ALLOC_1;
         let reaction_data_alloc =
             if self.using_reaction_data_alloc_1() {
@@ -589,6 +587,7 @@ impl Window
                 }
                 &self.reaction_data_alloc_0
             };
+        let scroll_bar_hovered = self.ver_scroll_bar.hovering() || self.hor_scroll_bar.hovering();
         for &id in &self.active_reactions {
             let reaction = self.reactions.get_mut(&id).unwrap();
             reaction.offset += widget_off;
@@ -609,7 +608,7 @@ impl Window
                     cursor_pos,
                     pos,
                     cursor_in_this_window,
-                    reaction_blocked ||
+                    reaction_blocked || scroll_bar_hovered ||
                     if let Some(held_id) = held_reaction {
                         held_id != id
                     } else {
@@ -624,9 +623,6 @@ impl Window
                 if override_cursor {
                     ctx.set_cursor(cursor_override);
                 }
-            }
-            if reaction.held() {
-                cursor_in_this_window = true;
             }
         }
         let window_moving = self.held() || self.any_resize();
@@ -650,7 +646,6 @@ impl Window
                 min_size.x = min_size.x.max(width);
             }
         }
-        let scroll_bar_hovered = self.ver_scroll_bar.hovering() || self.hor_scroll_bar.hovering();
         let mut transfer_commands_required = false;
         self.widget_scroll_off = widget_off;
         let ver_scroll_bar_width = self.ver_scroll_bar.calc_width(style);
@@ -661,7 +656,6 @@ impl Window
         if self.hor_scroll_bar_visible() && !hover_blocked {
             min_size.y += hor_scroll_bar_height + item_pad_outer.y;
         }
-        cursor_in_this_window |= cursor_in_some_widget;
         or_flag!(self.flags, Self::CURSOR_IN_WINDOW, cursor_in_this_window);
         if self.main_rect.max.x < min_size.x {
             self.main_rect.max.x = min_size.x;
@@ -818,7 +812,7 @@ impl Window
                 pos, cursor_pos, height,
                 self.widget_rect_max.y,
                 size.y,
-                active_widget.is_some(),
+                false,
                 hover_blocked && !self.hor_scroll_bar.held(),
             );
             triangulate_scroll_bars |= res.requires_triangulation;
@@ -837,7 +831,7 @@ impl Window
                 pos, cursor_pos, width,
                 self.widget_rect_max.x,
                 size.x,
-                active_widget.is_some(),
+                false,
                 hover_blocked && !self.ver_scroll_bar.held()
             );
             triangulate_scroll_bars |= res.requires_triangulation;
@@ -847,6 +841,7 @@ impl Window
             if mouse_left_state.released() {
                 self.flags &= !Self::CONTENT_HELD;
             } else if
+                held_reaction.is_none() &&
                 !self.ver_scroll_bar_visible() &&
                 !self.hor_scroll_bar_visible() &&
                 !delta_cursor_pos.is_zero()
@@ -863,6 +858,7 @@ impl Window
         } else if
             !hover_blocked &&
             cursor_in_this_window &&
+            held_reaction.is_none() &&
             mouse_left_state.pressed()
         {
             self.flags |= Self::CONTENT_HELD;
@@ -891,6 +887,7 @@ impl Window
             self.scroll_bar_indices.append_map(&indices_usize, |&i| i as u32);
         }
         for text in &self.text {
+            let text = text.as_mut();
             let offset = text.offset + widget_off;
             self.combined_text.add_text(
                 &text.text,
@@ -922,6 +919,16 @@ impl Window
         norm_size.x /= aspect_ratio;
         norm_size *= 0.5;
         transfer_commands_required |= self.painter_storage.requires_transfer_commands();
+        if let Some(semaphore) = self.signal_semaphore {
+            renderer.edit_resources(|r| {
+                self.painter_storage.end(
+                    (semaphore, self.signal_semaphore_value),
+                    r,
+                    tmp_alloc,
+                )?;
+                Ok(())
+            })?;
+        }
         Ok(WindowUpdateResult {
             cursor_in_window: cursor_in_this_window || self.any_resize(),
             requires_transfer_commands: transfer_commands_required,
@@ -1024,7 +1031,6 @@ impl Window
                 ..Default::default()
             };
             let first_index = indices_usize.len() as u32;
-            let mut flags = self.flags;
             for collapsing_headers in &self.active_collapsing_headers {
                 let (last_triangulation, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
                 *last_triangulation = new_triangulation;
@@ -1040,7 +1046,6 @@ impl Window
                 ]);
                 collapsing_headers.beam_vertex_range = VertexRange::new(n - 4..n);
             }
-            self.flags = flags;
             self.flags &= !Self::REQUIRES_TRIANGULATION;
             self.indices.append_map(&indices_usize, |&i| i as u32);
             self.last_triangulation = new_triangulation;
@@ -1056,12 +1061,9 @@ impl Window
     pub fn render(
         &mut self,
         frame_graph: &mut dyn FrameGraph,
-        msaa_samples: MSAA, 
         render_format: ColorFormat,
-        resolve_mode: Option<ResolveMode>,
         add_read: &mut impl FnMut(ReadInfo),
         add_signal_semaphore: &mut impl FnMut(TimelineSemaphoreId, u64),
-        add_pass: &mut impl FnMut(PassId),
     ) -> Result<(), Error>
     {
         let mut signal_semaphore = Default::default();
@@ -1176,9 +1178,10 @@ impl Window
                 offset: idx_mem.offset,
             },
         )?;
+        let size = self.size();
         let content_bounds = BoundingRect::from_min_max(
             pos + vec2(item_pad_inner.x, self.title_bar_rect.max.y + item_pad_inner.y),
-            pos + self.main_rect.max - item_pad_inner,
+            pos + size - item_pad_inner,
         );
         let pc_fragment = base_push_constants_fragment(
             content_bounds.min,
@@ -1203,7 +1206,7 @@ impl Window
         )?;
         self.painter_storage.render_commands(
             render_commands,
-            style, sampler,
+            sampler,
             pos + self.widget_scroll_off,
             content_bounds, base_pipeline,
             text_pipeline, texture_pipeline,
@@ -1212,12 +1215,6 @@ impl Window
             unit_scale, tmp_alloc,
             get_custom_pipeline
         )?;
-        let size = self.size();
-        let mut on_top_contents = None;
-        let content_area = BoundingRect::from_min_max(
-            pos + vec2(item_pad_inner.x, self.title_bar_rect.max.y + item_pad_inner.y),
-            pos + size - item_pad_inner,
-        );
         render_commands.bind_pipeline(text_pipeline)?;
         let font_scale = style.font_scale();
         let pc_vertex = push_constants_vertex(
@@ -1402,7 +1399,7 @@ impl UiSurface for Window
                 )
                 .unwrap_or_default();
             row.row_height = text.row_height;
-            entry.1 = Rc::new(RefCell::new(Text::new(
+            entry.1 = SharedText::new(Text::new(
                 text,
                 GlobalVec::with_len(1, row),
                 Default::default(),
@@ -1413,7 +1410,7 @@ impl UiSurface for Window
                 1, 
                 None,
                 None
-            )));
+            ));
         }
         entry.1.clone()
     }
@@ -1515,6 +1512,9 @@ impl UiSurface for Window
                 },
                 value
             ));
+        if let Some(reaction) = self.reactions.get_mut(&id) {
+            reaction.enable_animated_bool();
+        }
         entry.0
     }
 
@@ -1544,23 +1544,23 @@ impl UiReactSurface for Window {
         self
     }
 
-    fn reaction_from_ref<T: ?Sized>(
+    fn reaction_from_ref<'a, T: ?Sized>(
         &mut self,
-        value: &T,
-        mut f: impl FnMut(&mut Self::Surface, &T, &mut ReactionEntry),
+        value: &'a T,
+        mut f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, &'a T),
     ) -> &mut Reaction {
         let reaction = self.activate_reaction(value) as *mut ReactionEntry;
-        f(self, value, unsafe { &mut *reaction });
+        f(self, unsafe { &mut *reaction }, value);
         unsafe { &mut *reaction }
     }
 
-    fn reaction_from_mut<T: ?Sized>(
+    fn reaction_from_mut<'a, T: ?Sized>(
         &mut self,
-        value: &mut T,
-        mut f: impl FnMut(&mut Self::Surface, &mut T, &mut ReactionEntry),
+        value: &'a mut T,
+        mut f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, &'a mut T),
     ) -> &mut Reaction {
         let reaction = self.activate_reaction(value) as *mut ReactionEntry;
-        f(self, value, unsafe { &mut *reaction });
+        f(self, unsafe { &mut *reaction }, value);
         unsafe { &mut *reaction }
     }
 

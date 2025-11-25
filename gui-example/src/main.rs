@@ -11,14 +11,14 @@ use nox::{
 
 use nox_gui::{geom::{shapes::circle, *}, *};
 
-pub fn my_widget_show<Style: WindowStyle>(
-    ui: &mut impl UiCtx<Style>,
+pub fn my_widget_show(
+    ui: &mut impl UiReact,
+    reaction: &mut ReactionEntry,
     value: &mut bool,
-) -> Reaction {
+    _label: &str,
+) {
     let size = ui.standard_interact_height() * vec2(2.0, 1.0);
-    let reaction = ui.reaction_from_value(
-        value, size,
-    );
+    reaction.size = size;
     let id = reaction.id();
     let offset = reaction.offset();
     if reaction.clicked() {
@@ -27,16 +27,11 @@ pub fn my_widget_show<Style: WindowStyle>(
     let radius = size.y * 0.5;
     let rect = shapes::rect(Default::default(), size, radius);
     let mut center = offset + vec2(radius, radius);
-    let t = ui.animate_bool(reaction.id(), *value);
+    let t = ui.animated_bool(reaction.id(), *value);
     center.x += lerp(0.0, size.x - radius * 2.0, t);
     let visuals = ui.style().interact_visuals(&reaction);
     ui.paint(move |painter, row| {
-        let off =
-            if let Some(row) = row {
-                vec2(0.0, row.height_halved - size.y * 0.5)
-            } else {
-                vec2(0.0, 0.0)
-            };
+        let off = vec2(0.0, row.height_halved - size.y * 0.5);
         painter
             .rect(
                 id,
@@ -56,15 +51,17 @@ pub fn my_widget_show<Style: WindowStyle>(
                 visuals.fg_stroke_idx,
             );
     });
-    reaction
 }
 
-pub fn my_widget<Style: WindowStyle, Ui: UiCtx<Style>>(
-    value: &mut bool
-) -> impl FnMut(&mut Ui) -> Reaction
-{
-    |ui: &mut Ui| my_widget_show(ui, value)
+impl_widget!(my_widget_show, my_widget_ui(value: &'a mut bool, label: &str));
+/*
+pub fn my_widget_ui<'a, Surface: UiReactSurface, Style: UiStyle>(
+    value: &'a mut bool,
+    label: &str,
+) -> (&'a mut bool, impl FnMut(&mut UiReactCtx<Surface, Style>, &mut ReactionEntry, &mut bool)) {
+    (value, |ui, reaction, value| my_widget_show(ui, reaction, value, label))
 }
+*/
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MyEnum {
@@ -231,14 +228,17 @@ impl<'a> Interface for Example<'a> {
                 ui.resizeable(self.resizeable);
                 ui.clamp_height(self.clamp_height);
                 ui.clamp_width(self.clamp_width);
+
                 ui.collapsing("Show/hide widgets", |ui| {
 
                     ui.checkbox(&mut self.show_other_window, "Show other window");
                     ui.end_row();
 
+                    /*
                     ui.color_picker(&mut self.color);
                     ui.tag("Color picker");
                     ui.end_row();
+                    */
 
                     let image_source = image_source!("ferris.png");
                     let image_size = ui.standard_interact_height() * 2.0;
@@ -262,11 +262,13 @@ impl<'a> Interface for Example<'a> {
 
                     ui.end_row();
 
+                    /*
                     ui.combo_box("My Combo", |builder| {
                         builder.item(&mut self.radio_value, MyEnum::First, "First");
                         builder.item(&mut self.radio_value, MyEnum::Second, "Second");
                         builder.item(&mut self.radio_value, MyEnum::Third, "Third");
                     });
+                    */
 
                     ui.end_row();
 
@@ -276,6 +278,7 @@ impl<'a> Interface for Example<'a> {
                         None,
                     );
 
+                    /*
                     ui.collapsing("Sliders", |ui| {
                         ui.collapsing("f32", |ui| {
                             ui.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
@@ -288,6 +291,8 @@ impl<'a> Interface for Example<'a> {
                             ui.slider(&mut self.slider_value_uint, 0, 10, 20.0);
                         });
                     });
+                    */
+
                     ui.drag_value(
                         &mut self.drag_value_int,
                         i8::MIN,
@@ -296,13 +301,14 @@ impl<'a> Interface for Example<'a> {
                         0.01,
                         None,
                     );
-                    ui.tag("Drag value");
+                    //ui.tag("Drag value");
                     ui.end_row();
-                    ui.add(my_widget(&mut self.show_other_window))
+                    ui.add_from_mut(my_widget_ui(&mut self.show_other_window, "test"))
                         .hover_text("Simple custom widget");
                 });
             }
         )?;
+        /*
         if self.show_other_window {
             let mut fmt = String::new();
             <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / ctx.delta_time_secs_f32())).unwrap();
@@ -334,6 +340,7 @@ impl<'a> Interface for Example<'a> {
                     });
             })?;
         }
+        */
         self.tag_color.hue = (self.tag_color.hue + core::f32::consts::PI * ctx.delta_time_secs_f32()) % core::f32::consts::TAU;
         self.workspace.end(ctx, renderer)?;
         Ok(())

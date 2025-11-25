@@ -1,10 +1,7 @@
-use std::rc::Rc;
-
 use core::{
     marker::PhantomData,
     fmt::{Display, Write},
     str::FromStr,
-    cell::RefCell,
 };
 
 use compact_str::CompactString;
@@ -523,7 +520,7 @@ impl InputTextData {
                     )
                     .unwrap_or_default();
                 self.row_offsets.row_height = text.row_height;
-                input_text = text
+                input_text = text;
             });
             input_text
         });
@@ -810,7 +807,7 @@ impl InputTextData {
         self.double_click_timer += ui.win_ctx().delta_time_secs_f32();
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
         or_flag!(self.flags, Self::ACTIVATED_LAST_FRAME, !active_this_frame && self.active());
-        let text = Rc::new(RefCell::new(Text::new(
+        let text = SharedText::new(Text::new(
             if self.active() {
                 self.input_text.clone().unwrap()
             } else {
@@ -829,8 +826,8 @@ impl InputTextData {
             1,
             Some(BoundingRect::from_min_max(offset + item_pad_inner, offset + input_rect.max - item_pad_inner)),
             None,
-        )));
-        ui.render_text(text);
+        ));
+        ui.add_text(text);
         reaction.size = input_rect.max;
     }
 

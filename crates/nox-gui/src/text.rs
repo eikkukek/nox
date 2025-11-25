@@ -1,8 +1,9 @@
 use std::rc::Rc;
 
 use core::{
-    cell::RefCell,
+    cell::{RefCell, RefMut},
     marker::PhantomData,
+    ops::{Deref, DerefMut},
 };
 
 use nox_font::{text_segment_owned, RenderedText, TextOffset, TextSegmentOwned};
@@ -87,7 +88,10 @@ impl Text {
     }
 }
 
-pub type SharedText = Rc<RefCell<Text>>;
+#[derive(Default, Clone)]
+pub struct SharedText(pub Rc<RefCell<Text>>);
+
+pub struct SharedTextMut<'a>(pub RefMut<'a, Text>);
 
 pub struct SelectableTextData {}
 
@@ -902,4 +906,36 @@ impl<Style> Widget<Style> for SelectableText<Style>
         _global_resources: &mut GlobalResources,
         _tmp_alloc: &ArenaGuard,
     ) -> Result<(), Error> { Ok(()) }
+}
+
+impl SharedText {
+
+    pub fn new(text: Text) -> Self {
+        Self(Rc::new(RefCell::new(text)))
+    }
+
+    pub fn as_mut(&self) -> SharedTextMut<'_> {
+        SharedTextMut(self.0.borrow_mut())
+    }
+
+    pub fn edit(self, mut f: impl FnMut(&mut SharedTextMut)) -> Self {
+        f(&mut self.as_mut());
+        self
+    }
+}
+
+impl<'a> Deref for SharedTextMut<'a> {
+
+    type Target = Text;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> DerefMut for SharedTextMut<'a> {
+
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }

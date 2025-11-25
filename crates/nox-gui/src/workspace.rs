@@ -482,11 +482,11 @@ impl<'a, Style> Workspace<'a, Style>
             initial_size,
         ));
         window.set_last_frame(self.frame);
+        window.begin();
         if title != window.title {
             window.title = title.into();
             window.title_text = None;
         }
-        window.begin();
         let title_text = window.title_text.get_or_insert_with(|| self.text_renderer.render(
             &[text_segment(window.title.as_str(), self.style.font_regular())],
             false,
@@ -499,10 +499,10 @@ impl<'a, Style> Workspace<'a, Style>
                 self.style.item_pad_outer().y,
         );
         f(&mut UiCtx::new(
-            title,
             ctx,
-            &self.style,
             window,
+            &self.style,
+            start_off,
             &mut self.text_renderer,
             &mut self.image_loader,
         ));
@@ -554,7 +554,7 @@ impl<'a, Style> Workspace<'a, Style>
                 window_size,
                 aspect_ratio,
                 unit_scale,
-                tmp_alloc,
+                &tmp_alloc,
             )?;
             if cursor_in_window && ctx.mouse_button_state(MouseButton::Left).pressed() {
                 window_pressed = Some(i);
@@ -595,17 +595,12 @@ impl<'a, Style> Workspace<'a, Style>
                 .unwrap()
                 .render(
                     frame_graph,
-                    output_samples,
                     output_format,
-                    resolve_image.0.map(|v| v.1),
                     &mut |read| {
                         reads.push(read);
                     },
                     &mut |id, value| {
                         signal_semaphores.push((id, value));
-                    },
-                    &mut |pass| {
-                        self.window_passes.insert(pass, id);
                     },
                 )?;
         }
