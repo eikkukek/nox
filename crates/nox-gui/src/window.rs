@@ -6,7 +6,6 @@ use core::{
 use nox::{
     alloc::arena_alloc::{ArenaAlloc, ArenaGuard},
     mem::{
-        Hashable,
         vec_types::{GlobalVec, Vector},
         Allocator,
     },
@@ -65,7 +64,7 @@ pub struct Window
     vertices: GlobalVec<Vertex>,
     indices: GlobalVec<u32>,
     text: GlobalVec<SharedText>,
-    reactions: FxHashMap<ReactionId, ReactionEntry>,
+    reactions: FxHashMap<ReactionId, Reaction>,
     active_reactions: FxHashSet<ReactionId>,
     prev_active_reactions: GlobalVec<ReactionId>,
     reaction_data: FxHashMap<ReactionId, ReactionData>,
@@ -154,7 +153,7 @@ impl Window
             collapsing_headers: FxHashMap::default(),
             active_collapsing_headers: Default::default(),
             prev_active_collapsing_headers: Default::default(),
-            painter_storage: PainterStorage::new(),
+            painter_storage: PainterStorage::new(1 << 14),
             hover_window: HoverWindow::new(),
             scroll_bar_vertices: Default::default(),
             scroll_bar_indices: Default::default(),
@@ -187,13 +186,13 @@ impl Window
     fn activate_reaction<T: RefAddr>(
         &mut self,
         value: &T,
-    ) -> &mut ReactionEntry
+    ) -> &mut Reaction
     {
-        let mut id = ReactionId(Hashable(value.addr() as f64));
+        let mut id = ReactionId(value.addr());
         while !self.active_reactions.insert(id) {
-            id.0.0 += 0.01;
+            id.0 = id.0.wrapping_add(1);
         }
-        self.reactions.entry(id).or_insert_with(|| ReactionEntry::new(id))
+        self.reactions.entry(id).or_insert_with(|| Reaction::new(id))
     }
 
     #[inline(always)]
@@ -843,19 +842,20 @@ impl Window
         if self.content_held() {
             if mouse_left_state.released() {
                 self.flags &= !Self::CONTENT_HELD;
-            } else if
-                held_reaction.is_none() &&
-                !self.ver_scroll_bar_visible() &&
-                !self.hor_scroll_bar_visible() &&
-                !delta_cursor_pos.is_zero()
-            {
-                self.flags |= Self::HELD;
-            } else {
-                if self.ver_scroll_bar_visible()  {
-                    self.scroll_y -= delta_cursor_pos.y / self.widget_rect_max.y;
-                }
-                if self.hor_scroll_bar_visible() {
-                    self.scroll_x -= delta_cursor_pos.x / self.widget_rect_max.x;
+            } else if held_reaction.is_none() {
+                if
+                    !self.ver_scroll_bar_visible() &&
+                    !self.hor_scroll_bar_visible() &&
+                    !delta_cursor_pos.is_zero()
+                {
+                    self.flags |= Self::HELD;
+                } else {
+                    if self.ver_scroll_bar_visible()  {
+                        self.scroll_y -= delta_cursor_pos.y / self.widget_rect_max.y;
+                    }
+                    if self.hor_scroll_bar_visible() {
+                        self.scroll_x -= delta_cursor_pos.x / self.widget_rect_max.x;
+                    }
                 }
             }
         } else if
@@ -1354,9 +1354,9 @@ impl UiSurface for Window
         label: &str,
     ) -> (&mut CollapsingHeader, CollapsingHeaderId)
     {
-        let mut id = CollapsingHeaderId(Hashable((label as *const str).addr() as f64));
+        let mut id = CollapsingHeaderId((label as *const str).addr());
         while !self.active_collapsing_headers.insert(id) {
-            id.0.0 += 0.01;
+            id.0 = id.0.wrapping_add(1);
         }
         let (last_triangulation, collapsing_headers) =
             self.collapsing_headers.entry(id).or_insert_with(|| (0, CollapsingHeader::new()));
@@ -1551,18 +1551,18 @@ impl UiReactSurface for Window {
     fn reaction_from_addr<'a, T: RefAddr>(
         &mut self,
         value: T,
-        mut f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, T),
+        mut f: impl FnMut(&mut Self::Surface, &'a mut Reaction, T),
     ) -> &mut Reaction {
-        let reaction = self.activate_reaction(&value) as *mut ReactionEntry;
+        let reaction = self.activate_reaction(&value) as *mut Reaction;
         f(self, unsafe { &mut *reaction }, value);
         unsafe { &mut *reaction }
     }
 
-    fn get_reaction(&self, id: ReactionId) -> Option<&ReactionEntry> {
+    fn get_reaction(&self, id: ReactionId) -> Option<&Reaction> {
         self.reactions.get(&id)
     }
 
-    fn get_reaction_mut(&mut self, id: ReactionId) -> Option<&mut ReactionEntry> {
+    fn get_reaction_mut(&mut self, id: ReactionId) -> Option<&mut Reaction> {
         self.reactions.get_mut(&id)
     }
 }

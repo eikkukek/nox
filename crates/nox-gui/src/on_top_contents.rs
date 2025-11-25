@@ -20,7 +20,7 @@ impl OnTopContents {
     pub fn new() -> Self {
         Self {
             relative_bounds: Default::default(),
-            painter_storage: PainterStorage::new(),
+            painter_storage: PainterStorage::new(1 << 14),
         }
     }
 

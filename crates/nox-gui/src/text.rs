@@ -97,9 +97,7 @@ impl Text {
 
     pub fn reset(&mut self) {
         for (i, (_, instance)) in self.text.text.iter_mut().enumerate() {
-            for (j, offset) in instance.offsets.iter_mut().enumerate() {
-                *offset = self.reset_offsets[i][j];
-            }
+            instance.offsets.clone_from_slice(&self.reset_offsets[i]);
         }
     }
 }

@@ -67,12 +67,12 @@ pub trait UiReactSurface {
     fn reaction_from_addr<'a, T: RefAddr>(
         &mut self,
         value: T,
-        f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, T),
+        f: impl FnMut(&mut Self::Surface, &'a mut Reaction, T),
     ) -> &mut Reaction;
 
-    fn get_reaction(&self, id: ReactionId) -> Option<&ReactionEntry>;
+    fn get_reaction(&self, id: ReactionId) -> Option<&Reaction>;
 
-    fn get_reaction_mut(&mut self, id: ReactionId) -> Option<&mut ReactionEntry>;
+    fn get_reaction_mut(&mut self, id: ReactionId) -> Option<&mut Reaction>;
 }
 
 pub trait RefAddr {

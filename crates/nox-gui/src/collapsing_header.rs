@@ -3,7 +3,6 @@ use core::f32::consts::FRAC_PI_2;
 use compact_str::CompactString;
 
 use nox::{
-    mem::Hashable,
     *
 };
 
@@ -14,7 +13,7 @@ use nox_geom::*;
 use crate::*;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CollapsingHeaderId(pub Hashable<f64>);
+pub struct CollapsingHeaderId(pub usize);
 
 pub struct CollapsingHeader {
     label: CompactString,

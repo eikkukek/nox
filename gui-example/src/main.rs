@@ -13,7 +13,7 @@ use nox_gui::{geom::{shapes::circle, *}, *};
 
 pub fn my_widget_show(
     ui: &mut impl UiReact,
-    reaction: &mut ReactionEntry,
+    reaction: &mut Reaction,
     value: &mut bool,
     _label: &str,
 ) {
@@ -273,20 +273,18 @@ impl<'a> Interface for Example<'a> {
                         None,
                     );
 
-                    /*
                     ui.collapsing("Sliders", |ui| {
                         ui.collapsing("f32", |ui| {
                             ui.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
-                            ui.tag("f32 1");
+                            //ui.tag("f32 1");
                             ui.end_row();
                             ui.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
-                            ui.tag("f32 2");
+                            //ui.tag("f32 2");
                         });
                         ui.collapsing("u8", |ui| {
                             ui.slider(&mut self.slider_value_uint, 0, 10, 20.0);
                         });
                     });
-                    */
 
                     ui.drag_value(
                         &mut self.drag_value_int,

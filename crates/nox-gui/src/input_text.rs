@@ -589,7 +589,7 @@ impl InputTextData {
             self.flags |= Self::MOUSE_VISIBLE;
         }
         let mouse_visible = self.mouse_visible();
-        let rel_cursor_pos = reaction.rel_cursor_pos();
+        let rel_cursor_pos = reaction.rel_cursor_pos() + reaction.offset();
         let override_cursor = ui.style().override_cursor();
         let mouse_left_state = ui.win_ctx().mouse_button_state(MouseButton::Left);
         if override_cursor {
@@ -824,7 +824,7 @@ impl InputTextData {
             None,
             0,
             1,
-            Some(BoundingRect::from_min_max(offset + item_pad_inner, offset + input_rect.max - item_pad_inner)),
+            Some(BoundingRect::from_min_max(offset + vec2(item_pad_inner.x, 0.0), offset + input_rect.max - vec2(item_pad_inner.x, 0.0))),
             None,
         ));
         ui.add_text(text);

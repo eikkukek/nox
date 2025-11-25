@@ -282,7 +282,7 @@ impl PainterStorage {
     const REQUIRES_TRANSFER_COMMANDS: u32 = 0x1;
 
     #[inline(always)]
-    pub fn new() -> Self {
+    pub fn new(stack_size: usize) -> Self {
         Self {
             vertices: Default::default(),
             indices_usize: Default::default(),
@@ -294,7 +294,7 @@ impl PainterStorage {
             active_reactions: FxHashSet::default(),
             prev_active_reactions: Default::default(),
             shapes: Default::default(),
-            stack: ArenaAlloc::new(1 << 16).unwrap(),
+            stack: ArenaAlloc::new(stack_size).unwrap(),
             flags: 0,
         }
     } 
