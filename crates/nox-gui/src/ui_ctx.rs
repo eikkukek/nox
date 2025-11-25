@@ -261,42 +261,18 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     }
 
     #[inline(always)]
-    pub fn add_from_mut<'c, T, R>(
+    pub fn add<'c, T, R>(
         &mut self,
-        (value, mut f): (&'c mut T, impl FnMut(&mut UiReactCtx<Surface, Style>, R, &'c mut T)),
+        (value, mut f): (T, impl FnMut(&mut UiReactCtx<Surface, Style>, R, T)),
     ) -> ReactionRef<'_, Surface>
         where 
-            T: ?Sized,
+            T: RefAddr,
             R: From<&'c mut ReactionEntry>
     {
         let surface = unsafe {
             &mut *self.surface.get()
         };
-        let reaction = surface.as_mut().reaction_from_mut(value, |surface, reaction, value| {
-            reaction.offset = self.widget_off;
-            f(&mut UiReactCtx { ui: self, surface }, reaction.into(), value)
-        });
-        let size = reaction.size;
-        self.current_height = self.current_height.max(size.y);
-        self.widget_off.x += size.x + self.style.item_pad_outer().x;
-        self.current_row_reactions.push((reaction.id(), size));
-        let ptr = reaction as _;
-        ReactionRef { ptr, _marker: PhantomData }
-    }
-
-    #[inline(always)]
-    pub fn add_from_ref<'c, T, R>(
-        &mut self,
-        (value, mut f): (&'c T, impl FnMut(&mut UiReactCtx<Surface, Style>, R, &'c T))
-    ) -> ReactionRef<'_, Surface>
-        where 
-            T: ?Sized,
-            R: From<&'c mut ReactionEntry>
-    {
-        let surface = unsafe {
-            &mut *self.surface.get()
-        };
-        let reaction = surface.as_mut().reaction_from_ref(value, |surface, reaction, value| {
+        let reaction = surface.as_mut().reaction_from_addr(value, |surface, reaction, value| {
             reaction.offset = self.widget_off;
             f(&mut UiReactCtx { ui: self, surface }, reaction.into(), value)
         });
@@ -538,7 +514,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         label: &str,
     ) -> ReactionRef<'_, Surface>
     {
-        self.add_from_ref::<str, &mut Reaction>((label, |ui, reaction, label| {
+        self.add::<&str, &mut Reaction>((label, |ui, reaction, label| {
             let id = reaction.id();
             let offset = reaction.offset();
             let visuals = ui.style().interact_visuals(&reaction);
@@ -574,7 +550,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         label: &str,
     ) -> bool
     {
-        self.add_from_mut::<bool, &mut Reaction>((value, |ui, reaction, value| {
+        self.add::<&mut bool, &mut Reaction>((value, |ui, reaction, value| {
             let item_pad_inner = ui.style().item_pad_inner();
             let id = reaction.id();
             let offset = reaction.offset();
@@ -640,7 +616,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         drag_speed: f32,
     ) -> ReactionRef<'_, Surface>
     { 
-        self.add_from_mut::<T, &mut ReactionEntry>((value, |ui, reaction, value| {
+        self.add::<&mut T, &mut ReactionEntry>((value, |ui, reaction, value| {
             let id = reaction.id();
             ui.reaction_data(id, || SliderData::new(), |ui, slider| {
                 slider.update_value(ui.style(), ui.ui.slider_width, value, min, max, drag_speed);
@@ -683,7 +659,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         center_text: bool,
         format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
     ) -> ReactionRef<'_, Surface> {
-        self.add_from_mut::<T, &mut Reaction>((value, |ui, reaction, value| {
+        self.add::<&mut T, &mut Reaction>((value, |ui, reaction, value| {
             let id = reaction.id();
             ui.reaction_data(id, || InputTextData::new(), |ui, input_text| {
                 input_text.set_params(
@@ -746,7 +722,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         format_input: Option<fn(&mut dyn core::fmt::Write, &str) -> core::fmt::Result>,
     ) -> ReactionRef<'_, Surface>
     {
-        self.add_from_mut::<T, &mut Reaction>((value, |ui, reaction, value| {
+        self.add::<&mut T, &mut Reaction>((value, |ui, reaction, value| {
             let id = reaction.id();
             ui.reaction_data(id, || DragValueData::new(), |ui, drag_value| {
                 drag_value.set_input_params(
@@ -769,7 +745,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         label: &str,
     ) -> ReactionRef<'c, Surface>
     {
-        self.add_from_mut::<T, &mut Reaction>((value, |ui, reaction, value| {
+        self.add::<&mut T, &mut Reaction>((value, |ui, reaction, value| {
             let item_pad_inner = ui.style().item_pad_inner();
             let id = reaction.id();
             let offset = reaction.offset;
@@ -834,7 +810,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         label: &str,
     ) -> ReactionRef<'_, Surface>
     {
-        self.add_from_mut::<T, &mut Reaction>((value, |ui, reaction, value| {
+        self.add::<&mut T, &mut Reaction>((value, |ui, reaction, value| {
             let item_pad_inner = ui.style().item_pad_inner();
             let id = reaction.id();
             let visuals = ui.style().interact_visuals(reaction);
@@ -906,7 +882,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         source: ImageSource,
         size: Vec2,
     ) -> ReactionRef<'_, Surface> {
-        let reaction = self.add_from_ref::<str, &mut Reaction>((label, |ui, reaction, _| {
+        let reaction = self.add::<&str, &mut Reaction>((label, |ui, reaction, _| {
             let offset = reaction.offset;
             reaction.size = size;
             let source = match source {
@@ -1036,7 +1012,8 @@ impl<'a, 'b, 'c, Surface, Style> UiReact for UiReactCtx<'a, 'b, 'c, Surface, Sty
         text: &str,
     ) -> SharedText
     {
-        self.surface.reaction_text(self.ui.style, self.ui.text_renderer, id, text)
+        let text = self.surface.reaction_text(self.ui.style, self.ui.text_renderer, id, text);
+        text.edit(|text| text.reset())
     }
 
     #[inline(always)]

@@ -46,6 +46,7 @@ impl RowOffsets {
 #[derive(Default, Clone)]
 pub struct Text {
     pub text: RenderedText,
+    pub reset_offsets: GlobalVec<GlobalVec<font::VertexOffset>>,
     pub rows: GlobalVec<RowOffsets>,
     pub color: ColorSRGBA,
     pub offset: Vec2,
@@ -59,7 +60,6 @@ pub struct Text {
 
 impl Text {
 
-    #[inline(always)]
     pub fn new(
         text: RenderedText,
         rows: GlobalVec<RowOffsets>,
@@ -73,8 +73,16 @@ impl Text {
         tool_tip: Option<Rc<CompactString>>,
     ) -> Self
     {
+        let mut reset_offsets = GlobalVec::default();
+        for (_, instance) in &text.text {
+            let inst = reset_offsets.push(GlobalVec::default());
+            for &offset in &instance.offsets {
+                inst.push(offset);
+            }
+        }
         Self {
             text,
+            reset_offsets,
             rows,
             color,
             offset,
@@ -84,6 +92,14 @@ impl Text {
             row_count,
             bounds: bounds.unwrap_or(BoundingRect::from_min_max(Vec2::MIN, Vec2::MAX)),
             tool_tip
+        }
+    }
+
+    pub fn reset(&mut self) {
+        for (i, (_, instance)) in self.text.text.iter_mut().enumerate() {
+            for (j, offset) in instance.offsets.iter_mut().enumerate() {
+                *offset = self.reset_offsets[i][j];
+            }
         }
     }
 }

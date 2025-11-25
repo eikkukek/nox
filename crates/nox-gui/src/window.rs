@@ -184,12 +184,12 @@ impl Window
     }
 
     #[inline(always)]
-    fn activate_reaction<T: ?Sized>(
+    fn activate_reaction<T: RefAddr>(
         &mut self,
         value: &T,
     ) -> &mut ReactionEntry
     {
-        let mut id = ReactionId(Hashable((value as *const T).addr() as f64));
+        let mut id = ReactionId(Hashable(value.addr() as f64));
         while !self.active_reactions.insert(id) {
             id.0.0 += 0.01;
         }
@@ -478,11 +478,12 @@ impl Window
         self.flags &= !(Self::CURSOR_IN_WINDOW | Self::HOVER_WINDOW_ACTIVE);
         self.combined_text.clear();
         let mut hover_blocked =
-            !cursor_in_this_window &&
+            !cursor_in_this_window ||
             self.ver_scroll_bar.held() ||
-            self.hor_scroll_bar.held();
+            self.hor_scroll_bar.held() ||
+            self.content_held();
         let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
-        if !self.held() && !self.any_resize() {
+        if !self.held() && !self.any_resize() && !hover_blocked {
             if cursor_in_this_window {
                 let mut flags = self.flags;
                 flags &= !Self::RESIZE_BLOCKED_COL;
@@ -799,6 +800,7 @@ impl Window
         }
         self.min_size = min_size;
         let mut triangulate_scroll_bars = false;
+        let content_held = self.content_held();
         if self.ver_scroll_bar_visible() {
             let offset = vec2(title_bar_rect.max.x - item_pad_outer.x - ver_scroll_bar_width, title_bar_rect.max.y + item_pad_outer.y);
             let height = main_rect_max.y - offset.y - item_pad_outer.y - if self.hor_scroll_bar_visible() {
@@ -813,7 +815,7 @@ impl Window
                 self.widget_rect_max.y,
                 size.y,
                 false,
-                hover_blocked && !self.hor_scroll_bar.held(),
+                hover_blocked && !content_held && !self.hor_scroll_bar.held(),
             );
             triangulate_scroll_bars |= res.requires_triangulation;
             self.scroll_y = res.new_t;
@@ -832,11 +834,12 @@ impl Window
                 self.widget_rect_max.x,
                 size.x,
                 false,
-                hover_blocked && !self.ver_scroll_bar.held()
+                hover_blocked && !content_held && !self.ver_scroll_bar.held()
             );
             triangulate_scroll_bars |= res.requires_triangulation;
             self.scroll_x = res.new_t;
         }
+        hover_blocked |= self.hor_scroll_bar.held() || self.ver_scroll_bar.held();
         if self.content_held() {
             if mouse_left_state.released() {
                 self.flags &= !Self::CONTENT_HELD;
@@ -894,8 +897,8 @@ impl Window
                 offset / font_scale,
                 BoundedTextInstance {
                     add_scale: text.scale,
-                    min_bounds: pos + (vec2(0.0, title_bar_rect.max.y + item_pad_inner.y).max(text.bounds.min)),
-                    max_bounds: pos + (main_rect_max - vec2(0.0, item_pad_inner.y)).min(text.bounds.max),
+                    min_bounds: pos + (vec2(item_pad_inner.x, title_bar_rect.max.y + item_pad_inner.y).max(text.bounds.min + widget_off)),
+                    max_bounds: pos + (main_rect_max - item_pad_inner).min(text.bounds.max + widget_off),
                     color: text.color, 
                 }
             ).unwrap();
@@ -1512,6 +1515,7 @@ impl UiSurface for Window
                 },
                 value
             ));
+        entry.1 = value;
         if let Some(reaction) = self.reactions.get_mut(&id) {
             reaction.enable_animated_bool();
         }
@@ -1544,22 +1548,12 @@ impl UiReactSurface for Window {
         self
     }
 
-    fn reaction_from_ref<'a, T: ?Sized>(
+    fn reaction_from_addr<'a, T: RefAddr>(
         &mut self,
-        value: &'a T,
-        mut f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, &'a T),
+        value: T,
+        mut f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, T),
     ) -> &mut Reaction {
-        let reaction = self.activate_reaction(value) as *mut ReactionEntry;
-        f(self, unsafe { &mut *reaction }, value);
-        unsafe { &mut *reaction }
-    }
-
-    fn reaction_from_mut<'a, T: ?Sized>(
-        &mut self,
-        value: &'a mut T,
-        mut f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, &'a mut T),
-    ) -> &mut Reaction {
-        let reaction = self.activate_reaction(value) as *mut ReactionEntry;
+        let reaction = self.activate_reaction(&value) as *mut ReactionEntry;
         f(self, unsafe { &mut *reaction }, value);
         unsafe { &mut *reaction }
     }

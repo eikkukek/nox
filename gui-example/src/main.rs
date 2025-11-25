@@ -33,18 +33,12 @@ pub fn my_widget_show(
     ui.paint(move |painter, row| {
         let off = vec2(0.0, row.height_halved - size.y * 0.5);
         painter
-            .rect(
-                id,
-                rect,
-                offset + off,
+            .rect(id, rect, offset + off,
                 visuals.fill_col,
                 visuals.bg_strokes.clone(),
                 visuals.bg_stroke_idx
             )
-            .circle(
-                id,
-                circle(Vec2::default(), radius * 0.75),
-                18,
+            .circle(id, circle(Vec2::default(), radius * 0.75), 18,
                 center + off,
                 visuals.fill_col,
                 visuals.fg_strokes.clone(),
@@ -54,6 +48,7 @@ pub fn my_widget_show(
 }
 
 impl_widget!(my_widget_show, my_widget_ui(value: &'a mut bool, label: &str));
+
 /*
 pub fn my_widget_ui<'a, Surface: UiReactSurface, Style: UiStyle>(
     value: &'a mut bool,
@@ -303,7 +298,7 @@ impl<'a> Interface for Example<'a> {
                     );
                     //ui.tag("Drag value");
                     ui.end_row();
-                    ui.add_from_mut(my_widget_ui(&mut self.show_other_window, "test"))
+                    ui.add(my_widget_ui(&mut self.show_other_window, "test"))
                         .hover_text("Simple custom widget");
                 });
             }

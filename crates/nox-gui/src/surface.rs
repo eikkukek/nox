@@ -64,19 +64,32 @@ pub trait UiReactSurface {
 
     fn ui_surface_mut(&mut self) -> &mut Self::Surface;
 
-    fn reaction_from_ref<'a, T: ?Sized>(
+    fn reaction_from_addr<'a, T: RefAddr>(
         &mut self,
-        value: &'a T,
-        f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, &'a T),
-    ) -> &mut Reaction;
-
-    fn reaction_from_mut<'a, T: ?Sized>(
-        &mut self,
-        value: &'a mut T,
-        f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, &'a mut T),
+        value: T,
+        f: impl FnMut(&mut Self::Surface, &'a mut ReactionEntry, T),
     ) -> &mut Reaction;
 
     fn get_reaction(&self, id: ReactionId) -> Option<&ReactionEntry>;
 
     fn get_reaction_mut(&mut self, id: ReactionId) -> Option<&mut ReactionEntry>;
+}
+
+pub trait RefAddr {
+
+    fn addr(self) -> usize;
+}
+
+impl<'a, T: ?Sized> RefAddr for &'a T {
+
+    fn addr(self) -> usize {
+        (self as *const T).addr()
+    }
+}
+
+impl<'a, T: ?Sized> RefAddr for &'a mut T {
+
+    fn addr(self) -> usize {
+        (self as *const T).addr()
+    }
 }
