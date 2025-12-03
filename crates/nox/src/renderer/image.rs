@@ -17,7 +17,7 @@ use ash::vk;
 
 use crate::{has_bits, has_not_bits};
 
-use super::{Error, MSAA};
+use super::MSAA;
 
 pub use enums::*;
 pub use structs::*;

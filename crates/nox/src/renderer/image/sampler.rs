@@ -71,7 +71,7 @@ impl SamplerBuilder {
         self
     }
 
-    pub(crate) fn build(self, device: &ash::Device) -> Result<vk::Sampler, Error> {
+    pub(crate) fn build(self, device: &ash::Device) -> Result<vk::Sampler, ImageError> {
         let info = vk::SamplerCreateInfo {
             s_type: vk::StructureType::SAMPLER_CREATE_INFO,
             mag_filter: self.mag_filter.into(),

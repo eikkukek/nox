@@ -24,7 +24,7 @@ impl PipelineLayout {
         device: Arc<ash::Device>,
         shader_ids: [ShaderId; SHADER_COUNT],
         global_resources: &GlobalResources,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, PipelineError>
     {
         let mut set_infos = GlobalVec::<GlobalVec<vk::DescriptorSetLayoutBinding>>::new();
         let mut push_constants = GlobalVec::new();

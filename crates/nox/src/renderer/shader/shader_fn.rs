@@ -1,12 +1,14 @@
 use crate::Version;
 
+use super::*;
+
 #[inline(always)]
 pub fn glsl_to_spirv(
     input: &str,
     input_name: &str,
     shader_kind: shaderc::ShaderKind,
     vulkan_version: Version,
-) -> Result<shaderc::CompilationArtifact, shaderc::Error>
+) -> Result<shaderc::CompilationArtifact, ShaderError>
 {
     let compiler = shaderc::Compiler::new()?;
     let mut options = shaderc::CompileOptions::new().unwrap();

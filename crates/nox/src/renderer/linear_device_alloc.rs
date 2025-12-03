@@ -14,11 +14,15 @@ use crate::{
 
 use super::{
     PhysicalDeviceInfo,
-    memory_binder::MemoryBinder,
-    Error::{self, OutOfDeviceMemory, IncompatibleMemoryRequirements}
+    memory_binder::{
+        MemoryBinder,
+        MemoryBinderError::{
+            self, *,
+        }
+    },
 };
 
-pub type Result<T> = core::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, MemoryBinderError>;
 
 #[derive(Clone, Copy)]
 struct Block {
@@ -69,7 +73,7 @@ impl Block {
         let offset = (used + align - 1) & !(align - 1);
         let end = offset + memory_requirements.size;
         if block_size < end {
-            return Err(OutOfDeviceMemory { size: memory_requirements.size, align, avail: block_size - used } )
+            return Err(OutOfDeviceMemory { size: memory_requirements.size, align, } )
         }
         unsafe {
             device.bind_image_memory(image, device_memory, offset)?;
@@ -113,7 +117,7 @@ impl Block {
         let offset = (used + align - 1) & !(align - 1);
         let end = offset + memory_requirements.size;
         if block_size < end {
-            return Err(OutOfDeviceMemory { size: memory_requirements.size, align, avail: block_size - used } )
+            return Err(OutOfDeviceMemory { size: memory_requirements.size, align, } )
         }
         unsafe {
             device.bind_buffer_memory(buffer, device_memory, offset)?;
@@ -176,7 +180,7 @@ impl LinearDeviceAlloc {
 
     pub fn default(block_size: u64, context: &RendererContext) -> Result<Self> {
         if block_size == 0 {
-            return Err(Error::ZeroSizeAlloc)
+            return Err(ZeroSizeAlloc)
         }
         Self::new(
             context.device.clone(),
@@ -190,7 +194,7 @@ impl LinearDeviceAlloc {
 
     pub fn memory_mappable(block_size: u64, context: &RendererContext) -> Result<Self> {
         if block_size == 0 {
-            return Err(Error::ZeroSizeAlloc)
+            return Err(ZeroSizeAlloc)
         }
         Self::new(
             context.device.clone(),
@@ -286,9 +290,11 @@ impl DeviceMemory for Memory {
 
     unsafe fn free_memory(&self) {}
 
-    unsafe fn map_memory(&mut self) -> Option<NonNull<u8>> {
+    unsafe fn map_memory(&mut self) -> Result<NonNull<u8>> {
         unsafe {
-            self.get_mapped_memory()
+            self
+                .get_mapped_memory()
+                .ok_or(NonMappableMemory)
         }
     }
 }
@@ -310,17 +316,16 @@ impl MemoryBinder for LinearDeviceAlloc {
                     if let Some(fall_back) = fall_back {
                         return fall_back(image);
                     } else {
-                        return Err(Error::OutOfDeviceMemory {
+                        return Err(OutOfDeviceMemory {
                             size: memory_requirements.size,
                             align: memory_requirements.alignment,
-                            avail: block_size,
                         })
                     }
                 }
                 let mut res = blocks[*free_index]
                     .bind_image_memory(device, image, memory_requirements, self.block_size, *type_index, self.granularity,);
                 if let Err(err) = &res {
-                    if let Error::OutOfDeviceMemory { size: _, align: _, avail: _ } = err {
+                    if let OutOfDeviceMemory { size: _, align: _, } = err {
                         *free_index += 1;
                         if *free_index == blocks.len() {
                             blocks.push(Block::new());
@@ -351,10 +356,9 @@ impl MemoryBinder for LinearDeviceAlloc {
                     if let Some(fall_back) = fall_back {
                         return fall_back(buffer);
                     } else {
-                        return Err(Error::OutOfDeviceMemory {
+                        return Err(OutOfDeviceMemory {
                             size: memory_requirements.size,
                             align: memory_requirements.alignment,
-                            avail: block_size,
                         })
                     }
                 }
@@ -362,8 +366,8 @@ impl MemoryBinder for LinearDeviceAlloc {
                     .bind_buffer_memory(
                         device, buffer, memory_requirements, block_size, *type_index, self.granularity, self.map_memory
                     );
-                if let Err(err) = &res {
-                    if let Error::OutOfDeviceMemory { size: _, align: _, avail: _ } = err {
+                if let Err(err) = res {
+                    if let OutOfDeviceMemory { size: _, align: _, } = err {
                         *free_index += 1;
                         if *free_index == blocks.len() {
                             blocks.push(Block::new());
@@ -372,7 +376,7 @@ impl MemoryBinder for LinearDeviceAlloc {
                             device, buffer, memory_requirements, self.block_size, *type_index, self.granularity, self.map_memory
                         );
                     } else {
-                        return Err(err.clone())
+                        return Err(err)
                     }
                 }
                 return Ok(Box::new(res.unwrap()))

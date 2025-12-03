@@ -8,6 +8,8 @@ use nox_mem::{
 use crate::{
     has_bits, has_not_bits,
     version::Version,
+    InitError,
+    expand_error,
 };
 
 use super::DeviceName;
@@ -67,14 +69,10 @@ impl PhysicalDeviceInfo {
         instance: &ash::Instance,
         surface_loader: &surface::Instance,
         surface_khr: vk::SurfaceKHR,
-    ) -> Result<Option<Self>, String>
+    ) -> Result<Option<Self>, InitError>
     {
         let properties = unsafe { instance.get_physical_device_properties(physical_device) };
-        let device_name =
-            match ArrayString::from_ascii(&properties.device_name) {
-                Ok(device_name) => device_name,
-                Err(_) => return Err(String::from("failed to convert device name to string")),
-            };
+        let device_name = ArrayString::from_ascii(&properties.device_name)?;
         let api_version = Version::from(properties.api_version);
         let queue_family_indices =
             match QueueFamilyIndices::new(physical_device, instance, surface_loader, surface_khr) {
@@ -134,7 +132,7 @@ impl QueueFamilyIndices {
         instance: &ash::Instance,
         surface_loader: &surface::Instance,
         surface_khr: vk::SurfaceKHR
-    ) -> Result<Option<Self>, String>
+    ) -> Result<Option<Self>, InitError>
     {
         let properties = unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
 
@@ -156,9 +154,7 @@ impl QueueFamilyIndices {
                     match surface_loader.get_physical_device_surface_support(physical_device, i as u32, surface_khr) {
                         Ok(present_supported) => present_supported,
                         Err(result) =>  {
-                            return Err(
-                                format!("failed to get physical device surface support {:?}", result)
-                            )
+                            return Err(InitError::FailedToQuerySurfaceSupport(result))
                         },
                     }
                 };
@@ -257,53 +253,33 @@ pub fn rate_physical_device(
     physical_device: vk::PhysicalDevice,
     physical_device_info: &PhysicalDeviceInfo,
     instance: &ash::Instance
-) -> Result<i32, String>
+) -> Result<i32, InitError>
 {
     if physical_device_info.features.sample_rate_shading == vk::FALSE ||
         physical_device_info.features.sampler_anisotropy == vk::FALSE {
         return Ok(-1)
     }
     let mut required_extensions = ArrayVec::<ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>, 3>::new();
-    required_extensions.push(
-        ArrayString::from_str(
-            match khr::swapchain::NAME.to_str() {
-                Ok(s) => s,
-                Err(_) => return Err(String::from("failed to convert extension name to str"))
-            }
-        )).expect("should not happen"
-    );
+    required_extensions.push(ArrayString::from_str(
+        khr::swapchain::NAME.to_str()?
+    )).unwrap();
     if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_2 {
-        required_extensions.push(
-            ArrayString::from_str(
-                match khr::dynamic_rendering::NAME.to_str() {
-                    Ok(s) => s,
-                    Err(_) => return Err(String::from("failed to convert extension name to str")),
-                }
-            )).expect("should not happen"
-        );
-        required_extensions.push(
-            ArrayString::from_str(
-                match khr::timeline_semaphore::NAME.to_str() {
-                    Ok(s) => s,
-                    Err(_) => return Err(String::from("failed to convert extension name to str")),
-                }
-            )).expect("should not happen"
-        );
+        required_extensions.push(ArrayString::from_str(
+            khr::dynamic_rendering::NAME.to_str()?
+        )).unwrap();
+        required_extensions.push(ArrayString::from_str(
+            khr::timeline_semaphore::NAME.to_str()?
+        )).unwrap();
     }
     else if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_3 {
-        required_extensions.push(
-            ArrayString::from_str(
-                match khr::dynamic_rendering::NAME.to_str() {
-                    Ok(s) => s,
-                    Err(_) => return Err(String::from("failed to convert extension name to str")),
-                }
-            )).expect("should not happen"
-        );
+        required_extensions.push(ArrayString::from_str(
+            khr::dynamic_rendering::NAME.to_str()?
+        )).unwrap();
     }
     let available_extensions = unsafe {
         match instance.enumerate_device_extension_properties(physical_device) {
             Ok(available_extension) => available_extension,
-            Err(result) => return Err(format!("failed to enumerate device extensions: {:?}", result))
+            Err(result) => return Err(InitError::UnexpectedVulkanError(result))
         }
     };
     let mut found_extensions = false;
@@ -311,7 +287,7 @@ pub fn rate_physical_device(
         found_extensions = false;
         for available_extension in &available_extensions {
             let other = ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>
-                ::from_ascii(&available_extension.extension_name).map_err(Into::<String>::into)?;
+                ::from_ascii(&available_extension.extension_name)?;
             if extension == &other {
                 found_extensions = true;
                 break;
@@ -358,13 +334,13 @@ pub fn find_suitable_physical_device(
     instance: &ash::Instance,
     surface_loader: &surface::Instance,
     surface_khr: vk::SurfaceKHR,
-) -> Result<(vk::PhysicalDevice, PhysicalDeviceInfo), String>
+) -> Result<(vk::PhysicalDevice, PhysicalDeviceInfo), InitError>
 {
     let physical_devices = unsafe {
         match instance.enumerate_physical_devices() {
             Ok(physical_devices) => physical_devices,
             Err(result) => {
-                return Err(format!("failed to enumerate physical devices {:?}", result));
+                return Err(InitError::FailedToEnumeratePhysicalDevices(result));
             },
         }
     };
@@ -380,7 +356,7 @@ pub fn find_suitable_physical_device(
                     }
                 }
                 Err(err) => {
-                    println!("Nox backend error: {}", err);
+                    expand_error!("failed to get physical device info", err);
                     continue;
                 },
             };
@@ -388,7 +364,7 @@ pub fn find_suitable_physical_device(
             match rate_physical_device(physical_device, &physical_device_info, instance) {
                 Ok(score) => score,
                 Err(err) => {
-                    println!("Nox backend error: {}", err);
+                    expand_error!("failed to rate physical device", err);
                     continue;
                 },
             };
@@ -399,6 +375,6 @@ pub fn find_suitable_physical_device(
     }
     match best_physical_device {
         Some(physical_device) => Ok(physical_device),
-        None => Err(String::from("failed to find suitable physical device")),
+        None => Err(InitError::SuitablePhysicalDeviceNotFound),
     }
 }

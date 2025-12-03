@@ -1,10 +1,12 @@
 pub mod vertex_input;
+mod error;
 mod layout;
 mod graphics;
 mod compute;
 
 pub(crate) use layout::*;
 
+pub use error::PipelineError;
 pub use graphics::*;
 pub use compute::*;
 

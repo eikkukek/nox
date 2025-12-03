@@ -1,6 +1,7 @@
 mod window_ctx;
+mod expand_error;
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, OnceLock};
 
 use std::time;
 
@@ -25,8 +26,12 @@ pub use winit::window::CursorIcon;
 pub use winit::monitor::MonitorHandle;
 
 pub use window_ctx::WindowCtx;
+pub use expand_error::fn_expand_error;
 
-use crate::*;
+use crate::{
+    log,
+    *,
+};
 
 use super::{
     interface::Interface,
@@ -36,6 +41,8 @@ use super::{
 };
 
 pub type AppName = ArrayString<128>;
+
+pub static ERROR_CAUSE_FMT: OnceLock<log::CustomFmt> = OnceLock::new();
 
 pub struct Nox<'a, I>
     where
@@ -66,6 +73,40 @@ impl<'a, I: Interface> Nox<'a, I>
         memory: &'a mut Memory,
     ) -> Self
     {
+        log::init();
+        log::info_fmt(|fmt| {
+            fmt.text("INFO:  ", |spec| spec.with_color_spec(|spec| {
+                spec.set_fg(Some(log::Color::Green)).set_bold(true);
+            })).message(|spec| spec);
+        });
+        log::warn_fmt(|fmt| {
+            fmt.text("WARN:  ", |spec| spec.with_color_spec(|spec| {
+                spec.set_fg(Some(log::Color::Yellow)).set_bold(true);
+            })).message(|spec| spec);
+        });
+        log::error_fmt(|fmt| {
+            fmt.text("ERROR: ", |spec| spec.with_color_spec(|spec| {
+                spec.set_fg(Some(log::Color::Red)).set_bold(true);
+            })).message(|spec| spec);
+        });
+        log::debug_fmt(|fmt| {
+            fmt.text("DEBUG: ", |spec| spec.with_color_spec(|spec| {
+                spec.set_fg(Some(log::Color::Blue)).set_bold(true);
+            })).message(|spec| spec);
+        });
+        log::trace_fmt(|fmt| {
+            fmt.text("TRACE: ", |spec| spec.with_color_spec(|spec| {
+                spec.set_fg(Some(log::Color::Rgb(130, 130, 130))).set_bold(true);
+            })).message(|spec| spec);
+        }); 
+        if ERROR_CAUSE_FMT.get().is_none() {
+            let mut error_cause_fmt = log::LogFmt::default();
+            log::LogFmtBuilder::new(&mut error_cause_fmt)
+                .text("       caused by: ", |spec| spec.with_color_spec(|spec| {
+                    spec.set_fg(Some(log::Color::Magenta)).set_bold(true);
+                })).message(|spec| spec);
+            ERROR_CAUSE_FMT.set(log::custom_fmt(error_cause_fmt)).ok();
+        }
         Nox {
             interface: Arc::new(RwLock::new(interface)),
             window: None,
@@ -218,12 +259,12 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     window_ctx.delta_time = window_ctx.delta_counter.elapsed();
                     window_ctx.delta_counter = time::Instant::now();
                     let mut write = self.interface.write().unwrap();
-                    if let Err(e) = write
+                    if let Err(err) = write
                         .update(self, &mut window_ctx, &mut renderer_context)
                     {
                         event_loop.exit();
                         self.flags |= Self::ERROR;
-                        eprintln!("Failed to update: {:?}", e);
+                        expand_error!("failed to update", err);
                         return
                     }
                     if window_ctx.cursor_set() {
@@ -236,7 +277,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         if let Err(err) = renderer.render(&window, &mut *write, renderer_allocators) {
                             event_loop.exit();
                             self.flags |= Self::ERROR;
-                            eprintln!("Nox renderer error: {}", err);
+                            expand_error!("failed to render", err);
                             return
                         }
                     }
@@ -266,16 +307,16 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 .with_resizable(init_settings.window_resizeable);
             let window = match event_loop.create_window(window_attributes) {
                 Ok(window) => window,
-                Err(e) => {
+                Err(err) => {
                     event_loop.exit();
                     self.flags |= Self::ERROR;
-                    eprintln!("Nox error: failed to create window ( {} )", e);
+                    expand_error!("faileld to create window", err);
                     return
                 },
             };
             let inner_size = window.inner_size();
             self.window_size = (inner_size.width, inner_size.height);
-            println!("Nox message: created window {}", init_settings.app_name);
+            log::info!("created window");
             event_loop.set_control_flow(ControlFlow::Poll);
             let renderer_allocators = self.memory.renderer_allocators();
             window.request_redraw();
@@ -290,20 +331,20 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     renderer_allocators,
                 ) {
                 Ok(r) => Some(r),
-                Err(e) => {
+                Err(err) => {
                     event_loop.exit();
                     self.flags |= Self::ERROR;
-                    eprintln!("Nox error: failed to create renderer ( {} )", e);
+                    expand_error!("failed to init renderer", err);
                     return
                 }
             };
             let mut window_ctx = self.window_ctx.take().unwrap();
             window_ctx.clipboard = match Clipboard::new(&window) {
                 Ok(cb) => cb,
-                Err(e) => {
+                Err(err) => {
                     event_loop.exit();
                     self.flags |= Self::ERROR;
-                    eprintln!("Nox error: failed to create clibboard ( {:?} )", e);
+                    expand_error!("failed to create clipboard", err);
                     Clipboard::None
                 }
             };
@@ -311,11 +352,11 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
             window_ctx.window = self.window.clone();
             self.window_ctx = Some(window_ctx);
             let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
-            if let Err(e) = write
+            if let Err(err) = write
                 .init_callback(self, &mut renderer_context) {
                 event_loop.exit();
                 self.flags |= Self::ERROR;
-                eprintln!("Nox error: init callback error ( {:?} )", e);
+                expand_error!("init callback failed", err);
             }
         }
     }

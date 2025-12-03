@@ -8,6 +8,8 @@ use nox_alloc::arena_alloc::*;
 
 use crate::{renderer::*, has_not_bits};
 
+use super::*;
+
 #[derive(Clone, Copy, Debug)]
 pub struct DrawInfo {
     pub first_index: u32,
@@ -79,7 +81,7 @@ impl<'a> RenderCommands<'a> {
         tmp_alloc: &'a ArenaAlloc,
         frame_buffer_size: Dimensions,
         buffered_frames: u32,
-    ) -> Result<Self, Error>
+    ) -> Result<Self>
     {
         Ok(Self {
             transfer_command_pool: Arc::new(TransientCommandPool::new(device.clone(), queue_family_indices.transfer_index())?),
@@ -101,13 +103,13 @@ impl<'a> RenderCommands<'a> {
     #[inline(always)]
     pub fn edit_resources(
         &mut self,
-        mut f: impl FnMut(&mut GlobalResources) -> Result<(), Error>
-    ) -> Result<(), Error> {
+        mut f: impl FnMut(&mut GlobalResources) -> Result<()>
+    ) -> Result<()> {
         f(&mut *self.global_resources.write().unwrap())
     }
 
     #[inline(always)]
-    pub unsafe fn reset_linear_device_alloc(&mut self, id: LinearDeviceAllocId) -> Result<(), Error> {
+    pub unsafe fn reset_linear_device_alloc(&mut self, id: LinearDeviceAllocId) -> Result<()> {
         unsafe {
             self.global_resources
                 .write()
@@ -122,8 +124,8 @@ impl<'a> RenderCommands<'a> {
     pub fn synced_transfer_commands(
         &mut self,
         alloc: LinearDeviceAllocId,
-        mut f: impl FnMut(&mut TransferCommands) -> Result<(), Error>
-    ) -> Result<(), Error>
+        mut f: impl FnMut(&mut TransferCommands) -> Result<()>
+    ) -> Result<()>
     {
         let alloc = self.global_resources
             .write()
@@ -175,7 +177,7 @@ impl<'a> RenderCommands<'a> {
     }
 
     #[inline(always)]
-    pub fn wait_for_previous_frame(&self) -> Result<(), Error> {
+    pub fn wait_for_previous_frame(&self) -> Result<()> {
         let semaphore = self.semaphore;
         let value = self.semaphore_value;
         let wait_info = vk::SemaphoreWaitInfo {
@@ -192,7 +194,7 @@ impl<'a> RenderCommands<'a> {
     }
 
     #[inline(always)]
-    pub fn wait_idle(&self) -> Result<(), Error> {
+    pub fn wait_idle(&self) -> Result<()> {
         unsafe {
             self.device.device_wait_idle()?;
         }
@@ -206,7 +208,7 @@ impl<'a> RenderCommands<'a> {
     }
 
     #[inline(always)]
-    pub fn bind_pipeline(&mut self, id: GraphicsPipelineId) -> Result<(), Error> {
+    pub fn bind_pipeline(&mut self, id: GraphicsPipelineId) -> Result<()> {
         if self.current_pipeline.unwrap_or_default() == id {
             return Ok(());
         }
@@ -227,7 +229,7 @@ impl<'a> RenderCommands<'a> {
     pub fn bind_shader_resources<F>(
         &self,
         f: F,
-    ) -> Result<(), Error>
+    ) -> Result<()>
         where
             F: FnMut(u32) -> ShaderResourceId,
     {
@@ -259,7 +261,7 @@ impl<'a> RenderCommands<'a> {
     pub fn push_constants<F>(
         &self,
         f: F,
-    ) -> Result<(), Error>
+    ) -> Result<()>
         where
             F: FnMut(PushConstant) -> &'a [u8],
     {
@@ -293,7 +295,7 @@ impl<'a> RenderCommands<'a> {
         info: DrawInfo,
         bindings: [DrawBufferInfo; VERTEX_BUFFER_COUNT],
         index_buffer: DrawBufferInfo,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         assert!(self.current_pipeline.is_some(), "attempting to draw with no pipeline attached");
         unsafe {
@@ -354,7 +356,7 @@ impl<'a> RenderCommands<'a> {
         instance_count: u32,
         first_binding: u32,
         bindings: ArrayVec<DrawBufferInfo, VERTEX_BUFFER_COUNT>,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         assert!(self.current_pipeline.is_some(), "attempting to draw with no pipeline attached");
         unsafe {

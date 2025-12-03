@@ -3,7 +3,7 @@ use core::{
     hash::{Hash, Hasher},
 };
 
-use crate::errors::CapacityError;
+use super::VecError;
 
 pub trait Vector<T>:
     Sized +
@@ -32,30 +32,30 @@ pub trait Vector<T>:
 
     unsafe fn set_len(&mut self, new_len: usize);
 
-    fn reserve(&mut self, size: usize) -> Result<(), CapacityError>;
+    fn reserve(&mut self, size: usize) -> Result<(), VecError>;
 
-    fn resize(&mut self, new_len: usize, value: T) -> Result<(), CapacityError>
+    fn resize(&mut self, new_len: usize, value: T) -> Result<(), VecError>
         where
             T: Clone;
 
-    fn resize_with<F>(&mut self, new_len: usize, f: F) -> Result<(), CapacityError>
+    fn resize_with<F>(&mut self, new_len: usize, f: F) -> Result<(), VecError>
         where
             F: FnMut() -> T;
 
-    fn push(&mut self, value: T) -> Result<&mut T, CapacityError>;
+    fn push(&mut self, value: T) -> Result<&mut T, VecError>;
 
-    fn extend(&mut self, iter: impl Iterator<Item = T>) -> Result<&mut Self, CapacityError> {
+    fn extend(&mut self, iter: impl Iterator<Item = T>) -> Result<&mut Self, VecError> {
         for item in iter {
             self.push(item)?;
         }
         Ok(self)
     }
 
-    fn append(&mut self, slice: &[T]) -> Result<(), CapacityError>
+    fn append(&mut self, slice: &[T]) -> Result<(), VecError>
         where
             T: Clone;
 
-    fn append_map<U, F>(&mut self, slice: &[U], f: F) -> Result<(), CapacityError>
+    fn append_map<U, F>(&mut self, slice: &[U], f: F) -> Result<(), VecError>
         where
             F: FnMut(&U) -> T;
 
@@ -65,7 +65,7 @@ pub trait Vector<T>:
 
     fn last_mut(&mut self) -> Option<&mut T>;
 
-    fn insert(&mut self, index: usize, value: T) -> Result<&mut T, CapacityError>;
+    fn insert(&mut self, index: usize, value: T) -> Result<&mut T, VecError>;
 
     fn remove(&mut self, index: usize) -> T;
 
@@ -81,11 +81,11 @@ pub trait Vector<T>:
 
     fn clear(&mut self);
 
-    fn clone_from_slice(&mut self, from: &[T]) -> Result<(), CapacityError>
+    fn clone_from_slice(&mut self, from: &[T]) -> Result<(), VecError>
         where
             T: Clone;
 
-    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<(), CapacityError>
+    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<(), VecError>
         where
             V: Vector<T>;
 

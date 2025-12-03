@@ -28,7 +28,7 @@ impl TransientCommandPool {
     pub fn new(
         device: Arc<ash::Device>,
         queue_family_index: u32,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         let handle = helpers::create_command_pool(
             &device,
             vk::CommandPoolCreateFlags::TRANSIENT,
@@ -105,7 +105,7 @@ impl TransferCommands {
         linear_device_alloc: LinearDeviceAllocLock,
         signal_semaphores: &[(TimelineSemaphoreId, u64)],
         id: CommandRequestId,
-    ) -> Result<Self, Error>
+    ) -> Result<Self>
     {
         Ok(Self {
             transfer_command_pool,
@@ -139,7 +139,7 @@ impl TransferCommands {
     #[inline(always)]
     pub(crate) fn get_sync_objects(
         &mut self
-    ) -> Result<(bool, SyncObjects, &[(TimelineSemaphoreId, u64)]), vk::Result>
+    ) -> Result<(bool, SyncObjects, &[(TimelineSemaphoreId, u64)])>
     {
         let mut new = false;
         if self.sync_objects.is_none() {
@@ -173,8 +173,8 @@ impl TransferCommands {
     #[inline(always)]
     pub fn edit_resources(
         &mut self,
-        mut f: impl FnMut(TransferCommandsNested, &mut GlobalResources) -> Result<(), Error>
-    ) -> Result<(), Error> {
+        mut f: impl FnMut(TransferCommandsNested, &mut GlobalResources) -> Result<()>
+    ) -> Result<()> {
         let g = self.global_resources.clone();
         f(TransferCommandsNested { transfer_commands: self }, &mut g.write().unwrap())
     }
@@ -191,7 +191,7 @@ impl TransferCommands {
         clear_value: ClearColorValue,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
         alloc: &impl Allocator
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.clear_color_image_internal(&mut self.global_resources.write().unwrap(), image_id, clear_value, subresources, alloc)
     }
 
@@ -203,7 +203,7 @@ impl TransferCommands {
         stencil: u32,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
         alloc: &impl Allocator,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let g = self.global_resources.clone();
         self.clear_depth_stencil_image_internal(
             &mut g.write().unwrap(),
@@ -218,7 +218,7 @@ impl TransferCommands {
         data: &[u8],
         offset: u64,
         size: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let g = self.global_resources.clone();
         self.copy_data_to_buffer_internal(&mut g.write().unwrap(), buffer_id, data, offset, size)
     }
@@ -231,7 +231,7 @@ impl TransferCommands {
         layers: Option<ImageSubresourceLayers>,
         offset: Option<Offset3D>,
         dimensions: Option<Dimensions>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let g = self.global_resources.clone();
         self.copy_data_to_image_internal(&mut g.write().unwrap(), image_id, data, layers, offset, dimensions)
     }
@@ -241,7 +241,7 @@ impl TransferCommands {
         &self,
         image: ImageId,
         filter: Filter,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.gen_mip_maps_internal(&mut self.global_resources.write().unwrap(), image, filter)
     }
 
@@ -253,7 +253,7 @@ impl TransferCommands {
         clear_value: ClearColorValue,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
         alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let image = g.get_image(image_id)?;
         if has_not_bits!(image.properties.usage, vk::ImageUsageFlags::TRANSFER_DST) {
@@ -316,7 +316,7 @@ impl TransferCommands {
         stencil: u32,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
         alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let image = g.get_image(image_id)?;
         if has_not_bits!(image.properties.usage, vk::ImageUsageFlags::TRANSFER_DST) {
@@ -377,7 +377,7 @@ impl TransferCommands {
         data: &[u8],
         offset: u64,
         size: u64,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let mut default_binder = g.default_memory_binder_mappable().clone();
         let buffer = g.get_mut_buffer(buffer_id)?;
@@ -393,7 +393,7 @@ impl TransferCommands {
             }.into())
         }
         if (data.len() as u64) < size {
-            return Err(Error::InvalidHostCopy {
+            return Err(CommandError::InvalidHostCopy {
                 copy_size: size, host_buffer_size: data.len()
             })
         }
@@ -426,10 +426,7 @@ impl TransferCommands {
                     default_binder.bind_buffer_memory(buffer, None)
                 })
             )?;
-        let ptr = unsafe { memory.map_memory() };
-        let Some(ptr) = ptr else {
-            return Err(Error::NonMappableMemory)
-        };
+        let ptr = unsafe { memory.map_memory() }?;
 
         let region = vk::BufferCopy {
             src_offset: 0,
@@ -466,7 +463,7 @@ impl TransferCommands {
         layers: Option<ImageSubresourceLayers>,
         offset: Option<Offset3D>,
         dimensions: Option<Dimensions>,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let image = g.get_image(image_id)?;
         let properties = image.properties;
@@ -536,11 +533,7 @@ impl TransferCommands {
             .bind_buffer_memory(staging_buffer, Some(&mut |buffer| {
                 g.default_memory_binder_mappable().bind_buffer_memory(buffer, None)
             }))?;
-        let ptr = unsafe { memory.map_memory() };
-        let Some(ptr) = ptr else {
-            return Err(Error::NonMappableMemory)
-        };
-
+        let ptr = unsafe { memory.map_memory() }?;
         let region = vk::BufferImageCopy {
             buffer_offset: 0,
             buffer_row_length: 0,
@@ -577,7 +570,7 @@ impl TransferCommands {
         g: &mut GlobalResources,
         image: ImageId,
         filter: Filter,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let filter = filter.into();
         let image = g.get_image(image)?;
@@ -713,7 +706,7 @@ impl<'a> TransferCommandsNested<'a> {
         clear_value: ClearColorValue,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
         alloc: &impl Allocator
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.transfer_commands.clear_color_image_internal(g, image_id, clear_value, subresources, alloc)
     }
 
@@ -726,7 +719,7 @@ impl<'a> TransferCommandsNested<'a> {
         stencil: u32,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
         alloc: &impl Allocator,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.transfer_commands.clear_depth_stencil_image_internal(
             g, image_id, depth, stencil, subresources, alloc
         )
@@ -740,7 +733,7 @@ impl<'a> TransferCommandsNested<'a> {
         data: &[u8],
         offset: u64,
         size: u64,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.transfer_commands.copy_data_to_buffer_internal(g, buffer_id, data, offset, size)
     }
 
@@ -753,7 +746,7 @@ impl<'a> TransferCommandsNested<'a> {
         layers: Option<ImageSubresourceLayers>,
         offset: Option<Offset3D>,
         dimensions: Option<Dimensions>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.transfer_commands.copy_data_to_image_internal(g, image_id, data, layers, offset, dimensions)
     }
 
@@ -763,7 +756,7 @@ impl<'a> TransferCommandsNested<'a> {
         g: &mut GlobalResources,
         image: ImageId,
         filter: Filter,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         self.transfer_commands.gen_mip_maps_internal(g, image, filter)
     }
 }

@@ -66,8 +66,8 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
 
     fn edit_resources(
         &mut self,
-        f: &mut dyn FnMut(&mut GlobalResources) -> Result<(), Error>
-    ) -> Result<(), Error> {
+        f: &mut dyn FnMut(&mut GlobalResources) -> Result<()>
+    ) -> Result<()> {
         f(&mut self.frame_state
             .borrow_mut(self.token).resource_pool.global_resources
             .write()
@@ -83,28 +83,37 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
         self.frame_buffer_size
     }
 
-    fn set_render_image(&mut self, id: ResourceId, range_info: Option<ImageRangeInfo>) -> Result<(), Error>
+    fn set_render_image(&mut self, id: ResourceId, range_info: Option<ImageRangeInfo>) -> Result<()>
     {
         assert!(self.frame_state.borrow(self.token).is_valid_resource_id(id), "invalid id");
-        self.frame_state.borrow_mut(self.token).set_render_image(id, range_info)
+        self.frame_state
+            .borrow_mut(self.token)
+            .set_render_image(id, range_info)
+            .map_err(Into::into)
     }
 
-    fn add_image(&mut self, id: ImageId) -> Result<ResourceId, Error> {
-        self.frame_state.borrow_mut(self.token).add_image(id)
+    fn add_image(&mut self, id: ImageId) -> Result<ResourceId> {
+        self.frame_state
+            .borrow_mut(self.token)
+            .add_image(id)
+            .map_err(Into::into)
     }
 
     fn add_transient_image(
         &mut self,
         f: &mut dyn FnMut(&mut ImageBuilder),
-    ) -> Result<ResourceId, Error> {
-        self.frame_state.borrow_mut(self.token).add_transient_image(f)
+    ) -> Result<ResourceId> {
+        self.frame_state
+            .borrow_mut(self.token)
+            .add_transient_image(f)
+            .map_err(Into::into)
     }
 
     fn add_pass(
         &mut self,
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder),
-    ) -> Result<PassId, Error> {
+    ) -> Result<PassId> {
         let alloc = self.alloc;
         let pass = self.passes.push(Pass::new(
             PassId(self.next_pass_id),
@@ -122,7 +131,7 @@ impl<'a, Alloc: Allocator> FrameGraph<'a> for FrameGraphImpl<'a, Alloc> {
 
 impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
 
-    pub fn render(&mut self, interface: &mut impl Interface, render_commands: &mut RenderCommands) -> Result<(), Error> {
+    pub fn render(&mut self, interface: &mut impl Interface, render_commands: &mut RenderCommands) -> core::result::Result<(), FrameGraphError> {
         let alloc = self.alloc;
         let frame_state = self.frame_state.borrow_mut(self.token);
         let device = frame_state.device();
@@ -150,7 +159,9 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
         }
 
         for pass in passes.iter() {
-            let mut subresource_reset = FixedVec::with_capacity(pass.reads.len() + pass.writes.len(), alloc)?;
+            let mut subresource_reset = FixedVec
+                ::with_capacity(pass.reads.len() + pass.writes.len(), alloc)
+                .map_err(|err| FrameGraphError::new(err))?;
             let color_output_count = pass.writes.len();
             for read in pass.reads.iter() {
                 let resource_id = read.resource_id;
@@ -198,7 +209,7 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                 Depth,
                 DepthStencil,
             }
-            let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>, Error> {
+            let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>> {
                 let resource_id = write.main_id;
                 let image = frame_state.get_image(resource_id)?;
                 let properties = image.properties;
@@ -340,7 +351,9 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
             let mut color_outputs = FixedVec::with_no_alloc();
             let writes = &pass.writes;
             if color_output_count != 0 {
-                color_outputs = FixedVec::<vk::RenderingAttachmentInfo, Alloc>::with_capacity(color_output_count, alloc)?;
+                color_outputs = FixedVec::<vk::RenderingAttachmentInfo, Alloc>
+                    ::with_capacity(color_output_count, alloc)
+                    .map_err(|err| FrameGraphError::new(err))?;
                 for write in writes {
                     color_outputs
                         .push(process_write(write, AttachmentType::Color)?).unwrap();
@@ -399,7 +412,9 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
                 device.cmd_set_scissor(command_buffer, 0, &[scissor]);
             }
             render_commands.set_current_sample_count(pass.msaa_samples);
-            interface.render_commands(pass.id, render_commands)?;
+            interface
+                .render_commands(pass.id, render_commands)
+                .map_err(|err| FrameGraphError::RenderCommandError(Box::new(err)))?;
             unsafe { device.cmd_end_rendering(command_buffer); }
         }
         Ok(())
@@ -415,9 +430,9 @@ impl<'a, Alloc: Allocator> FrameGraphImpl<'a, Alloc> {
 
     pub fn collect_semaphores(
         &self,
-        mut collect_signal: impl FnMut(TimelineSemaphoreId, u64) -> Result<(), Error>,
-        mut collect_wait: impl FnMut(TimelineSemaphoreId, u64, PipelineStage) -> Result<(), Error>,
-    ) -> Result<(), Error>
+        mut collect_signal: impl FnMut(TimelineSemaphoreId, u64) -> Result<()>,
+        mut collect_wait: impl FnMut(TimelineSemaphoreId, u64, PipelineStage) -> Result<()>,
+    ) -> Result<()>
     {
         for pass in &self.passes {
             for &(id, value) in &pass.signal_semaphores {

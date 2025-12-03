@@ -110,7 +110,7 @@ impl Image {
     }
 
     #[inline(always)]
-    pub(crate) fn get_view(&self) -> Result<vk::ImageView, Error> {
+    pub(crate) fn get_view(&self) -> Result<vk::ImageView, ImageError> {
         let mut write = self.view.write().unwrap();
         if write.is_none() {
             let device = &self.device;
@@ -135,7 +135,7 @@ impl Image {
     pub(crate) fn create_subview(
         &self,
         range_info: ImageRangeInfo,
-    ) -> Result<(SlotIndex<vk::ImageView>, vk::ImageView), Error>
+    ) -> Result<(SlotIndex<vk::ImageView>, vk::ImageView), ImageError>
     {
         if let Some(err) = self.validate_range(range_info) {
             return Err(err.into())
@@ -168,7 +168,7 @@ impl Image {
     pub(crate) fn destroy_subview(
         &self,
         index: SlotIndex<vk::ImageView>
-    ) -> Result<(), Error> {
+    ) -> Result<(), ImageError> {
         let mut write = self.subviews.write().unwrap();
         let view = write.remove(index)?;
         unsafe {

@@ -1,6 +1,8 @@
 use ash::vk;
 
-use crate::renderer::{global_resources::*, Error, ShaderStage};
+use compact_str::CompactString;
+
+use crate::renderer::{global_resources::*, PipelineError, ShaderStage};
 
 pub struct ComputePipelineInfo {
     pub(crate) layout_id: PipelineLayoutId,
@@ -17,7 +19,7 @@ impl ComputePipelineInfo {
     pub(crate) fn as_create_info(
         &self,
         global_resources: &GlobalResources,
-    ) -> Result<vk::ComputePipelineCreateInfo<'_>, Error>
+    ) -> Result<vk::ComputePipelineCreateInfo<'_>, PipelineError>
     {
         let layout = global_resources.get_pipeline_layout(self.layout_id)?;
         let shader = layout
@@ -25,7 +27,7 @@ impl ComputePipelineInfo {
             .iter()
             .map(|v| global_resources.get_shader(*v).unwrap())
             .find(|v| v.stage() == ShaderStage::Compute)
-            .ok_or(Error::ShaderError(format!("failed to find compute shader")))?;
+            .ok_or(PipelineError::ShaderMismatch(CompactString::new("failed to find compute shader")))?;
         const NAME: &core::ffi::CStr = unsafe {
             core::ffi::CStr::from_bytes_with_nul_unchecked(b"main\0")
         };

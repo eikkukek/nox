@@ -1,3 +1,6 @@
+pub mod shader_fn;
+mod error;
+
 use std::sync::Arc;
 
 use ash::vk;
@@ -14,8 +17,9 @@ use nox_mem::{
 use super::{
     Handle,
     pipeline::create_shader_module,
-    Error,
 };
+
+pub use error::ShaderError;
 
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
@@ -150,13 +154,13 @@ impl Shader {
         device: Arc<ash::Device>,
         spirv: &[u32],
         stage: ShaderStage,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, ShaderError>
     {
         let compiler = Compiler::<targets::None>::new(Module::from_words(spirv))?;
         let mut uniforms = GlobalVec::new();
         let mut push_constants = GlobalVec::new();
         let resources = compiler.shader_resources()?;
-        let mut parse_uniform = |mut ty: vk::DescriptorType, resource_ty: ResourceType| -> Result<(), Error> {
+        let mut parse_uniform = |mut ty: vk::DescriptorType, resource_ty: ResourceType| -> Result<(), ShaderError> {
             for resource in resources.resources_for_type(resource_ty)? {
                 let mut set = 0;
                 if let Some(DecorationValue::Literal(dec)) = compiler.decoration(resource.id, spirv::Decoration::DescriptorSet)? {

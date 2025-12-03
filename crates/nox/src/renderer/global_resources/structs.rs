@@ -1,4 +1,6 @@
-use crate::{memory_binder::DeviceMemory, renderer::image::ImageRangeInfo};
+use crate::{
+    renderer::image::ImageRangeInfo
+};
 
 use super::*;
 
@@ -200,8 +202,8 @@ impl MemoryBinder for LinearDeviceAllocLock {
     fn bind_image_memory(
         &mut self,
         image: vk::Image,
-        fall_back: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error>>,
-    ) -> Result<Box<dyn DeviceMemory>, Error> {
+        fall_back: Option<&mut dyn FnMut(vk::Image) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
+    ) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> {
         self.alloc
             .write()
             .unwrap()
@@ -211,8 +213,8 @@ impl MemoryBinder for LinearDeviceAllocLock {
     fn bind_buffer_memory(
         &mut self,
         buffer: vk::Buffer,
-        fall_back: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error>>,
-    ) -> Result<Box<dyn DeviceMemory>, Error> {
+        fall_back: Option<&mut dyn FnMut(vk::Buffer) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
+    ) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> {
         self.alloc
             .write()
             .unwrap()
@@ -233,12 +235,12 @@ pub enum ResourceBinderImage<'a> {
     DefaultBinder,
     DefaultBinderMappable,
     LinearDeviceAlloc(LinearDeviceAllocId),
-    Owned(&'a mut dyn MemoryBinder, Option<&'a mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error>>)
+    Owned(&'a mut dyn MemoryBinder, Option<&'a mut dyn FnMut(vk::Image) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>)
 }
 
 pub enum ResourceBinderBuffer<'a> {
     DefaultBinder,
     DefaultBinderMappable,
     LinearDeviceAlloc(LinearDeviceAllocId),
-    Owned(&'a mut dyn MemoryBinder, Option<&'a mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error>>)
+    Owned(&'a mut dyn MemoryBinder, Option<&'a mut dyn FnMut(vk::Buffer) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>)
 }

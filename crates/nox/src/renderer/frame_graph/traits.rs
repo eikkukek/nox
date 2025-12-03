@@ -37,25 +37,25 @@ pub trait FrameGraph<'a> {
 
     fn edit_resources(
         &mut self,
-        f: &mut dyn FnMut(&mut GlobalResources) -> Result<(), Error>
-    ) -> Result<(), Error>;
+        f: &mut dyn FnMut(&mut GlobalResources) -> Result<()>
+    ) -> Result<()>;
 
     fn frame_index(&self) -> u32;
 
     fn frame_buffer_size(&self) -> image::Dimensions;
 
-    fn set_render_image(&mut self, id: ResourceId, range_info: Option<ImageRangeInfo>) -> Result<(), Error>;
+    fn set_render_image(&mut self, id: ResourceId, range_info: Option<ImageRangeInfo>) -> Result<()>;
 
-    fn add_image(&mut self, id: ImageId) -> Result<ResourceId, Error>;
+    fn add_image(&mut self, id: ImageId) -> Result<ResourceId>;
 
     fn add_transient_image(
         &mut self, 
         f: &mut dyn FnMut(&mut ImageBuilder),
-    ) -> Result<ResourceId, Error>;
+    ) -> Result<ResourceId>;
 
     fn add_pass(
         &mut self,
         info: PassInfo,
         f: &mut dyn FnMut(&mut dyn PassAttachmentBuilder),
-    ) -> Result<PassId, Error>;
+    ) -> Result<PassId>;
 }

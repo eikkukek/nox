@@ -1,5 +1,7 @@
 use ash::vk;
 
+use compact_str::CompactString;
+
 use nox_mem::{slice, vec_types::{Vector, GlobalVec, FixedVec}, Allocator};
 
 use super::*;
@@ -172,7 +174,7 @@ impl GraphicsPipelineInfo {
         &self,
         global_resources: &GlobalResources,
         alloc: &'a Alloc,
-    ) -> Result<CreateInfos<'a, Alloc>, Error>
+    ) -> Result<CreateInfos<'a, Alloc>, PipelineError>
     {
 
         let layout = global_resources.get_pipeline_layout(self.layout_id)?;
@@ -190,18 +192,18 @@ impl GraphicsPipelineInfo {
             };
             if shader.stage() == ShaderStage::Vertex {
                 if vertex_shader_included {
-                    return Err(Error::ShaderError(format!("vertex shader included twice in pipeline")))
+                    return Err(PipelineError::ShaderMismatch(CompactString::new("vertex shader included twice in pipeline")))
                 }
                 vertex_shader_included = true;
             }
             if shader.stage() == ShaderStage::Fragment {
                 if fragment_shader_included {
-                    return Err(Error::ShaderError(format!("fragment shader included twice in pipeline")))
+                    return Err(PipelineError::ShaderMismatch(CompactString::new("fragment shader included twice in pipeline")))
                 }
                 fragment_shader_included = true;
             }
             if !vertex_shader_included {
-                return Err(Error::ShaderError(format!("no vertex shader included in pipeline")))
+                return Err(PipelineError::ShaderMismatch(CompactString::new("no vertex shader included in pipeline")))
             }
             shader_stage_infos.push(vk::PipelineShaderStageCreateInfo {
                 s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,

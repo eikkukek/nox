@@ -2,7 +2,7 @@ use super::*;
 
 use ash::vk;
 
-use nox_mem::{Allocator, CapacityError, vec_types::{FixedVec, Vector}};
+use nox_mem::{Allocator, vec_types::{FixedVec, Vector}};
 
 use crate::{
     renderer::{
@@ -30,7 +30,7 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
         id: PassId,
         info: PassInfo,
         alloc: &'alloc Alloc
-    ) -> Result<Self, CapacityError> {
+    ) -> Result<Self> {
         let reads = FixedVec::with_capacity(info.max_reads as usize, alloc)?;
         let writes = FixedVec::with_capacity(info.max_color_writes as usize, alloc)?;
         let signal_semaphores = FixedVec::with_capacity(info.signal_semaphores as usize, alloc)?;
@@ -47,7 +47,7 @@ impl<'alloc, Alloc: Allocator> Pass<'alloc, Alloc> {
         })
     }
 
-    pub fn validate(&self, alloc: &Alloc) -> Result<bool, CapacityError> {
+    pub fn validate(&self, alloc: &Alloc) -> Result<bool> {
 
         enum WriteAccess<'a, Alloc: Allocator> {
             Whole,

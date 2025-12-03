@@ -6,7 +6,7 @@ use memmap2::Mmap;
 
 use ash::vk;
 
-use nox_mem::{vec_types::{Vector, ArrayVec, GlobalVec}};
+use nox_mem::{slot_map::SlotMapError, vec_types::{Vector, ArrayVec, GlobalVec}};
 
 use nox_alloc::arena_alloc::*;
 
@@ -128,16 +128,26 @@ impl SwapchainPassPipelineData {
         &mut self,
         format: vk::Format,
         tmp_alloc: &ArenaAlloc,
-    ) -> Result<vk::Pipeline, Error>
+    ) -> Result<vk::Pipeline, ResourceError>
     {
         if let Some(pipeline) = self.last_pipeline {
             if format == pipeline.1 {
-                return Ok(self.global_resources.read().unwrap().get_graphics_pipeline(pipeline.0)?.handle)
+                return Ok(self.global_resources
+                    .read()
+                    .unwrap()
+                    .get_graphics_pipeline(pipeline.0)
+                    .unwrap().handle
+                )
             }
         }
         if let Some(pipeline) = self.pipelines.iter().find(|p| p.1 == format) {
             self.last_pipeline = Some(*pipeline);
-            return Ok(self.global_resources.read().unwrap().get_graphics_pipeline(pipeline.0)?.handle)
+            return Ok(self.global_resources
+                .read()
+                .unwrap()
+                .get_graphics_pipeline(pipeline.0)
+                .unwrap().handle
+            )
         }
         let mut info = GraphicsPipelineInfo::new(self.layout_id);
         info.with_color_output_vk(format, WriteMask::all(), None);
@@ -152,10 +162,15 @@ impl SwapchainPassPipelineData {
                 &stack_guard, |_, v| { pipeline = Some(v) },
             )?;
         let pipeline = self.pipelines.push((pipeline.unwrap(), format));
-        Ok(self.global_resources.read().unwrap().get_graphics_pipeline(pipeline.0)?.handle)
+        Ok(self.global_resources
+            .read()
+            .unwrap()
+            .get_graphics_pipeline(pipeline.0)
+            .unwrap().handle
+        )
     }
 
-    pub fn get_pipeline_layout(&mut self) -> Result<vk::PipelineLayout, Error>
+    pub fn get_pipeline_layout(&mut self) -> Result<vk::PipelineLayout, SlotMapError>
     {
         Ok(self.global_resources
             .read()
@@ -188,7 +203,7 @@ impl SwapchainPassPipelineData {
             }],
         };
         g.update_shader_resources(&[update], &[], &[], &stack_guard)?;
-        g.get_descriptor_set(resource_id).map_err(Into::into)
+        Ok(g.get_descriptor_set(resource_id).unwrap())
     }
 
     const fn vertex_shader_input() -> &'static str {

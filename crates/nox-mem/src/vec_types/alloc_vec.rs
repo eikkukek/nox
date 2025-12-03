@@ -10,20 +10,21 @@ use crate::{
     allocator::Allocator,
     capacity_policy::{CapacityPolicy, Dyn, Fixed},
     conditional::{Conditional, False, True},
-    errors::CapacityError,
     global_alloc::{GlobalAlloc},
     impl_traits,
     option_alloc::OptionAlloc,
+    CapacityError,
 };
 
 use super::{
     Vector,
     Pointer,
+    VecError,
 };
 
-use CapacityError::{FixedCapacity, InvalidReservation, AllocFailed, ZeroSizedElement};
+use CapacityError::{FixedCapacity, AllocFailed, ZeroSizedElement};
 
-type Result<T> = core::result::Result<T, CapacityError>;
+type Result<T> = core::result::Result<T, VecError>;
 
 pub struct AllocVec<T, Alloc, CapacityPol, IsGlobal>
     where
@@ -124,9 +125,7 @@ impl<'alloc, T, Alloc, CapacityPol> AllocVec<T, OptionAlloc<'alloc, Alloc>, Capa
             if CapacityPol::can_grow() {
                 return Ok(Self::new(alloc).unwrap())
             }
-            return Err(InvalidReservation {
-                current: 0, requested: 0
-            })
+            return Err(FixedCapacity { capacity: 0 }.into())
         }
         let capacity =
             if CapacityPol::power_of_two() {
@@ -168,9 +167,7 @@ impl<'alloc, T, Alloc, CapacityPol> AllocVec<T, OptionAlloc<'alloc, Alloc>, Capa
             if CapacityPol::can_grow() {
                 return Ok(Self::new(alloc).unwrap())
             }
-            return Err(InvalidReservation {
-                current: 0, requested: 0
-            })
+            return Err(FixedCapacity { capacity: 0 }.into())
         }
         let capacity =
             if CapacityPol::power_of_two() {
@@ -426,12 +423,10 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
     fn reserve(&mut self, capacity: usize) -> Result<()>
     {
         if !CapacityPol::can_grow() {
-            return Err(FixedCapacity { capacity: self.capacity })
+            return Err(FixedCapacity { capacity: self.capacity }.into())
         }
-        let new_capacity = match CapacityPol::grow(self.capacity, capacity) {
-            Some(r) => r,
-            None => return Ok(()),
-        };
+        let new_capacity = CapacityPol::grow(self.capacity, capacity)?;
+        if new_capacity == self.capacity { return Ok(()) }
         let tmp = match unsafe { self.alloc.allocate_uninit(new_capacity) } {
             Some(r) => r.into(),
             None => return Err(
@@ -441,7 +436,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
                 else {
                     AllocFailed { new_capacity }
                 }
-            ),
+            )?,
         };
         debug_assert!(self.len <= self.capacity);
         unsafe {

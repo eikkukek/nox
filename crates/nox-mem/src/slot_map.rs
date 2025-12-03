@@ -36,10 +36,9 @@ use core::{
     num::NonZeroU32,
     ops::{Index, IndexMut},
 };
-use std::u32;
 
 use crate::{
-    capacity_policy::CapacityPolicy,
+    capacity_policy::{self, CapacityPolicy},
     conditional::{Conditional, False, True},
     global_alloc::{GlobalAlloc},
     vec_types::Pointer,
@@ -63,10 +62,32 @@ impl From<CapacityError> for SlotMapError {
     }
 }
 
+impl core::fmt::Display for SlotMapError {
+
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SlotMapError::StaleIndex { index, slot_version, index_version } => {
+                write!(f, "stale slot map index at {}, slot version is {} while index version is {}", index, slot_version, index_version)
+            },
+            SlotMapError::CapacityError(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl core::error::Error for SlotMapError {
+
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::CapacityError(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
 type Result<T> = core::result::Result<T, SlotMapError>;
 
 use SlotMapError::StaleIndex;
-use CapacityError::{ FixedCapacity, InvalidReservation, AllocFailed, ZeroSizedElement };
+use CapacityError::{FixedCapacity, AllocFailed, MaxCapacityExceeded, ZeroSizedElement};
 
 pub struct Dyn {}
 
@@ -80,29 +101,16 @@ impl CapacityPolicy for Dyn {
         true
     }
 
-    fn grow(current: usize, required: usize) -> Option<usize> {
+    fn grow(current: usize, required: usize) -> core::result::Result<usize, CapacityError> {
         let power_of_2 = required.next_power_of_two().max(2);
-        if power_of_2 <= current || power_of_2 > u32::MAX as usize { None }
-        else  { Some(power_of_2.max(2)) }
+        if power_of_2 <= current || power_of_2 > u32::MAX as usize {
+            Err(MaxCapacityExceeded { max_capacity: u32::MAX as usize })
+        }
+        else { Ok(power_of_2.max(2)) }
     }
 }
 
-pub struct Fixed {}
-
-impl CapacityPolicy for Fixed {
-
-    fn power_of_two() -> bool {
-        false
-    }
-
-    fn can_grow() -> bool {
-        false
-    }
-
-    fn grow(_: usize, _: usize) -> Option<usize> {
-        None
-    }
-}
+pub type Fixed = capacity_policy::Fixed;
 
 struct Slot<T> {
     value: MaybeUninit<T>,
@@ -482,14 +490,9 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
         if !CapacityPol::can_grow() {
             return Err(FixedCapacity { capacity: self.capacity as usize }.into())
         }
-        let new_capacity = match CapacityPol::grow(self.capacity as usize, capacity as usize) {
-            Some(c) => c as u32,
-            None => return Err(InvalidReservation {
-                current: self.capacity as usize,
-                requested: capacity as usize,
-            }.into())
-        };
-        let tmp: Pointer<Slot<T>> = unsafe { self.alloc 
+        let new_capacity = CapacityPol::grow(self.capacity as usize, capacity as usize)? as u32;
+        if new_capacity == self.capacity { return Ok(()) }
+        let tmp: Pointer<Slot<T>> = unsafe { self.alloc
             .allocate_uninit(new_capacity as usize)
             .ok_or(
                 if size_of!(T) == 0 {

@@ -1,6 +1,8 @@
 use ash::vk;
 use nox_mem::AsRaw;
 
+use core::fmt::Display;
+
 #[repr(u32)]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
 pub enum MSAA {
@@ -55,5 +57,29 @@ impl From<PipelineStage> for vk::PipelineStageFlags {
 
     fn from(value: PipelineStage) -> Self {
         Self::from_raw(value.as_raw())
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum QueueFamily {
+    Graphics,
+    Transfer,
+    Compute,
+}
+
+impl Display for QueueFamily {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Graphics => {
+                write!(f, "Graphics")
+            },
+            Self::Transfer => {
+                write!(f, "Transfer")
+            },
+            Self::Compute => {
+                write!(f, "Compute")
+            }
+        }
     }
 }

@@ -41,3 +41,17 @@ impl From<Offset3D> for vk::Offset3D {
         }
     }
 }
+
+impl core::fmt::Display for Offset2D {
+
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "(x: {}, y: {})", self.x, self.y)
+    }
+}
+
+impl core::fmt::Display for Offset3D {
+
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "(x: {}, y: {}, z: {})", self.x, self.y, self.z)
+    }
+}

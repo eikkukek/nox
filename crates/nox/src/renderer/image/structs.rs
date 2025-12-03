@@ -59,6 +59,13 @@ impl From<vk::Extent2D> for Dimensions {
     }
 }
 
+impl core::fmt::Display for Dimensions {
+
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(width: {}, height: {})", self.width, self.height)
+    }
+}
+
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComponentMapping {
     pub r: ComponentSwizzle,

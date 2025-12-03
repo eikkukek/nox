@@ -10,9 +10,10 @@ use ash::vk;
 
 use crate::renderer::{
     linear_device_alloc::LinearDeviceAlloc,
-    Error,
     *,
 };
+
+type Result<T> = core::result::Result<T, ResourceError>;
 
 pub(crate) struct FrameState {
     render_image: Option<(ResourceId, Option<ImageRangeInfo>)>,
@@ -27,7 +28,7 @@ impl FrameState {
         device: Arc<ash::Device>,
         global_resources: Arc<RwLock<GlobalResources>>,
         device_alloc: LinearDeviceAlloc,
-    ) -> Result<Self, Error>
+    ) -> Result<Self>
     {
         Ok(Self {
             render_image: None,
@@ -50,7 +51,7 @@ impl FrameState {
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, id: ImageId) -> Result<ResourceId, Error> {
+    pub fn add_image(&mut self, id: ImageId) -> Result<ResourceId> {
         self.resource_pool.add_image(id)
     }
 
@@ -58,7 +59,7 @@ impl FrameState {
     pub fn add_transient_image<F: FnMut(&mut ImageBuilder)>(
         &mut self,
         f: F,
-    ) -> Result<ResourceId, Error>
+    ) -> Result<ResourceId>
     {
         self.resource_pool.add_transient_image(f)
     }
@@ -68,7 +69,7 @@ impl FrameState {
         &mut self,
         id: ResourceId,
         range_info: Option<ImageRangeInfo>,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         self.resource_pool.set_render_image(id, range_info)?;
         Ok(())
@@ -78,7 +79,7 @@ impl FrameState {
     pub fn get_render_image(
         &mut self,
         graphics_queue: u32,
-    ) -> Result<Option<(ImageId, Option<ImageRangeInfo>)>, Error>
+    ) -> Result<Option<(ImageId, Option<ImageRangeInfo>)>>
     {
         self.resource_pool.get_render_image(graphics_queue, self.command_buffer)
     }
@@ -94,7 +95,7 @@ impl FrameState {
     }
 
     #[inline(always)]
-    pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>, Error> {
+    pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>> {
         self.resource_pool.get_image(resource_id)
     }
 
@@ -104,13 +105,13 @@ impl FrameState {
         id: ResourceId,
         state: ImageState,
         subresource_info: Option<ImageSubresourceRangeInfo>
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         self.resource_pool.cmd_memory_barrier(id, state, self.command_buffer, subresource_info)
     }
 
     #[inline(always)]
-    pub fn get_image_view(&self, id: ResourceId) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
+    pub fn get_image_view(&self, id: ResourceId) -> Result<(vk::ImageView, vk::ImageLayout)> {
         self.resource_pool.get_image_view(id)
     }
 
@@ -119,7 +120,7 @@ impl FrameState {
         &mut self,
         id: ResourceId,
         range_info: ImageRangeInfo,
-    ) -> Result<(vk::ImageView, vk::ImageLayout), Error>
+    ) -> Result<(vk::ImageView, vk::ImageLayout)>
     {
         self.resource_pool.create_image_view(id, range_info)
     }

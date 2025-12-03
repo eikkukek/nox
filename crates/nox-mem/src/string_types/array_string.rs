@@ -4,6 +4,8 @@ use core::{
     hash::Hash,
 };
 
+use super::StringError;
+
 #[derive(Copy, Clone)]
 pub struct ArrayString<const N: usize> {
     string: [u8; N],
@@ -30,14 +32,12 @@ impl<const N: usize> ArrayString<N> {
         }
     }
 
-    pub fn from_ascii<const N_BUF: usize>(s: &[i8; N_BUF]) -> Result<Self, Self> {
+    pub fn from_ascii<const N_BUF: usize>(s: &[i8; N_BUF]) -> Result<Self, StringError> {
         let mut string = [0u8; N];
         let mut len = 0usize;
         for c in *s {
             if c < 0 {
-                return Err(
-                    ArrayString::from_str("invalid ascii"),
-                );
+                return Err(StringError::InvalidAscii);
             }
             if c == b'\0' as i8 || len == N {
                 break;
@@ -53,15 +53,13 @@ impl<const N: usize> ArrayString<N> {
         )
     }
 
-    pub unsafe fn from_ascii_ptr(s: *const i8) -> Result<Self, Self> {
+    pub unsafe fn from_ascii_ptr(s: *const i8) -> Result<Self, StringError> {
         let mut string = [0u8; N];
         let mut len = 0usize;
         let mut c = unsafe { *s };
         while c != b'\0' as i8  && len != N {
             if c < 0 {
-                return Err(
-                    ArrayString::from_str("invalid ascii"),
-                );
+                return Err(StringError::InvalidAscii);
             }
             string[len] = c as u8;
             len += 1;
@@ -91,6 +89,13 @@ impl<const N: usize> ArrayString<N> {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+}
+
+impl<const N: usize> AsRef<str> for ArrayString<N> {
+
+    fn as_ref(&self) -> &str {
+        self.as_str()
     }
 }
 

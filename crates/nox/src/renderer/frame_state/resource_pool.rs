@@ -8,14 +8,19 @@ use nox_mem::{
 };
 
 use crate::{
-    has_bits, memory_binder::MemoryBinder, renderer::{
-        Error, ImageState, global_resources::*, image::{Image, ImageBuilder, ImageRangeInfo, ImageSubresourceRangeInfo}, linear_device_alloc::LinearDeviceAlloc
+    has_bits, memory_binder::MemoryBinder,
+    renderer::{
+        ImageState,
+        global_resources::*,
+        image::{Image, ImageBuilder, ImageRangeInfo, ImageSubresourceRangeInfo},
+        linear_device_alloc::LinearDeviceAlloc,
     }
 };
 
 use super::{
     ResourceId,
     ResourceFlags,
+    Result,
 };
 
 pub(crate) struct ResourcePool
@@ -107,7 +112,7 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn add_image(&mut self, id: ImageId) -> Result<ResourceId, Error> {
+    pub fn add_image(&mut self, id: ImageId) -> Result<ResourceId> {
         let g = self.global_resources.read().unwrap();
         let image = g.get_image(id)?;
         let mut flags = 0;
@@ -128,7 +133,7 @@ impl ResourcePool
     pub fn add_transient_image<F: FnMut(&mut ImageBuilder)>(
         &mut self,
         f: F,
-    ) -> Result<ResourceId, Error>
+    ) -> Result<ResourceId>
     {
         let mut g = self.global_resources.write().unwrap();
         let mut default_binder = g.default_memory_binder();
@@ -158,7 +163,7 @@ impl ResourcePool
         &mut self,
         resource_id: ResourceId,
         range_info: Option<ImageRangeInfo>,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let image = self.get_image(resource_id)?;
         if let Some(info) = range_info {
@@ -175,7 +180,7 @@ impl ResourcePool
         &mut self,
         graphics_queue: u32,
         command_buffer: vk::CommandBuffer,
-    ) -> Result<Option<(ImageId, Option<ImageRangeInfo>)>, Error>
+    ) -> Result<Option<(ImageId, Option<ImageRangeInfo>)>>
     {
         if self.render_image.is_none() {
             return Ok(None)
@@ -218,7 +223,7 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>, Error> {
+    pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>> {
         Ok(
             if has_bits!(resource_id.flags, ResourceFlags::Transient) {
                 self.global_resources
@@ -242,7 +247,7 @@ impl ResourcePool
         state: ImageState,
         command_buffer: vk::CommandBuffer,
         subresource_info: Option<ImageSubresourceRangeInfo>
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let g = self.global_resources.write().unwrap();
         let image = g.get_image(id.image_id)?;
@@ -251,7 +256,7 @@ impl ResourcePool
     }
 
     #[inline(always)]
-    pub fn get_image_view(&self, id: ResourceId) -> Result<(vk::ImageView, vk::ImageLayout), Error> {
+    pub fn get_image_view(&self, id: ResourceId) -> Result<(vk::ImageView, vk::ImageLayout)> {
         let g = self.global_resources.write().unwrap();
         let src = g.get_image(id.image_id)?;
         Ok((src.get_view()?, src.layout()))
@@ -262,7 +267,7 @@ impl ResourcePool
         &mut self,
         id: ResourceId,
         range_info: ImageRangeInfo,
-    ) -> Result<(vk::ImageView, vk::ImageLayout), Error>
+    ) -> Result<(vk::ImageView, vk::ImageLayout)>
     {
         let g = self.global_resources.write().unwrap();
         let image = g.get_image(id.image_id)?;

@@ -8,7 +8,7 @@ pub mod slot_map;
 
 mod macros;
 mod as_raw;
-mod errors;
+mod capacity_error;
 mod allocator;
 mod option_alloc;
 mod global_alloc;
@@ -17,7 +17,7 @@ mod mad_cell;
 mod const_fn;
 mod slice_cast;
 
-pub use errors::CapacityError;
+pub use capacity_error::CapacityError;
 pub use allocator::Allocator;
 pub use global_alloc::GlobalAlloc;
 pub use option_alloc::OptionAlloc;

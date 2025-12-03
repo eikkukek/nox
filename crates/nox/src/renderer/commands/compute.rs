@@ -9,6 +9,8 @@ use crate::renderer::{
     *
 };
 
+use super::*;
+
 pub struct ComputeCommands<'a> {
     device: Arc<ash::Device>,
     command_buffer: vk::CommandBuffer,
@@ -45,8 +47,8 @@ impl<'a> ComputeCommands<'a> {
 
     pub fn edit_resources(
         &mut self,
-        mut f: impl FnMut(&mut GlobalResources) -> Result<(), Error>,
-    ) -> Result<(), Error>
+        mut f: impl FnMut(&mut GlobalResources) -> Result<()>,
+    ) -> Result<()>
     {
         let mut g = self.global_resources.write().unwrap();
         f(&mut g)
@@ -55,7 +57,7 @@ impl<'a> ComputeCommands<'a> {
     pub fn prepare_storage_image(
         &mut self,
         id: ImageId,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let g = self.global_resources.read().unwrap();
         let image = g.get_image(id)?;
@@ -73,7 +75,7 @@ impl<'a> ComputeCommands<'a> {
         Ok(())
     }
 
-    pub fn bind_pipeline(&mut self, id: ComputePipelineId) -> Result<(), Error> {
+    pub fn bind_pipeline(&mut self, id: ComputePipelineId) -> Result<()> {
         let g = self.global_resources.read().unwrap();
         let pipeline = g.get_compute_pipeline(id)?;
         unsafe {
@@ -91,7 +93,7 @@ impl<'a> ComputeCommands<'a> {
     pub fn bind_shader_resources<F>(
         &self,
         f: F,
-    ) -> Result<(), Error>
+    ) -> Result<()>
         where
             F: FnMut(u32) -> ShaderResourceId,
     {
@@ -120,7 +122,7 @@ impl<'a> ComputeCommands<'a> {
     pub fn push_constants<'b, F>(
         &self,
         f: F,
-    ) -> Result<(), Error>
+    ) -> Result<()>
         where
             F: FnMut(PushConstant) -> &'a [u8]
     {

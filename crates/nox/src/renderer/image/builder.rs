@@ -100,7 +100,7 @@ impl ImageBuilder {
         self
     }
 
-    pub(crate) fn build(&mut self) -> Result<Image, Error> {
+    pub(crate) fn build(&mut self) -> Result<Image, ImageError> {
         let mut image_type = vk::ImageType::TYPE_2D;
         if self.dimensions.depth > 1 {
             assert!(self.array_layers == 1, "image layers must be 1 if depth is greater than 1");

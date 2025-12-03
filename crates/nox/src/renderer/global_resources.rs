@@ -1,3 +1,4 @@
+mod error;
 pub mod default_binder;
 mod enums;
 mod structs;
@@ -14,13 +15,17 @@ use nox_mem::{
 };
 
 use crate::{
-    has_bits, memory_binder::DeviceMemory, renderer::{
-        buffer::BufferUsage, image::{Format, SamplerBuilder}, pipeline::PipelineLayout, *
+    has_bits,
+    memory_binder::{DeviceMemory, MemoryBinderError},
+    renderer::{
+        buffer::BufferUsage,
+        image::{Format, SamplerBuilder},
+        pipeline::PipelineLayout,
+        *,
     }
 };
 
 use super::{
-    Error,
     PhysicalDeviceInfo,
     image::{
         ImageBuilder,
@@ -30,10 +35,13 @@ use super::{
     memory_binder::MemoryBinder,
 };
 
+pub use error::ResourceError;
 pub use default_binder::{DefaultBinder};
 pub use enums::*;
 pub use structs::*;
 use descriptor_pool::*;
+
+type Result<T> = core::result::Result<T, ResourceError>;
 
 pub struct GlobalResources {
     device: Arc<ash::Device>,
@@ -69,7 +77,7 @@ impl GlobalResources {
         physical_device: vk::PhysicalDevice,
         physical_device_info: PhysicalDeviceInfo,
         memory_layout: MemoryLayout,
-    ) -> Result<Self, Error>
+    ) -> core::result::Result<Self, InitError>
     {
         let default_binder = DefaultBinder::new(
             device.clone(),
@@ -88,7 +96,9 @@ impl GlobalResources {
             ..Default::default()
         };
         let dummy_layout = unsafe { RaiiHandle::new(
-            device.create_descriptor_set_layout(&dummy_layout_info, None)?,
+            device
+                .create_descriptor_set_layout(&dummy_layout_info, None)
+                .map_err(|err| InitError::UnexpectedVulkanError(err))?,
             |v| device.destroy_descriptor_set_layout(v, None))
         };
         let dummy_pool_info = vk::DescriptorPoolCreateInfo {
@@ -97,7 +107,9 @@ impl GlobalResources {
             ..Default::default()
         };
         let dummy_descriptor_pool = unsafe { RaiiHandle::new(
-            device.create_descriptor_pool(&dummy_pool_info, None)?,
+            device
+                .create_descriptor_pool(&dummy_pool_info, None)
+                .map_err(|err| InitError::UnexpectedVulkanError(err))?,
             |v| device.destroy_descriptor_pool(v, None))
         };
         let dummy_alloc_info = vk::DescriptorSetAllocateInfo {
@@ -112,7 +124,7 @@ impl GlobalResources {
             (device.fp_v1_0().allocate_descriptor_sets)(device.handle(), &dummy_alloc_info, &mut dummy_descriptor_set)
         };
         if res != vk::Result::SUCCESS {
-            return Err(res.into())
+            return Err(InitError::UnexpectedVulkanError(res))
         }
         Ok(Self {
             api_version: physical_device_info.api_version(),
@@ -179,7 +191,7 @@ impl GlobalResources {
         input: &str,
         name: &str,
         stage: ShaderStage,
-    ) -> Result<ShaderId, Error>
+    ) -> Result<ShaderId>
     {
         let spriv = shader_fn::glsl_to_spirv(
             &input,
@@ -200,10 +212,10 @@ impl GlobalResources {
         &mut self,
         spirv: &[u32],
         stage: ShaderStage,
-    ) -> Result<ShaderId, Error>
+    ) -> Result<ShaderId>
     {
         if spirv.len() % 4 != 0 {
-            return Err(Error::ShaderError(format!("spirv binary size must be a multiple of 4")))
+            return Err(ShaderError::InvalidSpirv.into())
         }
         let shader = Shader::new(
             self.device.clone(),
@@ -219,15 +231,15 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_shader(&self, id: ShaderId) -> Result<&Shader, SlotMapError> {
-        self.shaders.get(id.0)
+    pub(crate) fn get_shader(&self, id: ShaderId) -> core::result::Result<&Shader, SlotMapError> {
+        self.shaders.get(id.0).map_err(Into::into)
     }
 
     #[inline(always)]
     pub fn create_pipeline_layout<const SHADER_COUNT: usize>(
         &mut self,
         shaders: [ShaderId; SHADER_COUNT],
-    ) -> Result<PipelineLayoutId, Error>
+    ) -> Result<PipelineLayoutId>
     {
         let mut s = ArrayVec::<&Shader, SHADER_COUNT>::new();
         for id in shaders {
@@ -248,8 +260,8 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_pipeline_layout(&self, id: PipelineLayoutId) -> Result<&PipelineLayout, SlotMapError> {
-        self.pipeline_layouts.get(id.0)
+    pub(crate) fn get_pipeline_layout(&self, id: PipelineLayoutId) -> core::result::Result<&PipelineLayout, SlotMapError> {
+        self.pipeline_layouts.get(id.0).map_err(Into::into)
     }
 
     #[inline(always)]
@@ -258,7 +270,7 @@ impl GlobalResources {
         resources: &[ShaderResourceInfo],
         mut collect: F,
         alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<()>
         where
             F: FnMut(usize, ShaderResourceId)
     {
@@ -292,7 +304,7 @@ impl GlobalResources {
         &mut self,
         resources: &[ShaderResourceId],
         alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let mut sets = FixedVec::with_capacity(resources.len(), alloc)?;
         for id in resources {
@@ -313,12 +325,15 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn get_descriptor_set(
+    pub(crate) fn get_descriptor_set(
         &mut self,
         resource_id: ShaderResourceId,
-    ) -> Result<vk::DescriptorSet, SlotMapError>
+    ) -> core::result::Result<vk::DescriptorSet, SlotMapError>
     {
-        self.shader_resources.get(resource_id.0).map(|v| v.descriptor_set)
+        self.shader_resources
+            .get(resource_id.0)
+            .map(|v| v.descriptor_set)
+            .map_err(Into::into)
     }
 
     #[inline(always)]
@@ -328,7 +343,7 @@ impl GlobalResources {
         buffer_updates: &[ShaderResourceBufferUpdate],
         copies: &[ShaderResourceCopy],
         alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let mut writes = FixedVec::with_capacity(image_updates.len() + buffer_updates.len(), alloc)?;
         let mut image_infos = FixedVec::with_capacity(image_updates.len(), alloc)?;
@@ -347,8 +362,9 @@ impl GlobalResources {
                 [set.set as usize].0
                 [update.binding as usize]
             else {
-                return Err(Error::ShaderError(
+                return Err(ResourceError::Other(
                     format!("invalid shader resource image binding {} for set {}", update.binding, set.set)
+                        .into()
                 ));
             };
             let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
@@ -357,13 +373,19 @@ impl GlobalResources {
                 let sampler = self.samplers.get(info.sampler.0)?.handle;
                 let image_view =
                     if let Some(range_info) = range_info {
-                        let (index, view) = self.get_image(id)?.create_subview(range_info)?;
+                        let (index, view) = self
+                            .get_image(id)?
+                            .create_subview(range_info)
+                            .map_err(|err| ResourceError::ImageError(err))?;
                         let set = self.shader_resources.get_mut(update.resource.0)?;
                         set.image_views.push((id, index));
                         view
                     }
                     else {
-                        self.get_image(id)?.get_view()?
+                        self
+                            .get_image(id)?
+                            .get_view()
+                            .map_err(|err| ResourceError::ImageError(err))?
                     };
                 let vk_info = vk::DescriptorImageInfo {
                     sampler,
@@ -400,8 +422,9 @@ impl GlobalResources {
                 [set.set as usize].0
                 [update.binding as usize]
             else {
-                return Err(Error::ShaderError(
+                return Err(ResourceError::Other(
                     format!("invalid shader resource image binding {} for set {}", update.binding, set.set)
+                        .into()
                 ));
             };
             let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
@@ -409,7 +432,7 @@ impl GlobalResources {
                 let buffer = self.buffers.get(info.buffer.0)?;
                 let properties = buffer.properties();
                 if info.offset + info.size > properties.size {
-                    return Err(Error::BufferError(BufferError::OutOfRange {
+                    return Err(ResourceError::BufferError(BufferError::OutOfRange {
                         buffer_size: properties.size,
                         requested_offset: info.offset,
                         requested_size: info.size,
@@ -466,7 +489,7 @@ impl GlobalResources {
     pub fn create_pipeline_cache(
         &mut self,
         initial_data: Option<&[u8]>,
-    ) -> Result<PipelineCacheId, Error>
+    ) -> Result<PipelineCacheId>
     {
         let initial_data = initial_data.unwrap_or(&[]);
         let info = vk::PipelineCacheCreateInfo {
@@ -489,7 +512,7 @@ impl GlobalResources {
     pub fn retrieve_pipeline_cache_data(
         &mut self,
         id: PipelineCacheId,
-    ) -> Result<GlobalVec<u8>, Error>
+    ) -> Result<GlobalVec<u8>>
     {
         let device = &*self.device;
         let handle = self.pipeline_caches.get(id.0)?.handle;
@@ -531,7 +554,7 @@ impl GlobalResources {
         cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
         mut collect: impl FnMut(usize, GraphicsPipelineId),
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let pipeline_count = infos.len();
         if pipeline_count == 0 {
@@ -615,7 +638,7 @@ impl GlobalResources {
         cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
         mut collect: impl FnMut(usize, ComputePipelineId),
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let pipeline_count = infos.len();
         if pipeline_count == 0 {
@@ -666,7 +689,7 @@ impl GlobalResources {
         layout_id: PipelineLayoutId,
         alloc: &'a Alloc,
         mut f: F,
-    ) -> Result<(vk::PipelineLayout, FixedVec<'a, vk::DescriptorSet, Alloc>), Error>
+    ) -> Result<(vk::PipelineLayout, FixedVec<'a, vk::DescriptorSet, Alloc>)>
         where
             Alloc: Allocator,
             F: FnMut(u32) -> ShaderResourceId,
@@ -691,7 +714,7 @@ impl GlobalResources {
         layout_id: PipelineLayoutId,
         alloc: &'a Alloc,
         mut f: F,
-    ) -> Result<(vk::PipelineLayout, FixedVec<'a, (PushConstant, &'b [u8]), Alloc>), Error>
+    ) -> Result<(vk::PipelineLayout, FixedVec<'a, (PushConstant, &'b [u8]), Alloc>)>
         where
             Alloc: Allocator,
             F: FnMut(PushConstant) -> &'b [u8],
@@ -706,12 +729,12 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_graphics_pipeline(&self, id: GraphicsPipelineId) -> Result<&GraphicsPipeline, SlotMapError> {
+    pub(crate) fn get_graphics_pipeline(&self, id: GraphicsPipelineId) -> core::result::Result<&GraphicsPipeline, SlotMapError> {
         self.graphics_pipelines.get(id.0)
     }
 
     #[inline(always)]
-    pub(crate) fn get_compute_pipeline(&self, id: ComputePipelineId) -> Result<&ComputePipeline, SlotMapError> {
+    pub(crate) fn get_compute_pipeline(&self, id: ComputePipelineId) -> core::result::Result<&ComputePipeline, SlotMapError> {
         self.compute_pipelines.get(id.0)
     }
 
@@ -721,10 +744,10 @@ impl GlobalResources {
         size: u64,
         usage: &[BufferUsage],
         binder: ResourceBinderBuffer,
-    ) -> Result<BufferId, Error>
+    ) -> Result<BufferId>
     {
         if size == 0 {
-            return Err(Error::ZeroSizeAlloc)
+            return Err(MemoryBinderError::ZeroSizeAlloc.into())
         }
         let mut vk_usage = vk::BufferUsageFlags::from_raw(0);
         for usage in usage {
@@ -748,7 +771,7 @@ impl GlobalResources {
                     let mut alloc = self.linear_device_allocs.get_mut(id.0)?.write().unwrap();
                     let mut default_callback = |buffer| self.default_binder.bind_buffer_memory(buffer, None);
                     let mut mappable_callback = |buffer| self.default_binder_mappable.bind_buffer_memory(buffer, None);
-                    let fallback: &mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error> =
+                    let fallback: &mut dyn FnMut(vk::Buffer) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> =
                         if alloc.alloc.mappable() {
                             &mut default_callback
                         } else {
@@ -780,10 +803,13 @@ impl GlobalResources {
     pub unsafe fn map_buffer(
         &mut self,
         buffer: BufferId,
-    ) -> Option<NonNull<u8>>
+    ) -> Result<NonNull<u8>>
     {
         unsafe {
-            self.buffers.get_mut(buffer.0).ok()?.map_memory()
+            self.buffers
+                .get_mut(buffer.0)?
+                .map_memory()
+                .map_err(Into::into)
         }
     }
 
@@ -793,12 +819,12 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_buffer(&self, id: BufferId) -> Result<&Buffer, SlotMapError> {
+    pub(crate) fn get_buffer(&self, id: BufferId) -> core::result::Result<&Buffer, SlotMapError> {
         self.buffers.get(id.0)
     }
 
     #[inline(always)]
-    pub(crate) fn get_mut_buffer(&mut self, id: BufferId) -> Result<&mut Buffer, SlotMapError> {
+    pub(crate) fn get_mut_buffer(&mut self, id: BufferId) -> core::result::Result<&mut Buffer, SlotMapError> {
         self.buffers.get_mut(id.0)
     }
 
@@ -806,7 +832,7 @@ impl GlobalResources {
     pub fn create_sampler<F: FnMut(&mut SamplerBuilder)>(
         &mut self,
         mut f: F,
-    ) -> Result<SamplerId, Error>
+    ) -> Result<SamplerId>
     {
         let mut builder = SamplerBuilder::new();
         f(&mut builder);
@@ -825,7 +851,7 @@ impl GlobalResources {
         &mut self,
         binder: ResourceBinderImage,
         mut f: F,
-    ) -> Result<ImageId, Error>
+    ) -> Result<ImageId>
         where
             F: FnMut(&mut ImageBuilder)
     {
@@ -844,7 +870,7 @@ impl GlobalResources {
                     let mut alloc = self.linear_device_allocs.get_mut(id.0)?.write().unwrap();
                     let mut default_callback = |image| self.default_binder.bind_image_memory(image, None);
                     let mut mappable_callback = |image| self.default_binder_mappable.bind_image_memory(image, None);
-                    let fallback: &mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error> =
+                    let fallback: &mut dyn FnMut(vk::Image) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> =
                         if alloc.alloc.mappable() {
                             &mut default_callback
                         } else {
@@ -887,14 +913,14 @@ impl GlobalResources {
     pub(crate) fn get_image(
         &self,
         id: ImageId,
-    ) -> Result<Arc<Image>, SlotMapError>
+    ) -> core::result::Result<Arc<Image>, SlotMapError>
     {
         self.images.get(id.0).map(|v| v.clone())
     }
 
     #[must_use]
     #[inline(always)]
-    pub fn create_default_linear_device_alloc(&mut self, block_size: u64) -> Result<LinearDeviceAllocId, Error> {
+    pub fn create_default_linear_device_alloc(&mut self, block_size: u64) -> Result<LinearDeviceAllocId> {
         Ok(LinearDeviceAllocId(self.linear_device_allocs.insert(Arc::new(RwLock::new(LinearDeviceAllocResource {
             alloc: LinearDeviceAlloc::new(
                     self.device.clone(),
@@ -910,7 +936,7 @@ impl GlobalResources {
 
     #[must_use]
     #[inline(always)]
-    pub fn create_default_linear_device_alloc_mappable(&mut self, block_size: u64) -> Result<LinearDeviceAllocId, Error> {
+    pub fn create_default_linear_device_alloc_mappable(&mut self, block_size: u64) -> Result<LinearDeviceAllocId> {
         Ok(LinearDeviceAllocId(self.linear_device_allocs.insert(Arc::new(RwLock::new(LinearDeviceAllocResource {
             alloc: LinearDeviceAlloc::new(
                     self.device.clone(),
@@ -934,11 +960,11 @@ impl GlobalResources {
         &mut self,
         id: LinearDeviceAllocId,
         semaphores: &[(TimelineSemaphoreId, u64)],
-    ) -> Result<LinearDeviceAllocLock, Error> {
+    ) -> Result<LinearDeviceAllocLock> {
         let alloc = self.linear_device_allocs.get_mut(id.0)?;
         let mut write = alloc.write().unwrap();
         if write.semaphore_count != 0 {
-            return Err(Error::ResourceLocked)
+            return Err(ResourceError::ResourceLocked)
         }
         for &(semaphore, value) in semaphores {
             self.timeline_semaphores
@@ -951,7 +977,7 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn create_timeline_semaphore(&mut self, initial_value: u64) -> Result<TimelineSemaphoreId, Error> {
+    pub fn create_timeline_semaphore(&mut self, initial_value: u64) -> Result<TimelineSemaphoreId> {
         let mut type_info = vk::SemaphoreTypeCreateInfo {
             s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
             semaphore_type: vk::SemaphoreType::TIMELINE,
@@ -972,7 +998,7 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn get_semaphore_value(&mut self, id: TimelineSemaphoreId) -> Result<u64, Error> {
+    pub fn get_semaphore_value(&mut self, id: TimelineSemaphoreId) -> Result<u64> {
         let handle = self.timeline_semaphores.get(id.0)?.handle;
         unsafe {
             Ok(self.device.get_semaphore_counter_value(handle)?)
@@ -985,7 +1011,7 @@ impl GlobalResources {
         semaphores: &[(TimelineSemaphoreId, u64)],
         timeout: u64,
         alloc: &impl Allocator,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool> {
         let mut handles = FixedVec::with_capacity(semaphores.len(), alloc)?;
         let mut values = FixedVec::with_capacity(semaphores.len(), alloc)?;
         let mut unlock_resources = FixedVec::with_capacity(semaphores.len(), alloc)?;
@@ -1043,12 +1069,12 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_timeline_semaphore(&self, id: TimelineSemaphoreId) -> Result<vk::Semaphore, Error> {
-        self.timeline_semaphores.get(id.0).map(|v| v.handle).map_err(|e| e.into())
+    pub(crate) fn get_timeline_semaphore(&self, id: TimelineSemaphoreId) -> Result<vk::Semaphore> {
+        self.timeline_semaphores.get(id.0).map(|v| v.handle).map_err(Into::into)
     }
 
     #[inline(always)]
-    pub(crate) fn update_semaphores(&mut self) -> Result<(), Error> {
+    pub(crate) fn update_semaphores(&mut self) -> Result<()> {
         for (_, semaphore) in &mut self.timeline_semaphores {
             let handle = semaphore.handle;
             let value = unsafe {

@@ -4,12 +4,13 @@ use ash::vk;
 
 use crate::{
     renderer::{
-        Error,
         PhysicalDeviceInfo,
-        memory_binder::{MemoryBinder, DeviceMemory},
+        memory_binder::{MemoryBinder, DeviceMemory, MemoryBinderError::{self, *}},
     },
     has_bits,
 };
+
+type Result<T> = core::result::Result<T, MemoryBinderError>;
 
 #[derive(Clone)]
 pub struct DefaultBinder {
@@ -47,8 +48,8 @@ pub struct Memory {
     device: Arc<ash::Device>,
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
-    mappable: bool,
     map: Option<NonNull<u8>>,
+    mappable: bool,
 }
 
 unsafe impl Send for Memory {}
@@ -74,18 +75,17 @@ impl DeviceMemory for Memory {
         }
     }
 
-    unsafe fn map_memory(&mut self) -> Option<core::ptr::NonNull<u8>> {
+    unsafe fn map_memory(&mut self) -> Result<core::ptr::NonNull<u8>> {
         if !self.mappable {
-            return None
+            return Err(NonMappableMemory)
         }
         if let Some(map) = self.map {
-            return Some(map)
+            return Ok(map)
         }
         let ptr = unsafe {
-            self.device.map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::from_raw(0)).ok()?
+            self.device.map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::from_raw(0))?
         };
-        self.map = Some(NonNull::new(ptr as *mut u8).unwrap());
-        self.map
+        Ok(*self.map.insert(NonNull::new(ptr as *mut u8).unwrap()))
     }
 }
 
@@ -94,14 +94,14 @@ impl MemoryBinder for DefaultBinder {
     fn bind_image_memory(
         &mut self,
         image: vk::Image,
-        _: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, Error>>
-    ) -> Result<Box<dyn DeviceMemory>, Error>
+        _: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>>>
+    ) -> Result<Box<dyn DeviceMemory>>
     {
         let device = &self.device;
         let memory_requirements = unsafe { device.get_image_memory_requirements(image) };
         let memory_type_bits = self.memory_type_bits & memory_requirements.memory_type_bits;
         if memory_type_bits == 0 {
-            return Err(Error::IncompatibleMemoryRequirements)
+            return Err(IncompatibleMemoryRequirements)
         }
         let memory_type_index = memory_type_bits.trailing_zeros();
         let allocate_info = vk::MemoryAllocateInfo {
@@ -128,13 +128,13 @@ impl MemoryBinder for DefaultBinder {
     fn bind_buffer_memory(
         &mut self,
         buffer: vk::Buffer,
-        _: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, Error>>
-    ) -> Result<Box<dyn DeviceMemory>, Error> {
+        _: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>>>
+    ) -> Result<Box<dyn DeviceMemory>> {
         let device = &self.device;
         let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
         let memory_type_bits = self.memory_type_bits & memory_requirements.memory_type_bits;
         if memory_type_bits == 0 {
-            return Err(Error::IncompatibleMemoryRequirements)
+            return Err(IncompatibleMemoryRequirements)
         }
         let memory_type_index = memory_type_bits.trailing_zeros();
         let allocate_info = vk::MemoryAllocateInfo {

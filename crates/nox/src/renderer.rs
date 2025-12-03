@@ -4,10 +4,10 @@ pub mod image;
 pub mod memory_binder;
 pub mod linear_device_alloc;
 
+mod errors;
 mod memory_layout;
 mod handle;
 mod helpers;
-mod shader_fn;
 mod shader;
 mod enums;
 mod structs;
@@ -52,12 +52,15 @@ use super::{
     Interface,
     Version,
     AppName,
-    error::Error,
+    Error,
+    InitError,
     utility::clamp,
+    log,
 };
 
 pub use vk::Format as VkFormat;
 
+pub use errors::*;
 pub use enums::*;
 pub use structs::*;
 pub use memory_layout::MemoryLayout;
@@ -163,18 +166,6 @@ impl RendererContext {
     pub fn buffer_size(&self, buffer: BufferId) -> Option<u64> {
         self.global_resources.read().unwrap().buffer_size(buffer)
     }
-
-    #[inline(always)]
-    pub fn create_linear_device_alloc_mappable(&self, block_size: u64) -> Result<LinearDeviceAlloc, Error> {
-        LinearDeviceAlloc::new(
-            self.device.clone(),
-            block_size,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            &self.physical_device_info,
-            true
-        )
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -214,12 +205,12 @@ impl<'a> Renderer<'a> {
         memory_layout: MemoryLayout,
         mut buffered_frames: u32,
         allocators: &'a Allocators,
-    ) -> Result<Self, String>
+    ) -> Result<Self, InitError>
     {
         buffered_frames = clamp(buffered_frames, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
         assert!(buffered_frames <= MAX_BUFFERED_FRAMES);
         allocators.realloc_frame_graphs(buffered_frames);
-        let tmp_alloc = Arc::new(ArenaAlloc::new(memory_layout.tmp_arena_size()).ok_or(format!("failed to create tmp alloc"))?);
+        let tmp_alloc = Arc::new(ArenaAlloc::new(memory_layout.tmp_arena_size()).ok_or(InitError::GlobalAllocFailed)?);
         let vulkan_context = VulkanContext
             ::new(
                 window,
@@ -228,15 +219,14 @@ impl<'a> Renderer<'a> {
                 buffered_frames,
                 enable_validation,
                 &tmp_alloc
-            )
-            .map_err(|e| e)?;
+            )?;
         let device = Arc::new(vulkan_context.device().clone());
         let main_thread_context = ThreadContext
             ::new(
                 device.clone(),
                 vulkan_context.queue_family_indices())
-            .map_err(|e|
-                format!("failed to create main thread context ( {:?} )", e)
+            .map_err(|err|
+                InitError::UnexpectedVulkanError(err)
             )?;
         let physical_device_info = vulkan_context.physical_device_info().clone();
         let global_resources = Arc::new(RwLock::new(
@@ -247,12 +237,11 @@ impl<'a> Renderer<'a> {
                     vulkan_context.physical_device(),
                     physical_device_info.clone(),
                     memory_layout
-                )
-                .map_err(|e| format!("failed to create global resources ( {:?} ) ", e))?
+                )?
         ));
         let swapchain_pass_pipeline_data = SwapchainPassPipelineData
             ::new(global_resources.clone(), buffered_frames, &tmp_alloc)
-            .map_err(|e| format!("failed to create full screen pass data ( {:?} )", e))?;
+            .map_err(|err| InitError::SwapchainPassError(Box::new(err)))?;
         let mut s = Self {
             main_thread_context,
             vulkan_context,
@@ -319,7 +308,7 @@ impl<'a> Renderer<'a> {
                 compute_command_buffers.as_mut_ptr(),
             );
             if result != vk::Result::SUCCESS {
-                return Err(format!("failed to allocate compute command buffers {:?}", result))
+                return Err(InitError::UnexpectedVulkanError(result))
             }
             compute_command_buffers.set_len(buffered_frames as usize);
             for _ in 0..buffered_frames {
@@ -444,7 +433,7 @@ impl<'a> Renderer<'a> {
         transfer_queue: vk::Queue,
         graphics_queue: vk::Queue,
         pending_transfers: &mut GlobalVec<CommandRequestId>,
-    ) -> Result<(), String>
+    ) -> Result<(), CommandError>
     {
         let device = &self.device;
         if !self.transfer_commands.is_empty() {
@@ -455,13 +444,10 @@ impl<'a> Renderer<'a> {
                 let transfer_command_buffer = command.transfer_command_buffer();
                 let graphics_command_buffer = command.graphics_command_buffer();
                 let (new, sync_objects, signal_semaphores) = command
-                    .get_sync_objects()
-                    .map_err(|e| format!("failed to create fence: {:?}", e))?;
+                    .get_sync_objects()?;
                 if new {
                     unsafe {
-                        device
-                            .end_command_buffer(transfer_command_buffer)
-                            .map_err(|e| format!("failed to end command buffer: {:?}", e))?;
+                        device.end_command_buffer(transfer_command_buffer)?;
                     }
                     let submit_info = vk::SubmitInfo {
                         s_type: vk::StructureType::SUBMIT_INFO,
@@ -476,26 +462,21 @@ impl<'a> Renderer<'a> {
                             transfer_queue,
                             &[submit_info],
                             sync_objects.transfer_fence,
-                        ).map_err(|e| format!("failed to submit transfer commands: {:?}", e))?;
+                        ).map_err(|err| QueueSubmitError(QueueFamily::Transfer, err))?;
                     };
                     let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
                     let mut signal_handles = FixedVec
-                        ::with_capacity(signal_semaphores.len(), &tmp_alloc)
-                        .map_err(|e| format!("arena alloc failed: {:?}", e))?;
+                        ::with_capacity(signal_semaphores.len(), &tmp_alloc)?;
                     let mut signal_values = FixedVec
-                        ::with_capacity(signal_semaphores.len(), &tmp_alloc)
-                        .map_err(|e| format!("arena alloc failed: {:?}", e))?;
+                        ::with_capacity(signal_semaphores.len(), &tmp_alloc)?;
                     let g = self.global_resources.read().unwrap();
                     for &(semaphore, value) in signal_semaphores {
-                        let handle = g
-                            .get_timeline_semaphore(semaphore)
-                            .map_err(|e| format!("failed to get timeline semaphore {:?}: {:?}", semaphore, e))?;
+                        let handle = g.get_timeline_semaphore(semaphore)?;
                         signal_handles.push(handle).ok();
                         signal_values.push(value).ok();
                     }
                     unsafe {
-                        device.end_command_buffer(graphics_command_buffer)
-                        .map_err(|e| format!("failed to end command buffer: {:?}", e))?;
+                        device.end_command_buffer(graphics_command_buffer)?;
                     }
                     let wait_stage = vk::PipelineStageFlags::TRANSFER;
                     let wait_value = 0;
@@ -523,7 +504,7 @@ impl<'a> Renderer<'a> {
                             graphics_queue,
                             &[submit_info],
                             sync_objects.graphics_fence,
-                        ).map_err(|e| format!("failed to submit graphics commands: {:?}", e))?;
+                        ).map_err(|err| QueueSubmitError(QueueFamily::Graphics, err))?;
                     }
                 }
                 unsafe {
@@ -533,8 +514,8 @@ impl<'a> Renderer<'a> {
                             ready = true;
                         },
                         Err(vk::Result::TIMEOUT) => {}
-                        Err(e) => {
-                            return Err(format!("unexpected fence wait error: {:?}", e))
+                        Err(err) => {
+                            return Err(err.into())
                         }
                     }
                     if ready {
@@ -551,27 +532,25 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    pub(crate) fn render<I: Interface>(
+    pub(crate) fn render(
         &mut self,
         window: &Window,
-        interface: &mut I,
+        interface: &mut impl Interface,
         allocators: &'a Allocators,
-    ) -> Result<(), String>
+    ) -> Result<(), RenderError>
     {
         let graphics_queue = self.vulkan_context.graphics_queue();
         let transfer_queue = self.vulkan_context.transfer_queue();
         let compute_queue = self.vulkan_context.compute_queue();
-        self
-            .async_transfer_requests(interface)
-            .map_err(|e| format!("failed to record async transfer requests: {:?}", e))?;
+        self.async_transfer_requests(interface)
+            .map_err(|err| RenderError::AsyncTransferRequestError(err))?;
         let mut pending_transfers = GlobalVec::new();
         self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)?;
         let device = self.device.clone();
         self.global_resources
             .write()
             .unwrap()
-            .update_semaphores()
-            .map_err(|e| format!("unexpected error while updating semaphores: {:?}", e))?;
+            .update_semaphores()?;
         let swapchain_loader = self.vulkan_context.swapchain_loader().clone();
         let queue_family_indices = self.vulkan_context.queue_family_indices();
         let mut render_context = self.renderer_context();
@@ -580,28 +559,22 @@ impl<'a> Renderer<'a> {
                 self.main_thread_context.graphics_pool(),
                 &self.tmp_alloc,
                 allocators
-            )
-            .map_err(|e| {
-                format!("failed to get swapchain context ( {} )", e)
-            })?;
+            )?;
         let mut swapchain_context = swapchain_context.borrow_mut();
-        let frame_data = match swapchain_context
-            .setup_image(&device, &swapchain_loader)
-            .map_err(|e| {
-                format!("failed to setup render image ( {} )", e)
-            })? {
-                Some(r) => r,
-                None => return Ok(())
-            };
+        let frame_data = match swapchain_context.setup_image(&device, &swapchain_loader)?
+        {
+            Some(r) => r,
+            None => return Ok(())
+        };
         if recreated {
             self.frame_buffer_size = frame_data.extent.into();
             render_context.frame_buffer_size = self.frame_buffer_size;
             interface
                 .frame_buffer_size_callback(&mut render_context)
-                .map_err(|e| format!("interface frame buffer size callback failed ( {:?} )", e))?;
+                .map_err(|err| RenderError::FrameBufferSizeCallbackError(err))?;
             self
                 .async_transfer_requests(interface)
-                .map_err(|e| format!("failed to record async transfer requests: {:?}", e))?;
+                .map_err(|err| RenderError::AsyncTransferRequestError(err))?;
             self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)?;
         } 
         let compute_state = self.compute_states[frame_data.frame_index as usize];
@@ -620,7 +593,7 @@ impl<'a> Renderer<'a> {
         );
         interface
             .compute(&mut compute_commands)
-            .map_err(|e| format!("interface failed to record compute commands ( {:?} )", e))?;
+            .map_err(|err| RenderError::ComputeError(err))?;
         unsafe {
             device.end_command_buffer(compute_state.command_buffer).unwrap();
         }
@@ -628,34 +601,20 @@ impl<'a> Renderer<'a> {
             let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
             let wait_count = 1 + compute_commands.wait_semaphores.len();
             let signal_count = 1 + compute_commands.signal_semaphores.len();
-            let mut wait_handles = FixedVec
-                ::with_capacity(wait_count, &tmp_alloc)
-                .map_err(|e| format!("arena alloc failed: {:?}", e))?;
-            let mut wait_values = FixedVec
-                ::with_capacity(wait_count, &tmp_alloc)
-                .map_err(|e| format!("arena alloc failed: {:?}", e))?;
-            let mut wait_stages = FixedVec
-                ::with_capacity(wait_count, &tmp_alloc)
-                .map_err(|e| format!("arena alloc failed: {:?}", e))?;
-            let mut signal_handles = FixedVec
-                ::with_capacity(signal_count, &tmp_alloc)
-                .map_err(|e| format!("arena alloc failed: {:?}", e))?;
-            let mut signal_values = FixedVec
-                ::with_capacity(signal_count, &tmp_alloc)
-                .map_err(|e| format!("arena alloc failed: {:?}", e))?;
+            let mut wait_handles = FixedVec::with_capacity(wait_count, &tmp_alloc)?;
+            let mut wait_values = FixedVec::with_capacity(wait_count, &tmp_alloc)?;
+            let mut wait_stages = FixedVec::with_capacity(wait_count, &tmp_alloc)?;
+            let mut signal_handles = FixedVec::with_capacity(signal_count, &tmp_alloc)?;
+            let mut signal_values = FixedVec::with_capacity(signal_count, &tmp_alloc)?;
             let g = self.global_resources.read().unwrap();
             for &(id, value, stage) in &compute_commands.wait_semaphores {
-                let handle = g
-                    .get_timeline_semaphore(id)
-                    .map_err(|e| format!("invalid timeline semaphore id when submitting compute commands: {:?}", e))?;
+                let handle = g.get_timeline_semaphore(id)?;
                 wait_handles.push(handle).ok();
                 wait_values.push(value).ok();
                 wait_stages.push(stage.into()).ok();
             }
             for &(id, value) in &compute_commands.signal_semaphores {
-                let handle = g
-                    .get_timeline_semaphore(id)
-                    .map_err(|e| format!("invalid timeline semaphore id when submitting compute commands: {:?}", e))?;
+                let handle = g.get_timeline_semaphore(id)?;
                 signal_handles.push(handle).ok();
                 signal_values.push(value).ok();
             }
@@ -692,16 +651,15 @@ impl<'a> Renderer<'a> {
                     Default::default(),
                 );
                 if let Err(err) = result {
-                    return Err(format!("failed to submit to compute queue ( {:?} )", err))
+                    return Err(QueueSubmitError(QueueFamily::Compute, err).into())
                 }
             }
         }
-        if let Err(e) = helpers::begin_command_buffer(&device, frame_data.command_buffer) {
-            return Err(format!("failed to begin command buffer {:?}", e))
-        }
+        helpers
+            ::begin_command_buffer(&device, frame_data.command_buffer)
+            .map_err(|err| RenderError::UnexpectedVulkanError(err))?;
         let pipeline = self.swapchain_pass_pipeline_data
-            .get_pipeline(frame_data.format, &self.tmp_alloc)
-            .map_err(|e| format!("failed to get full screen pass pipeline {:?}", e))?;
+            .get_pipeline(frame_data.format, &self.tmp_alloc)?;
         let alloc = &allocators.frame_graphs()[frame_data.frame_index as usize];
         unsafe {
             alloc.force_clear();
@@ -720,7 +678,7 @@ impl<'a> Renderer<'a> {
             );
             interface
                 .render(&mut frame_graph, &pending_transfers)
-                .map_err(|e| format!("interface failed to render ( {:?} )", e))?;
+                .map_err(|err| RenderError::RenderError(err))?;
             let mut render_commands = RenderCommands::new(
                 device.clone(),
                 frame_data.command_buffer,
@@ -731,44 +689,32 @@ impl<'a> Renderer<'a> {
                 &self.tmp_alloc,
                 frame_data.extent.into(),
                 self.buffered_frames,
-            ).map_err(|e| {
-                format!("failed to create render commands: {:?}", e)
-            })?;
-            frame_graph
-                .render(interface, &mut render_commands)
-                .map_err(|e| format!("frame graph failed to render: {:?}", e))?;
+            )?;
+            frame_graph.render(interface, &mut render_commands)?;
             let (transfer_fence, mut wait_semaphores, mut wait_values, mut wait_stages) =
                 if render_commands.transfer_commands.is_empty() {
                     let frame_graph_count = frame_graph.wait_semaphore_count() as usize;
                     (
                         vk::Fence::null(),
-                        FixedVec
-                            ::with_capacity(frame_graph_count + 2, alloc)
-                            .map_err(|e| format!("failed to allocate wait semaphores: {:?}", e))?,
-                        FixedVec
-                            ::with_capacity(frame_graph_count + 2, alloc)
-                            .map_err(|e| format!("failed to allocate wait semaphore values: {:?}", e))?,
-                        FixedVec
-                            ::with_capacity(frame_graph_count + 2, alloc)
-                            .map_err(|e| format!("failed to allocate wait semaphore stages: {:?}", e))?,
+                        FixedVec::with_capacity(frame_graph_count + 2, alloc)?,
+                        FixedVec::with_capacity(frame_graph_count + 2, alloc)?,
+                        FixedVec::with_capacity(frame_graph_count + 2, alloc)?,
                     )
                 } else {
                     let frame_graph_count = frame_graph.wait_semaphore_count() as usize;
-                    let mut transfer_command_buffers = FixedVec::with_capacity(render_commands.transfer_commands.len(), alloc)
-                        .map_err(|e| format!("failed to allocate command buffers: {:?}", e))?;
-                    let mut graphics_command_buffers = FixedVec::with_capacity(render_commands.transfer_commands.len(), alloc)
-                        .map_err(|e| format!("failed to allocate command buffers: {:?}", e))?;
+                    let mut transfer_command_buffers = FixedVec::with_capacity(render_commands.transfer_commands.len(), alloc)?;
+                    let mut graphics_command_buffers = FixedVec::with_capacity(render_commands.transfer_commands.len(), alloc)?;
                     for transfer_commands in &render_commands.transfer_commands {
                         let command_buffer = transfer_commands.transfer_command_buffer();
                         unsafe {
                             device.end_command_buffer(command_buffer)
-                                .map_err(|e| format!("failed to end transfer command buffer: {:?}", e))?;
+                                .map_err(|err| RenderError::UnexpectedVulkanError(err))?;
                         }
                         transfer_command_buffers.push(command_buffer).ok();
                         let command_buffer = transfer_commands.graphics_command_buffer();
                         unsafe {
                             device.end_command_buffer(command_buffer)
-                                .map_err(|e| format!("failed to end graphics command buffer: {:?}", e))?;
+                                .map_err(|err| RenderError::UnexpectedVulkanError(err))?;
                         }
                         graphics_command_buffers.push(command_buffer).ok();
                     }
@@ -778,7 +724,7 @@ impl<'a> Renderer<'a> {
                     };
                     let transfer_fence = unsafe {
                         device.create_fence(&fence_info, None)
-                    }.map_err(|e| format!("unexpected error when creating fence: {:?}", e))?;
+                    }.map_err(|err| RenderError::UnexpectedVulkanError(err))?;
                     self.sync_transfer_timeline_value += 1;
                     let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
                         s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
@@ -799,7 +745,7 @@ impl<'a> Renderer<'a> {
                             transfer_queue,
                             &[submit_info],
                             vk::Fence::null(),
-                        ).map_err(|e| format!("failed to submit transfer commands: {:?}", e))?;
+                        ).map_err(|err| QueueSubmitError(QueueFamily::Transfer, err))?;
                     };
                     let wait_value = self.sync_transfer_timeline_value;
                     let wait_stage = vk::PipelineStageFlags::TRANSFER;
@@ -828,29 +774,24 @@ impl<'a> Renderer<'a> {
                             graphics_queue,
                             &[submit_info],
                             transfer_fence,
-                        ).map_err(|e| format!("failed t o submit graphics commands: {:?}", e))?;
+                        ).map_err(|err| QueueSubmitError(QueueFamily::Graphics, err))?;
                     }
                     let mut wait_semaphores = FixedVec
-                        ::with_capacity(frame_graph_count + 3, alloc)
-                        .map_err(|e| format!("failed to allocate wait semaphores: {:?}", e))?;
+                        ::with_capacity(frame_graph_count + 3, alloc)?;
                     wait_semaphores.push(self.sync_transfer_semaphore).ok();
                     let mut wait_values = FixedVec
-                        ::with_capacity(frame_graph_count + 3, alloc)
-                        .map_err(|e| format!("failed to allocate wait semaphore values: {:?}", e))?;
+                        ::with_capacity(frame_graph_count + 3, alloc)?;
                     wait_values.push(self.sync_transfer_timeline_value).ok();
                     let mut wait_stages = FixedVec
-                        ::with_capacity(frame_graph_count + 3, alloc)
-                        .map_err(|e| format!("failed to allocate wait semaphore stages: {:?}", e))?;
+                        ::with_capacity(frame_graph_count + 3, alloc)?;
                     wait_stages.push(vk::PipelineStageFlags::TRANSFER).ok();
                     (transfer_fence, wait_semaphores, wait_values, wait_stages)
                 };
             let signal_count = frame_graph.signal_semaphore_count() as usize;
             let mut signal_semaphores = FixedVec
-                ::with_capacity(signal_count + 2, alloc)
-                .map_err(|e| format!("failed to allocate signal semaphores: {:?}", e))?;
+                ::with_capacity(signal_count + 2, alloc)?;
             let mut signal_values = FixedVec
-                ::with_capacity(signal_count + 2, alloc)
-                .map_err(|e| format!("failed to allocate signal semaphore values: {:?}", e))?;
+                ::with_capacity(signal_count + 2, alloc)?;
             let g = self.global_resources.read().unwrap();
             frame_graph.collect_semaphores(
                 |id, value| {
@@ -866,7 +807,7 @@ impl<'a> Renderer<'a> {
                     wait_stages.push(stage.into())?;
                     Ok(())
                 }
-            ).map_err(|e| format!("failed to collect signal semaphores ( {:?} )", e))?;
+            )?;
             self.sync_transfer_commands.move_from_vec(&mut render_commands.transfer_commands);
             (transfer_fence, wait_semaphores, wait_values, wait_stages, signal_semaphores, signal_values)
         };
@@ -874,8 +815,7 @@ impl<'a> Renderer<'a> {
         let mut image_state = frame_data.image_state;
         let graphics_queue_index = queue_family_indices.graphics_index();
         if let Some((render_image, range_info)) = frame_state
-                .get_render_image(queue_family_indices.graphics_index())
-                .map_err(|e| format!("failed to get render image ( {:?} )", e))?
+            .get_render_image(queue_family_indices.graphics_index())?
         {
             let command_buffer = frame_data.command_buffer;
             let write_image_state = ImageState::new(
@@ -970,8 +910,9 @@ impl<'a> Renderer<'a> {
                 image_state,
                 queue_family_indices.graphics_index()
             );
-        if let Err(e) = unsafe { device.end_command_buffer(frame_data.command_buffer) } {
-            return Err(format!("failed to end command buffer {:?}", e))
+        unsafe { device
+            .end_command_buffer(frame_data.command_buffer)
+            .map_err(|err| RenderError::UnexpectedVulkanError(err))?
         }
         wait_semaphores.append(&[semaphores.wait_semaphore, compute_state.semaphore]).unwrap();
         wait_values.append(&[0, compute_state.timeline_value + 1]).unwrap();
@@ -1000,20 +941,18 @@ impl<'a> Renderer<'a> {
             ..Default::default()
         };
         submit_info = submit_info.push_next(&mut timeline_submit);
-        if let Err(e) = unsafe { device.queue_submit(graphics_queue, &[submit_info], fence) } {
-            return Err(format!("graphics queue submit failed {:?}", e))
+        if let Err(err) = unsafe { device.queue_submit(graphics_queue, &[submit_info], fence) } {
+            return Err(QueueSubmitError(QueueFamily::Graphics, err).into())
         }
         if !self.sync_transfer_commands.is_empty() {
             unsafe {
                 device
                     .wait_for_fences(&[transfer_fence], true, u64::MAX)
-                    .map_err(|e| format!("failed to wait for transfer fence: {:?}", e))?;
+                    .map_err(|err| RenderError::UnexpectedVulkanError(err))?;
                 device.destroy_fence(transfer_fence, None);
             }
         }
-        let present_result = swapchain_context
-            .present_submit(&swapchain_loader, graphics_queue)
-            .map_err(|e| format!("queue present failed {}", e))?;
+        let present_result = swapchain_context.present_submit(&swapchain_loader, graphics_queue)?;
         if present_result != PresentResult::Success || frame_data.suboptimal {
             self.vulkan_context.request_swapchain_update(self.buffered_frames, window.inner_size());
         }
@@ -1022,7 +961,7 @@ impl<'a> Renderer<'a> {
     }
 
     pub(crate) fn clean_up(&mut self, allocators: &'a Allocators) {
-        println!("Nox renderer message: terminating renderer");
+        log::info!("terminating renderer");
         unsafe {
             self.device.device_wait_idle().ok();
         }

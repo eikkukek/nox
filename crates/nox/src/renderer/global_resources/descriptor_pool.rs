@@ -13,7 +13,7 @@ impl DescriptorPool {
     pub fn new(
         device: Arc<ash::Device>,
         memory_layout: MemoryLayout,
-    ) -> Result<Self, Error>
+    ) -> core::result::Result<Self, InitError>
     {
         let pool_sizes = [
             vk::DescriptorPoolSize {
@@ -43,7 +43,9 @@ impl DescriptorPool {
             ..Default::default()
         };
         let handle = unsafe {
-            device.create_descriptor_pool(&info, None)?
+            device
+                .create_descriptor_pool(&info, None)
+                .map_err(|err| InitError::UnexpectedVulkanError(err))?
         };
         Ok(Self {
             device,
@@ -58,11 +60,11 @@ impl DescriptorPool {
         &mut self,
         set_layouts: &[vk::DescriptorSetLayout],
         alloc: &'a Alloc,
-    ) -> Result<FixedVec<'a, vk::DescriptorSet, Alloc>, Error>
+    ) -> Result<FixedVec<'a, vk::DescriptorSet, Alloc>>
     {
         let count = set_layouts.len() as u32;
         if self.allocated_sets + count > self.max_sets {
-            return Err(Error::DescriptorPoolFull { max_sets: self.max_sets, allocated_sets: self.allocated_sets })
+            return Err(ResourceError::DescriptorPoolFull { max_sets: self.max_sets, })
         }
         let info = vk::DescriptorSetAllocateInfo {
             s_type: vk::StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -89,7 +91,7 @@ impl DescriptorPool {
     pub fn free(
         &mut self,
         descriptor_sets: &[vk::DescriptorSet]
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         unsafe {
             self.device.free_descriptor_sets(self.handle, descriptor_sets)?;

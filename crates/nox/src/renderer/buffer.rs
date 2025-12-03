@@ -120,10 +120,14 @@ impl Buffer {
     }
 
     #[inline(always)]
-    pub unsafe fn map_memory(&mut self) -> Option<NonNull<u8>>
+    pub unsafe fn map_memory(&mut self) -> Result<NonNull<u8>, BufferError>
     {
         unsafe {
-            self.memory.as_mut()?.map_memory()
+            self.memory
+                .as_mut()
+                .ok_or(BufferError::UnbindedMemory)?
+                .map_memory()
+                .map_err(|e| e.into())
         }
     }
 }
