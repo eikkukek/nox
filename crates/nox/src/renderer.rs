@@ -3,6 +3,7 @@ pub mod pipeline;
 pub mod image;
 pub mod memory_binder;
 pub mod linear_device_alloc;
+mod ctx;
 
 mod errors;
 mod memory_layout;
@@ -53,6 +54,7 @@ use super::{
     Version,
     AppName,
     Error,
+    error::AnyError,
     InitError,
     utility::clamp,
     log,
@@ -60,7 +62,8 @@ use super::{
 
 pub use vk::Format as VkFormat;
 
-pub use errors::*;
+pub(crate) use errors::*;
+pub use ctx::RendererContext;
 pub use enums::*;
 pub use structs::*;
 pub use memory_layout::MemoryLayout;
@@ -121,50 +124,6 @@ impl Allocators {
 
     fn frame_graphs(&self) -> &ArrayVec<ArenaAlloc, {MAX_BUFFERED_FRAMES as usize}> {
         unsafe { &*self.frame_graphs.get() }
-    }
-}
-
-
-pub struct RendererContext {
-    global_resources: Arc<RwLock<GlobalResources>>,
-    transfer_requests: Rc<UnsafeCell<TransferRequests>>,
-    frame_buffer_size: image::Dimensions,
-    pub(crate) device: Arc<ash::Device>,
-    physical_device_info: Arc<PhysicalDeviceInfo>,
-}
-
-impl RendererContext {
-
-    #[inline(always)]
-    pub fn edit_resources(
-        &self,
-        mut f: impl FnMut(&mut GlobalResources) -> Result<(), Error>,
-    ) -> Result<(), Error>
-    {
-        let mut resources = self.global_resources.write().unwrap();
-        f(&mut resources)
-    }
-
-    #[inline(always)]
-    pub fn edit_transfer_requests(
-        &mut self,
-        mut f: impl FnMut(&mut TransferRequests),
-    )
-    {
-        let requests = unsafe {
-            &mut *self.transfer_requests.get()
-        };
-        f(requests)
-    }
-
-    #[inline(always)]
-    pub fn frame_buffer_size(&self) -> image::Dimensions {
-        self.frame_buffer_size
-    }
-
-    #[inline(always)]
-    pub fn buffer_size(&self, buffer: BufferId) -> Option<u64> {
-        self.global_resources.read().unwrap().buffer_size(buffer)
     }
 }
 
@@ -241,7 +200,7 @@ impl<'a> Renderer<'a> {
         ));
         let swapchain_pass_pipeline_data = SwapchainPassPipelineData
             ::new(global_resources.clone(), buffered_frames, &tmp_alloc)
-            .map_err(|err| InitError::SwapchainPassError(Box::new(err)))?;
+            .map_err(|err| InitError::SwapchainPassError(AnyError::new("swapchain pass error", err)))?;
         let mut s = Self {
             main_thread_context,
             vulkan_context,

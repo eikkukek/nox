@@ -5,7 +5,7 @@ use core::marker::PhantomData;
 use rustc_hash::FxHashMap;
 use compact_str::CompactString;
 
-use nox::mem::CapacityError;
+use nox::mem::vec_types::VecError;
 use nox_geom::Vec2;
 
 use super::*;
@@ -120,7 +120,7 @@ impl<UserInstanceData, V: Default + Vector<UserInstanceData>> CombinedRenderedTe
         text: &RenderedText,
         offset: impl Into<Vec2>,
         user_data: UserInstanceData,
-    ) -> Result<(), CapacityError>
+    ) -> Result<(), VecError>
         where 
             UserInstanceData: Copy
     {

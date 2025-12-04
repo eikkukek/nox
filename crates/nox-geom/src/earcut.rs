@@ -1,6 +1,5 @@
 use nox_mem::{
-    vec_types::{Vector, GlobalVec},
-    CapacityError,
+    vec_types::{Vector, GlobalVec, VecError},
 };
 
 use super::{*, fn_2d::*};
@@ -21,7 +20,7 @@ pub fn earcut<P>(
     clock_wise: bool,
     out_vertices: &mut impl Vector<P>,
     out_indices: &mut impl Vector<usize>,
-) -> Result<bool, CapacityError>
+) -> Result<bool, VecError>
     where
         P: From<[f32; 2]>,
 {

@@ -1,5 +1,6 @@
 #[macro_use]
 
+mod error;
 mod ring_buffer;
 mod shaders;
 mod color;
@@ -26,6 +27,8 @@ mod painter;
 mod window;
 mod reaction;
 mod workspace;
+
+pub use error::GuiError;
 
 pub use ring_buffer::*;
 use shaders::*;

@@ -8,7 +8,7 @@ pub mod version;
 pub mod utility;
 
 mod memory;
-mod errors;
+pub mod error;
 mod init_settings;
 mod clipboard;
 
@@ -16,9 +16,10 @@ pub use nox_mem as mem;
 pub use nox_alloc as alloc;
 pub use nox_log as log;
 
-use errors::InitError;
+use error::InitError;
 
-pub use errors::Error;
+pub use error::Error;
+pub use nox_derive::Error;
 pub use version::Version;
 pub use nox::*;
 pub use init_settings::*;

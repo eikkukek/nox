@@ -64,10 +64,9 @@ pub fn nox_vertex_input(item: TokenStream) -> TokenStream {
         })
         .collect();
     let expanded = quote! {
-        use nox::*;
-        unsafe impl VertexInput for #name {
+        unsafe impl nox::VertexInput for #name {
 
-            fn get_attributes<const FIRST_LOCATION: u32>() -> &'static [VertexInputAttribute] {
+            fn get_attributes<const FIRST_LOCATION: u32>() -> &'static [nox::VertexInputAttribute] {
                 &[ #( #inputs ),*
                 ]
             }

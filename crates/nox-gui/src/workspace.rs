@@ -162,14 +162,14 @@ impl<'a, Style> Workspace<'a, Style>
         output_format: ColorFormat,
         cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         if self.output_samples == output_samples && self.output_format == output_format {
             return Ok(())
         }
         if output_samples == MSAA::None {
             return Err(
-                Error::UserError("nox_gui: output samples must be defined".into())
+                GuiError::UndefinedOutputSamples
             )
         }
         self.output_samples = output_samples;
