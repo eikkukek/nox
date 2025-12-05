@@ -4,12 +4,13 @@ members = [
 	"crates/nox",
 	"crates/nox-font",
 	"crates/nox-mem",
-	"crates/nox-derive",
 	"crates/nox-ser",
 	"crates/nox-alloc",
 	"crates/nox-geom",
 	"crates/nox-gui",
 	"crates/nox-log",
+	"crates/nox-error",
+	"crates/nox-derive",
 ]
 exclude = [
 	"example",
