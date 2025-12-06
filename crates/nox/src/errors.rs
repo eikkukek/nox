@@ -1,12 +1,10 @@
-mod any;
-
 use core::str::Utf8Error;
 
 use ash::vk;
 
 use compact_str::CompactString;
 
-use nox_derive::Error;
+use nox_error::{Error, any::AnyError};
 
 use nox_mem::{
     vec_types::VecError,
@@ -26,8 +24,6 @@ pub use crate::renderer::{
 };
 
 use core::error;
-
-pub use any::{AnyError, SomeError};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -65,28 +61,18 @@ pub enum Error {
     #[display("command error")]
     CommandError(#[from] #[source] CommandError),
 
-    #[display("io error")]
-    IoError(#[from] #[source] std::io::Error),
-
     #[display("{0}")]
-    Other(#[source(err.source())] AnyError),
+    Other(#[from] #[source(Some(err.source()))] AnyError),
 }
 
 impl Error {
 
-    pub fn new(desc: &str, err: impl error::Error + 'static) -> Self {
+    pub fn new(desc: &str, err: impl error::Error + Send + Sync + 'static) -> Self {
         Self::Other(AnyError::new(desc, err))
     }
 }
 
-impl<T: Into<AnyError>> From<T> for Error {
-
-    fn from(value: T) -> Self {
-        Self::Other(value.into())
-    }
-}
-
-#[derive(Error, Debug)]
+#[derive(Error, Debug)] #[any("init error")]
 pub enum InitError {
 
     #[display("vec error")]
@@ -131,6 +117,6 @@ pub enum InitError {
     #[display("unsupported platform")]
     UnsupportedPlatform,
 
-    #[display("{0}")]
-    SwapchainPassError(#[source(err.source())] AnyError),
+    #[display("swapchain pass error")]
+    SwapchainPassError(#[source(Some(err.source()))] AnyError),
 }

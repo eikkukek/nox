@@ -10,6 +10,8 @@ use nox_mem::{slot_map::SlotMapError, vec_types::{Vector, ArrayVec, GlobalVec}};
 
 use nox_alloc::arena_alloc::*;
 
+use nox_error::Context;
+
 use crate::renderer::image::ImageRangeInfo;
 
 use super::{
@@ -39,38 +41,48 @@ impl SwapchainPassPipelineData {
         global_resources: Arc<RwLock<GlobalResources>>,
         buffered_frame_count: u32,
         tmp_alloc: &ArenaAlloc,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, AnyError>
     {
         assert!(buffered_frame_count <= MAX_BUFFERED_FRAMES);
 
         let mut g = global_resources.write().unwrap();
 
-        let mut cache_dir = std::env::current_exe()?;
+        let mut cache_dir = std::env
+            ::current_exe()
+            .ctx_err("io error")?;
         cache_dir.pop();
         cache_dir.push(Self::CACHE_NAME);
 
         let pipeline_cache_id = 
-            if fs::exists(&cache_dir)? {
+            if fs::exists(&cache_dir).ctx_err("io error")? {
                 let file = File
-                    ::open(&cache_dir)?;
+                    ::open(&cache_dir)
+                    .ctx_err("failed to open pipeline cache file")?;
                 let map = unsafe {
-                    Mmap::map(&file)?
+                    Mmap::map(&file)
+                        .ctx_err("failed to map pipeline cache")?
                 };
-                g.create_pipeline_cache(Some(&map))?
+                g.create_pipeline_cache(Some(&map))
+                    .ctx_err("failed to create pipeline cache with data")?
             }
             else {
-                File::create_new(&cache_dir)?;
-                g.create_pipeline_cache(None)?
+                File::create_new(&cache_dir).ctx_err("failed to create pipeline cache file")?;
+                g.create_pipeline_cache(None)
+                    .ctx_err("failed to create pipeline cache")?
             };
 
         let shaders = [
-            g.create_shader(Self::vertex_shader_input(), "swapchain_pass_vertex", ShaderStage::Vertex)?,
-            g.create_shader(Self::fragment_shader_input(), "swapchain_pass_fragment", ShaderStage::Fragment)?,
+            g.create_shader(Self::vertex_shader_input(), "swapchain_pass_vertex", ShaderStage::Vertex)
+                .ctx_err("failed to create vertex shader")?,
+            g.create_shader(Self::fragment_shader_input(), "swapchain_pass_fragment", ShaderStage::Fragment)
+                .ctx_err("failed to create fragment shader")?,
         ];
 
-        let layout_id = g.create_pipeline_layout(shaders)?;
+        let layout_id = g.create_pipeline_layout(shaders)
+            .ctx_err("failed to create pipeline layout")?;
 
-        let sampler = g.create_sampler(|_| {})?;
+        let sampler = g.create_sampler(|_| {})
+            .ctx_err("failed to create sampler")?;
 
         let stack_guard = ArenaGuard::new(&tmp_alloc);
 
@@ -84,7 +96,7 @@ impl SwapchainPassPipelineData {
             &resource_infos,
             |_, v| { shader_resources.push(v).unwrap(); },
             &stack_guard,
-        )?;
+        ).ctx_err("failed to allocate shader resources")?;
 
         Ok(Self {
             global_resources: global_resources.clone(),

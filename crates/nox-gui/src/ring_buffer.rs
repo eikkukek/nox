@@ -10,6 +10,8 @@ use nox::{
     },
 };
 
+use crate::GuiError;
+
 #[derive(Default, Clone, Copy, Debug)]
 struct RingBufReg {
     head: usize,
@@ -40,7 +42,7 @@ impl RingBuf {
         map: NonNull<u8>,
         buffered_frames: u32,
         size: usize,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, GuiError> {
         Ok(Self {
             buffer,
             map,
@@ -59,7 +61,7 @@ impl RingBuf {
         &mut self,
         render_commands: &mut RenderCommands,
         count: usize,
-    ) -> Result<RingBufMem<T>, Error>
+    ) -> Result<RingBufMem<T>, GuiError>
     {
         let RingBufReg { head, tail } = self.current_reg;
         let size = count * size_of!(T);
@@ -67,7 +69,7 @@ impl RingBuf {
         let mut new_tail = offset + size;
         // wrapped around to current head
         if tail < head && new_tail > head {
-            return Err(Error::UserError("GUI ring buffer out of memory".into()))
+            return Err(GuiError::RingBufferOutOfMemory)
         }
         // wrap around
         if new_tail > self.size

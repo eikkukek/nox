@@ -1,15 +1,16 @@
 use crate::{
-    error::SomeError,
     log::{self, error},
 };
 
+use nox_error::any::SomeError;
+
 use super::*;
 
-pub fn fn_expand_error(target: &str, msg: &str, err: impl core::error::Error + 'static) -> Result<bool, log::LogError> {
+pub fn fn_expand_error(target: &str, msg: &str, err: impl core::error::Error + Send + Sync + 'static) -> Result<bool, log::LogError> {
     if let Some(&error_cause_fmt) = ERROR_CAUSE_FMT.get() {
         let err = SomeError::new(msg, err);
         if error!("{}", err) {
-            let mut source = err.source();
+            let mut source = Some(err.source());
             while let Some(err) = source {
                 log::log(
                     target,

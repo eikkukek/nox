@@ -7,6 +7,7 @@ edition = "2024"
 nox-mem = { path = "../nox-mem" }
 nox-alloc = { path = "../nox-alloc" }
 nox-derive = { path = "../nox-derive" }
+nox-error = { path = "../nox-error" }
 nox-log = { path = "../nox-log" }
 
 ash = "0.38.0"

@@ -349,7 +349,8 @@ impl<'a, Style> Workspace<'a, Style>
                 }
             )?;
             Ok(())
-        })
+        })?;
+        Ok(())
     }
 
     pub fn create_custom_pipelines<'b>(
@@ -358,7 +359,7 @@ impl<'a, Style> Workspace<'a, Style>
         infos: &[(&'b str, CustomPipelineInfo<'b>)],
         cache_id: Option<PipelineCacheId>,
         alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         render_context.edit_resources(|r| {
             let mut pipelines = GlobalVec::new();
@@ -413,7 +414,8 @@ impl<'a, Style> Workspace<'a, Style>
                 }
             )?;
             Ok(())
-        })
+        })?;
+        Ok(())
     }
 
     #[inline(always)]
@@ -439,12 +441,10 @@ impl<'a, Style> Workspace<'a, Style>
     }
 
     #[inline(always)]
-    pub fn begin(&mut self, ctx: &WindowCtx) -> Result<(), Error>
+    pub fn begin(&mut self, ctx: &WindowCtx) -> Result<(), GuiError>
     {
         if self.began() {
-            return Err(Error::UserError(
-                "nox_gui: attempting to call Workspace::begin twice before calling Workspace::end".into()
-            ))
+            return Err(GuiError::EndNotCalled);
         }
         self.window_passes.clear();
         self.unit_scale = self.style.pixels_per_unit() / ctx.window_size_f32().1;
@@ -467,14 +467,12 @@ impl<'a, Style> Workspace<'a, Style>
         initial_position: [f32; 2],
         initial_size: [f32; 2],
         mut f: F,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
         where
             F: FnMut(&mut UiCtx<Window, Style>),
     {
         if !self.began() {
-            return Err(Error::UserError(
-                "nox_gui: attempting to update window before calling Workspace::begin".into()
-            ));
+            return Err(GuiError::BeginNotCalled);
         }
         let window = self.windows.entry(id).or_insert_with(|| Window::new(
             title,
@@ -516,12 +514,10 @@ impl<'a, Style> Workspace<'a, Style>
         &mut self,
         ctx: &mut WindowCtx,
         renderer: &mut RendererContext,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         if !self.began() {
-            return Err(Error::UserError(
-                "nox_gui: attempting to call Workspace::end before calling Workspace::begin".into()
-            ))
+            return Err(GuiError::BeginNotCalled)
         }
         self.active_windows.retain(|id| {
             let win = self.windows.get(id).unwrap();
@@ -638,15 +634,13 @@ impl<'a, Style> Workspace<'a, Style>
         render_commands: &mut RenderCommands,
         pass_id: PassId,
         sampler: SamplerId,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         if self.vertex_buffer.is_none() {
             self.init_buffers(render_commands)?;
         } 
         let Some(base_pipeline) = self.base_pipelines.base_pipeline else {
-            return Err(Error::UserError(
-                "nox_gui: attempting to render Workspace before creating graphics pipelines".into()
-            ))
+            return Err(GuiError::GraphicsPipelinesNotCreated)
         };
         let text_pipeline = self.base_pipelines.text_pipeline.unwrap();
         let texture_pipeline = self.base_pipelines.texture_pipeline.unwrap();
@@ -729,7 +723,7 @@ impl<'a, Style> Workspace<'a, Style>
         Ok(())
     }
 
-    fn init_buffers(&mut self, render_commands: &mut RenderCommands) -> Result<(), Error> {
+    fn init_buffers(&mut self, render_commands: &mut RenderCommands) -> Result<(), GuiError> {
         let buffered_frames = render_commands.buffered_frames();
         render_commands.edit_resources(|r| {
             let vertex_buffer = r.create_buffer(

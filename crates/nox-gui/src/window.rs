@@ -380,7 +380,7 @@ impl Window
         aspect_ratio: f32,
         unit_scale: f32,
         tmp_alloc: &ArenaGuard,
-    ) -> Result<WindowUpdateResult, Error>
+    ) -> Result<WindowUpdateResult, GuiError>
     {
         let override_cursor = style.override_cursor();
         let mut cursor_in_this_window =
@@ -1100,7 +1100,7 @@ impl Window
         unit_scale: f32,
         tmp_alloc: &ArenaGuard,
         get_custom_pipeline: &mut impl FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         if !self.renderable() {
             return Ok(())
@@ -1299,7 +1299,7 @@ impl Window
         sampler: SamplerId,
         texture_pipeline_layout: PipelineLayoutId,
         tmp_alloc: &ArenaGuard,
-    ) -> Result<(), Error> {
+    ) -> Result<(), GuiError> {
         self.painter_storage.transfer_commands(
             transfer_commands,
             self.signal_semaphore.map(|v| (v, self.signal_semaphore_value)).unwrap(),

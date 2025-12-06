@@ -12,7 +12,7 @@ pub fn render_text<'a>(
     pc_vertex: PushConstantsVertex,
     vertex_buffer: &mut RingBuf,
     index_buffer: &mut RingBuf,
-) -> Result<(), Error>
+) -> Result<(), GuiError>
 {
     render_commands.push_constants(|_| unsafe {
         pc_vertex.as_bytes()

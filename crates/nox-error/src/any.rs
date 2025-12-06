@@ -9,19 +9,19 @@ use compact_str::CompactString;
 
 pub struct AnyError {
     desc: CompactString,
-    err: Box<dyn error::Error>,
+    err: Box<dyn error::Error + Send + Sync>,
 }
 
 impl AnyError {
 
-    pub fn new(desc: impl AsRef<str>, err: impl error::Error + 'static) -> Self {
+    pub fn new(desc: impl AsRef<str>, err: impl error::Error + Send + Sync + 'static) -> Self {
         Self {
             desc: CompactString::new(desc),
             err: Box::new(err),
         }
     }
 
-    pub fn source(&self) -> &(dyn error::Error + 'static) {
+    pub fn source(&self) -> &(dyn error::Error + Send + Sync + 'static) {
         &*self.err
     }
 }
@@ -47,12 +47,20 @@ impl error::Error for AnyError {
     }
 }
 
-pub struct SomeError<E: error::Error + 'static> {
+
+
+pub struct SomeError<E>
+    where
+        E: error::Error + Send + Sync + 'static
+{
     desc: CompactString,
     err: E,
 }
 
-impl<E: error::Error + 'static> SomeError<E> {
+impl<E> SomeError<E>
+    where
+        E: error::Error + Send + Sync + 'static
+{
 
     pub fn new(desc: impl AsRef<str>, err: E) -> Self {
         Self {
@@ -66,28 +74,40 @@ impl<E: error::Error + 'static> SomeError<E> {
     }
 }
 
-impl<E: error::Error + 'static> Debug for SomeError<E> {
+impl<E> Debug for SomeError<E>
+    where
+        E: error::Error + Send + Sync + 'static
+{
 
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         <E as Debug>::fmt(&self.err, f)
     }
 }
 
-impl<E: error::Error + 'static> Display for SomeError<E> {
+impl<E> Display for SomeError<E>
+    where
+        E: error::Error + Send + Sync + 'static
+{
 
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", &self.desc)
     }
 }
 
-impl<E: error::Error + 'static> error::Error for SomeError<E> {
+impl<E> error::Error for SomeError<E>
+    where
+        E: error::Error + Send + Sync + 'static
+{
 
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.err)
     }
 }
 
-impl<E: error::Error + 'static> From<SomeError<E>> for AnyError {
+impl<E> From<SomeError<E>> for AnyError
+    where
+        E: error::Error + Send + Sync + 'static
+{
 
     fn from(value: SomeError<E>) -> Self {
         AnyError::new(value.desc, value.err)

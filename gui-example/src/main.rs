@@ -6,6 +6,7 @@ use memmap2::Mmap;
 
 use nox::{
     linear_device_alloc::LinearDeviceAlloc,
+    error::Context,
     *
 };
 
@@ -152,14 +153,18 @@ impl<'a> Interface for Example<'a> {
                     FormatFeature::ColorAttachment | FormatFeature::SampledImage,
                 ).unwrap();
             self.pipeline_cache =
-                if fs::exists(&self.cache_dir)? {
-                    let file = File::open(&self.cache_dir)?;
+                if fs::exists(&self.cache_dir).ctx_err("io error")? {
+                    let file = File
+                        ::open(&self.cache_dir)
+                        .ctx_err("failed to open pipeline cache file")?;
                     let map = unsafe {
-                        Mmap::map(&file)?
+                        Mmap::map(&file)
+                            .ctx_err("failed to map pipeline cache file")?
                     };
                     r.create_pipeline_cache(Some(&map))?
                 } else {
-                    File::create_new(&self.cache_dir)?;
+                    File::create_new(&self.cache_dir)
+                        .ctx_err("failed to create pipeline cache file")?;
                     r.create_pipeline_cache(None)?
                 };
             self.sampler = r.create_sampler(|builder| {
@@ -205,7 +210,8 @@ impl<'a> Interface for Example<'a> {
                         .with_usage(ImageUsage::Sampled);
             })?;
             Ok(())
-        })
+        })?;
+        Ok(())
     }
 
     fn update(
@@ -377,9 +383,9 @@ impl<'a> Interface for Example<'a> {
     )
     {
         renderer.edit_resources(|r| {
-            let mut file = File::create(&self.cache_dir)?;
+            let mut file = File::create(&self.cache_dir).ctx_err("io error")?;
             let data = r.retrieve_pipeline_cache_data(self.pipeline_cache)?;
-            file.write(&data)?;
+            file.write(&data).ctx_err("io error")?;
             println!("cache written");
             Ok(())
         }).ok();

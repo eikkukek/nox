@@ -24,9 +24,9 @@ fn impl_into_any(input: &DeriveInput) -> syn::Result<Option<proc_macro2::TokenSt
             .map_err(|err| syn::Error::new(attr.path().span(), format!("failed to find nox-error crate {err}")))?
             .name;
         let pkg_path = if crate_path == "nox" {
-            Ident::new("nox::error", attr.path().span())
+            quote! { nox::error }
         } else {
-            Ident::new("nox_error", attr.path().span())
+            quote! { nox_error }
         };
         Ok(Some(quote! {
             impl From<#name> for #pkg_path::any::AnyError {

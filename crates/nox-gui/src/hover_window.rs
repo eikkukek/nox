@@ -116,7 +116,7 @@ impl HoverWindow {
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
         unit_scale: f32,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         let vert_count = self.vertices.len();
         let vert_mem = unsafe {

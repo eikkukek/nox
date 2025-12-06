@@ -223,7 +223,7 @@ impl ReactionShapes {
         window_semaphore: (TimelineSemaphoreId, u64),
         global_resources: &mut GlobalResources,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         for params in &self.rendered_shapes {
             hide_vertices(vertices, params.shape_vertex_range);
@@ -317,7 +317,7 @@ impl PainterStorage {
         window_semaphore: (TimelineSemaphoreId, u64),
         global_resources: &mut GlobalResources,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         self.prev_active_reactions.retain(|v| !self.active_reactions.contains(v));
         for reaction in &self.prev_active_reactions {
@@ -491,7 +491,7 @@ impl PainterStorage {
         frame_graph: &mut dyn FrameGraph,
         render_format: ColorFormat,
         add_read: &mut dyn FnMut(ReadInfo),
-    ) -> Result<(), Error> {
+    ) -> Result<(), GuiError> {
         for id in &self.active_reactions {
             if let Some(shapes) = self.reaction_shapes.get_mut(id) {
                 for data in shapes.active_image_iter() {
@@ -511,7 +511,7 @@ impl PainterStorage {
         sampler: SamplerId,
         texture_pipeline_layout: PipelineLayoutId,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         for id in &self.active_reactions {
             let shapes= self.reaction_shapes
@@ -548,7 +548,7 @@ impl PainterStorage {
         unit_scale: f32,
         tmp_alloc: &impl Allocator,
         get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<(), Error>
+    ) -> Result<(), GuiError>
     {
         let vert_count = self.vertices.len();
         let idx_count = self.indices.len();

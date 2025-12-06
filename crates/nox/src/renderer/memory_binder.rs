@@ -2,6 +2,8 @@ use core::ptr::NonNull;
 
 use ash::vk;
 
+use crate::error::any::AnyError;
+
 #[derive(Debug)]
 pub enum MemoryBinderError {
     VulkanError(vk::Result),
@@ -9,7 +11,7 @@ pub enum MemoryBinderError {
     NonMappableMemory,
     ZeroSizeAlloc,
     IncompatibleMemoryRequirements,
-    Other(Box<dyn core::error::Error>),
+    Other(AnyError),
 }
 
 pub trait DeviceMemory: 'static + Send + Sync {
@@ -59,7 +61,7 @@ impl core::error::Error for MemoryBinderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::VulkanError(err) => Some(err),
-            Self::Other(err) => Some(&**err),
+            Self::Other(err) => Some(err.source()),
             _ => None,
         }
     }

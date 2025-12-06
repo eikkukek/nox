@@ -34,12 +34,12 @@ impl<T, const N: usize> ArrayVec<T, N>
         }
     }
 
-    pub fn with_len(value: T, len: usize) -> Result<Self, CapacityError>
+    pub fn with_len(value: T, len: usize) -> Result<Self, VecError>
         where
             T: Clone,
     {
         if len > N {
-            return Err(CapacityError::FixedCapacity { capacity: N })
+            return Err(VecError::from(CapacityError::FixedCapacity { capacity: N }))
         }
         let mut data: [MaybeUninit<T>; N] = unsafe { MaybeUninit::uninit().assume_init() };
         for i in 0..len {

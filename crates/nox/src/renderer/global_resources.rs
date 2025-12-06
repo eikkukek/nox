@@ -362,10 +362,7 @@ impl GlobalResources {
                 [set.set as usize].0
                 [update.binding as usize]
             else {
-                return Err(ResourceError::Other(
-                    format!("invalid shader resource image binding {} for set {}", update.binding, set.set)
-                        .into()
-                ));
+                return Err(ResourceError::InvalidShaderResourceImageBinding { binding: update.binding, set: set.set, });
             };
             let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
             for info in update.infos {
@@ -422,10 +419,7 @@ impl GlobalResources {
                 [set.set as usize].0
                 [update.binding as usize]
             else {
-                return Err(ResourceError::Other(
-                    format!("invalid shader resource image binding {} for set {}", update.binding, set.set)
-                        .into()
-                ));
+                return Err(ResourceError::InvalidShaderResourceImageBinding { binding: update.binding, set: set.set, });
             };
             let mut vk_infos = FixedVec::with_capacity(update.infos.len(), alloc)?;
             for info in update.infos {

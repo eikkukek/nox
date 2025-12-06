@@ -203,7 +203,7 @@ impl ImageData {
         frame_graph: &mut dyn FrameGraph,
         render_format: ColorFormat,
         add_read: &mut dyn FnMut(ReadInfo),
-    ) -> Result<(), Error> {
+    ) -> Result<(), GuiError> {
         self.render_format = render_format;
         if !self.source_reset() && let Some(image) = self.image {
             let resource_id = frame_graph.add_image(image)?;
@@ -219,7 +219,7 @@ impl ImageData {
         sampler: SamplerId,
         texture_pipeline_layout: PipelineLayoutId,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), Error> {
+    ) -> Result<(), GuiError> {
         if self.source_reset() {
             let source = self.source.as_ref().unwrap();
             transfer_commands.edit_resources(|mut cmd, r| {
@@ -322,7 +322,7 @@ impl ImageData {
         inv_aspect_ratio: f32,
         unit_scale: f32,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), Error> {
+    ) -> Result<(), GuiError> {
         if self.shader_resource.is_none() {
             render_commands.edit_resources(|r| {
                 r.allocate_shader_resources(
@@ -380,7 +380,7 @@ impl ImageData {
         window_semaphore: (TimelineSemaphoreId, u64),
         global_resources: &mut GlobalResources,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), Error> {
+    ) -> Result<(), GuiError> {
         if let Some(resource) = self.shader_resource.take() {
             if global_resources.wait_for_semaphores(
                 &[(window_semaphore.0, window_semaphore.1)],

@@ -49,12 +49,13 @@ use nox_mem::{
 
 use nox_alloc::arena_alloc::*;
 
+use nox_error::any::AnyError;
+
 use super::{
     Interface,
     Version,
     AppName,
     Error,
-    error::AnyError,
     InitError,
     utility::clamp,
     log,

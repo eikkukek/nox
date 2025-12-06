@@ -1,32 +1,59 @@
-use core::{
-    fmt::{self, Display, Formatter},
-    error,
-};
-
-use nox::error::{
-    AnyError,
+use nox::{
+    error::Error,
     ResourceError,
+    FrameGraphError,
+    CommandError,
+    mem::vec_types::VecError,
 };
 
-#[derive(Debug)]
+#[derive(Error, Debug)] #[any("nox gui error")]
 pub enum GuiError {
-    ResourceError(ResourceError),
+
+    #[display("undefined output samples")]
     UndefinedOutputSamples,
+
+    #[display("begin not called")]
+    BeginNotCalled,
+
+    #[display("end not called")]
+    EndNotCalled,
+
+    #[display("graphics pipelines not created")]
+    GraphicsPipelinesNotCreated,
+
+    #[display("ring buffer out of memory")]
+    RingBufferOutOfMemory,
+
+    #[display("nox resource error")]
+    ResourceError(#[source] #[from] ResourceError),
+
+    #[display("nox frame graph error")]
+    FrameGraphError(#[source] #[from] FrameGraphError),
+
+    #[display("nox command error")]
+    CommandError(#[source] #[from] CommandError),
+
+    #[display("nox vec error")]
+    VecError(#[source] #[from] VecError),
 }
 
-impl Display for GuiError {
+impl From<GuiError> for ResourceError {
 
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ResourceError(_) => write!(f, "nox resource error"),
-            Self::UndefinedOutputSamples => write!(f, "")
-        }
+    fn from(value: GuiError) -> Self {
+        Self::Other(value.into())
     }
 }
 
-impl Into<AnyError> for GuiError {
+impl From<GuiError> for nox::Error {
 
-    fn into(self) -> AnyError {
-        AnyError::new("nox gui error", self)
+    fn from(value: GuiError) -> Self {
+        Self::Other(value.into())
+    }
+}
+
+impl From<GuiError> for nox::CommandError {
+
+    fn from(value: GuiError) -> Self {
+        Self::Other(value.into())
     }
 }
