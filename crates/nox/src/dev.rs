@@ -26,7 +26,10 @@ pub(crate) use has_not_bits;
 
 macro_rules! format_location {
     ($fmt:literal $(,$arg:expr)* $(,)?) => {
-        { let loc = $crate::dev::error::location!(); compact_str::format_compact!($fmt $(,$arg)*) }
+        {
+            let loc = $crate::dev::error::location!();
+            compact_str::format_compact!($fmt, loc = loc $(,$arg)*)
+        }
     };
 }
 pub(crate) use format_location;

@@ -35,7 +35,6 @@ use crate::{
     log,
     expand_error,
     Event,
-    gpu,
 };
 
 use super::{
@@ -54,11 +53,10 @@ pub struct Nox<'a, I>
         I: Interface,
 {
     interface: Arc<RwLock<I>>,
-    window_ctx: Option<WindowContext>,
+    window_context: WindowContext,
     window: Option<Arc<Window>>,
     memory: &'a Memory,
     gpu: Option<Gpu<'a>>,
-    window_size: (u32, u32),
     flags: u32,
 }
 
@@ -116,8 +114,7 @@ impl<'a, I: Interface> Nox<'a, I>
             window: None,
             memory,
             gpu: None,
-            window_ctx: Some(WindowContext::new()),
-            window_size: (0, 0),
+            window_context: WindowContext::new(),
             flags: 0,
         }
     }
@@ -138,7 +135,7 @@ impl<'a, I: Interface> Drop for Nox<'a, I> {
                 .write()
                 .unwrap()
                 .clean_up(&mut gpu.context());
-            gpu.clean_up(self.memory.gpu());
+            gpu.clean_up(self.memory.gpu().host_allocators());
         }
     }
 }
@@ -149,32 +146,33 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
         if self.error_set() {
             return
         }
-        let mut window_ctx = self.window_ctx.take().unwrap();
         match event {
             WindowEvent::CursorMoved { device_id: _, position } => {
-                window_ctx.cursor_position = (position.x, position.y);
-                window_ctx.flags |= WindowContext::CURSOR_MOVED;
+                self.window_context.cursor_position = (position.x, position.y);
+                self.window_context.flags |= WindowContext::CURSOR_MOVED;
             },
             WindowEvent::MouseWheel { device_id: _, delta, phase: _ } => {
                 match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
-                        window_ctx.mouse_scroll_line_delta = (x, y);
+                        self.window_context.mouse_scroll_line_delta = (x, y);
                     },
                     MouseScrollDelta::PixelDelta(d) => {
-                        window_ctx.mouse_scroll_pixel_delta = (d.x, d.y);
+                        self.window_context.mouse_scroll_pixel_delta = (d.x, d.y);
                     }
                 };
             },
             WindowEvent::KeyboardInput { device_id: _, event, is_synthetic: _ } => {
                 match event {
                     KeyEvent { physical_key, logical_key, text, location: _, state, repeat, .. } => {
-                        let phys = window_ctx.physical_keys.entry(physical_key).or_default();
+                        let phys = self.window_context.physical_keys
+                            .entry(physical_key)
+                            .or_default();
                         phys.pressed = state == ElementState::Pressed;
                         phys.released = state == ElementState::Released;
                         phys.held = state != ElementState::Released;
                         phys.repeat = repeat;
                         if let Some(text) = text && (phys.pressed || repeat) {
-                            window_ctx.input_text.push((
+                            self.window_context.input_text.push((
                                 match physical_key {
                                     PhysicalKey::Code(c) => c,
                                     PhysicalKey::Unidentified(_) => KeyCode::Backspace,
@@ -182,7 +180,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                                 CompactString::new(&text))
                             );
                         }
-                        let logic = window_ctx.logical_keys.entry(logical_key).or_default();
+                        let logic = self.window_context.logical_keys.entry(logical_key).or_default();
                         logic.pressed = state == ElementState::Pressed;
                         logic.released = state == ElementState::Released;
                         logic.held = state != ElementState::Released;
@@ -191,15 +189,14 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 };
             },
             WindowEvent::MouseInput { device_id: _, state, button } => {
-                let button = window_ctx.mouse_buttons.entry(button).or_default();
+                let button = self.window_context.mouse_buttons.entry(button).or_default();
                 button.pressed = state == ElementState::Pressed;
                 button.released = state == ElementState::Released;
                 button.held = state != ElementState::Released;
             },
             WindowEvent::CloseRequested => event_loop.exit(), // terminate app,
             WindowEvent::Resized(size) => {
-                self.window_size = (size.width, size.height);
-                window_ctx.window_size = (size.width, size.height);
+                self.window_context.window_size = (size.width, size.height);
                 if let Some(gpu) = &mut self.gpu {
                     gpu.request_resize(size);
                 }
@@ -207,28 +204,30 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
             WindowEvent::RedrawRequested => {
                 let host_allocators = self.memory.gpu().host_allocators();
                 if let Some(window) = self.window.clone() {
-                    window_ctx.delta_time = window_ctx.delta_counter.elapsed();
-                    window_ctx.delta_counter = time::Instant::now();
+                    self.window_context.delta_time = self.window_context.delta_counter.elapsed();
+                    self.window_context.delta_counter = time::Instant::now();
                     let mut interface = self.interface.write().unwrap();
                     if let Err(err) = interface
                         .event(Event::Update {
-                            win: &mut window_ctx,
+                            win: &mut self.window_context,
                             gpu: self.gpu
                                 .as_mut()
                                 .unwrap()
                                 .context(),
-                        }).context_from_origin(|orig| ErrorContext::EventError(orig))?
+                        }).context_from_origin(|orig| ErrorContext::EventError(orig))
                     {
                         event_loop.exit();
                         self.flags |= Self::ERROR;
                         expand_error!(err);
                         return
                     }
-                    if window_ctx.cursor_set() {
-                        window.set_cursor(window_ctx.current_cursor);
+                    if self.window_context.cursor_set() {
+                        window.set_cursor(self.window_context.current_cursor);
                     }
-                    window_ctx.flags &= !(WindowContext::CURSOR_SET | WindowContext::CURSOR_MOVED);
-                    window_ctx.input_text.clear();
+                    self.window_context.flags &= !(
+                        WindowContext::CURSOR_SET | WindowContext::CURSOR_MOVED
+                    );
+                    self.window_context.input_text.clear();
                     window.request_redraw();
                     if let Some(gpu) = &mut self.gpu {
                         if let Err(err) = gpu 
@@ -242,19 +241,18 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         }
                     }
                 }
-                window_ctx.reset_input();
+                self.window_context.reset_input();
             },
             _ => {},
         }
-        self.window_ctx = Some(window_ctx);
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let mut write = self.interface.write().unwrap();
-        let init_settings = write.init_settings();
-        self.monitors.clear();
-        for handle in event_loop.available_monitors() {
-            self.monitors.push(handle);
+        let mut interface = self.interface.write().unwrap();
+        let init_settings = interface.init_settings();
+        self.window_context.monitors.clear();
+        for monitor in event_loop.available_monitors() {
+            self.window_context.monitors.push(monitor);
         }
         if self.window.is_none() {
             let window_attributes = Window::default_attributes()
@@ -267,31 +265,32 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 .with_resizable(init_settings.window_resizeable);
             let window = match event_loop
                 .create_window(window_attributes)
-                .ctx_err("failed to create window")
+                .context("failed to create window")
             {
                 Ok(window) => window,
                 Err(err) => {
                     event_loop.exit();
+                    expand_error!(err);
                     self.flags |= Self::ERROR;
                     return
                 },
             };
             let inner_size = window.inner_size();
-            self.window_size = (inner_size.width, inner_size.height);
+            self.window_context.window_size = (inner_size.width, inner_size.height);
             log::info!("created window");
             event_loop.set_control_flow(ControlFlow::Poll);
-            let renderer_allocators = self.memory.renderer_allocators();
+            let host_allocators = self.memory.gpu().host_allocators();
             window.request_redraw();
-            self.renderer = match Renderer
+            self.gpu = match Gpu
                 ::new(
                     &window,
                     &init_settings.app_name,
                     init_settings.app_version,
                     init_settings.enable_vulkan_validation,
-                    *self.memory.renderer_layout(),
+                    *self.memory.gpu().layout(),
                     3,
-                    renderer_allocators,
-                ).ctx_err("failed to init renderer")
+                    host_allocators,
+                ).context("failed to init gpu")
             {
                 Ok(r) => Some(r),
                 Err(err) => {
@@ -301,8 +300,9 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     return
                 }
             };
-            let mut window_ctx = self.window_ctx.take().unwrap();
-            window_ctx.clipboard = match Clipboard::new(&window).ctx_err("failed to create clipboard")
+            self.window_context.clipboard = match Clipboard
+                ::new(&window)
+                .context("failed to create clipboard")
             {
                 Ok(cb) => cb,
                 Err(err) => {
@@ -313,12 +313,11 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 }
             };
             self.window = Some(Arc::new(window));
-            window_ctx.window = self.window.clone();
-            self.window_ctx = Some(window_ctx);
-            let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
-            if let Err(err) = write
-                .init_callback(self, &mut renderer_context)
-                .ctx_err("init callback failed")
+            self.window_context.window = self.window.clone();
+            let mut gpu = self.gpu.as_mut().unwrap().context();
+            if let Err(err) = interface
+                .init(&mut self.window_context, &mut gpu)
+                .context("init callback failed")
             {
                 event_loop.exit();
                 self.flags |= Self::ERROR;

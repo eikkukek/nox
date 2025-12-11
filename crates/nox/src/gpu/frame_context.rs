@@ -41,7 +41,12 @@ impl<'a> FrameContext<'a> {
     }
 
     #[inline(always)]
-    pub fn gpu(&mut self) -> &mut GpuContext<'a> {
+    pub fn gpu(&self) -> &GpuContext<'a> {
+        &self.resource_pool.context
+    }
+
+    #[inline(always)]
+    pub fn gpu_mut(&mut self) -> &mut GpuContext<'a> {
         &mut self.resource_pool.context
     }
 

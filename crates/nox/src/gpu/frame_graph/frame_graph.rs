@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use core::panic::Location;
+
+use core::ops::{Deref, DerefMut};
 
 use ash::vk;
 
@@ -11,7 +12,7 @@ use nox_alloc::arena_alloc::ArenaAlloc;
 
 use crate::dev::{
     export::*,
-    error::{Error, Context, Tracked, ErrorContext},
+    error::{Error, Context, Tracked, ErrorContext, caller},
     has_not_bits,
 };
 
@@ -57,8 +58,14 @@ impl<'a> FrameGraph<'a> {
 
 impl<'a> FrameGraph<'a> {
 
-    pub fn gpu(&mut self) -> &mut GpuContext<'a> {
+    #[inline(always)]
+    pub fn gpu(&self) -> &GpuContext<'a> {
         self.frame_context.gpu()
+    }
+
+    #[inline(always)]
+    pub fn gpu_mut(&mut self) -> &mut GpuContext<'a> {
+        self.frame_context.gpu_mut()
     }
 
     pub fn frame_index(&self) -> u32 {
@@ -68,12 +75,12 @@ impl<'a> FrameGraph<'a> {
     #[track_caller]
     pub fn set_render_image(&mut self, id: ResourceId, range_info: Option<ImageRangeInfo>) -> Result<()>
     {
-        self.frame_context.set_render_image(id, range_info, Location::caller())?;
+        self.frame_context.set_render_image(id, range_info, caller!())
     }
 
     #[track_caller]
     pub fn add_image(&mut self, id: ImageId) -> Result<ResourceId> {
-        self.frame_context.add_image(id, Location::caller())?
+        self.frame_context.add_image(id, caller!())
     }
 
     #[track_caller]
@@ -81,7 +88,7 @@ impl<'a> FrameGraph<'a> {
         &mut self,
         f: &mut dyn FnMut(&mut ImageBuilder),
     ) -> Result<ResourceId> {
-        self.frame_context.add_transient_image(f, Location::caller())?
+        self.frame_context.add_transient_image(f, caller!())
     }
 
     #[track_caller]
@@ -95,7 +102,7 @@ impl<'a> FrameGraph<'a> {
             PassId(self.next_pass_id),
             info,
             alloc,
-            Location::caller(),
+            caller!()
         )?);
         self.next_pass_id += 1;
         f(pass);
@@ -112,17 +119,29 @@ impl<'a> FrameGraph<'a> {
 impl<'a> FrameGraph<'a> {
 
     pub(crate) fn render(
-        &mut self,
+        mut self,
         interface: &mut impl Interface,
-        render_commands: &mut RenderCommands,
-    ) -> Result<()>
+        frame_semaphore: vk::Semaphore,
+        frame_semaphore_value: u64,
+        buffered_frames: u32,
+    ) -> Result<FrameGraphResult<'a>>
     {
         let alloc = self.alloc;
-        let frame_context = self.frame_context;
-        let device = frame_context.device();
-        let passes = &mut self.passes;
+        let device = self.frame_context.device();
         let command_buffer = self.command_buffer;
-        let graphics_queue_index = self.queue_family_indices.graphics_index();
+        let queue_family_indices = self.queue_family_indices;
+        let graphics_queue_index = queue_family_indices.graphics_index();
+
+        let mut passes = FixedVec
+            ::with_capacity(self.passes.len(), alloc)
+            .context_with(|| ErrorContext::VecError(location!()))?;
+
+        passes.move_from_vec(&mut self.passes);
+
+        let mut render_commands = RenderCommands::new(
+            command_buffer, &mut self, frame_semaphore, frame_semaphore_value,
+            alloc, queue_family_indices, buffered_frames
+        ).context("failed to initialize render commands")?;
 
         struct SubresourceReset {
             image: Arc<Image>,
@@ -146,15 +165,15 @@ impl<'a> FrameGraph<'a> {
         for pass in passes.iter() {
             let mut subresource_reset = FixedVec
                 ::with_capacity(pass.reads.len() + pass.writes.len(), alloc)
-                .context_with(|loc| ErrorContext::VecError(loc))?;
+                .context_with(|| ErrorContext::VecError(location!()))?;
             let color_output_count = pass.writes.len();
             for read in pass.reads.iter() {
                 let resource_id = read.resource_id;
-                let image = frame_context.get_image(resource_id)?;
+                let image = render_commands.frame_graph.frame_context.get_image(resource_id)?;
                 let properties = image.properties;
                 if has_not_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
                     return Err(Error::just_context("image read must be sampleable"
-                    )).context(ErrorContext::EventError(read.loc()))
+                    )).context(ErrorContext::EventError(read.loc))
                 }
                 let state = image.state();
                 let dst_state = ImageState::new(
@@ -168,14 +187,14 @@ impl<'a> FrameGraph<'a> {
                 }
                 let range_info = read.range_info;
                 if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
-                    frame_context.cmd_memory_barrier(
+                    render_commands.frame_graph.frame_context.cmd_memory_barrier(
                         resource_id,
                         dst_state,
                         None,
                     )?;
                 }
                 else {
-                    frame_context.cmd_memory_barrier(
+                    render_commands.frame_graph.frame_context.cmd_memory_barrier(
                         resource_id,
                         dst_state,
                         range_info.map(|v| v.subresource_info)
@@ -196,15 +215,18 @@ impl<'a> FrameGraph<'a> {
                 Depth,
                 DepthStencil,
             }
-            let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>> {
+            let mut process_write = |write: &WriteInfo, ty: AttachmentType|
+                -> Result<vk::RenderingAttachmentInfo<'static>>
+            {
                 let resource_id = write.main_id;
-                let image = frame_context.get_image(resource_id)?;
+                let image = render_commands.frame_graph.frame_context.get_image(resource_id)?;
                 let properties = image.properties;
                 let (access, layout, stage) = match ty {
                     AttachmentType::Color => {
                         if has_not_bits!(properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT) {
-                            return Err(Error::just_context("color write image must be usable as an color attachment"
-                            )).context(ErrorContext::EventError(write.loc()))
+                            return Err(Error::just_context(
+                                "color write image must be usable as an color attachment"
+                            )).context(ErrorContext::EventError(write.loc))
                         }
                         (
                             vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
@@ -214,24 +236,28 @@ impl<'a> FrameGraph<'a> {
                     },
                     AttachmentType::Depth => {
                         if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
-                            return Err(Error::just_context("depth/stencil write image must be usable as an depth/stencil attachment"
-                            )).context(ErrorContext::EventError(write.loc()))
+                            return Err(Error::just_context(
+                                "depth/stencil write image must be usable as an depth/stencil attachment"
+                            )).context(ErrorContext::EventError(write.loc))
                         }
                         (
                             vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                             vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
-                            vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                            vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS |
+                            vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
                         )
                     },
                     AttachmentType::DepthStencil => {
                         if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
-                            return Err(Error::just_context("depth/stencil write image must be usable as an depth/stencil attachment"
-                            )).context(ErrorContext::EventError(write.loc()))
+                            return Err(Error::just_context(
+                                "depth/stencil write image must be usable as an depth/stencil attachment"
+                            )).context(ErrorContext::EventError(write.loc))
                         }
                         (
                             vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                             vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                            vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                            vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS |
+                            vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
                         )
                     }
                 };
@@ -245,14 +271,14 @@ impl<'a> FrameGraph<'a> {
                 let range_info = write.range_info;
                 if state != dst_state {
                     if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
-                        frame_context.cmd_memory_barrier(
+                        render_commands.frame_graph.frame_context.cmd_memory_barrier(
                             resource_id,
                             dst_state,
                             None,
                         )?;
                     }
                     else {
-                        frame_context.cmd_memory_barrier(
+                        render_commands.frame_graph.frame_context.cmd_memory_barrier(
                             resource_id,
                             dst_state,
                             range_info.map(|v| v.subresource_info)
@@ -272,25 +298,26 @@ impl<'a> FrameGraph<'a> {
                 let mut resolve_mode = Default::default();
                 if let Some((resolve_id, mode)) = write.resolve {
                     resolve_mode = mode.into();
-                    let resolve_image = frame_context.get_image(resolve_id)?;
+                    let resolve_image = render_commands.frame_graph.frame_context.get_image(resolve_id)?;
                     let resolve_properties = resolve_image.properties;
                     if properties.dimensions != resolve_properties.dimensions {
-                        return Err(Error::just_context(format_compact!("resolve image dimensions {} must match main image dimensions {}",
-                            resolve_properties, properties.dimensions,
-                        ))).context(ErrorContext::EventError(resource_id.loc()))
+                        return Err(Error::just_context(format_compact!(
+                            "resolve image dimensions {} must match main image dimensions {}",
+                            resolve_properties.dimensions, properties.dimensions,
+                        ))).context(ErrorContext::EventError(resource_id.loc))
                     }
                     let state = resolve_image.state();
                     let range_info = write.resolve_range_info;
                     if state != dst_state {
                         if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
-                            frame_context.cmd_memory_barrier(
+                            render_commands.frame_graph.frame_context.cmd_memory_barrier(
                                 resolve_id,
                                 dst_state,
                                 None,
                             )?;
                         }
                         else {
-                            frame_context.cmd_memory_barrier(
+                            render_commands.frame_graph.frame_context.cmd_memory_barrier(
                                 resolve_id,
                                 dst_state,
                                 range_info.map(|v| v.subresource_info)
@@ -308,9 +335,9 @@ impl<'a> FrameGraph<'a> {
                     }
                     let (image_view, image_layout) =
                         if let Some(info) = range_info {
-                            frame_context.create_image_view(resolve_id, info)?
+                            render_commands.frame_graph.frame_context.create_image_view(resolve_id, info)?
                         } else {
-                            frame_context.get_image_view(resolve_id)?
+                            render_commands.frame_graph.frame_context.get_image_view(resolve_id)?
                         };
                     resolve_image_view = image_view;
                     resolve_image_layout = image_layout;
@@ -319,9 +346,9 @@ impl<'a> FrameGraph<'a> {
                 render_extent.height = render_extent.height.min(properties.dimensions.height);
                 let (image_view, image_layout) =
                     if let Some(info) = range_info {
-                        frame_context.create_image_view(resource_id, info)?
+                        render_commands.frame_graph.frame_context.create_image_view(resource_id, info)?
                     } else {
-                        frame_context.get_image_view(resource_id)?
+                        render_commands.frame_graph.frame_context.get_image_view(resource_id)?
                     };
                 Ok(vk::RenderingAttachmentInfo {
                     s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
@@ -341,7 +368,7 @@ impl<'a> FrameGraph<'a> {
             if color_output_count != 0 {
                 color_outputs = FixedVec::<vk::RenderingAttachmentInfo, ArenaAlloc>
                     ::with_capacity(color_output_count, alloc)
-                    .context_with(|loc| ErrorContext::VecError(loc))?;
+                    .context_with(|| ErrorContext::VecError(location!()))?;
                 for write in writes {
                     color_outputs
                         .push(process_write(write, AttachmentType::Color)?).unwrap();
@@ -380,7 +407,11 @@ impl<'a> FrameGraph<'a> {
                 color_attachment_count: color_output_count as u32,
                 p_color_attachments: color_outputs.as_ptr(),
                 p_depth_attachment: if let Some(attachment) = &depth_output { attachment } else { 0 as _ },
-                p_stencil_attachment: if let Some(attachment) = &stencil_output { attachment } else { 0 as _ },
+                p_stencil_attachment: if let Some(attachment) = &stencil_output {
+                    attachment
+                } else {
+                    0 as _
+                },
                 ..Default::default()
             };
             unsafe {
@@ -402,11 +433,14 @@ impl<'a> FrameGraph<'a> {
             render_commands.set_current_sample_count(pass.msaa_samples);
             interface.event(Event::RenderWork {
                 pass_id: pass.id,
-                commands: render_commands,
+                commands: &mut render_commands,
             }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
             unsafe { device.cmd_end_rendering(command_buffer); }
         }
-        Ok(())
+        Ok(FrameGraphResult {
+            render_commands: render_commands.finish(),
+            frame_graph: self, 
+        })
     }
 
     pub fn signal_semaphore_count(&self) -> u32 {
@@ -419,16 +453,16 @@ impl<'a> FrameGraph<'a> {
 
     pub(crate) fn collect_semaphores(
         &self,
-        mut collect_signal: impl FnMut(TimelineSemaphoreId, u64) -> Result<()>,
-        mut collect_wait: impl FnMut(TimelineSemaphoreId, u64, PipelineStage) -> Result<()>,
+        mut collect_signal: impl FnMut(&Self, TimelineSemaphoreId, u64) -> Result<()>,
+        mut collect_wait: impl FnMut(&Self, TimelineSemaphoreId, u64, PipelineStage) -> Result<()>,
     ) -> Result<()>
     {
         for pass in &self.passes {
             for &(id, value) in &pass.signal_semaphores {
-                collect_signal(id, value)?;
+                collect_signal(self, id, value)?;
             }
             for &(id, value, stage) in &pass.wait_semaphores {
-                collect_wait(id, value, stage)?;
+                collect_wait(self, id, value, stage)?;
             }
         }
         Ok(())
@@ -436,5 +470,33 @@ impl<'a> FrameGraph<'a> {
 
     pub(crate) fn finalize(self) -> FrameContext<'a> {
         self.frame_context
+    }
+}
+
+pub(crate) struct FrameGraphResult<'a> {
+   pub frame_graph: FrameGraph<'a>,
+   pub render_commands: RenderCommandsStorage,
+}
+
+impl<'a> FrameGraphResult<'a> {
+
+    pub fn device(&self) -> Arc<ash::Device> {
+        self.frame_graph.frame_context.device()
+    }
+}
+
+impl<'a> Deref for FrameGraphResult<'a> {
+
+    type Target = FrameGraph<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.frame_graph
+    }
+}
+
+impl<'a> DerefMut for FrameGraphResult<'a> {
+
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.frame_graph
     }
 }

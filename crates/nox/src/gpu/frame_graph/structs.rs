@@ -1,9 +1,10 @@
 use ash::vk;
 
 use crate::dev::{
-    export::*,
-    error::Location,
+    error::{caller, Location},
 };
+
+use crate::gpu::*;
 
 use super::*;
 
@@ -149,7 +150,7 @@ impl From<ClearValue> for vk::ClearValue {
 pub struct ReadInfo {
     pub resource_id: ResourceId,
     pub range_info: Option<ImageRangeInfo>,
-    loc: &'static Location,
+    pub(crate) loc: Location,
 }
 
 impl ReadInfo {
@@ -160,16 +161,12 @@ impl ReadInfo {
         Self {
             resource_id,
             range_info,
-            loc: Location::caller(),
+            loc: caller!(),
         }
-    }
-
-    pub fn loc(&self) -> &'static Location {
-        self.loc
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct WriteInfo {
     pub main_id: ResourceId,
     pub range_info: Option<ImageRangeInfo>,
@@ -178,7 +175,7 @@ pub struct WriteInfo {
     pub load_op: AttachmentLoadOp,
     pub store_op: AttachmentStoreOp,
     pub clear_value: ClearValue,
-    loc: &'static Location,
+    pub(crate) loc: Location,
 }
 
 impl WriteInfo {
@@ -203,12 +200,8 @@ impl WriteInfo {
             load_op,
             store_op,
             clear_value,
-            loc: Location::caller(),
+            loc: caller!(),
         }
-    }
-
-    pub fn loc(&self) -> &'static Location {
-        self.loc
     }
 
     #[inline(always)]

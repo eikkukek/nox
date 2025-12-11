@@ -1,8 +1,6 @@
 use core::{
     slice,
     ptr,
-    num::NonZeroI32,
-    fmt::{self, Display, Formatter}
 };
 
 use ash::{khr::{surface, swapchain}, vk};
@@ -14,7 +12,7 @@ use nox_mem::{vec_types::{Vector, FixedVec}};
 use nox_alloc::arena_alloc::*;
 
 use crate::{
-    dev::{error::{Result, Error, Context, location}, utility::clamp},
+    dev::{error::{Result, Error, Context, location, ErrorContext}, utility::clamp},
     has_bits, has_not_bits,
 };
 
@@ -71,7 +69,7 @@ impl TiedResources {
         device: &ash::Device,
         image: vk::Image,
         image_format: vk::Format,
-    ) -> Result<Self, vk::Result> {
+    ) -> Result<Self> {
         let image_view_create_info = vk::ImageViewCreateInfo {
             s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
             image,
@@ -93,14 +91,16 @@ impl TiedResources {
             ..Default::default()
         };
         let image_view = unsafe { device
-            .create_image_view(&image_view_create_info, None)?
+            .create_image_view(&image_view_create_info, None)
+            .context("failed to create image view")?
         };
         let semaphore_create_info = vk::SemaphoreCreateInfo {
             s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
             ..Default::default()
         };
         let present_wait_semaphore = unsafe { device
-            .create_semaphore(&semaphore_create_info, None)?
+            .create_semaphore(&semaphore_create_info, None)
+            .context("failed to create semaphore")?
         };
         Ok(Self {
             image_view,
@@ -128,21 +128,23 @@ struct UntiedResources {
 
 impl UntiedResources {
 
-    pub fn new(device: &ash::Device) -> Result<Self, vk::Result> {
+    pub fn new(device: &ash::Device) -> Result<Self> {
         let fence_create_info = vk::FenceCreateInfo {
             s_type: vk::StructureType::FENCE_CREATE_INFO,
             flags: vk::FenceCreateFlags::SIGNALED,
             ..Default::default()
         };
         let frame_ready_fence = unsafe { device
-            .create_fence(&fence_create_info, None)?
+            .create_fence(&fence_create_info, None)
+            .context("failed to create fence")?
         };
         let semaphore_create_info = vk::SemaphoreCreateInfo {
             s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
             ..Default::default()
         };
         let image_ready_semaphore = unsafe { device
-            .create_semaphore(&semaphore_create_info, None)?
+            .create_semaphore(&semaphore_create_info, None)
+            .context("failed to create semaphore")?
         };
         Ok(Self {
             frame_ready_fence,
@@ -181,7 +183,8 @@ impl<'a> Resources<'a> {
     {
         let image_count = images.len();
         let mut command_buffers = FixedVec
-            ::with_capacity(image_count, allocator)?;
+            ::with_capacity(image_count, allocator)
+            .context_with(|| ErrorContext::VecError(location!()))?;
         command_buffers.resize(image_count, Default::default()).unwrap();
         let command_buffer_alloc_info = vk::CommandBufferAllocateInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
@@ -192,9 +195,10 @@ impl<'a> Resources<'a> {
         };
         helpers
             ::allocate_command_buffers(device, &command_buffer_alloc_info, &mut command_buffers)
-            .context_with(|| format_compact!("failed to allocate command buffers at {}", location!()))?;
+            .context("failed to allocate main render command buffers")?;
         let mut tied_resources = FixedVec::<TiedResources, ArenaAlloc>
-            ::with_capacity(image_count, allocator)?;
+            ::with_capacity(image_count, allocator)
+            .context_with(|| ErrorContext::VecError(location!()))?;
         for i in 0..image_count {
             tied_resources
                 .push(match TiedResources::new(device, images[i], image_format) {
@@ -211,7 +215,8 @@ impl<'a> Resources<'a> {
                 }).unwrap();
         }
         let mut untied_resources = FixedVec::<UntiedResources, ArenaAlloc>
-            ::with_capacity(buffered_frame_count as usize, allocator)?;
+            ::with_capacity(buffered_frame_count as usize, allocator)
+            .context_with(|| ErrorContext::VecError(location!()))?;
         for i in 0..buffered_frame_count as usize {
             untied_resources
                 .push(
@@ -375,7 +380,9 @@ impl<'a> SwapchainContext<'a> {
         }
         let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
         if has_not_bits!(capabilities.supported_usage_flags, image_usage) {
-            return Err(Error::just_context(format_compact!("unsupported swapchain, missing usage {image_usage:?}")))
+            return Err(Error::just_context(format_compact!(
+                "unsupported swapchain, missing usage {image_usage:?}"
+            )))
         }
         //image_usage |= capabilities.supported_usage_flags & vk::ImageUsageFlags::TRANSFER_DST;
         let create_info = vk::SwapchainCreateInfoKHR {
@@ -413,7 +420,7 @@ impl<'a> SwapchainContext<'a> {
                 image_count as usize,
                 Default::default(),
                 local_allocator
-            )?;
+            ).context_with(|| ErrorContext::VecError(location!()))?;
         let image_states = FixedVec
             ::with_len(
                 images.len(),
@@ -424,7 +431,7 @@ impl<'a> SwapchainContext<'a> {
                     vk::PipelineStageFlags::TOP_OF_PIPE
                 ),
                 local_allocator
-            )?;
+            ).context_with(|| ErrorContext::VecError(location!()))?;
         result = unsafe {
             get_swapchain_images_khr(
                 device.handle(),
@@ -629,7 +636,9 @@ fn find_surface_format(
         if count == 0 || result != vk::Result::SUCCESS {
             return Err(Error::new("failed to get vulkan surface formats", result))
         }
-        let mut formats = FixedVec::with_len(count as usize, Default::default(), &alloc)?;
+        let mut formats = FixedVec
+            ::with_len(count as usize, Default::default(), &alloc)
+            .context_with(|| ErrorContext::VecError(location!()))?;
         result = get_physical_device_surface_formats_khr(
             physical_device,
             surface_handle,
@@ -658,7 +667,8 @@ fn find_present_mode(
 {
     unsafe {
         let alloc = ArenaGuard::new(alloc);
-        let get_physical_device_surface_present_modes_khr = surface_loader.fp().get_physical_device_surface_present_modes_khr;
+        let get_physical_device_surface_present_modes_khr = surface_loader
+            .fp().get_physical_device_surface_present_modes_khr;
         let mut count = 0u32;
         let mut result = get_physical_device_surface_present_modes_khr(
             physical_device,
@@ -669,7 +679,9 @@ fn find_present_mode(
         if count == 0 || result != vk::Result::SUCCESS {
             return Err(Error::new("failed to get vulkan surface present modes", result))
         }
-        let mut modes = FixedVec::with_len(count as usize, Default::default(), &alloc)?;
+        let mut modes = FixedVec
+            ::with_len(count as usize, Default::default(), &alloc)
+            .context_with(|| ErrorContext::VecError(location!()))?;
         result = get_physical_device_surface_present_modes_khr(
             physical_device,
             surface_handle,

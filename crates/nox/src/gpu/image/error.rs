@@ -19,7 +19,7 @@ pub enum ImageError {
         image_mip_levels: u32, base_level: u32, level_count: u32,
         image_array_layers: u32, base_layer: u32, layer_count: u32,
     },
-    #[display("image has immutable format {format:?}, requested format was {requested_format:?}")]
+    #[display("image has immutable format {image_format:?}, requested format was {requested_format:?}")]
     ImmutableFormat {
         image_format: vk::Format,
         requested_format: vk::Format,

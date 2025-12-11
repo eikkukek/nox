@@ -1,6 +1,4 @@
-use std::sync::{Arc, RwLockWriteGuard};
-
-use core::panic::Location;
+use std::sync::Arc;
 
 use ash::vk;
 
@@ -11,10 +9,7 @@ use nox_mem::{
 
 use crate::dev::{
     has_bits,
-    export::{
-        *,
-    },
-    error::{Result, Error, Context, ErrorContext},
+    error::{Result, Error, Context, ErrorContext, Location},
 };
 
 use crate::gpu::{*, memory_binder::MemoryBinder};
@@ -54,8 +49,8 @@ impl ResourcePool {
 
 pub(super) struct ResourcePoolContext<'a> {
     pub pool: &'a mut ResourcePool,
-    pub context: GpuContext,
-    pub render_image: Option<(ImageId, Option<ImageRangeInfo>, &'static Location<'static>)>,
+    pub context: GpuContext<'a>,
+    pub render_image: Option<(ImageId, Option<ImageRangeInfo>, Location)>,
     pub render_image_reset: Option<(ImageState, ImageSubresourceRangeInfo)>,
 }
 
@@ -64,7 +59,7 @@ impl<'a> ResourcePoolContext<'a>
 
     #[inline(always)]
     pub fn new(
-        mut context: Context,
+        mut context: GpuContext<'a>,
         resource_pool: &'a mut ResourcePool,
     ) -> Self
     {
@@ -124,7 +119,7 @@ impl<'a> ResourcePoolContext<'a>
     pub fn add_image(
         &mut self,
         id: ImageId,
-        loc: &'static Location<'static>,
+        loc: Location,
     ) -> Result<ResourceId>
     {
         let image = self.context.get_image(id)?;
@@ -139,7 +134,7 @@ impl<'a> ResourcePoolContext<'a>
             format: properties.format,
             samples: properties.samples,
             flags,
-            loc: Some(loc),
+            loc: loc,
         })
     }
 
@@ -147,13 +142,16 @@ impl<'a> ResourcePoolContext<'a>
     pub fn add_transient_image<F: FnMut(&mut ImageBuilder)>(
         &mut self,
         f: F,
-        loc: &'static Location<'static>,
+        loc: Location,
     ) -> Result<ResourceId>
     {
         let mut default_binder = self.context.default_memory_binder();
         let index = self.pool.transient_images
             .insert(self.context.create_image(
-                ResourceBinderImage::Owned(&mut self.pool.device_alloc, Some(&mut |image| default_binder.bind_image_memory(image, None))),
+                ResourceBinderImage::Owned(
+                    &mut self.pool.device_alloc,
+                    Some(&mut |image| default_binder.bind_image_memory(image, None))
+                ),
                 f,
             )?);
         let image_id = self.pool.transient_images[index];
@@ -169,7 +167,7 @@ impl<'a> ResourcePoolContext<'a>
             format: properties.format,
             samples: properties.samples,
             flags,
-            loc: Some(loc),
+            loc,
         })
     }
 
@@ -178,7 +176,7 @@ impl<'a> ResourcePoolContext<'a>
         &mut self,
         resource_id: ResourceId,
         range_info: Option<ImageRangeInfo>,
-        loc: &'static Location<'static>,
+        loc: Location,
     ) -> Result<()>
     {
         let image = self.get_image(resource_id)?;
@@ -243,7 +241,8 @@ impl<'a> ResourcePoolContext<'a>
     #[inline(always)]
     pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>> {
         self.context
-            .get_image(resource_id.image_id)?
+            .get_image(resource_id.image_id)
+            .context("couldn't find image")
     }
 
     #[inline(always)]
@@ -268,7 +267,7 @@ impl<'a> ResourcePoolContext<'a>
     #[inline(always)]
     pub fn get_image_view(&self, id: ResourceId) -> Result<(vk::ImageView, vk::ImageLayout)> {
         let src = self.context.get_image(id.image_id)?;
-        Ok((src.get_view()?, src.layout()))
+        Ok((src.get_view().context("failed to get image view")?, src.layout()))
     }
 
     #[inline(always)]
@@ -279,7 +278,9 @@ impl<'a> ResourcePoolContext<'a>
     ) -> Result<(vk::ImageView, vk::ImageLayout)>
     {
         let image = self.context.get_image(id.image_id)?;
-        let (index, view) = image.create_subview(range_info)?;
+        let (index, view) = image
+            .create_subview(range_info)
+            .context("failed to create image subview")?;
         self.pool.subviews.push((id.image_id, index));
         Ok((view, image.layout()))
     }

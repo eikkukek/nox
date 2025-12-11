@@ -4,7 +4,6 @@ use std::{
     cell::RefCell,
 };
 use std::ffi::CString;
-use nox_error::tracked::location;
 use winit::{dpi::PhysicalSize, window::Window};
 use ash::{
     khr::{surface, swapchain, wayland_surface, win32_surface, xcb_surface, xlib_surface},
@@ -134,7 +133,7 @@ impl<'a> VulkanContext<'a> {
         let instance = unsafe {
             entry
                 .create_instance(&instance_create_info, None)
-                .ctx_err("failed to create vulkan instance")?
+                .context("failed to create vulkan instance")?
         };
         let surface_loader = surface::Instance::new(&entry, &instance);
         let surface_handle = unsafe {
@@ -146,7 +145,7 @@ impl<'a> VulkanContext<'a> {
                 window.window_handle().unwrap().as_raw(),
                 None
             )
-            .context_with(|_| {
+            .context_with(|| {
                 instance.destroy_instance(None);
                 "failed to create vulkan surface"
             })?
@@ -220,7 +219,7 @@ impl<'a> VulkanContext<'a> {
         let device = unsafe {
             instance
                 .create_device(physical_device, &device_create_info, None)
-                .context_with(|_| {
+                .context_with(|| {
                     surface_loader.destroy_surface(surface_handle, None);
                     instance.destroy_instance(None);
                     "failed to create vulkan device"
@@ -337,8 +336,12 @@ impl<'a> VulkanContext<'a> {
             SwapchainState::Valid => {},
             SwapchainState::OutOfDate(buffered_frame_count, framebuffer_size) => {
                 recreated = true;
-                self 
-                    .update_swapchain(framebuffer_size, graphics_command_pool, buffered_frame_count, tmp_alloc, host_allocators)?;
+                self.update_swapchain(
+                        framebuffer_size,
+                        graphics_command_pool,
+                        buffered_frame_count,
+                        tmp_alloc, host_allocators
+                    )?;
             },
         }
         Ok((self.swapchain_context.clone().unwrap(), recreated))

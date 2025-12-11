@@ -94,7 +94,7 @@ impl SwapchainPassPipelineData {
             &resource_infos,
             |_, v| { shader_resources.push(v).unwrap(); },
             &stack_guard,
-        ).ctx_err("failed to allocate shader resources")?;
+        ).context("failed to allocate shader resources")?;
 
         Ok(Self {
             global_resources: global_resources.clone(),
@@ -113,7 +113,7 @@ impl SwapchainPassPipelineData {
         &mut self,
         buffered_frame_count: u32,
         tmp_alloc: &ArenaAlloc,
-    ) -> Result<(), Error>
+    ) -> Result<()>
     {
         let mut g = self.global_resources.write().unwrap();
         let stack_guard = ArenaGuard::new(&tmp_alloc);
@@ -180,12 +180,13 @@ impl SwapchainPassPipelineData {
         )
     }
 
-    pub fn get_pipeline_layout(&mut self) -> Result<vk::PipelineLayout, SlotMapError>
+    pub fn get_pipeline_layout(&mut self) -> Result<vk::PipelineLayout>
     {
         Ok(self.global_resources
             .read()
             .unwrap()
-            .get_pipeline_layout(self.layout_id)?
+            .get_pipeline_layout(self.layout_id)
+            .context("couldn't find swapchain pass pipeline")?
             .handle()
         )
     }
@@ -196,7 +197,7 @@ impl SwapchainPassPipelineData {
         range_info: Option<ImageRangeInfo>,
         frame_index: u32,
         tmp_alloc: &ArenaAlloc,
-    ) -> Result<vk::DescriptorSet, Error>
+    ) -> Result<vk::DescriptorSet>
     {
         let stack_guard = ArenaGuard::new(&tmp_alloc);
         let mut g = self.global_resources.write().unwrap();

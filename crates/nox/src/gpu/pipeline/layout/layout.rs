@@ -4,10 +4,7 @@ use ash::vk;
 
 use nox_mem::vec_types::{ArrayVec, GlobalVec, Vector};
 
-use crate::gpu::{
-    *,
-    shader::Shader,
-};
+use crate::gpu::*;
 
 #[derive(Clone)]
 pub(crate) struct PipelineLayout {
@@ -24,7 +21,7 @@ impl PipelineLayout {
         device: Arc<ash::Device>,
         shader_ids: [ShaderId; SHADER_COUNT],
         global_resources: &GlobalResources,
-    ) -> Result<Self, PipelineError>
+    ) -> Result<Self>
     {
         let mut set_infos = GlobalVec::<GlobalVec<vk::DescriptorSetLayoutBinding>>::new();
         let mut push_constants = GlobalVec::new();
@@ -92,7 +89,10 @@ impl PipelineLayout {
             };
             unsafe {
                 set_layouts
-                    .push(device.create_descriptor_set_layout(&create_info, None)?);
+                    .push(device
+                        .create_descriptor_set_layout(&create_info, None)
+                        .context("failed to create descriptor set layout")?
+                    );
             }
         }
         let info = vk::PipelineLayoutCreateInfo {
@@ -104,7 +104,9 @@ impl PipelineLayout {
             ..Default::default()
         };
         let handle = unsafe {
-            device.create_pipeline_layout(&info, None)?
+            device
+                .create_pipeline_layout(&info, None)
+                .context("failed to create pipeline layout")?
         };
         let set_layouts = set_layouts.into_inner();
         let mut pipeline_descriptor_sets = GlobalVec::with_capacity(set_layouts.len());
@@ -136,7 +138,10 @@ impl PipelineLayout {
         self.handle
     }
 
-    pub fn pipeline_descriptor_sets(&self) -> &[(GlobalVec<Option<vk::DescriptorType>>, vk::DescriptorSetLayout)] {
+    pub fn pipeline_descriptor_sets(
+        &self,
+    ) -> &[(GlobalVec<Option<vk::DescriptorType>>, vk::DescriptorSetLayout)]
+    {
         &self.pipeline_descriptor_sets
     }
 

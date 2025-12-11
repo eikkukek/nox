@@ -13,4 +13,6 @@ pub use frame_graph::FrameGraph;
 
 use pass::Pass;
 
+pub(crate) use frame_graph::FrameGraphResult;
+
 use super::frame_context::{FrameContext, ResourceFlags};

@@ -12,10 +12,7 @@ use nox_mem::{Allocator, vec_types::{FixedVec, GlobalVec, Vector}};
 
 use super::*;
 
-use crate::dev::{
-    has_not_bits,
-    format_location,
-};
+use crate::dev::format_location;
 
 use crate::gpu::{memory_binder::MemoryBinder, *};
 
@@ -79,11 +76,11 @@ pub(crate) struct SyncObjects {
     pub binary_semaphore: vk::Semaphore,
 }
 
-pub(crate) struct TransferCommandsStorage {
+pub struct TransferCommandsStorage {
     transfer_command_pool: Arc<TransientCommandPool>,
-    pub transfer_command_buffer: vk::CommandBuffer,
+    pub(crate) transfer_command_buffer: vk::CommandBuffer,
     graphics_command_pool: Arc<TransientCommandPool>,
-    pub graphics_command_buffer: vk::CommandBuffer,
+    pub(crate) graphics_command_buffer: vk::CommandBuffer,
     staging_buffers: GlobalVec<vk::Buffer>,
     linear_device_alloc: LinearDeviceAllocLock,
     sync_objects: Option<SyncObjects>,
@@ -189,7 +186,7 @@ impl<'a, 'b> TransferCommands<'a, 'b> {
     #[inline(always)]
     pub(crate) fn get_sync_objects(
         &mut self
-    ) -> Result<(bool, SyncObjects, &[(TimelineSemaphoreId, u64)], &GpuContext)>
+    ) -> Result<(bool, SyncObjects, &[(TimelineSemaphoreId, u64)], &GpuContext<'b>)>
     {
         let mut new = false;
         if self.sync_objects.is_none() {
@@ -214,7 +211,7 @@ impl<'a, 'b> TransferCommands<'a, 'b> {
             let binary_semaphore = unsafe {
                 self.device()
                     .create_semaphore(&semaphore_info, None)
-                    .context_with(|| format_compact!("failed to create semaphore at {loc}"))?
+                    .context_with(|| format_location!("failed to create semaphore at {loc}"))?
             };
             self.sync_objects = Some(SyncObjects {
                 transfer_fence,
@@ -223,7 +220,9 @@ impl<'a, 'b> TransferCommands<'a, 'b> {
             });
             new = true;
         }
-        Ok((new, self.sync_objects.unwrap(), &self.signal_semaphores, self.context.get_mut()))
+        Ok((new, self.sync_objects.unwrap(), &self.signal_semaphores, unsafe {
+            &mut *self.context.get()
+        }))
     }
 
     pub(crate) fn device(&self) -> &ash::Device {

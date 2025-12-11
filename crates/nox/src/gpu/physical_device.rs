@@ -12,7 +12,7 @@ use crate::dev::{
     export::{
         Version,
     },
-    error::{Result, Error, ErrorContext, location},
+    error::{Result, Error, Context, ErrorContext, location},
 };
 
 use super::DeviceName;
@@ -77,7 +77,7 @@ impl PhysicalDeviceInfo {
         let properties = unsafe { instance.get_physical_device_properties(physical_device) };
         let device_name = ArrayString
             ::from_ascii(&properties.device_name)
-            .context(ErrorContext::StringConversionError(location!()))?;
+            .context_with(|| ErrorContext::StringConversionError(location!()))?;
         let api_version = Version::from(properties.api_version);
         let queue_family_indices =
             match QueueFamilyIndices::new(physical_device, instance, surface_loader, surface_khr) {
@@ -387,6 +387,6 @@ pub fn find_suitable_physical_device(
     }
     best_physical_device
         .ok_or_else(||
-            Error::just_ctx("failed to find suitable vulkan physical device")
+            Error::just_context("failed to find suitable vulkan physical device")
         )
 }

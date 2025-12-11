@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use ash::vk;
 
@@ -6,12 +6,12 @@ use nox_alloc::arena_alloc::*;
 
 use crate::gpu::*;
 
-use super::{Result, *};
+use crate::dev::error::{Result, Context};
 
 pub struct ComputeCommands<'a> {
-    device: Arc<ash::Device>,
     command_buffer: vk::CommandBuffer,
-    global_resources: Arc<RwLock<GlobalResources>>,
+    context: GpuContext<'a>,
+    device: Arc<ash::Device>,
     current_pipeline: Option<ComputePipelineId>,
     pub(crate) wait_semaphores: GlobalVec<(TimelineSemaphoreId, u64, PipelineStage)>,
     pub(crate) signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
@@ -23,17 +23,16 @@ impl<'a> ComputeCommands<'a> {
 
     #[inline(always)]
     pub(crate) fn new(
-        device: Arc<ash::Device>,
         command_buffer: vk::CommandBuffer,
-        global_resources: Arc<RwLock<GlobalResources>>,
+        context: GpuContext<'a>,
         tmp_alloc: &'a ArenaAlloc,
         queue_index: u32,
     ) -> Self
     {
         Self {
-            device,
             command_buffer,
-            global_resources,
+            device: context.device(),
+            context,
             current_pipeline: None,
             wait_semaphores: Default::default(),
             signal_semaphores: Default::default(),
@@ -42,13 +41,9 @@ impl<'a> ComputeCommands<'a> {
         }
     }
 
-    pub fn edit_resources(
-        &mut self,
-        mut f: impl FnMut(&mut GlobalResources) -> Result<()>,
-    ) -> Result<()>
-    {
-        let mut g = self.global_resources.write().unwrap();
-        f(&mut g)
+    #[inline(always)]
+    pub fn gpu(&mut self) -> &mut GpuContext<'a> {
+        &mut self.context
     }
 
     pub fn prepare_storage_image(
@@ -56,8 +51,7 @@ impl<'a> ComputeCommands<'a> {
         id: ImageId,
     ) -> Result<()>
     {
-        let g = self.global_resources.read().unwrap();
-        let image = g.get_image(id)?;
+        let image = self.context.get_image(id)?;
         image.cmd_memory_barrier(
             ImageState {
                 access_flags: vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
@@ -68,13 +62,12 @@ impl<'a> ComputeCommands<'a> {
             self.command_buffer,
             None,
             false,
-        )?;
+        ).context("image memory barrier failed")?;
         Ok(())
     }
 
     pub fn bind_pipeline(&mut self, id: ComputePipelineId) -> Result<()> {
-        let g = self.global_resources.read().unwrap();
-        let pipeline = g.get_compute_pipeline(id)?;
+        let pipeline = self.context.get_compute_pipeline(id)?;
         unsafe {
             self.device.cmd_bind_pipeline(
                 self.command_buffer,
@@ -95,11 +88,13 @@ impl<'a> ComputeCommands<'a> {
             F: FnMut(u32) -> ShaderResourceId,
     {
         let guard = ArenaGuard::new(self.tmp_alloc);
-        let g = self.global_resources.read().unwrap();
-        let pipeline = g.get_compute_pipeline(
-            self.current_pipeline.expect("attempting to bind shader resources with no pipeline attached")
-        )?;
-        let (layout, sets) = g.pipeline_get_shader_resource(
+        let Some(pipeline) = self.current_pipeline else {
+            return Err(Error::just_context(
+                "attempting to bind shader resources with no pipeline binded",
+            ))
+        };
+        let pipeline = self.context.get_compute_pipeline(pipeline)?;
+        let (layout, sets) = self.context.pipeline_get_shader_resource(
             pipeline.layout_id,
             &guard,
             f,
@@ -124,11 +119,13 @@ impl<'a> ComputeCommands<'a> {
             F: FnMut(PushConstant) -> &'a [u8]
     {
         let guard = ArenaGuard::new(self.tmp_alloc);
-        let g = self.global_resources.read().unwrap();
-        let pipeline = g.get_compute_pipeline(
-            self.current_pipeline.expect("attempting to push constants with no pipeline attached")
-        )?;
-        let (layout, push_constants) = g.pipeline_get_push_constants(
+        let Some(pipeline) = self.current_pipeline else {
+            return Err(Error::just_context(
+                "attempting to push constants with no pipeline binded",
+            ))
+        };
+        let pipeline = self.context.get_compute_pipeline(pipeline)?;
+        let (layout, push_constants) = self.context.pipeline_get_push_constants(
             pipeline.layout_id,
             &guard,
             f,
@@ -153,9 +150,11 @@ impl<'a> ComputeCommands<'a> {
         group_count_x: u32,
         group_count_y: u32,
         group_count_z: u32,
-    )
+    ) -> Result<()>
     {
-        assert!(self.current_pipeline.is_some(), "attempting to dispatch with no pipeline attached");
+        if self.current_pipeline.is_none() {
+            return Err(Error::just_context("attempting to dispatch with no pipeline binded"))
+        }
         unsafe {
             self.device.cmd_dispatch(
                 self.command_buffer,
@@ -164,6 +163,7 @@ impl<'a> ComputeCommands<'a> {
                 group_count_z
             );
         }
+        Ok(())
     }
 
     #[inline(always)]

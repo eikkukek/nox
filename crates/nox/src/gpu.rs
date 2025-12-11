@@ -103,7 +103,7 @@ impl HostAllocators {
         Ok(Self {
             swapchain: ArenaAlloc
                 ::new(memory_layout.swapchain_size())
-                .context_with(|| format_compact!("failed to create arena alloc at {}", location!()))?,
+                .context_with(|| format_location!("failed to create arena alloc at {loc}"))?,
             frame_graphs: UnsafeCell::new(Default::default()),
             _memory_layout: memory_layout,
         })
@@ -115,7 +115,7 @@ impl HostAllocators {
             buffered_frames as usize,
             || ArenaAlloc
                 ::new(self._memory_layout.frame_graph_arena_size())
-                .context_with(|| format_compact!("failed to create arena alloc at {}", location!())),
+                .context_with(|| format_location!("failed to create arena alloc at {loc}")),
             |err| Error::new(ErrorContext::VecError(location!()), err)
         )
     }
@@ -170,7 +170,7 @@ impl<'a> Gpu<'a> {
         let tmp_alloc = Arc::new(
             ArenaAlloc
                 ::new(memory_layout.tmp_arena_size())
-                .context_with(|| format_compact!("failed to create arena alloc at {}", location!()))?
+                .context_with(|| format_location!("failed to create arena alloc at {loc}"))?
         );
         let vulkan_context = VulkanContext
             ::new(
@@ -232,8 +232,8 @@ impl<'a> Gpu<'a> {
                     vk::MemoryPropertyFlags::LAZILY_ALLOCATED | vk::MemoryPropertyFlags::PROTECTED,
                     &physical_device_info,
                     false,
-                ).context_with(|| format_compact!(
-                    "failed to create linear device alloc at {}", location!(),
+                ).context_with(|| format_location!(
+                    "failed to create linear device alloc at {loc}"
                 ))?;
                 let s = ResourcePool::new(device_alloc);
                 i += 1;
@@ -309,7 +309,7 @@ impl<'a> Gpu<'a> {
     }
 
     #[inline(always)]
-    pub(crate) fn request_resize(&mut self, size: PhysicalSize<u32>) {
+    pub fn request_resize(&mut self, size: PhysicalSize<u32>) {
         self.vulkan_context.request_swapchain_update(self.buffered_frames, size);
     }
 
@@ -514,7 +514,9 @@ impl<'a> Gpu<'a> {
                 }
                 unsafe {
                     let mut ready = false;
-                    match commands.gpu().device().wait_for_fences(&[sync_objects.transfer_fence, sync_objects.graphics_fence], true, 0) {
+                    match commands.gpu().device().wait_for_fences(
+                        &[sync_objects.transfer_fence, sync_objects.graphics_fence], true, 0
+                    ) {
                         Ok(()) => {
                             ready = true;
                         },
@@ -535,6 +537,149 @@ impl<'a> Gpu<'a> {
             }
         }
         Ok(())
+    }
+
+    fn process_frame_graph<'b>(
+        alloc: &'b ArenaAlloc,
+        mut frame_graph: FrameGraphResult<'b>,
+        graphics_queue: vk::Queue,
+        transfer_queue: vk::Queue,
+        sync_transfer_semaphore: vk::Semaphore,
+        sync_transfer_timeline_value: &mut u64,
+        sync_transfer_commands: &mut GlobalVec<TransferCommandsStorage>,
+    ) -> Result<RenderResult<'b>>
+    {
+        let device = frame_graph.device();
+        let mut result = RenderResult::default();
+        if frame_graph.render_commands.transfer_commands.is_empty() {
+            let count = frame_graph.wait_semaphore_count() as usize;
+            result.wait_semaphores = FixedVec
+                ::with_capacity(count + 2, alloc)
+                .context_with(|| ErrorContext::VecError(location!()))?;
+            result.wait_values = FixedVec
+                ::with_capacity(count + 2, alloc)
+                .context_with(|| ErrorContext::VecError(location!()))?;
+            result.wait_stages = FixedVec
+                ::with_capacity(count + 2, alloc)
+                .context_with(|| ErrorContext::VecError(location!()))?;
+        } else {
+            let count = frame_graph.wait_semaphore_count() as usize;
+            let mut transfer_command_buffers = FixedVec
+                ::with_capacity(frame_graph.render_commands.transfer_commands.len(), alloc)
+                .context_with(|| ErrorContext::VecError(location!()))?;
+            let mut graphics_command_buffers = FixedVec
+                ::with_capacity(frame_graph.render_commands.transfer_commands.len(), alloc)
+                .context_with(|| ErrorContext::VecError(location!()))?;
+            for storage in &frame_graph.render_commands.transfer_commands {
+                let command_buffer = storage.transfer_command_buffer;
+                unsafe {
+                    device.end_command_buffer(command_buffer)
+                        .context(ErrorContext::CommandBufferEndError(location!()))?
+                }
+                transfer_command_buffers.push(command_buffer).ok();
+                let command_buffer = storage.graphics_command_buffer;
+                unsafe {
+                    device.end_command_buffer(command_buffer)
+                        .context(ErrorContext::CommandBufferEndError(location!()))?
+                }
+                graphics_command_buffers.push(command_buffer).ok();
+            }
+            let fence_info = vk::FenceCreateInfo {
+                s_type: vk::StructureType::FENCE_CREATE_INFO,
+                ..Default::default()
+            };
+            let transfer_fence = unsafe {
+                device.create_fence(&fence_info, None)
+            }.context_with(|| format_compact!("failed to create fence at {}", location!()))?;
+            *sync_transfer_timeline_value += 1;
+            let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
+                s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                signal_semaphore_value_count: 1,
+                p_signal_semaphore_values: sync_transfer_timeline_value as *const _,
+                ..Default::default()
+            };
+            let submit_info = vk::SubmitInfo {
+                s_type: vk::StructureType::SUBMIT_INFO,
+                command_buffer_count: transfer_command_buffers.len() as u32,
+                p_command_buffers: transfer_command_buffers.as_ptr(),
+                signal_semaphore_count: 1,
+                p_signal_semaphores: &sync_transfer_semaphore,
+                ..Default::default()
+            }.push_next(&mut timeline_info);
+            unsafe {
+                device.queue_submit(
+                    transfer_queue,
+                    &[submit_info],
+                    vk::Fence::null(),
+                ).context(ErrorContext::TransferQueueSubmitError(location!()))?;
+            };
+            let wait_value = *sync_transfer_timeline_value;
+            let wait_stage = vk::PipelineStageFlags::TRANSFER;
+            *sync_transfer_timeline_value += 1;
+            let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
+                s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
+                wait_semaphore_value_count: 1,
+                p_wait_semaphore_values: &wait_value,
+                signal_semaphore_value_count: 1,
+                p_signal_semaphore_values: sync_transfer_timeline_value,
+                ..Default::default()
+            };
+            let submit_info = vk::SubmitInfo {
+                s_type: vk::StructureType::SUBMIT_INFO,
+                command_buffer_count: graphics_command_buffers.len() as u32,
+                p_command_buffers: graphics_command_buffers.as_ptr(),
+                wait_semaphore_count: 1,
+                p_wait_semaphores: &sync_transfer_semaphore,
+                p_wait_dst_stage_mask: &wait_stage,
+                signal_semaphore_count: 1,
+                p_signal_semaphores: &sync_transfer_semaphore,
+                ..Default::default()
+            }.push_next(&mut timeline_info);
+            unsafe {
+                device.queue_submit(
+                    graphics_queue,
+                    &[submit_info],
+                    transfer_fence,
+                ).context(ErrorContext::GraphicsQueueSubmitError(location!()))?;
+            }
+            result.wait_semaphores = FixedVec
+                ::with_capacity(count + 3, alloc)
+                .context_with(|| ErrorContext::VecError(location!()))?;
+            result.wait_semaphores.push(sync_transfer_semaphore).ok();
+            result.wait_values = FixedVec
+                ::with_capacity(count + 3, alloc)
+                .context_with(|| ErrorContext::VecError(location!()))?;
+            result.wait_values.push(*sync_transfer_timeline_value).ok();
+            result.wait_stages = FixedVec
+                ::with_capacity(count + 3, alloc)
+                .context_with(|| ErrorContext::VecError(location!()))?;
+            result.wait_stages.push(vk::PipelineStageFlags::TRANSFER).ok();
+        };
+        sync_transfer_commands.move_from_vec(&mut frame_graph.render_commands.transfer_commands);
+        let signal_count = frame_graph.signal_semaphore_count() as usize;
+        result.signal_semaphores = FixedVec
+            ::with_capacity(signal_count + 2, alloc)
+            .context_with(|| ErrorContext::VecError(location!()))?;
+        result.signal_values = FixedVec
+            ::with_capacity(signal_count + 2, alloc)
+            .context_with(|| ErrorContext::VecError(location!()))?;
+        frame_graph.collect_semaphores(
+            |frame_graph, id, value| {
+                let handle = frame_graph.gpu().get_timeline_semaphore(id)?;
+                result.signal_semaphores.push(handle).unwrap();
+                result.signal_values.push(value).unwrap();
+                Ok(())
+            },
+            |frame_graph, id, value, stage| {
+                let handle = frame_graph.gpu().get_timeline_semaphore(id)?;
+                result.wait_semaphores.push(handle).unwrap();
+                result.wait_values.push(value).unwrap();
+                result.wait_stages.push(stage.into()).unwrap();
+                Ok(())
+            }
+        )?;
+        result.frame_context = Some(frame_graph.frame_graph.finalize());
+        Ok(result)
     }
 
     pub(crate) fn render(
@@ -573,38 +718,49 @@ impl<'a> Gpu<'a> {
             None => return Ok(())
         };
         if recreated {
-            self.frame_buffer_size = frame_data.extent.into();
-            let mut context = self.context();
-            interface.event(Event::FrameBufferResized {
-                gpu: &mut context,
-                new_size: self.frame_buffer_size,
-            }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
+            let frame_buffer_size = frame_data.extent.into();
+            {
+                let mut context = GpuContext::new(
+                    self.global_resources.write().unwrap(),
+                    &mut self.transfer_requests,
+                    frame_buffer_size
+                );
+                interface.event(Event::FrameBufferResized {
+                    gpu: &mut context,
+                    new_size: frame_buffer_size,
+                }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
+            }
             self.async_transfer_requests(interface)
                 .context("async transfer requests failed")?;
-            self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)?;
+            self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
+                .context("failed to process transfer requests")?;
+            self.frame_buffer_size = frame_buffer_size;
         } 
         let compute_state = self.compute_states[frame_data.frame_index as usize];
         unsafe {
             device.reset_command_buffer(
                 compute_state.command_buffer, vk::CommandBufferResetFlags::RELEASE_RESOURCES
             ).unwrap();
-        }
-        helpers::begin_command_buffer(&device, compute_state.command_buffer).unwrap();
-        let mut compute_commands = ComputeCommands::new(
-            self.device.clone(),
-            compute_state.command_buffer,
-            self.global_resources.clone(),
-            &self.tmp_alloc,
-            queue_family_indices.compute_index(),
-        );
-        interface
-            .event(Event::ComputeWork {
-                commands: &mut compute_commands
-            }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
-        unsafe {
-            device.end_command_buffer(compute_state.command_buffer).unwrap();
-        }
+        } 
         {
+            helpers::begin_command_buffer(&device, compute_state.command_buffer).unwrap();
+            let mut compute_commands = ComputeCommands::new(
+                compute_state.command_buffer,
+                GpuContext::new(
+                    self.global_resources.write().unwrap(),
+                    &mut self.transfer_requests,
+                    self.frame_buffer_size,
+                ),
+                &self.tmp_alloc,
+                queue_family_indices.compute_index(),
+            );
+            interface
+                .event(Event::ComputeWork {
+                    commands: &mut compute_commands
+                }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
+            unsafe {
+                device.end_command_buffer(compute_state.command_buffer).unwrap();
+            }
             let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
             let wait_count = 1 + compute_commands.wait_semaphores.len();
             let signal_count = 1 + compute_commands.signal_semaphores.len();
@@ -679,20 +835,24 @@ impl<'a> Gpu<'a> {
             alloc.force_clear();
         }
         self.sync_transfer_commands.clear();
-        let (
-            transfer_fence,
-            mut wait_semaphores,
-            mut wait_values, mut wait_stages,
-            mut signal_semaphores,
-            mut signal_values,
+        let RenderResult {
             mut frame_context,
-        ) =
+            mut wait_semaphores, mut wait_values, mut wait_stages,
+            mut signal_semaphores, mut signal_values,
+            transfer_fence
+        } =
         {
             let mut frame_graph = FrameGraph::new(
                 FrameContext::new(
                     frame_data.command_buffer,
                     device.clone(),
-                    self.context(),
+                    GpuContext::new(
+                        self.global_resources
+                            .write()
+                            .unwrap(),
+                        &mut self.transfer_requests,
+                        frame_data.extent.into(),
+                    ),
                     &mut self.frame_resource_pools[frame_data.frame_index as usize],
                 ),
                 frame_data.command_buffer,
@@ -705,157 +865,23 @@ impl<'a> Gpu<'a> {
                     frame_graph: &mut frame_graph,
                     pending_transfers: &pending_transfers,
                 }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
-            let mut render_commands = RenderCommands::new(
-                device.clone(),
-                frame_data.command_buffer,
-                queue_family_indices,
-                frame_graph.gpu(),
+            let frame_graph = frame_graph.render(
+                interface,
                 compute_state.semaphore,
                 compute_state.timeline_value,
-                &self.tmp_alloc,
-                self.buffered_frames,
+                self.buffered_frames
             )?;
-            frame_graph.render(interface, &mut render_commands)?;
-            let (transfer_fence, mut wait_semaphores, mut wait_values, mut wait_stages) =
-                if render_commands.transfer_commands.is_empty() {
-                    let frame_graph_count = frame_graph.wait_semaphore_count() as usize;
-                    (
-                        vk::Fence::null(),
-                        FixedVec
-                            ::with_capacity(frame_graph_count + 2, alloc)
-                            .context_with(|| ErrorContext::VecError(location!()))?,
-                        FixedVec
-                            ::with_capacity(frame_graph_count + 2, alloc)
-                            .context_with(|| ErrorContext::VecError(location!()))?,
-                        FixedVec
-                            ::with_capacity(frame_graph_count + 2, alloc)
-                            .context_with(|| ErrorContext::VecError(location!()))?,
-                    )
-                } else {
-                    let frame_graph_count = frame_graph.wait_semaphore_count() as usize;
-                    let mut transfer_command_buffers = FixedVec
-                        ::with_capacity(render_commands.transfer_commands.len(), alloc)
-                        .context_with(|| ErrorContext::VecError(location!()))?;
-                    let mut graphics_command_buffers = FixedVec
-                        ::with_capacity(render_commands.transfer_commands.len(), alloc)
-                        .context_with(|| ErrorContext::VecError(location!()))?;
-                    for storage in &render_commands.transfer_commands {
-                        let command_buffer = storage.transfer_command_buffer;
-                        unsafe {
-                            device.end_command_buffer(command_buffer)
-                                .context(ErrorContext::CommandBufferEndError(location!()))?
-                        }
-                        transfer_command_buffers.push(command_buffer).ok();
-                        let command_buffer = storage.graphics_command_buffer;
-                        unsafe {
-                            device.end_command_buffer(command_buffer)
-                                .context(ErrorContext::CommandBufferEndError(location!()))?
-                        }
-                        graphics_command_buffers.push(command_buffer).ok();
-                    }
-                    let fence_info = vk::FenceCreateInfo {
-                        s_type: vk::StructureType::FENCE_CREATE_INFO,
-                        ..Default::default()
-                    };
-                    let transfer_fence = unsafe {
-                        device.create_fence(&fence_info, None)
-                    }.context_with(|| format_compact!("failed to create fence at {}", location!()))?;
-                    self.sync_transfer_timeline_value += 1;
-                    let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
-                        s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                        signal_semaphore_value_count: 1,
-                        p_signal_semaphore_values: &self.sync_transfer_timeline_value,
-                        ..Default::default()
-                    };
-                    let submit_info = vk::SubmitInfo {
-                        s_type: vk::StructureType::SUBMIT_INFO,
-                        command_buffer_count: transfer_command_buffers.len() as u32,
-                        p_command_buffers: transfer_command_buffers.as_ptr(),
-                        signal_semaphore_count: 1,
-                        p_signal_semaphores: &self.sync_transfer_semaphore,
-                        ..Default::default()
-                    }.push_next(&mut timeline_info);
-                    unsafe {
-                        device.queue_submit(
-                            transfer_queue,
-                            &[submit_info],
-                            vk::Fence::null(),
-                        ).context(ErrorContext::TransferQueueSubmitError(location!()))?;
-                    };
-                    let wait_value = self.sync_transfer_timeline_value;
-                    let wait_stage = vk::PipelineStageFlags::TRANSFER;
-                    self.sync_transfer_timeline_value += 1;
-                    let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
-                        s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                        wait_semaphore_value_count: 1,
-                        p_wait_semaphore_values: &wait_value,
-                        signal_semaphore_value_count: 1,
-                        p_signal_semaphore_values: &self.sync_transfer_timeline_value,
-                        ..Default::default()
-                    };
-                    let submit_info = vk::SubmitInfo {
-                        s_type: vk::StructureType::SUBMIT_INFO,
-                        command_buffer_count: graphics_command_buffers.len() as u32,
-                        p_command_buffers: graphics_command_buffers.as_ptr(),
-                        wait_semaphore_count: 1,
-                        p_wait_semaphores: &self.sync_transfer_semaphore,
-                        p_wait_dst_stage_mask: &wait_stage,
-                        signal_semaphore_count: 1,
-                        p_signal_semaphores: &self.sync_transfer_semaphore,
-                        ..Default::default()
-                    }.push_next(&mut timeline_info);
-                    unsafe {
-                        device.queue_submit(
-                            graphics_queue,
-                            &[submit_info],
-                            transfer_fence,
-                        ).context(ErrorContext::GraphicsQueueSubmitError(location!()))?;
-                    }
-                    let mut wait_semaphores = FixedVec
-                        ::with_capacity(frame_graph_count + 3, alloc)
-                        .context_with(|| ErrorContext::VecError(location!()))?;
-                    wait_semaphores.push(self.sync_transfer_semaphore).ok();
-                    let mut wait_values = FixedVec
-                        ::with_capacity(frame_graph_count + 3, alloc)
-                        .context_with(|| ErrorContext::VecError(location!()))?;
-                    wait_values.push(self.sync_transfer_timeline_value).ok();
-                    let mut wait_stages = FixedVec
-                        ::with_capacity(frame_graph_count + 3, alloc)
-                        .context_with(|| ErrorContext::VecError(location!()))?;
-                    wait_stages.push(vk::PipelineStageFlags::TRANSFER).ok();
-                    (transfer_fence, wait_semaphores, wait_values, wait_stages)
-                };
-            let signal_count = frame_graph.signal_semaphore_count() as usize;
-            let mut signal_semaphores = FixedVec
-                ::with_capacity(signal_count + 2, alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            let mut signal_values = FixedVec
-                ::with_capacity(signal_count + 2, alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            let g = self.global_resources.read().unwrap();
-            frame_graph.collect_semaphores(
-                |id, value| {
-                    let handle = g.get_timeline_semaphore(id)?;
-                    signal_semaphores.push(handle).unwrap();
-                    signal_values.push(value).unwrap();
-                    Ok(())
-                },
-                |id, value, stage| {
-                    let handle = g.get_timeline_semaphore(id)?;
-                    wait_semaphores.push(handle).unwrap();
-                    wait_values.push(value).unwrap();
-                    wait_stages.push(stage.into()).unwrap();
-                    Ok(())
-                }
-            )?;
-            self.sync_transfer_commands.move_from_vec(&mut render_commands.transfer_commands);
-            (
-                transfer_fence,
-                wait_semaphores, wait_values, wait_stages,
-                signal_semaphores, signal_values,
-                frame_graph.finalize(),
-            )
+            Self::process_frame_graph(
+                alloc,
+                frame_graph,
+                graphics_queue,
+                transfer_queue,
+                self.sync_transfer_semaphore,
+                &mut self.sync_transfer_timeline_value,
+                &mut self.sync_transfer_commands,
+            )?
         };
+        let mut frame_context = frame_context.take().unwrap();
         let mut image_state = frame_data.image_state;
         let graphics_queue_index = queue_family_indices.graphics_index();
         if let Some((render_image, range_info)) = frame_context
@@ -1028,4 +1054,15 @@ impl<'a> Gpu<'a> {
         self.vulkan_context
             .destroy_swapchain(self.main_thread_context.graphics_pool(), &host_allocators);
     }
+}
+
+#[derive(Default)]
+struct RenderResult<'a> {
+    frame_context: Option<FrameContext<'a>>,
+    wait_semaphores: FixedVec<'a, vk::Semaphore, ArenaAlloc>,
+    wait_values: FixedVec<'a, u64, ArenaAlloc>,
+    wait_stages: FixedVec<'a, vk::PipelineStageFlags, ArenaAlloc>,
+    signal_semaphores: FixedVec<'a, vk::Semaphore, ArenaAlloc>,
+    signal_values: FixedVec<'a, u64, ArenaAlloc>,
+    transfer_fence: vk::Fence,
 }

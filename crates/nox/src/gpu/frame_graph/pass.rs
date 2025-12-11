@@ -9,7 +9,7 @@ use nox_mem::{vec_types::{FixedVec, Vector}};
 use nox_alloc::arena_alloc::ArenaAlloc;
 
 use crate::dev::{
-    error::{Error, Context, Location, ErrorContext},
+    error::{Error, Context, Location, location, caller, ErrorContext},
     has_not_bits,
 };
 
@@ -26,7 +26,7 @@ pub(super) struct Pass<'a> {
     pub depth_write: Option<(bool, WriteInfo)>,
     pub render_area: Option<vk::Rect2D>,
     pub msaa_samples: MSAA,
-    pub loc: &'static Location,
+    pub loc: Location,
 }
 
 impl<'a> Pass<'a> {
@@ -35,20 +35,20 @@ impl<'a> Pass<'a> {
         id: PassId,
         info: PassInfo,
         alloc: &'a ArenaAlloc,
-        loc: &'static Location<'static>,
+        loc: Location,
     ) -> Result<Self> {
         let reads = FixedVec
             ::with_capacity(info.max_reads as usize, alloc)
-            .context_with(|loc| ErrorContext::VecError(loc))?;
+            .context_with(|| ErrorContext::VecError(location!()))?;
         let writes = FixedVec
             ::with_capacity(info.max_color_writes as usize, alloc)
-            .context_with(|loc| ErrorContext::VecError(loc))?;
+            .context_with(|| ErrorContext::VecError(location!()))?;
         let signal_semaphores = FixedVec
             ::with_capacity(info.signal_semaphores as usize, alloc)
-            .context_with(|loc| ErrorContext::VecError(loc))?;
+            .context_with(|| ErrorContext::VecError(location!()))?;
         let wait_semaphores = FixedVec
             ::with_capacity(info.wait_semaphores as usize, alloc)
-            .context_with(|loc| ErrorContext::VecError(loc))?;
+            .context_with(|| ErrorContext::VecError(location!()))?;
         Ok(Self {
             id,
             reads,
@@ -74,7 +74,7 @@ impl<'a> Pass<'a> {
             let writes = &self.writes;
             let mut write_ranges = FixedVec::<(ResourceId, WriteAccess), ArenaAlloc>
                 ::with_capacity(writes.len(), alloc)
-                .context_with(|loc| ErrorContext::VecError(loc))?;
+                .context_with(|| ErrorContext::VecError(location!()))?;
             for write in writes {
 
                 let id = write.main_id;
@@ -115,7 +115,7 @@ impl<'a> Pass<'a> {
                 else {
                     let mut ranges = FixedVec
                         ::with_capacity(writes.len(), alloc)
-                        .context_with(|loc| ErrorContext::VecError(loc))?;
+                        .context_with(|| ErrorContext::VecError(location!()))?;
                     ranges.push(current_range.subresource_info).unwrap();
                     write_ranges.push((id, WriteAccess::Partial(ranges))).unwrap();
                 }
@@ -126,7 +126,7 @@ impl<'a> Pass<'a> {
 }
 
 pub struct PassBuilder<'a> {
-    pub(super) pass: &'a Pass<'a>,
+    pub(super) pass: &'a mut Pass<'a>,
 }
 
 impl<'a> PassBuilder<'a> {
@@ -135,13 +135,13 @@ impl<'a> PassBuilder<'a> {
     pub fn with_read(&mut self, read_info: ReadInfo) -> Result<&mut Self> {
         if has_not_bits!(read_info.resource_id.flags, ResourceFlags::Sampleable) {
             return Err(Error::just_context("image read must be sampleable")
-            ).context(ErrorContext::EventError(Location::caller()))
+            ).context_with(|| ErrorContext::EventError(caller!()))
         }
         self.pass.reads
             .push(read_info)
             .context("read capacity exceeded")
-            .context(ErrorContext::EventError(Location::caller()))?;
-        self
+            .context_with(|| ErrorContext::EventError(caller!()))?;
+        Ok(self)
     }
 
     #[track_caller]
@@ -151,7 +151,7 @@ impl<'a> PassBuilder<'a> {
                 format_compact!("write MSAA sample count {} must match pass sample count {}",
                     write.samples(), self.pass.msaa_samples,
                 )
-            )).context(ErrorContext::EventError(Location::caller()))
+            )).context(ErrorContext::EventError(caller!()))
         }
         if write.samples() != MSAA::X1 {
             if let Some(resolve) = write.resolve.map(|v| v.0) {
@@ -160,22 +160,22 @@ impl<'a> PassBuilder<'a> {
                         format_compact!("write resolve image sample count must be 1, given sample count was {}",
                             resolve.samples(),
                         )
-                    )).context(ErrorContext::EventError(Location::caller()))
+                    )).context(ErrorContext::EventError(caller!()))
                 }
                 if write.main_id.format != resolve.format {
                     return Err(Error::just_context(
-                        format_compact!("write resolve image format must be the same as the main image format, resolve format was {} while sampled format was {}",
+                        format_compact!("write resolve image format {:?} must be the same as the main image format {:?}",
                             resolve.samples(), write.main_id.format,
                         )
-                    )).context(ErrorContext::EventError(Location::caller()))
+                    )).context(ErrorContext::EventError(caller!()))
                 }
             }
         }
         self.pass.writes
             .push(write)
             .context("write capacity exceeded")
-            .context(ErrorContext::EventError(Location::caller()))?;
-        self
+            .context_with(|| ErrorContext::EventError(caller!()))?;
+        Ok(self)
     }
 
     #[track_caller]
@@ -185,7 +185,7 @@ impl<'a> PassBuilder<'a> {
                 format_compact!("write MSAA sample count {} must match pass sample count {}",
                     write.samples(), self.pass.msaa_samples,
                 )
-            )).context(ErrorContext::EventError(Location::caller()))
+            )).context(ErrorContext::EventError(caller!()))
         }
         if write.samples() != MSAA::X1 {
             if let Some(resolve) = write.resolve.map(|v| v.0) {
@@ -194,19 +194,20 @@ impl<'a> PassBuilder<'a> {
                         format_compact!("write resolve image sample count must be 1, given sample count was {}",
                             resolve.samples(),
                         )
-                    )).context(ErrorContext::EventError(Location::caller()))
+                    )).context(ErrorContext::EventError(caller!()))
                 }
                 if write.main_id.format != resolve.format {
                     return Err(Error::just_context(
-                        format_compact!("write resolve image format must be the same as the main image format, resolve format was {} while sampled format was {}",
+                        format_compact!(
+                            "write resolve image format {:?} must be the same as the main image format {:?}",
                             resolve.samples(), write.main_id.format,
                         )
-                    )).context(ErrorContext::EventError(Location::caller()))
+                    )).context(ErrorContext::EventError(caller!()))
                 }
             }
         }
         self.pass.depth_write = Some((false, write));
-        self
+        Ok(self)
     }
 
     #[track_caller]
@@ -216,7 +217,7 @@ impl<'a> PassBuilder<'a> {
                 format_compact!("write MSAA sample count {} must match pass sample count {}",
                     write.samples(), self.pass.msaa_samples,
                 )
-            )).context(ErrorContext::EventError(Location::caller()))
+            )).context(ErrorContext::EventError(caller!()))
         }
         if write.samples() != MSAA::X1 {
             if let Some(resolve) = write.resolve.map(|v| v.0) {
@@ -225,19 +226,20 @@ impl<'a> PassBuilder<'a> {
                         format_compact!("write resolve image sample count must be 1, given sample count was {}",
                             resolve.samples(),
                         )
-                    )).context(ErrorContext::EventError(Location::caller()))
+                    )).context(ErrorContext::EventError(caller!()))
                 }
                 if write.main_id.format != resolve.format {
                     return Err(Error::just_context(
-                        format_compact!("write resolve image format must be the same as the main image format, resolve format was {} while sampled format was {}",
+                        format_compact!(
+                            "write resolve image format {:?} must be the same as the main image format {:?}",
                             resolve.samples(), write.main_id.format,
                         )
-                    )).context(ErrorContext::EventError(Location::caller()))
+                    )).context(ErrorContext::EventError(caller!()))
                 }
             }
         }
         self.pass.depth_write = Some((true, write));
-        self
+        Ok(self)
     }
 
     fn with_render_area(&mut self, render_area: RenderArea) -> &mut Self {
@@ -256,8 +258,8 @@ impl<'a> PassBuilder<'a> {
         self.pass.wait_semaphores
             .push((id, value, stage))
             .context("wait semaphore capacity exceeded")
-            .context(ErrorContext::EventError(Location::caller()))?;
-        self
+            .context_with(|| ErrorContext::EventError(caller!()))?;
+        Ok(self)
     }
 
     #[track_caller]
@@ -269,7 +271,7 @@ impl<'a> PassBuilder<'a> {
         self.pass.signal_semaphores
             .push((id, value))
             .context("signal semaphore capacity exceeded")
-            .context(ErrorContext::EventError(Location::caller()))?;
-        self
+            .context_with(|| ErrorContext::EventError(caller!()))?;
+        Ok(self)
     }
 }

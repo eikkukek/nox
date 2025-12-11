@@ -49,7 +49,7 @@ impl DescriptorPool {
         let handle = unsafe {
             device
                 .create_descriptor_pool(&info, None)
-                .context_with(|| format_compact!("failed to create descriptor pool at {}", location!()))
+                .context_with(|| format_compact!("failed to create descriptor pool at {}", location!()))?
         };
         Ok(Self {
             device,
@@ -68,7 +68,9 @@ impl DescriptorPool {
     {
         let count = set_layouts.len() as u32;
         if self.allocated_sets + count > self.max_sets {
-            return Err(Error::new("descriptor pool was full with max sets {}", self.max_sets))
+            return Err(Error::just_context(format_compact!(
+                "descriptor pool was full with max sets {}", self.max_sets
+            )))
         }
         let info = vk::DescriptorSetAllocateInfo {
             s_type: vk::StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -77,13 +79,15 @@ impl DescriptorPool {
             p_set_layouts: set_layouts.as_ptr(),
             ..Default::default()
         };
-        let mut sets = FixedVec::with_capacity(count as usize, alloc)?;
+        let mut sets = FixedVec
+            ::with_capacity(count as usize, alloc)
+            .context("vec error")?;
         let device = &self.device;
         let res = unsafe {
             (device.fp_v1_0().allocate_descriptor_sets)(device.handle(), &info, sets.as_mut_ptr())
         };
         if res != vk::Result::SUCCESS {
-            return Err(res.into())
+            return Err(Error::new("failed to allocate descriptor sets", res))
         }
         unsafe {
             sets.set_len(count as usize);
@@ -98,7 +102,10 @@ impl DescriptorPool {
     ) -> Result<()>
     {
         unsafe {
-            self.device.free_descriptor_sets(self.handle, descriptor_sets)?;
+            self.device.free_descriptor_sets(
+                self.handle,
+                descriptor_sets
+            ).context("failed to free descriptor sets")?;
         }
         self.allocated_sets -= descriptor_sets.len() as u32;
         Ok(())
