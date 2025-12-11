@@ -19,6 +19,11 @@ use crate::{
 
 use super::*;
 
+pub use winit::keyboard::KeyCode;
+pub use winit::event::MouseButton;
+pub use winit::window::CursorIcon;
+pub use winit::monitor::MonitorHandle;
+
 #[derive(Default, Clone, Copy)]
 pub struct InputState {
     pub(super) pressed: bool,

@@ -1,5 +1,9 @@
-mod window_context;
+pub mod win;
 mod expand_error;
+
+pub mod error_util {
+    pub use super::expand_error::*;
+}
 
 use std::{
     sync::{Arc, RwLock, OnceLock},
@@ -22,25 +26,17 @@ use nox_mem::string_types::ArrayString;
 use nox_error::Context;
 use nox_mem::vec_types::Vector;
 
-pub use winit::keyboard::KeyCode;
-pub use winit::event::MouseButton;
-pub use winit::window::CursorIcon;
-pub use winit::monitor::MonitorHandle;
-
-pub use window_context::WindowContext;
-pub use expand_error::{fn_expand_error, fn_expand_warn};
-
 use crate::{
-    dev::error::ErrorContext,
+    dev::error::{ErrorContext, Tracked},
     log,
-    expand_error,
     Event,
+    gpu,
+    expand_error,
 };
 
 use super::{
     interface::Interface,
     memory::Memory,
-    gpu::Gpu,
     clipboard::Clipboard,
 };
 
@@ -53,10 +49,10 @@ pub struct Nox<'a, I>
         I: Interface,
 {
     interface: Arc<RwLock<I>>,
-    window_context: WindowContext,
+    window_context: win::WindowContext,
     window: Option<Arc<Window>>,
     memory: &'a Memory,
-    gpu: Option<Gpu<'a>>,
+    gpu: Option<gpu::Gpu<'a>>,
     flags: u32,
 }
 
@@ -114,7 +110,7 @@ impl<'a, I: Interface> Nox<'a, I>
             window: None,
             memory,
             gpu: None,
-            window_context: WindowContext::new(),
+            window_context: win::WindowContext::new(),
             flags: 0,
         }
     }
@@ -149,7 +145,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
         match event {
             WindowEvent::CursorMoved { device_id: _, position } => {
                 self.window_context.cursor_position = (position.x, position.y);
-                self.window_context.flags |= WindowContext::CURSOR_MOVED;
+                self.window_context.flags |= win::WindowContext::CURSOR_MOVED;
             },
             WindowEvent::MouseWheel { device_id: _, delta, phase: _ } => {
                 match delta {
@@ -214,7 +210,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                                 .as_mut()
                                 .unwrap()
                                 .context(),
-                        }).context_from_origin(|orig| ErrorContext::EventError(orig))
+                        }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
                     {
                         event_loop.exit();
                         self.flags |= Self::ERROR;
@@ -225,7 +221,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                         window.set_cursor(self.window_context.current_cursor);
                     }
                     self.window_context.flags &= !(
-                        WindowContext::CURSOR_SET | WindowContext::CURSOR_MOVED
+                        win::WindowContext::CURSOR_SET | win::WindowContext::CURSOR_MOVED
                     );
                     self.window_context.input_text.clear();
                     window.request_redraw();
@@ -281,7 +277,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
             event_loop.set_control_flow(ControlFlow::Poll);
             let host_allocators = self.memory.gpu().host_allocators();
             window.request_redraw();
-            self.gpu = match Gpu
+            self.gpu = match gpu::Gpu
                 ::new(
                     &window,
                     &init_settings.app_name,

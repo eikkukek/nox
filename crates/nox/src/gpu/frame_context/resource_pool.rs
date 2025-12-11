@@ -106,16 +106,6 @@ impl<'a> ResourcePoolContext<'a>
     }
 
     #[inline(always)]
-    pub fn is_valid_id(&self, id: ResourceId) -> bool {
-        if has_bits!(id.flags, ResourceFlags::Transient) {
-            self.pool.transient_images.contains(id.index)
-        }
-        else {
-            self.context.is_valid_image(id.image_id)
-        }
-    }
-
-    #[inline(always)]
     pub fn add_image(
         &mut self,
         id: ImageId,
@@ -184,6 +174,9 @@ impl<'a> ResourcePoolContext<'a>
             if let Some(err) = image.validate_range(info) {
                 return Err(Error::new("invalid image range", err))
             }
+        }
+        if let Some(err) = image.validate_usage(vk::ImageUsageFlags::SAMPLED) {
+            return Err(Error::new("image has incompatible usage", err))
         }
         self.render_image = Some((resource_id.image_id, range_info, loc));
         Ok(())

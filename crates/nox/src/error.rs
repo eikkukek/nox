@@ -46,7 +46,7 @@ impl Debug for Error {
 
 impl Tracked for Error {
 
-    fn loc(&self) -> Location {
-        self.0.loc()
+    fn location(&self) -> Option<Location> {
+        self.0.location()
     }
 }

@@ -156,9 +156,6 @@ impl Shader {
         stage: ShaderStage,
     ) -> Result<Self, ShaderError>
     {
-        if spirv.len() % 4 != 0 {
-            return Err(ShaderError::InvalidSpirv)
-        }
         let compiler = Compiler::<targets::None>::new(Module::from_words(spirv))?;
         let mut uniforms = GlobalVec::new();
         let mut push_constants = GlobalVec::new();

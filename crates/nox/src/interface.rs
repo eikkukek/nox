@@ -12,7 +12,7 @@ pub trait Interface
     /// Gets called once right after start up.
     fn init(
         &mut self,
-        win: &mut WindowContext,
+        win: &mut win::WindowContext,
         gpu: &mut gpu::GpuContext,
     ) -> Result<()> { Ok(()) }
    

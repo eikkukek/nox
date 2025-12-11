@@ -99,7 +99,7 @@ impl Buffer {
         let has = self.properties.usage;
         (has_not_bits!(has, usage))
             .then_some(BufferError::UsageMismatch {
-                missing_usage: has ^ usage & has,
+                missing_usage: usage ^ has & usage,
         })
     }
 

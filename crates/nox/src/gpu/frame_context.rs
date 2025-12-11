@@ -101,11 +101,6 @@ impl<'a> FrameContext<'a> {
     }
 
     #[inline(always)]
-    pub fn is_valid_resource_id(&self, id: ResourceId) -> bool {
-        self.resource_pool.is_valid_id(id)
-    }
-
-    #[inline(always)]
     pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>> {
         self.resource_pool.get_image(resource_id)
     }

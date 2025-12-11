@@ -159,12 +159,17 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub fn supported_image_format<F: Format, U: Into<u32> + Copy>(
+    pub fn supported_image_format<F: Format>(
         &self,
         formats: &[F],
-        required_features: U,
+        required_features: &[FormatFeature],
     ) -> Option<F>
     {
+        let mut features = 0;
+        required_features
+            .iter()
+            .map(|&f| features |= f)
+            .count();
         for format in formats {
             let properties = unsafe {
                 self.instance
@@ -172,8 +177,8 @@ impl GlobalResources {
                         self.physical_device, format.as_vk_format())
             };
             if has_bits!(
-                    properties.optimal_tiling_features,
-                    vk::FormatFeatureFlags::from_raw(<U as Into<u32>>::into(required_features))
+                properties.optimal_tiling_features,
+                vk::FormatFeatureFlags::from_raw(features)
             ) {
                 return Some(*format)
             }

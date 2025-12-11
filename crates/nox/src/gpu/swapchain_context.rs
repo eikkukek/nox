@@ -12,8 +12,7 @@ use nox_mem::{vec_types::{Vector, FixedVec}};
 use nox_alloc::arena_alloc::*;
 
 use crate::{
-    dev::{error::{Result, Error, Context, location, ErrorContext}, utility::clamp},
-    has_bits, has_not_bits,
+    dev::{error::{Result, Error, Context, location, ErrorContext}, utility::clamp, has_bits, has_not_bits},
 };
 
 use super::{

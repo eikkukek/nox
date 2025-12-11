@@ -1,32 +1,61 @@
-pub type Location = &'static core::panic::Location<'static>;
+use crate::{Location, caller};
 
+pub trait ImplTry {}
+
+/// Trait for types that track [`Location`]s.
+///
+/// # Example
+/// ```rust
+/// use nox_error::Context;
+/// use nox_error::Tracked;
+///
+/// fallible().context_from_tracked(|orig| {
+///     format!("error at {}", orig.or_this())
+/// })?;
+/// ```
 pub trait Tracked {
     
-    fn loc(&self) -> Location;
+    fn location(&self) -> Option<Location>;
+
+    #[track_caller]
+    #[inline(always)]
+    fn location_or_this(&self) -> Location {
+        self.location()
+            .unwrap_or_else(|| caller!())
+    }
+
+    #[track_caller]
+    #[inline(always)]
+    fn or_this(&self) -> Location
+        where Self: ImplTry
+    {
+        self.location()
+            .unwrap_or_else(|| caller!())
+    }
 }
 
 impl Tracked for Location {
 
-    fn loc(&self) -> Location {
-        self
+    #[inline(always)]
+    fn location(&self) -> Option<Location> {
+        Some(*self)
     }
 }
 
-#[track_caller]
-pub fn location() -> Location {
-    core::panic::Location::caller()
-}
+impl ImplTry for Option<Location> {}
 
-#[macro_export]
-macro_rules! location {
-    () => {
-        $crate::tracked::location()
-    };
-}
+impl Tracked for Option<Location> {
 
-#[macro_export]
-macro_rules! caller {
-    () => {
-        core::panic::Location::caller()
-    };
+    #[inline(always)]
+    fn location(&self) -> Option<Location> {
+        *self
+    }
+
+    #[track_caller]
+    #[inline(always)]
+    fn or_this(&self) -> Location
+        where Self: ImplTry
+    {
+        self.unwrap_or_else(|| caller!())
+    }
 }

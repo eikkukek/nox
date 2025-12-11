@@ -19,10 +19,16 @@ pub trait Context<T, E>
     fn context<C>(self, ctx: C) -> Result<T>
         where C: Display + Send + Sync + 'static;
 
+    fn context_tracked<C>(self, ctx: C) -> Result<T>
+        where C: Display + Send + Sync + 'static;
+
     fn context_with<C>(self, f: impl FnMut() -> C) -> Result<T>
         where C: Display + Send + Sync + 'static;
 
-    /// Add context from a error with tracked location.
+    fn context_tracked_with<C>(self, f: impl FnMut() -> C) -> Result<T>
+        where C: Display + Send + Sync + 'static;
+
+    /// Add context from an error with possibly tracked location.
     ///
     /// # Example
     /// ``` rust
@@ -36,13 +42,39 @@ pub trait Context<T, E>
     /// }
     ///
     /// fn call_do_thing() -> Result<()> {
-    ///     do_thing().context_from_origin(|orig|
-    ///         format!("error origin: {orig}")
+    ///     do_thing().context_from_tracked(|orig|
+    ///         format!("error origin: {}", orig.or_this())
     ///     )?;
     ///     Ok(())
     /// }
     /// ```
-    fn context_from_origin<C>(self, f: impl FnMut(Location) -> C) -> Result<T>
+    fn context_from_tracked<C>(self, f: impl FnMut(Option<Location>) -> C) -> Result<T>
+        where
+            C: Display + Send + Sync + 'static,
+            E: Tracked;
+
+    /// Add context from an error with possibly tracked location in addition to tracking the caller
+    /// of this function.
+    ///
+    /// # Example
+    /// ``` rust
+    ///
+    /// use nox_error::Error;
+    /// use nox_error::Context;
+    /// use nox_error::Result;
+    ///
+    /// fn do_thing() -> Result<()> {
+    ///     Err(Error::just_ctx("failed"))
+    /// }
+    ///
+    /// fn call_do_thing() -> Result<()> {
+    ///     do_thing().context_tracked_from_tracked(|orig|
+    ///         format!("error origin: {}", orig.or_this())
+    ///     )?;
+    ///     Ok(())
+    /// }
+    /// ```
+    fn context_tracked_from_tracked<C>(self, f: impl FnMut(Option<Location>) -> C) -> Result<T>
         where
             C: Display + Send + Sync + 'static,
             E: Tracked;
@@ -50,35 +82,58 @@ pub trait Context<T, E>
 
 impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Result<T, E> {
     
-    #[track_caller]
     fn context<C>(self, ctx: C) -> Result<T>
         where C: Display + Send + Sync + 'static,
     {
-        let loc = caller!();
         self.map_err(|err| {
-            Error::new_internal(ctx, err, loc)
+            Error::new_internal(ctx, err, None)
         })
     }
 
     #[track_caller]
+    fn context_tracked<C>(self, ctx: C) -> Result<T>
+        where C: Display + Send + Sync + 'static,
+    {
+        self.map_err(|err| {
+            Error::new_internal(ctx, err, Some(caller!()))
+        })
+    }
+
     fn context_with<C>(self, mut f: impl FnMut() -> C) -> Result<T>
         where C: Display + Send + Sync + 'static,
     {
-        let loc = caller!();
         self.map_err(|err| {
-            Error::new_internal(f(), err, loc)
+            Error::new_internal(f(), err, None)
         })
     }
 
     #[track_caller]
-    fn context_from_origin<C>(self, mut f: impl FnMut(Location) -> C) -> Result<T>
+    fn context_tracked_with<C>(self, mut f: impl FnMut() -> C) -> Result<T>
+        where C: Display + Send + Sync + 'static
+    {
+        self.map_err(|err| {
+            Error::new_internal(f(), err, Some(caller!()))
+        })
+    }
+
+    fn context_from_tracked<C>(self, mut f: impl FnMut(Option<Location>) -> C) -> Result<T>
         where
             C: Display + Send + Sync + 'static,
             E: Tracked, 
     {
-        let loc = caller!();
         self.map_err(|err| {
-            Error::new_internal(f(err.loc()), err, loc)
+            Error::new_internal(f(err.location()), err, None)
+        })
+    }
+
+    #[track_caller]
+    fn context_tracked_from_tracked<C>(self, mut f: impl FnMut(Option<Location>) -> C) -> Result<T>
+        where
+            C: Display + Send + Sync + 'static,
+            E: Tracked
+    {
+        self.map_err(|err| {
+            Error::new_internal(f(err.location()), err, Some(caller!()))
         })
     }
 }

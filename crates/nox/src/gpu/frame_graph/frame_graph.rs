@@ -12,7 +12,7 @@ use nox_alloc::arena_alloc::ArenaAlloc;
 
 use crate::dev::{
     export::*,
-    error::{Error, Context, Tracked, ErrorContext, caller},
+    error::{Error, Context, ErrorContext, caller, location},
     has_not_bits,
 };
 
@@ -86,7 +86,7 @@ impl<'a> FrameGraph<'a> {
     #[track_caller]
     pub fn add_transient_image(
         &mut self,
-        f: &mut dyn FnMut(&mut ImageBuilder),
+        f: impl FnMut(&mut ImageBuilder),
     ) -> Result<ResourceId> {
         self.frame_context.add_transient_image(f, caller!())
     }
@@ -95,7 +95,7 @@ impl<'a> FrameGraph<'a> {
     pub fn add_pass(
         &mut self,
         info: PassInfo,
-        f: &mut dyn FnMut(&mut Pass),
+        mut f: impl FnMut(&mut PassBuilder) -> Result<()>,
     ) -> Result<PassId> {
         let alloc = self.alloc;
         let pass = self.passes.push(Pass::new(
@@ -105,7 +105,7 @@ impl<'a> FrameGraph<'a> {
             caller!()
         )?);
         self.next_pass_id += 1;
-        f(pass);
+        f(&mut PassBuilder { pass, }).context("failed to build pass")?;
         self.signal_semaphore_count += pass.signal_semaphores.len() as u32;
         self.wait_semaphore_count += pass.wait_semaphores.len() as u32;
         if !pass.validate(alloc)? {
@@ -135,8 +135,9 @@ impl<'a> FrameGraph<'a> {
         let mut passes = FixedVec
             ::with_capacity(self.passes.len(), alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
-
-        passes.move_from_vec(&mut self.passes);
+        passes
+            .move_from_vec(&mut self.passes)
+            .context_with(|| ErrorContext::VecError(location!()))?;
 
         let mut render_commands = RenderCommands::new(
             command_buffer, &mut self, frame_semaphore, frame_semaphore_value,
@@ -172,8 +173,9 @@ impl<'a> FrameGraph<'a> {
                 let image = render_commands.frame_graph.frame_context.get_image(resource_id)?;
                 let properties = image.properties;
                 if has_not_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
-                    return Err(Error::just_context("image read must be sampleable"
-                    )).context(ErrorContext::EventError(read.loc))
+                    return Err(Error::just_context(format_compact!("while processing pass at {}", pass.location_or_this())
+                    )).context("image read must be sampleable")
+                        .context(ErrorContext::EventError(read.location_or_this()))
                 }
                 let state = image.state();
                 let dst_state = ImageState::new(
@@ -215,8 +217,7 @@ impl<'a> FrameGraph<'a> {
                 Depth,
                 DepthStencil,
             }
-            let mut process_write = |write: &WriteInfo, ty: AttachmentType|
-                -> Result<vk::RenderingAttachmentInfo<'static>>
+            let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>>
             {
                 let resource_id = write.main_id;
                 let image = render_commands.frame_graph.frame_context.get_image(resource_id)?;
@@ -226,7 +227,7 @@ impl<'a> FrameGraph<'a> {
                         if has_not_bits!(properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT) {
                             return Err(Error::just_context(
                                 "color write image must be usable as an color attachment"
-                            )).context(ErrorContext::EventError(write.loc))
+                            )).context(ErrorContext::EventError(write.location_or_this()))
                         }
                         (
                             vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
@@ -238,7 +239,7 @@ impl<'a> FrameGraph<'a> {
                         if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
                             return Err(Error::just_context(
                                 "depth/stencil write image must be usable as an depth/stencil attachment"
-                            )).context(ErrorContext::EventError(write.loc))
+                            )).context(ErrorContext::EventError(write.location_or_this()))
                         }
                         (
                             vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
@@ -251,7 +252,7 @@ impl<'a> FrameGraph<'a> {
                         if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
                             return Err(Error::just_context(
                                 "depth/stencil write image must be usable as an depth/stencil attachment"
-                            )).context(ErrorContext::EventError(write.loc))
+                            )).context(ErrorContext::EventError(write.location_or_this()))
                         }
                         (
                             vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
@@ -304,7 +305,7 @@ impl<'a> FrameGraph<'a> {
                         return Err(Error::just_context(format_compact!(
                             "resolve image dimensions {} must match main image dimensions {}",
                             resolve_properties.dimensions, properties.dimensions,
-                        ))).context(ErrorContext::EventError(resource_id.loc))
+                        ))).context(ErrorContext::EventError(resource_id.location_or_this()))
                     }
                     let state = resolve_image.state();
                     let range_info = write.resolve_range_info;
@@ -371,7 +372,11 @@ impl<'a> FrameGraph<'a> {
                     .context_with(|| ErrorContext::VecError(location!()))?;
                 for write in writes {
                     color_outputs
-                        .push(process_write(write, AttachmentType::Color)?).unwrap();
+                        .push(process_write(write, AttachmentType::Color)
+                            .context_with(||
+                                format_compact!("error while processing pass at {}", pass.location_or_this())
+                            )?
+                        ).unwrap();
                 }
             }
             let mut stencil_output = None;
@@ -434,7 +439,7 @@ impl<'a> FrameGraph<'a> {
             interface.event(Event::RenderWork {
                 pass_id: pass.id,
                 commands: &mut render_commands,
-            }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
+            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             unsafe { device.cmd_end_rendering(command_buffer); }
         }
         Ok(FrameGraphResult {

@@ -1,5 +1,5 @@
 use crate::{
-    WindowContext,
+    win,
     gpu,
 };
 
@@ -8,7 +8,7 @@ pub enum Event<'a, 'b, 'c> {
     ///
     /// Happens once per frame.
     Update {
-        win: &'a mut WindowContext,
+        win: &'a mut win::WindowContext,
         gpu: gpu::GpuContext<'a>,
     },
     /// Nox is recording compute commands.

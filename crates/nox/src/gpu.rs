@@ -36,11 +36,6 @@ use winit::{
     dpi::PhysicalSize, window::Window
 };
 
-use token_cell::{
-    prelude::*,
-    runtime_token,
-};
-
 use compact_str::format_compact;
 
 use nox_mem::{
@@ -53,7 +48,7 @@ use nox_alloc::arena_alloc::*;
 use crate::dev::{
     export::*,
     utility::clamp,
-    error::{self, Result, Error, Context, ErrorContext, location},
+    error::{self, Result, Error, Context, ErrorContext, Tracked, location},
     format_location,
 };
 
@@ -83,8 +78,6 @@ use swapchain_context::PresentResult;
 use thread_context::ThreadContext;
 
 use swapchain_pass::SwapchainPassPipelineData;
-
-runtime_token!(pub(crate) FrameToken);
 
 pub type DeviceName = ArrayString<{ash::vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 
@@ -149,7 +142,6 @@ pub(crate) struct Gpu<'a> {
     buffered_frames: u32,
     tmp_alloc: Arc<ArenaAlloc>,
     frame_buffer_size: image::Dimensions,
-    frame_token: FrameToken,
 }
 
 impl<'a> Gpu<'a> {
@@ -166,7 +158,9 @@ impl<'a> Gpu<'a> {
     {
         buffered_frames = clamp(buffered_frames, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
         assert!(buffered_frames <= MAX_BUFFERED_FRAMES);
-        host_allocators.realloc_frame_graphs(buffered_frames);
+        host_allocators
+            .realloc_frame_graphs(buffered_frames)
+            .context("failed to allocate frame graph host allocators")?;
         let tmp_alloc = Arc::new(
             ArenaAlloc
                 ::new(memory_layout.tmp_arena_size())
@@ -217,7 +211,6 @@ impl<'a> Gpu<'a> {
             sync_transfer_commands: Default::default(),
             tmp_alloc,
             frame_buffer_size: image::Dimensions::new(1, 1, 1),
-            frame_token: FrameToken::new().unwrap(),
             transfer_requests: Default::default(),
         };
         let mut frame_resource_pools = ArrayVec::new();
@@ -288,12 +281,7 @@ impl<'a> Gpu<'a> {
     }
 
     #[inline(always)]
-    pub fn device_info(&self) -> &PhysicalDeviceInfo {
-        self.vulkan_context.physical_device_info()
-    }
-
-    #[inline(always)]
-    pub fn context(&mut self) -> GpuContext {
+    pub fn context(&mut self) -> GpuContext<'_> {
         GpuContext {
             global_resources: self.global_resources.write().unwrap(),
             transfer_requests: &mut self.transfer_requests,
@@ -405,7 +393,7 @@ impl<'a> Gpu<'a> {
                     request_id: id,
                     commands: &mut commands,
                 })
-                .context_from_origin(|orig| ErrorContext::EventError(orig))?;
+                .context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
 
             self.transfer_commands.push(storage);
         }
@@ -728,7 +716,7 @@ impl<'a> Gpu<'a> {
                 interface.event(Event::FrameBufferResized {
                     gpu: &mut context,
                     new_size: frame_buffer_size,
-                }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
+                }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             }
             self.async_transfer_requests(interface)
                 .context("async transfer requests failed")?;
@@ -757,7 +745,8 @@ impl<'a> Gpu<'a> {
             interface
                 .event(Event::ComputeWork {
                     commands: &mut compute_commands
-                }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
+                }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
+            let compute_commands = compute_commands.finish();
             unsafe {
                 device.end_command_buffer(compute_state.command_buffer).unwrap();
             }
@@ -864,7 +853,7 @@ impl<'a> Gpu<'a> {
                 .event(Event::Render {
                     frame_graph: &mut frame_graph,
                     pending_transfers: &pending_transfers,
-                }).context_from_origin(|orig| ErrorContext::EventError(orig))?;
+                }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             let frame_graph = frame_graph.render(
                 interface,
                 compute_state.semaphore,
@@ -959,9 +948,10 @@ impl<'a> Gpu<'a> {
                 device.cmd_bind_descriptor_sets(
                     command_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
-                    self.swapchain_pass_pipeline_data.get_pipeline_layout().unwrap(),
+                    self.swapchain_pass_pipeline_data.get_pipeline_layout(frame_context.gpu_mut()).unwrap(),
                     0,
                     &[self.swapchain_pass_pipeline_data.get_descriptor_set(
+                        frame_context.gpu_mut(),
                         render_image,
                         range_info,
                         frame_data.frame_index,

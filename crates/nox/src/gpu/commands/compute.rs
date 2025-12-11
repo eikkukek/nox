@@ -13,10 +13,15 @@ pub struct ComputeCommands<'a> {
     context: GpuContext<'a>,
     device: Arc<ash::Device>,
     current_pipeline: Option<ComputePipelineId>,
-    pub(crate) wait_semaphores: GlobalVec<(TimelineSemaphoreId, u64, PipelineStage)>,
-    pub(crate) signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
+    wait_semaphores: GlobalVec<(TimelineSemaphoreId, u64, PipelineStage)>,
+    signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
     tmp_alloc: &'a ArenaAlloc,
     queue_index: u32,
+}
+
+pub(crate) struct ComputeCommandsStorage {
+    pub wait_semaphores: GlobalVec<(TimelineSemaphoreId, u64, PipelineStage)>,
+    pub signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
 }
 
 impl<'a> ComputeCommands<'a> {
@@ -174,5 +179,9 @@ impl<'a> ComputeCommands<'a> {
     #[inline(always)]
     pub fn signal_semaphore(&mut self, id: TimelineSemaphoreId, value: u64) {
         self.signal_semaphores.push((id, value));
+    }
+
+    pub(crate) fn finish(self) -> ComputeCommandsStorage {
+        ComputeCommandsStorage { wait_semaphores: self.wait_semaphores, signal_semaphores: self.signal_semaphores }
     }
 }

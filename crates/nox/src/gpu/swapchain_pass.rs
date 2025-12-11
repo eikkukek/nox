@@ -6,7 +6,7 @@ use memmap2::Mmap;
 
 use ash::vk;
 
-use nox_mem::{slot_map::SlotMapError, vec_types::{Vector, ArrayVec, GlobalVec}};
+use nox_mem::{vec_types::{Vector, ArrayVec, GlobalVec}};
 
 use nox_alloc::arena_alloc::*;
 
@@ -140,11 +140,10 @@ impl SwapchainPassPipelineData {
         tmp_alloc: &ArenaAlloc,
     ) -> Result<vk::Pipeline>
     {
+        let mut g = self.global_resources.write().unwrap();
         if let Some(pipeline) = self.last_pipeline {
             if format == pipeline.1 {
-                return Ok(self.global_resources
-                    .read()
-                    .unwrap()
+                return Ok(g
                     .get_graphics_pipeline(pipeline.0)
                     .unwrap().handle
                 )
@@ -152,9 +151,7 @@ impl SwapchainPassPipelineData {
         }
         if let Some(pipeline) = self.pipelines.iter().find(|p| p.1 == format) {
             self.last_pipeline = Some(*pipeline);
-            return Ok(self.global_resources
-                .read()
-                .unwrap()
+            return Ok(g
                 .get_graphics_pipeline(pipeline.0)
                 .unwrap().handle
             )
@@ -163,28 +160,22 @@ impl SwapchainPassPipelineData {
         info.with_color_output_vk(format, WriteMask::all(), None);
         let mut pipeline = None;
         let stack_guard = ArenaGuard::new(&tmp_alloc);
-        self.global_resources
-            .write()
-            .unwrap()
+        g
             .create_graphics_pipelines(
                 &[info],
                 Some(self.pipeline_cache_id),
                 &stack_guard, |_, v| { pipeline = Some(v) },
             )?;
         let pipeline = self.pipelines.push((pipeline.unwrap(), format));
-        Ok(self.global_resources
-            .read()
-            .unwrap()
+        Ok(g
             .get_graphics_pipeline(pipeline.0)
             .unwrap().handle
         )
     }
 
-    pub fn get_pipeline_layout(&mut self) -> Result<vk::PipelineLayout>
+    pub fn get_pipeline_layout(&mut self, context: &mut GpuContext) -> Result<vk::PipelineLayout>
     {
-        Ok(self.global_resources
-            .read()
-            .unwrap()
+        Ok(context
             .get_pipeline_layout(self.layout_id)
             .context("couldn't find swapchain pass pipeline")?
             .handle()
@@ -193,6 +184,7 @@ impl SwapchainPassPipelineData {
 
     pub fn get_descriptor_set(
         &mut self,
+        context: &mut GpuContext,
         image: ImageId,
         range_info: Option<ImageRangeInfo>,
         frame_index: u32,
@@ -200,7 +192,6 @@ impl SwapchainPassPipelineData {
     ) -> Result<vk::DescriptorSet>
     {
         let stack_guard = ArenaGuard::new(&tmp_alloc);
-        let mut g = self.global_resources.write().unwrap();
         let resource_id = self.shader_resources[frame_index as usize];
         let update = ShaderResourceImageUpdate {
             resource: resource_id,
@@ -213,8 +204,8 @@ impl SwapchainPassPipelineData {
                     storage_image: false,
             }],
         };
-        g.update_shader_resources(&[update], &[], &[], &stack_guard)?;
-        Ok(g.get_descriptor_set(resource_id).unwrap())
+        context.update_shader_resources(&[update], &[], &[], &stack_guard)?;
+        Ok(context.get_descriptor_set(resource_id).unwrap())
     }
 
     const fn vertex_shader_input() -> &'static str {

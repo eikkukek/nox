@@ -1,7 +1,5 @@
 use ash::vk;
 
-use compact_str::CompactString;
-
 use nox_mem::{slice, vec_types::{Vector, GlobalVec, FixedVec}, Allocator};
 
 use super::*;

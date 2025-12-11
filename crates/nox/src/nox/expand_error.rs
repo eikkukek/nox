@@ -45,7 +45,7 @@ pub fn fn_expand_warn(target: &str, err: Error) -> Result<bool> {
 #[macro_export]
 macro_rules! expand_error {
     ($err:expr) => {
-        $crate::fn_expand_error(module_path!(), $err)
+        $crate::error_util::fn_expand_error(module_path!(), $err)
             .unwrap_or(false)
     };
 }
@@ -53,7 +53,7 @@ macro_rules! expand_error {
 #[macro_export]
 macro_rules! expand_warn {
     ($err:expr) => {
-        $crate::fn_expand_warn(module_path!(), $err)
+        $crate::error_util::fn_expand_warn(module_path!(), $err)
             .unwrap_or(false)
     };
 }

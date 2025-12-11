@@ -423,6 +423,9 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
     fn reserve(&mut self, capacity: usize) -> Result<()>
     {
         if !CapacityPol::can_grow() {
+            if capacity == self.capacity {
+                return Ok(())
+            }
             return Err(FixedCapacity { capacity: self.capacity }.into())
         }
         let new_capacity = CapacityPol::grow(self.capacity, capacity)?;

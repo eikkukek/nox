@@ -114,10 +114,10 @@ impl<'a> VulkanContext<'a> {
         if enable_validation {
             instance_extensions
                 .push(ext_debug_utils.as_ptr())
-                .context_with(|| ErrorContext::VecError(location!()));
+                .context_with(|| ErrorContext::VecError(location!()))?;
             layers
                 .push(validation_layer_name.as_ptr())
-                .context_with(|| ErrorContext::VecError(location!()));
+                .context_with(|| ErrorContext::VecError(location!()))?;
         }
         verify_instance_layers(&entry, &layers)?;
         verify_instance_extensions(&entry, &instance_extensions)?;

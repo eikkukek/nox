@@ -9,7 +9,7 @@ use nox_mem::{vec_types::{FixedVec, Vector}};
 use nox_alloc::arena_alloc::ArenaAlloc;
 
 use crate::dev::{
-    error::{Error, Context, Location, location, caller, ErrorContext},
+    error::{Error, Context, Location, location, caller, Tracked, ErrorContext},
     has_not_bits,
 };
 
@@ -26,7 +26,7 @@ pub(super) struct Pass<'a> {
     pub depth_write: Option<(bool, WriteInfo)>,
     pub render_area: Option<vk::Rect2D>,
     pub msaa_samples: MSAA,
-    pub loc: Location,
+    loc: Location,
 }
 
 impl<'a> Pass<'a> {
@@ -125,11 +125,19 @@ impl<'a> Pass<'a> {
     }
 }
 
-pub struct PassBuilder<'a> {
-    pub(super) pass: &'a mut Pass<'a>,
+impl<'a> Tracked for Pass<'a> {
+
+    #[inline(always)]
+    fn location(&self) -> Option<Location> {
+        Some(self.loc)
+    }
 }
 
-impl<'a> PassBuilder<'a> {
+pub struct PassBuilder<'a, 'b> {
+    pub(super) pass: &'a mut Pass<'b>,
+}
+
+impl<'a, 'b> PassBuilder<'a, 'b> {
 
     #[track_caller]
     pub fn with_read(&mut self, read_info: ReadInfo) -> Result<&mut Self> {
@@ -211,7 +219,7 @@ impl<'a> PassBuilder<'a> {
     }
 
     #[track_caller]
-    fn with_depth_stencil_write(&mut self, write: WriteInfo) -> Result<&mut Self> {
+    pub fn with_depth_stencil_write(&mut self, write: WriteInfo) -> Result<&mut Self> {
         if write.samples() != self.pass.msaa_samples {
             return Err(Error::just_context(
                 format_compact!("write MSAA sample count {} must match pass sample count {}",
@@ -242,13 +250,13 @@ impl<'a> PassBuilder<'a> {
         Ok(self)
     }
 
-    fn with_render_area(&mut self, render_area: RenderArea) -> &mut Self {
+    pub fn with_render_area(&mut self, render_area: RenderArea) -> &mut Self {
         self.pass.render_area = Some(render_area.into());
         self
     }
 
     #[track_caller]
-    fn with_wait_semaphore(
+    pub fn with_wait_semaphore(
         &mut self,
         id: TimelineSemaphoreId,
         value: u64,
@@ -263,7 +271,7 @@ impl<'a> PassBuilder<'a> {
     }
 
     #[track_caller]
-    fn with_signal_semaphore(
+    pub fn with_signal_semaphore(
         &mut self,
         id: TimelineSemaphoreId,
         value: u64

@@ -3,7 +3,7 @@ use ash::vk;
 use nox_mem::{impl_as_raw_bit_op, slot_map::SlotIndex, AsRaw};
 
 use crate::dev::{
-    error::{Location, caller},
+    error::{Location, Tracked, caller},
 };
 
 use crate::gpu::*;
@@ -24,7 +24,7 @@ pub struct ResourceId {
     pub(crate) format: vk::Format,
     pub(crate) samples: MSAA,
     pub(crate) flags: u32,
-    pub(crate) loc: Location,
+    pub(super) loc: Location,
 }
 
 impl ResourceId {
@@ -47,5 +47,13 @@ impl Default for ResourceId {
             flags: 0,
             loc: caller!(),
         }
+    }
+}
+
+impl Tracked for ResourceId {
+
+    #[inline(always)]
+    fn location(&self) -> Option<Location> {
+        Some(self.loc)
     }
 }

@@ -1,7 +1,7 @@
 use ash::vk;
 
 use crate::dev::{
-    error::{caller, Location},
+    error::{caller, Location, Tracked},
 };
 
 use crate::gpu::*;
@@ -150,7 +150,7 @@ impl From<ClearValue> for vk::ClearValue {
 pub struct ReadInfo {
     pub resource_id: ResourceId,
     pub range_info: Option<ImageRangeInfo>,
-    pub(crate) loc: Location,
+    loc: Option<Location>,
 }
 
 impl ReadInfo {
@@ -166,6 +166,13 @@ impl ReadInfo {
     }
 }
 
+impl Tracked for ReadInfo {
+
+    fn location(&self) -> Option<Location> {
+        self.loc
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct WriteInfo {
     pub main_id: ResourceId,
@@ -175,7 +182,7 @@ pub struct WriteInfo {
     pub load_op: AttachmentLoadOp,
     pub store_op: AttachmentStoreOp,
     pub clear_value: ClearValue,
-    pub(crate) loc: Location,
+    loc: Option<Location>,
 }
 
 impl WriteInfo {
@@ -189,7 +196,7 @@ impl WriteInfo {
         resolve_range_info: Option<ImageRangeInfo>,
         load_op: AttachmentLoadOp,
         store_op: AttachmentStoreOp,
-        clear_value: ClearValue,
+        clear_value: impl Into<ClearValue>,
     ) -> Self
     {
         Self {
@@ -199,7 +206,7 @@ impl WriteInfo {
             resolve_range_info,
             load_op,
             store_op,
-            clear_value,
+            clear_value: clear_value.into(),
             loc: caller!(),
         }
     }
@@ -207,5 +214,12 @@ impl WriteInfo {
     #[inline(always)]
     pub(crate) fn samples(&self) -> MSAA {
         self.main_id.samples()
+    }
+}
+
+impl Tracked for WriteInfo {
+
+    fn location(&self) -> Option<Location> {
+        self.loc
     }
 }

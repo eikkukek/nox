@@ -15,7 +15,7 @@ use core::{
 
 use ash::vk;
 
-use crate::{has_bits, has_not_bits};
+use crate::dev::{has_bits, has_not_bits};
 
 use super::MSAA;
 

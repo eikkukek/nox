@@ -1,10 +1,12 @@
 #[macro_use]
 
-pub mod tracked;
+pub mod location;
+mod tracked;
 mod error;
 mod context;
 
-pub use tracked::{Location, Tracked};
+pub use location::Location;
+pub use tracked::{Tracked};
 pub use error::{Error, BuildInternal};
 pub use nox_derive::Error;
 
