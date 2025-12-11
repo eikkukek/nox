@@ -1,4 +1,4 @@
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{alloc, dealloc, Layout, LayoutError};
 
 use core::{
     mem,
@@ -7,6 +7,16 @@ use core::{
 };
 
 use nox_mem::{Allocator, align_up};
+
+use nox_error::Error;
+
+#[derive(Debug, Error)]
+pub enum InitError {
+    #[display("layout error")]
+    LayoutError(#[from] #[source] LayoutError),
+    #[display("global alloc failed")]
+    GlobalAllocFailed,
+}
 
 struct Cell {
     pos: usize,
@@ -21,19 +31,17 @@ pub struct ArenaAlloc {
 
 impl ArenaAlloc {
 
-    pub fn new(size: usize) -> Option<Self> {
-        let layout = Layout::from_size_align(size, mem::align_of::<usize>()).ok()?;
+    pub fn new(size: usize) -> Result<Self, InitError> {
+        let layout = Layout::from_size_align(size, mem::align_of::<usize>())?;
         let ptr = unsafe { alloc(layout) };
-        Some(
-            Self {
-                data: NonNull::new(ptr)?,
-                size,
-                cell: UnsafeCell::new(Cell {
-                    pos: 0,
-                    guard_active: false,
-                }),
-            }
-        )
+        Ok(Self {
+            data: NonNull::new(ptr).ok_or(InitError::GlobalAllocFailed)?,
+            size,
+            cell: UnsafeCell::new(Cell {
+                pos: 0,
+                guard_active: false,
+            }),
+        })
     }
     
     #[inline(always)]

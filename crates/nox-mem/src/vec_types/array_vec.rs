@@ -3,7 +3,8 @@ use core::{
     ops::{Deref, DerefMut},
     ptr::{self},
     fmt::{Debug, Display},
-    slice
+    slice,
+    result,
 };
 
 use crate::{
@@ -11,11 +12,11 @@ use crate::{
     impl_traits,
 };
 
-use super::VecError;
-
 use super::{
     Vector,
     Pointer,
+    VecError,
+    Result,
 };
 
 pub struct ArrayVec<T, const N: usize>
@@ -34,7 +35,7 @@ impl<T, const N: usize> ArrayVec<T, N>
         }
     }
 
-    pub fn with_len(value: T, len: usize) -> Result<Self, VecError>
+    pub fn with_len(value: T, len: usize) -> Result<Self>
         where
             T: Clone,
     {
@@ -104,53 +105,88 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     }
 
     #[inline(always)]
-    fn reserve(&mut self, _: usize) -> Result<(), VecError> {
+    fn reserve(&mut self, _: usize) -> Result<()> {
         Err(CapacityError::FixedCapacity { capacity: N }.into())
     }
 
-    fn resize(&mut self, len: usize, value: T) -> Result<(), VecError>
+    fn resize(&mut self, new_len: usize, value: T) -> Result<()>
         where
             T: Clone
     {
-        if len > N { return Err(CapacityError::FixedCapacity { capacity: N }.into()) }
+        if new_len > N { return Err(CapacityError::FixedCapacity { capacity: N }.into()) }
         let ptr = self.data.as_mut_ptr();
-        if len > self.len {
-            for i in self.len..len {
+        if new_len > self.len {
+            for i in self.len..new_len {
                 unsafe { (*ptr.add(i)).write(value.clone()) };
             }
         }
-        else if len < self.len {
-            for i in len..self.len {
+        else if new_len < self.len {
+            for i in new_len..self.len {
                 unsafe { ptr::drop_in_place((*ptr.add(i)).as_mut_ptr()); }
             }
         }
-        self.len = len;
+        self.len = new_len;
         Ok(())
     }
 
-    fn resize_with<F>(&mut self, len: usize, mut f: F) -> Result<(), VecError>
+    fn resize_with<F>(&mut self, new_len: usize, mut f: F) -> Result<()>
         where
             F: FnMut() -> T
     {
-        if len > N { return Err(CapacityError::FixedCapacity { capacity: N }.into()) }
+        if new_len > N { return Err(CapacityError::FixedCapacity { capacity: N }.into()) }
         let ptr = unsafe {
             Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
         };
-        if len > self.len {
-            for i in self.len..len {
+        if new_len > self.len {
+            for i in self.len..new_len {
                 unsafe { (*ptr.add(i)).write(f()) };
             }
         }
-        else if len < self.len {
+        else if new_len < self.len {
             unsafe {
-                ptr.add(len).drop_in_place(self.len - len);
+                ptr.add(new_len).drop_in_place(self.len - new_len);
             }
         }
-        self.len = len;
+        self.len = new_len;
         Ok(())
     }
 
-    fn append(&mut self, slice: &[T]) -> Result<(), VecError>
+    fn try_resize_with<F, E, MapE>(
+        &mut self,
+        new_len: usize,
+        mut f: F,
+        mut map_err: MapE,
+    ) -> result::Result<(), E>
+        where
+            F: FnMut() -> std::result::Result<T, E>,
+            MapE: FnMut(VecError) -> E
+    {
+        if new_len > N { return Err(map_err(
+            CapacityError::FixedCapacity { capacity: N }.into()
+        ))}
+        let ptr = unsafe {
+            Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
+        };
+        if new_len > self.len {
+            for i in self.len..new_len {
+                unsafe { (*ptr.add(i))
+                    .write(f().map_err(|err| {
+                        self.len = i;
+                        err
+                    })?)
+                };
+            }
+        }
+        else if new_len < self.len {
+            unsafe {
+                ptr.add(new_len).drop_in_place(self.len - new_len);
+            }
+        }
+        self.len = new_len;
+        Ok(())
+    }
+
+    fn append(&mut self, slice: &[T]) -> Result<()>
         where
             T: Clone
     {
@@ -172,7 +208,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         Ok(())
     }
 
-    fn append_map<U, F>(&mut self, slice: &[U], mut f: F) -> Result<(), VecError>
+    fn append_map<U, F>(&mut self, slice: &[U], mut f: F) -> Result<()>
         where
             F: FnMut(&U) -> T
     {
@@ -193,7 +229,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
     }
 
     #[inline(always)]
-    fn push(&mut self, value: T) -> Result<&mut T, VecError> {
+    fn push(&mut self, value: T) -> Result<&mut T> {
         if self.len >= N { return Err(CapacityError::FixedCapacity { capacity: N }.into()) }
         let ptr = unsafe { self.as_mut_ptr().add(self.len) };
         unsafe { ptr::write(ptr, value) };
@@ -229,7 +265,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         }       
     }
 
-    fn insert(&mut self, index: usize, value: T) -> Result<&mut T, VecError> {
+    fn insert(&mut self, index: usize, value: T) -> Result<&mut T> {
         if index >= self.len {
             panic!("index {} was out of bounds with len {} when inserting", index, self.len)
         }
@@ -274,7 +310,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         self.len = 0;
     }
 
-    fn clone_from_slice(&mut self, from: &[T]) -> Result<(), VecError>
+    fn clone_from_slice(&mut self, from: &[T]) -> Result<()>
         where
             T: Clone
     {
@@ -294,7 +330,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         Ok(())
     }
 
-    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<(), VecError>
+    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<()>
         where
             V: Vector<T>
     {

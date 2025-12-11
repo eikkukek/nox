@@ -3,14 +3,14 @@ use core::{
     ptr::{dangling, dangling_mut},
     marker::PhantomData,
     ops::{Deref, DerefMut},
+    result,
 };
 
 use crate::{
-    vec_types::*,
-    *
+    *,
 };
 
-use super::VecError;
+use super::*;
 
 pub struct PhantomVec<T> {
     _marker: PhantomData<T>
@@ -59,30 +59,41 @@ impl<T> Vector<T> for PhantomVec<T> {
 
     unsafe fn set_len(&mut self, _new_len: usize) {}
 
-    fn reserve(&mut self, _size: usize) -> Result<(), VecError> {
+    fn reserve(&mut self, _size: usize) -> Result<()> {
         Err(CapacityError::FixedCapacity { capacity: 0 }.into())
     }
 
-    fn resize(&mut self, _new_len: usize, _value: T) -> Result<(), VecError>
+    fn resize(&mut self, _new_len: usize, _value: T) -> Result<()>
         where
             T: Clone { Err(CapacityError::FixedCapacity { capacity: 0 }.into()) }
 
-    fn resize_with<F>(&mut self, _new_len: usize, _f: F) -> Result<(), VecError>
+    fn resize_with<F>(&mut self, _new_len: usize, _f: F) -> Result<()>
         where
             F: FnMut() -> T { Err(CapacityError::FixedCapacity { capacity: 0 }.into()) }
 
-    fn push(&mut self, _value: T) -> Result<&mut T, VecError> {
+    fn try_resize_with<F, E, MapE>(
+        &mut self,
+        _new_len: usize,
+        _f: F,
+        mut map_err: MapE,
+    ) -> result::Result<(), E>
+        where
+            F: FnMut() -> std::result::Result<T, E>,
+            MapE: FnMut(VecError) -> E
+    { Err(map_err(CapacityError::FixedCapacity { capacity: 0 }.into())) }
+
+    fn push(&mut self, _value: T) -> Result<&mut T> {
         Err(CapacityError::FixedCapacity { capacity: 0 }.into())
     }
 
-    fn append(&mut self, _slice: &[T]) -> Result<(), VecError>
+    fn append(&mut self, _slice: &[T]) -> Result<()>
         where
         T: Clone
     {
         Err(CapacityError::FixedCapacity { capacity: 0 }.into())
     }
 
-    fn append_map<U, F>(&mut self, _slice: &[U], _f: F) -> Result<(), VecError>
+    fn append_map<U, F>(&mut self, _slice: &[U], _f: F) -> Result<()>
         where
             F: FnMut(&U) -> T
     {
@@ -101,7 +112,7 @@ impl<T> Vector<T> for PhantomVec<T> {
         None
     }
 
-    fn insert(&mut self, _index: usize, _value: T) -> Result<&mut T, VecError> {
+    fn insert(&mut self, _index: usize, _value: T) -> Result<&mut T> {
         Err(CapacityError::FixedCapacity { capacity: 0 }.into())
     }
 
@@ -115,14 +126,14 @@ impl<T> Vector<T> for PhantomVec<T> {
 
     fn clear(&mut self) {}
 
-    fn clone_from_slice(&mut self, _from: &[T]) -> Result<(), VecError>
+    fn clone_from_slice(&mut self, _from: &[T]) -> Result<()>
         where
             T: Clone
     {
         Err(CapacityError::FixedCapacity { capacity: 0 }.into())
     }
 
-    fn move_from_vec<V>(&mut self, _from: &mut V) -> Result<(), VecError>
+    fn move_from_vec<V>(&mut self, _from: &mut V) -> Result<()>
         where
             V: Vector<T>
     {

@@ -5,6 +5,7 @@ pub mod conditional;
 pub mod vec_types;
 pub mod string_types;
 pub mod slot_map;
+pub mod dynamic;
 
 mod macros;
 mod as_raw;

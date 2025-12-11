@@ -4,6 +4,7 @@ use core::{
     ops::{Deref, DerefMut},
     hash::{Hash, Hasher},
     fmt::{Debug, Display},
+    result,
 };
 
 use crate::{
@@ -20,11 +21,10 @@ use super::{
     Vector,
     Pointer,
     VecError,
+    Result,
 };
 
 use CapacityError::{FixedCapacity, AllocFailed, ZeroSizedElement};
-
-type Result<T> = core::result::Result<T, VecError>;
 
 pub struct AllocVec<T, Alloc, CapacityPol, IsGlobal>
     where
@@ -450,45 +450,80 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
         Ok(())
     }
 
-    fn resize(&mut self, len: usize, value: T) -> Result<()> 
+    fn resize(&mut self, new_len: usize, value: T) -> Result<()> 
         where
             T: Clone
     {
-        if len > self.capacity {
-            self.reserve(len)?
+        if new_len > self.capacity {
+            self.reserve(new_len)?
         }
-        if len > self.len {
-            for i in self.len..len {
+        if new_len > self.len {
+            for i in self.len..new_len {
                 unsafe { self.data.add(i).write(value.clone()) }
             }
         }
-        else if len < self.len {
+        else if new_len < self.len {
             unsafe {
-                self.data.add(len).drop_in_place(self.len - len);
+                self.data.add(new_len).drop_in_place(self.len - new_len);
             }
         }
-        self.len = len;
+        self.len = new_len;
         Ok(())
     }
 
-    fn resize_with<F>(&mut self, len: usize, mut f: F) -> Result<()>
+    fn resize_with<F>(&mut self, new_len: usize, mut f: F) -> Result<()>
         where
             F: FnMut() -> T
     {
-        if len > self.capacity {
-            self.reserve(len)?
+        if new_len > self.capacity {
+            self.reserve(new_len)?
         }
-        if len > self.len {
-            for i in self.len..len {
+        if new_len > self.len {
+            for i in self.len..new_len {
                 unsafe { self.data.add(i).write(f()) }
             }
         }
-        else if len < self.len {
+        else if new_len < self.len {
             unsafe {
-                self.data.add(len).drop_in_place(self.len - len);
+                self.data.add(new_len).drop_in_place(self.len - new_len);
             }
         }
-        self.len = len;
+        self.len = new_len;
+        Ok(())
+    }
+
+    fn try_resize_with<F, E, MapE>(
+        &mut self,
+        new_len: usize,
+        mut f: F,
+        mut map_err: MapE,
+    ) -> result::Result<(), E>
+        where
+            F: FnMut() -> result::Result<T, E>,
+            MapE: FnMut(VecError) -> E
+    {
+        if new_len > self.capacity {
+            self
+                .reserve(new_len)
+                .map_err(|err| map_err(err))?;
+        }
+        if new_len > self.len {
+            for i in self.len..new_len {
+                unsafe { self.data
+                    .add(i)
+                    .write(f().map_err(|err| {
+                        self.len = i;
+                        err
+                    })?)
+                }
+            }
+        }
+        else if new_len < self.len {
+            unsafe {
+                self.data.add(new_len).drop_in_place(self.len - new_len);
+            }
+        }
+        self.len = new_len;
         Ok(())
     }
 

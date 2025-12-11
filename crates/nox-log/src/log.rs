@@ -1,6 +1,3 @@
-mod error;
-pub mod fmt;
-
 use std::{
     io::Write,
     sync::{OnceLock, Mutex},
@@ -18,14 +15,11 @@ use compact_str::CompactString;
 
 use nox_mem::slot_map::*;
 
-pub use error::LogError;
-pub use fmt::{LogFmt, LogFmtBuilder};
+use crate::*;
 
 use fmt::SegmentSpec;
 
 pub type CustomFmt = SlotIndex<LogFmt>;
-
-type Result<T> = core::result::Result<T, LogError>;
 
 #[repr(i8)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]

@@ -1,11 +1,10 @@
-mod window_ctx;
+mod window_context;
 mod expand_error;
 
-use std::sync::{Arc, RwLock, OnceLock};
-
-use std::time;
-
-use nox_mem::vec_types::{Vector, GlobalVec};
+use std::{
+    sync::{Arc, RwLock, OnceLock},
+    time,
+};
 
 use compact_str::CompactString;
 
@@ -20,23 +19,29 @@ use winit::{
 
 use nox_mem::string_types::ArrayString;
 
+use nox_error::Context;
+use nox_mem::vec_types::Vector;
+
 pub use winit::keyboard::KeyCode;
 pub use winit::event::MouseButton;
 pub use winit::window::CursorIcon;
 pub use winit::monitor::MonitorHandle;
 
-pub use window_ctx::WindowCtx;
-pub use expand_error::fn_expand_error;
+pub use window_context::WindowContext;
+pub use expand_error::{fn_expand_error, fn_expand_warn};
 
 use crate::{
+    dev::error::ErrorContext,
     log,
-    *,
+    expand_error,
+    Event,
+    gpu,
 };
 
 use super::{
     interface::Interface,
     memory::Memory,
-    renderer::*,
+    gpu::Gpu,
     clipboard::Clipboard,
 };
 
@@ -49,11 +54,10 @@ pub struct Nox<'a, I>
         I: Interface,
 {
     interface: Arc<RwLock<I>>,
-    window_ctx: Option<WindowCtx>,
+    window_ctx: Option<WindowContext>,
     window: Option<Arc<Window>>,
     memory: &'a Memory,
-    renderer: Option<Renderer<'a>>,
-    monitors: GlobalVec<MonitorHandle>,
+    gpu: Option<Gpu<'a>>,
     window_size: (u32, u32),
     flags: u32,
 }
@@ -111,9 +115,8 @@ impl<'a, I: Interface> Nox<'a, I>
             interface: Arc::new(RwLock::new(interface)),
             window: None,
             memory,
-            renderer: None,
-            window_ctx: Some(WindowCtx::new()),
-            monitors: Default::default(),
+            gpu: None,
+            window_ctx: Some(WindowContext::new()),
             window_size: (0, 0),
             flags: 0,
         }
@@ -124,69 +127,18 @@ impl<'a, I: Interface> Nox<'a, I>
         event_loop.set_control_flow(ControlFlow::Poll);
         event_loop.run_app(&mut self).expect("failed to run event loop");
     }
-
-    #[inline(always)]
-    pub fn gpu_name(&self) -> renderer::DeviceName {
-        self.renderer
-            .as_ref()
-            .unwrap()
-            .device_info()
-            .device_name().clone()
-    }
-
-    #[inline(always)]
-    pub fn window_size(&self) -> (u32, u32) {
-        self.window_size
-    }
-
-    #[inline(always)]
-    pub fn window_size_f32(&self) -> (f32, f32) {
-        (self.window_size.0 as f32, self.window_size.1 as f32)
-    }
-
-    #[inline(always)]
-    pub fn aspect_ratio(&self) -> f64 {
-        self.window_size.0 as f64 /
-        self.window_size.1 as f64
-    }
-
-    #[inline(always)]
-    pub fn monitors(&self) -> &[MonitorHandle] {
-        &self.monitors
-    }
-
-    #[inline(always)]
-    fn reset_input(&self, ctx: &mut WindowCtx) {
-        ctx.mouse_scroll_pixel_delta = (0.0, 0.0); 
-        ctx.mouse_scroll_line_delta = (0.0, 0.0);
-        ctx.physical_keys.retain(|_, v| {
-            v.pressed = false;
-            v.released = false;
-            v.held
-        });
-        ctx.logical_keys.retain(|_, v| {
-            v.pressed = false;
-            v.released = false;
-            v.held
-        });
-        ctx.mouse_buttons.retain(|_, v| {
-            v.pressed = false;
-            v.released = false;
-            v.held
-        });
-    }
 }
 
 impl<'a, I: Interface> Drop for Nox<'a, I> {
 
     fn drop(&mut self) {
-        if let Some(mut renderer) = self.renderer.take() {
-            renderer.wait_idle();
+        if let Some(mut gpu) = self.gpu.take() {
+            gpu.wait_idle();
             self.interface
                 .write()
                 .unwrap()
-                .clean_up(&mut renderer.renderer_context());
-            renderer.clean_up(self.memory.renderer_allocators());
+                .clean_up(&mut gpu.context());
+            gpu.clean_up(self.memory.gpu());
         }
     }
 }
@@ -201,7 +153,7 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
         match event {
             WindowEvent::CursorMoved { device_id: _, position } => {
                 window_ctx.cursor_position = (position.x, position.y);
-                window_ctx.flags |= WindowCtx::CURSOR_MOVED;
+                window_ctx.flags |= WindowContext::CURSOR_MOVED;
             },
             WindowEvent::MouseWheel { device_id: _, delta, phase: _ } => {
                 match delta {
@@ -248,41 +200,49 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
             WindowEvent::Resized(size) => {
                 self.window_size = (size.width, size.height);
                 window_ctx.window_size = (size.width, size.height);
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.request_resize(size);
+                if let Some(gpu) = &mut self.gpu {
+                    gpu.request_resize(size);
                 }
             },
             WindowEvent::RedrawRequested => {
-                let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
-                let renderer_allocators = self.memory.renderer_allocators();
+                let host_allocators = self.memory.gpu().host_allocators();
                 if let Some(window) = self.window.clone() {
                     window_ctx.delta_time = window_ctx.delta_counter.elapsed();
                     window_ctx.delta_counter = time::Instant::now();
-                    let mut write = self.interface.write().unwrap();
-                    if let Err(err) = write
-                        .update(self, &mut window_ctx, &mut renderer_context)
+                    let mut interface = self.interface.write().unwrap();
+                    if let Err(err) = interface
+                        .event(Event::Update {
+                            win: &mut window_ctx,
+                            gpu: self.gpu
+                                .as_mut()
+                                .unwrap()
+                                .context(),
+                        }).context_from_origin(|orig| ErrorContext::EventError(orig))?
                     {
                         event_loop.exit();
                         self.flags |= Self::ERROR;
-                        expand_error!("failed to update", err);
+                        expand_error!(err);
                         return
                     }
                     if window_ctx.cursor_set() {
                         window.set_cursor(window_ctx.current_cursor);
                     }
-                    window_ctx.flags &= !(WindowCtx::CURSOR_SET | WindowCtx::CURSOR_MOVED);
+                    window_ctx.flags &= !(WindowContext::CURSOR_SET | WindowContext::CURSOR_MOVED);
                     window_ctx.input_text.clear();
                     window.request_redraw();
-                    if let Some(renderer) = &mut self.renderer {
-                        if let Err(err) = renderer.render(&window, &mut *write, renderer_allocators) {
+                    if let Some(gpu) = &mut self.gpu {
+                        if let Err(err) = gpu 
+                            .render(&window, &mut *interface, host_allocators)
+                            .context("failed to render")
+                        {
                             event_loop.exit();
                             self.flags |= Self::ERROR;
-                            expand_error!("failed to render", err);
+                            expand_error!(err);
                             return
                         }
                     }
                 }
-                self.reset_input(&mut window_ctx);
+                window_ctx.reset_input();
             },
             _ => {},
         }
@@ -305,12 +265,14 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                 ))
                 .with_min_inner_size(LogicalSize::new(1.0, 1.0))
                 .with_resizable(init_settings.window_resizeable);
-            let window = match event_loop.create_window(window_attributes) {
+            let window = match event_loop
+                .create_window(window_attributes)
+                .ctx_err("failed to create window")
+            {
                 Ok(window) => window,
                 Err(err) => {
                     event_loop.exit();
                     self.flags |= Self::ERROR;
-                    expand_error!("faileld to create window", err);
                     return
                 },
             };
@@ -329,22 +291,24 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
                     *self.memory.renderer_layout(),
                     3,
                     renderer_allocators,
-                ) {
+                ).ctx_err("failed to init renderer")
+            {
                 Ok(r) => Some(r),
                 Err(err) => {
                     event_loop.exit();
                     self.flags |= Self::ERROR;
-                    expand_error!("failed to init renderer", err);
+                    expand_error!(err);
                     return
                 }
             };
             let mut window_ctx = self.window_ctx.take().unwrap();
-            window_ctx.clipboard = match Clipboard::new(&window) {
+            window_ctx.clipboard = match Clipboard::new(&window).ctx_err("failed to create clipboard")
+            {
                 Ok(cb) => cb,
                 Err(err) => {
                     event_loop.exit();
                     self.flags |= Self::ERROR;
-                    expand_error!("failed to create clipboard", err);
+                    expand_error!(err);
                     Clipboard::None
                 }
             };
@@ -353,10 +317,12 @@ impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
             self.window_ctx = Some(window_ctx);
             let mut renderer_context = self.renderer.as_mut().unwrap().renderer_context();
             if let Err(err) = write
-                .init_callback(self, &mut renderer_context) {
+                .init_callback(self, &mut renderer_context)
+                .ctx_err("init callback failed")
+            {
                 event_loop.exit();
                 self.flags |= Self::ERROR;
-                expand_error!("init callback failed", err);
+                expand_error!(err);
             }
         }
     }

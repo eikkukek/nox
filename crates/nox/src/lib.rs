@@ -1,32 +1,39 @@
 #[macro_use]
 
-mod nox;
-mod renderer;
-mod interface;
-
-pub mod version;
-pub mod utility;
-
-mod memory;
-mod errors;
+mod version;
 mod init_settings;
+mod memory;
+
+pub mod error;
+mod nox;
+mod event;
+pub mod gpu;
+mod interface;
+mod utility;
+
 mod clipboard;
 
-pub use nox_mem as mem;
-pub use nox_alloc as alloc;
-pub use nox_log as log;
+mod dev;
 
-use errors::InitError;
+mod export {
 
-pub use nox_error as error;
+    use super::*;
 
-pub use errors::Error;
-pub use nox_derive::Error;
-pub use version::Version;
-pub use nox::*;
-pub use init_settings::*;
-pub use renderer::*;
-pub use memory::Memory;
-pub use interface::Interface;
-pub use mem::array_string;
-pub use mem::GlobalAlloc;
+    pub use nox_mem as mem;
+    pub use nox_alloc as alloc;
+    pub use nox_log as log;
+
+    pub use version::Version;
+    pub use init_settings::InitSettings;
+    pub use memory::Memory;
+    pub use event::Event;
+    pub use nox::*;
+    pub use interface::Interface;
+    pub use mem::array_string;
+    pub use mem::GlobalAlloc;
+}
+
+pub use export::*;
+
+pub use error::Error;
+pub type Result<T> = core::result::Result<T, Error>;

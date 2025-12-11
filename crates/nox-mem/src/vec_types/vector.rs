@@ -1,9 +1,10 @@
 use core::{
     ops::{Deref, DerefMut},
     hash::{Hash, Hasher},
+    result,
 };
 
-use super::VecError;
+use super::{VecError, Result};
 
 pub trait Vector<T>:
     Sized +
@@ -32,30 +33,40 @@ pub trait Vector<T>:
 
     unsafe fn set_len(&mut self, new_len: usize);
 
-    fn reserve(&mut self, size: usize) -> Result<(), VecError>;
+    fn reserve(&mut self, size: usize) -> Result<()>;
 
-    fn resize(&mut self, new_len: usize, value: T) -> Result<(), VecError>
+    fn resize(&mut self, new_len: usize, value: T) -> Result<()>
         where
             T: Clone;
 
-    fn resize_with<F>(&mut self, new_len: usize, f: F) -> Result<(), VecError>
+    fn resize_with<F>(&mut self, new_len: usize, f: F) -> Result<()>
         where
             F: FnMut() -> T;
 
-    fn push(&mut self, value: T) -> Result<&mut T, VecError>;
+    fn try_resize_with<F, E, MapE>(
+        &mut self,
+        new_len: usize,
+        f: F,
+        map_err: MapE,
+    ) -> result::Result<(), E>
+        where
+            F: FnMut() -> result::Result<T, E>,
+            MapE: FnMut(VecError) -> E;
 
-    fn extend(&mut self, iter: impl Iterator<Item = T>) -> Result<&mut Self, VecError> {
+    fn push(&mut self, value: T) -> Result<&mut T>;
+
+    fn extend(&mut self, iter: impl Iterator<Item = T>) -> Result<&mut Self> {
         for item in iter {
             self.push(item)?;
         }
         Ok(self)
     }
 
-    fn append(&mut self, slice: &[T]) -> Result<(), VecError>
+    fn append(&mut self, slice: &[T]) -> Result<()>
         where
             T: Clone;
 
-    fn append_map<U, F>(&mut self, slice: &[U], f: F) -> Result<(), VecError>
+    fn append_map<U, F>(&mut self, slice: &[U], f: F) -> Result<()>
         where
             F: FnMut(&U) -> T;
 
@@ -65,7 +76,7 @@ pub trait Vector<T>:
 
     fn last_mut(&mut self) -> Option<&mut T>;
 
-    fn insert(&mut self, index: usize, value: T) -> Result<&mut T, VecError>;
+    fn insert(&mut self, index: usize, value: T) -> Result<&mut T>;
 
     fn remove(&mut self, index: usize) -> T;
 
@@ -81,11 +92,11 @@ pub trait Vector<T>:
 
     fn clear(&mut self);
 
-    fn clone_from_slice(&mut self, from: &[T]) -> Result<(), VecError>
+    fn clone_from_slice(&mut self, from: &[T]) -> Result<()>
         where
             T: Clone;
 
-    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<(), VecError>
+    fn move_from_vec<V>(&mut self, from: &mut V) -> Result<()>
         where
             V: Vector<T>;
 

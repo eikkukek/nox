@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 nox-mem = { path = "../nox-mem" }
+nox-error = { path = "../nox-error" }

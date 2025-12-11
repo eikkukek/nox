@@ -1,33 +1,85 @@
-use core::error;
+//! Provides [`Context`] trait which is implemented for any [`Result<T, E>`] where
+//! ```rust
+//! E: core::error::Error + Send + Sync + 'static
+//! ```
 
-use super::any::AnyError;
+use core::{
+    error,
+    result,
+    fmt::Display,
+};
 
-pub trait Context<T, E: error::Error + Send + Sync + 'static> { 
+use super::{Error, Tracked, BuildInternal, Result, Location, caller};
 
-    fn ctx_err(self, ctx: impl AsRef<str>) -> Result<T, AnyError>;
+pub trait Context<T, E>
+    where
+        E: error::Error + Send + Sync + 'static,
+{
 
-    fn ctx_err_with<C: AsRef<str>>(self, f: impl FnMut() -> C) -> Result<T, AnyError>;
+    fn context<C>(self, ctx: C) -> Result<T>
+        where C: Display + Send + Sync + 'static;
 
-    fn any_err(self) -> Result<T, AnyError>
+    fn context_with<C>(self, f: impl FnMut() -> C) -> Result<T>
+        where C: Display + Send + Sync + 'static;
+
+    /// Add context from a error with tracked location.
+    ///
+    /// # Example
+    /// ``` rust
+    ///
+    /// use nox_error::Error;
+    /// use nox_error::Context;
+    /// use nox_error::Result;
+    ///
+    /// fn do_thing() -> Result<()> {
+    ///     Err(Error::just_ctx("failed"))
+    /// }
+    ///
+    /// fn call_do_thing() -> Result<()> {
+    ///     do_thing().context_from_origin(|orig|
+    ///         format!("error origin: {orig}")
+    ///     )?;
+    ///     Ok(())
+    /// }
+    /// ```
+    fn context_from_origin<C>(self, f: impl FnMut(Location) -> C) -> Result<T>
         where
-            E: Into<AnyError>;
+            C: Display + Send + Sync + 'static,
+            E: Tracked;
 }
 
-impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for Result<T, E> {
-
-    fn ctx_err(self, ctx: impl AsRef<str>) -> Result<T, AnyError> {
-        self.map_err(|err| AnyError::new(ctx, err))
-    }
-
-    fn ctx_err_with<C: AsRef<str>>(self, mut f: impl FnMut() -> C) -> Result<T, AnyError> {
-        self.map_err(|err| AnyError::new(f(), err))
-    }
-
-    fn any_err(self) -> Result<T, AnyError>
-        where
-            E: Into<AnyError>
+impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Result<T, E> {
+    
+    #[track_caller]
+    fn context<C>(self, ctx: C) -> Result<T>
+        where C: Display + Send + Sync + 'static,
     {
-        self.map_err(|err| err.into())
+        let loc = caller!();
+        self.map_err(|err| {
+            Error::new_internal(ctx, err, loc)
+        })
+    }
+
+    #[track_caller]
+    fn context_with<C>(self, mut f: impl FnMut() -> C) -> Result<T>
+        where C: Display + Send + Sync + 'static,
+    {
+        let loc = caller!();
+        self.map_err(|err| {
+            Error::new_internal(f(), err, loc)
+        })
+    }
+
+    #[track_caller]
+    fn context_from_origin<C>(self, mut f: impl FnMut(Location) -> C) -> Result<T>
+        where
+            C: Display + Send + Sync + 'static,
+            E: Tracked, 
+    {
+        let loc = caller!();
+        self.map_err(|err| {
+            Error::new_internal(f(err.loc()), err, loc)
+        })
     }
 }
 
