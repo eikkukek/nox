@@ -196,7 +196,8 @@ struct App {
     fire_effect_vertex: gpu::ShaderId,
     fire_effect_fragment: gpu::ShaderId,
     pipeline_layouts: [gpu::PipelineLayoutId; 4],
-    pipelines: [gpu::GraphicsPipelineId; 3],
+    graphics_pipelines: [gpu::GraphicsPipelineId; 2],
+    outline_pipeline: (gpu::GraphicsPipelineId, gpu::ImageFormat),
     fire_pipeline: gpu::ComputePipelineId,
     vertex_buffer: gpu::BufferId,
     vertex_instance_buffer: gpu::BufferId,
@@ -246,7 +247,8 @@ impl App {
             fire_effect_vertex: Default::default(),
             fire_effect_fragment: Default::default(),
             pipeline_layouts: Default::default(),
-            pipelines: Default::default(),
+            graphics_pipelines: Default::default(),
+            outline_pipeline: Default::default(),
             fire_pipeline: Default::default(),
             vertex_buffer: Default::default(),
             vertex_instance_buffer: Default::default(),
@@ -640,35 +642,6 @@ impl Interface for App {
                 }),
                 write_enable: true,
             });
-        let mut outline_pipeline_info = gpu::GraphicsPipelineInfo::new(self.pipeline_layouts[1]);
-        outline_pipeline_info
-            .with_sample_shading(gpu::SampleShadingInfo::new(gpu::MSAA::X4, 0.2, false, false))
-            .with_color_output(
-                self.color_format,
-                gpu::WriteMask::all(),
-                None,
-            )
-            .with_depth_output(self.depth_stencil_format)
-            .with_stencil_output(self.depth_stencil_format)
-            .with_vertex_input_binding(gpu::VertexInputBinding::new::<0, Vertex>(0, gpu::VertexInputRate::Vertex))
-            .with_vertex_input_binding(gpu::VertexInputBinding::new::<3, VertexOff>(1, gpu::VertexInputRate::Instance))
-            .with_depth_stencil(gpu::DepthStencilInfo {
-                compare_op: gpu::CompareOp::Less,
-                depth_bounds: Some(gpu::DepthBounds::new(0.0, 1.0)),
-                stencil_test_info: Some(gpu::StencilTestInfo {
-                    front: Default::default(),
-                    back: gpu::StencilOpState {
-                        fail_op: gpu::StencilOp::Keep,
-                        pass_op: gpu::StencilOp::Keep,
-                        depth_fail_op: gpu::StencilOp::Keep,
-                        compare_op: gpu::CompareOp::NotEqual,
-                        compare_mask: 0x1,
-                        write_mask: 0x0,
-                        reference: 0x1,
-                    },
-                }),
-                write_enable: true,
-            });
         let mut fire_effect_pipeline_info = gpu::GraphicsPipelineInfo::new(self.pipeline_layouts[3]);
         fire_effect_pipeline_info
             .with_sample_shading(gpu::SampleShadingInfo::new(gpu::MSAA::X4, 0.2, false, false))
@@ -678,10 +651,10 @@ impl Interface for App {
                 None,
             );
         gpu.create_graphics_pipelines(
-            &[graphics_pipeline_info, outline_pipeline_info, fire_effect_pipeline_info],
+            &[graphics_pipeline_info, fire_effect_pipeline_info],
             Some(self.pipeline_cache),
             &GlobalAlloc,
-            |i, id| { self.pipelines[i] = id; },
+            |i, id| { self.graphics_pipelines[i] = id; },
         )?;
         let fire_pipeline_info = gpu::ComputePipelineInfo::new(self.pipeline_layouts[2]);
         gpu.create_compute_pipelines(
@@ -793,7 +766,7 @@ impl Interface for App {
 
     fn event(&mut self, event: Event) -> Result<()> {
         match event {
-            Event::FrameBufferCreated { gpu, new_size, new_format: _ } => {
+            Event::FrameBufferCreated { gpu, new_size, new_format } => {
                 gpu.wait_for_semaphores(&[(self.fire_semaphore, self.fire_semaphore_value)], u64::MAX, &GlobalAlloc)?;
                 unsafe {
                     gpu.lock_linear_device_alloc(self.image_alloc, &[])?
@@ -820,9 +793,47 @@ impl Interface for App {
                 unsafe {
                     staging_alloc.reset();
                 }
-                gpu.add_async_transfer_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
+                self.fire_transfer_id = gpu.add_async_transfer_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
                 self.fire_semaphore_value += 1;
                 self.frame_buffer_size = new_size;
+                if self.outline_pipeline.1 != new_format {
+                    self.outline_pipeline.1 = new_format;
+                    gpu.destroy_graphics_pipeline(self.outline_pipeline.0);
+                    let mut outline_pipeline_info = gpu::GraphicsPipelineInfo::new(self.pipeline_layouts[1]);
+                    outline_pipeline_info
+                        .with_sample_shading(gpu::SampleShadingInfo::new(gpu::MSAA::X4, 0.2, false, false))
+                        .with_color_output(
+                            new_format,
+                            gpu::WriteMask::all(),
+                            None,
+                        )
+                        .with_depth_output(self.depth_stencil_format)
+                        .with_stencil_output(self.depth_stencil_format)
+                        .with_vertex_input_binding(gpu::VertexInputBinding::new::<0, Vertex>(0, gpu::VertexInputRate::Vertex))
+                        .with_vertex_input_binding(gpu::VertexInputBinding::new::<3, VertexOff>(1, gpu::VertexInputRate::Instance))
+                        .with_depth_stencil(gpu::DepthStencilInfo {
+                            compare_op: gpu::CompareOp::Less,
+                            depth_bounds: Some(gpu::DepthBounds::new(0.0, 1.0)),
+                            stencil_test_info: Some(gpu::StencilTestInfo {
+                                front: Default::default(),
+                                back: gpu::StencilOpState {
+                                    fail_op: gpu::StencilOp::Keep,
+                                    pass_op: gpu::StencilOp::Keep,
+                                    depth_fail_op: gpu::StencilOp::Keep,
+                                    compare_op: gpu::CompareOp::NotEqual,
+                                    compare_mask: 0x1,
+                                    write_mask: 0x0,
+                                    reference: 0x1,
+                                },
+                            }),
+                            write_enable: true,
+                        });
+                    gpu.create_graphics_pipelines(
+                        &[outline_pipeline_info],
+                        Some(self.pipeline_cache), &GlobalAlloc,
+                        |_, id| self.outline_pipeline.0 = id,
+                    )?;
+                }
                 Ok(())
             },
             Event::Update { win, gpu: _ } => {
@@ -945,15 +956,6 @@ impl Interface for App {
                             .with_dimensions(frame_buffer_size);
                     }
                 )?;
-                let color_output_resolve = frame_graph.add_transient_image(
-                    |builder| {
-                        builder
-                            .with_usage(gpu::ImageUsage::ColorAttachment)
-                            .with_usage(gpu::ImageUsage::Sampled)
-                            .with_format(self.color_format, false)
-                            .with_dimensions(frame_buffer_size);
-                    }
-                )?;
                 //frame_graph.set_render_image(color_output_resolve, None)?;
                 let fire_tex = frame_graph.add_image(self.fire_images[self.heat_in as usize])?;
                 self.fire_pass = frame_graph.add_pass(
@@ -983,12 +985,13 @@ impl Interface for App {
                         Ok(())
                     }
                 )?;
+                let final_output = frame_graph.swapchain_image();
                 self.outline_pass = frame_graph.add_pass(
                     gpu::PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: gpu::MSAA::X4 , signal_semaphores: 1, wait_semaphores: 1 },
                     |builder| {
                         builder
                             .with_write(gpu::WriteInfo::new(color_output)
-                                .with_resolve(gpu::WriteResolveInfo::new(color_output_resolve, gpu::ResolveMode::Average, None))
+                                .with_resolve(gpu::WriteResolveInfo::new(final_output, gpu::ResolveMode::Average, None))
                             )?
                             .with_depth_stencil_write(gpu::WriteInfo::new(depth_stencil_output))?
                             .with_signal_semaphore(self.semaphore, self.semaphore_value + 1)?
@@ -1002,14 +1005,14 @@ impl Interface for App {
             Event::RenderWork { pass_id, commands } => {
                 match pass_id {
                     x if x == self.fire_pass => {
-                        commands.bind_pipeline(self.pipelines[2])?;
+                        commands.bind_pipeline(self.graphics_pipelines[1])?;
                         commands.bind_shader_resources(|_|
                             self.shader_resources[3]
                         )?;
                         commands.draw_bufferless(6, 1)?;
                     },
                     x if x == self.cube_pass => {
-                        commands.bind_pipeline(self.pipelines[0])?;
+                        commands.bind_pipeline(self.graphics_pipelines[0])?;
                         commands.bind_shader_resources(|i| {
                             self.shader_resources[i as usize]
                         })?;
@@ -1027,7 +1030,7 @@ impl Interface for App {
                         )?;
                     },
                     x if x == self.outline_pass => {
-                        commands.bind_pipeline(self.pipelines[1])?;
+                        commands.bind_pipeline(self.outline_pipeline.0)?;
                         commands.bind_shader_resources(|_| {
                             self.shader_resources[0]
                         })?;

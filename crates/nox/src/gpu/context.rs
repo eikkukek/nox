@@ -30,9 +30,9 @@ impl<'a> GpuContext<'a> {
         &mut self,
         staging_alloc: LinearDeviceAllocId,
         signal_semaphores: &[(TimelineSemaphoreId, u64)]
-    )
+    ) -> CommandRequestId
     {
-        self.transfer_requests.add_async_request(staging_alloc, signal_semaphores);
+        self.transfer_requests.add_async_request(staging_alloc, signal_semaphores)
     }
 
     #[inline(always)]
