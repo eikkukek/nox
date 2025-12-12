@@ -14,10 +14,19 @@ use crate::gpu::*;
 
 use super::LinearDeviceAlloc;
 
+pub(crate) enum ImageSource {
+    Owned(Arc<Image>),
+    Swapchain(vk::Image, vk::ImageView, ImageState),
+}
+
 pub(crate) struct FrameContext<'a> {
     command_buffer: vk::CommandBuffer,
     device: Arc<ash::Device>,
     resource_pool: ResourcePoolContext<'a>,
+    swapchain_image: vk::Image,
+    swapchain_image_view: vk::ImageView,
+    swapchain_format: vk::Format,
+    swapchain_image_state: ImageState,
 }
 
 impl<'a> FrameContext<'a> {
@@ -25,18 +34,25 @@ impl<'a> FrameContext<'a> {
     #[inline(always)]
     pub fn new(
         command_buffer: vk::CommandBuffer,
-        device: Arc<ash::Device>,
         context: GpuContext<'a>,
         resource_pool: &'a mut ResourcePool,
+        swapchain_image: vk::Image,
+        swapchain_image_view: vk::ImageView,
+        swapchain_format: vk::Format,
+        swapchain_image_state: ImageState,
     ) -> Self
     {
         Self {
-            device,
+            device: context.device(),
             resource_pool: ResourcePoolContext::new(
                 context,
                 resource_pool
             ),
             command_buffer,
+            swapchain_image,
+            swapchain_image_view,
+            swapchain_format,
+            swapchain_image_state,
         }
     }
 
@@ -75,34 +91,37 @@ impl<'a> FrameContext<'a> {
     }
 
     #[inline(always)]
-    pub fn set_render_image(
-        &mut self,
-        id: ResourceId,
-        range_info: Option<ImageRangeInfo>,
-        loc: Location,
-    ) -> Result<()>
-    {
-        self.resource_pool.set_render_image(id, range_info, loc)?;
-        Ok(())
+    pub fn swapchain_image(&self, loc: Location) -> ResourceId {
+        ResourceId {
+            format: self.swapchain_format,
+            samples: MSAA::X1,
+            flags: ResourceFlags::SwapchainImage as u32,
+            loc: Some(loc),
+            ..Default::default()
+        }
     }
 
     #[inline(always)]
-    pub fn get_render_image(
-        &mut self,
-        graphics_queue: u32,
-    ) -> Result<Option<(ImageId, Option<ImageRangeInfo>)>>
-    {
-        self.resource_pool.get_render_image(graphics_queue, self.command_buffer)
+    pub fn get_image(&self, resource_id: ResourceId) -> Result<ImageSource> {
+        if !resource_id.is_swapchain_image() {
+            Ok(ImageSource::Owned(self.resource_pool.get_image(resource_id)?))
+        } else {
+            Ok(ImageSource::Swapchain(
+                self.swapchain_image,
+                self.swapchain_image_view,
+                self.swapchain_image_state,
+            ))
+        }
     }
 
     #[inline(always)]
-    pub fn render_done(&mut self) {
-        self.resource_pool.render_done(self.command_buffer);
+    pub fn get_swapchain_image_state(&self) -> ImageState {
+        self.swapchain_image_state
     }
 
     #[inline(always)]
-    pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>> {
-        self.resource_pool.get_image(resource_id)
+    pub fn set_swapchain_image_state(&mut self, state: ImageState) {
+        self.swapchain_image_state = state;
     }
 
     #[inline(always)]

@@ -17,6 +17,7 @@ use crate::dev::{
 };
 
 use crate::gpu::*;
+use crate::gpu::frame_context::ImageSource;
 
 use super::*;
 
@@ -73,9 +74,8 @@ impl<'a> FrameGraph<'a> {
     }
 
     #[track_caller]
-    pub fn set_render_image(&mut self, id: ResourceId, range_info: Option<ImageRangeInfo>) -> Result<()>
-    {
-        self.frame_context.set_render_image(id, range_info, caller!())
+    pub fn swapchain_image(&self) -> ResourceId {
+        self.frame_context.swapchain_image(caller!())
     }
 
     #[track_caller]
@@ -108,9 +108,11 @@ impl<'a> FrameGraph<'a> {
         f(&mut PassBuilder { pass, }).context("failed to build pass")?;
         self.signal_semaphore_count += pass.signal_semaphores.len() as u32;
         self.wait_semaphore_count += pass.wait_semaphores.len() as u32;
-        if !pass.validate(alloc)? {
-            //assert!(pass.validate(alloc)?, "pass valiation error (Image subresource write overlaps)");
-            todo!("pass validation error message not done")
+        if let Some(err) = pass.validate(alloc)? {
+            return Err(Error::new(
+                "pass was invalid",
+                err,
+            ))
         }
         Ok(pass.id)
     }
@@ -169,13 +171,19 @@ impl<'a> FrameGraph<'a> {
                 .context_with(|| ErrorContext::VecError(location!()))?;
             let color_output_count = pass.writes.len();
             for read in pass.reads.iter() {
-                let resource_id = read.resource_id;
-                let image = render_commands.frame_graph.frame_context.get_image(resource_id)?;
+                let resource_id = read.id;
+                let image = match render_commands.frame_graph.frame_context.get_image(resource_id)? {
+                    ImageSource::Owned(image) => image,
+                    ImageSource::Swapchain(_, _, _,) => return Err(Error::just_context(
+                        "swapchain images are write only"
+                    )).context(ErrorContext::EventError(read.location_or_this()))
+                        .context(format_compact!("error while processing pass at {}", pass.location_or_this())),
+                };
                 let properties = image.properties;
                 if has_not_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
-                    return Err(Error::just_context(format_compact!("while processing pass at {}", pass.location_or_this())
-                    )).context("image read must be sampleable")
-                        .context(ErrorContext::EventError(read.location_or_this()))
+                    return Err(Error::just_context("image read must be sampleable"
+                    )).context(ErrorContext::EventError(read.location_or_this()))
+                        .context(format_compact!("error while processing pass at {}", pass.location_or_this()))
                 }
                 let state = image.state();
                 let dst_state = ImageState::new(
@@ -187,7 +195,7 @@ impl<'a> FrameGraph<'a> {
                 if state == dst_state {
                     continue
                 }
-                let range_info = read.range_info;
+                let range_info = read.range;
                 if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
                     render_commands.frame_graph.frame_context.cmd_memory_barrier(
                         resource_id,
@@ -219,150 +227,249 @@ impl<'a> FrameGraph<'a> {
             }
             let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>>
             {
-                let resource_id = write.main_id;
+                let resource_id = write.id;
                 let image = render_commands.frame_graph.frame_context.get_image(resource_id)?;
-                let properties = image.properties;
-                let (access, layout, stage) = match ty {
-                    AttachmentType::Color => {
-                        if has_not_bits!(properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT) {
-                            return Err(Error::just_context(
-                                "color write image must be usable as an color attachment"
-                            )).context(ErrorContext::EventError(write.location_or_this()))
-                        }
-                        (
-                            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                        )
-                    },
-                    AttachmentType::Depth => {
-                        if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
-                            return Err(Error::just_context(
-                                "depth/stencil write image must be usable as an depth/stencil attachment"
-                            )).context(ErrorContext::EventError(write.location_or_this()))
-                        }
-                        (
-                            vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                            vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
-                            vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS |
-                            vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                        )
-                    },
-                    AttachmentType::DepthStencil => {
-                        if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
-                            return Err(Error::just_context(
-                                "depth/stencil write image must be usable as an depth/stencil attachment"
-                            )).context(ErrorContext::EventError(write.location_or_this()))
-                        }
-                        (
-                            vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                            vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS |
-                            vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                        )
-                    }
-                };
-                let dst_state = ImageState::new(
-                    access,
-                    layout,
-                    graphics_queue_index,
-                    stage,
-                );
-                let state = image.state();
-                let range_info = write.range_info;
-                if state != dst_state {
-                    if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
-                        render_commands.frame_graph.frame_context.cmd_memory_barrier(
-                            resource_id,
-                            dst_state,
-                            None,
-                        )?;
-                    }
-                    else {
-                        render_commands.frame_graph.frame_context.cmd_memory_barrier(
-                            resource_id,
-                            dst_state,
-                            range_info.map(|v| v.subresource_info)
-                        )?;
-                        if let Some(info) = range_info {
-                            subresource_reset.push(SubresourceReset {
-                                image,
-                                command_buffer,
-                                old_state: state,
-                                subresource: info.subresource_info,
-                            }).unwrap();
-                        }
-                    }
-                }
-                let mut resolve_image_view = Default::default();
-                let mut resolve_image_layout = Default::default();
-                let mut resolve_mode = Default::default();
-                if let Some((resolve_id, mode)) = write.resolve {
-                    resolve_mode = mode.into();
-                    let resolve_image = render_commands.frame_graph.frame_context.get_image(resolve_id)?;
-                    let resolve_properties = resolve_image.properties;
-                    if properties.dimensions != resolve_properties.dimensions {
-                        return Err(Error::just_context(format_compact!(
-                            "resolve image dimensions {} must match main image dimensions {}",
-                            resolve_properties.dimensions, properties.dimensions,
-                        ))).context(ErrorContext::EventError(resource_id.location_or_this()))
-                    }
-                    let state = resolve_image.state();
-                    let range_info = write.resolve_range_info;
-                    if state != dst_state {
-                        if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
-                            render_commands.frame_graph.frame_context.cmd_memory_barrier(
-                                resolve_id,
-                                dst_state,
-                                None,
-                            )?;
-                        }
-                        else {
-                            render_commands.frame_graph.frame_context.cmd_memory_barrier(
-                                resolve_id,
-                                dst_state,
-                                range_info.map(|v| v.subresource_info)
-                            )?;
-                            if let Some(info) = range_info {
-                                subresource_reset.push(SubresourceReset {
-                                    image: resolve_image,
-                                    command_buffer,
-                                    old_state: state,
-                                    subresource: info.subresource_info,
+                match image {
+                    ImageSource::Owned(image) => {
+                        let properties = image.properties;
+                        let (access, layout, stage) = match ty {
+                            AttachmentType::Color => {
+                                if has_not_bits!(properties.usage, vk::ImageUsageFlags::COLOR_ATTACHMENT) {
+                                    return Err(Error::just_context(
+                                        "color write image must be usable as an color attachment"
+                                    )).context(ErrorContext::EventError(write.location_or_this()))
                                 }
-                                ).unwrap();
+                                (
+                                    vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                )
+                            },
+                            AttachmentType::Depth => {
+                                if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
+                                    return Err(Error::just_context(
+                                        "depth/stencil write image must be usable as an depth/stencil attachment"
+                                    )).context(ErrorContext::EventError(write.location_or_this()))
+                                }
+                                (
+                                    vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                                    vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                                    vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS |
+                                    vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                                )
+                            },
+                            AttachmentType::DepthStencil => {
+                                if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
+                                    return Err(Error::just_context(
+                                        "depth/stencil write image must be usable as an depth/stencil attachment"
+                                    )).context(ErrorContext::EventError(write.location_or_this()))
+                                }
+                                (
+                                    vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                                    vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                                    vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS |
+                                    vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                                )
+                            }
+                        };
+                        let dst_state = ImageState::new(
+                            access,
+                            layout,
+                            graphics_queue_index,
+                            stage,
+                        );
+                        let state = image.state();
+                        let range_info = write.range;
+                        if state != dst_state {
+                            if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
+                                render_commands.frame_graph.frame_context.cmd_memory_barrier(
+                                    resource_id,
+                                    dst_state,
+                                    None,
+                                )?;
+                            }
+                            else {
+                                render_commands.frame_graph.frame_context.cmd_memory_barrier(
+                                    resource_id,
+                                    dst_state,
+                                    range_info.map(|v| v.subresource_info)
+                                )?;
+                                if let Some(info) = range_info {
+                                    subresource_reset.push(SubresourceReset {
+                                        image,
+                                        command_buffer,
+                                        old_state: state,
+                                        subresource: info.subresource_info,
+                                    }).unwrap();
+                                }
                             }
                         }
-                    }
-                    let (image_view, image_layout) =
-                        if let Some(info) = range_info {
-                            render_commands.frame_graph.frame_context.create_image_view(resolve_id, info)?
-                        } else {
-                            render_commands.frame_graph.frame_context.get_image_view(resolve_id)?
+                        let mut resolve_image_view = Default::default();
+                        let mut resolve_image_layout = Default::default();
+                        let mut resolve_mode = Default::default();
+                        if let Some(resolve) = write.resolve {
+                            resolve_mode = resolve.mode.into();
+                            let resolve_image = render_commands.frame_graph.frame_context.get_image(resolve.id)?;
+                            match resolve_image {
+                                ImageSource::Owned(resolve_image) => {
+                                    let resolve_properties = resolve_image.properties;
+                                    if properties.dimensions != resolve_properties.dimensions {
+                                        return Err(Error::just_context(format_compact!(
+                                            "resolve image dimensions {} must match main image dimensions {}",
+                                            resolve_properties.dimensions, properties.dimensions,
+                                        ))).context(ErrorContext::EventError(resource_id.location_or_this()))
+                                    }
+                                    let state = resolve_image.state();
+                                    let range_info = resolve.range;
+                                    if state != dst_state {
+                                        if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
+                                            render_commands.frame_graph.frame_context.cmd_memory_barrier(
+                                                resolve.id,
+                                                dst_state,
+                                                None,
+                                            )?;
+                                        }
+                                        else {
+                                            render_commands.frame_graph.frame_context.cmd_memory_barrier(
+                                                resolve.id,
+                                                dst_state,
+                                                range_info.map(|v| v.subresource_info)
+                                            )?;
+                                            if let Some(info) = range_info {
+                                                subresource_reset.push(SubresourceReset {
+                                                    image: resolve_image,
+                                                    command_buffer,
+                                                    old_state: state,
+                                                    subresource: info.subresource_info,
+                                                }
+                                                ).unwrap();
+                                            }
+                                        }
+                                    }
+                                    let (image_view, image_layout) =
+                                        if let Some(info) = range_info {
+                                            render_commands.frame_graph.frame_context.create_image_view(resolve.id, info)?
+                                        } else {
+                                            render_commands.frame_graph.frame_context.get_image_view(resolve.id)?
+                                        };
+                                    resolve_image_view = image_view;
+                                    resolve_image_layout = image_layout;
+                                },
+                                ImageSource::Swapchain(image, view, state) => {
+                                    let dimensions = render_commands.frame_graph.frame_context
+                                        .gpu()
+                                        .frame_buffer_size();
+                                    if properties.dimensions != dimensions {
+                                        return Err(Error::just_context(format_compact!(
+                                            "resolve (swapchain) image dimensions {} must match main image dimensions {}",
+                                            dimensions, properties.dimensions,
+                                        ))).context(ErrorContext::EventError(resource_id.location_or_this()))
+                                    }
+                                    if resolve.range.is_some() {
+                                        return Err(Error::just_context("swapchain images don't support image ranges"
+                                        )).context(ErrorContext::EventError(resource_id.location_or_this()))
+                                            .context(format_compact!("error while processing pass at {}", pass.location_or_this()))
+                                    }
+                                    if state != dst_state {
+                                        let memory_barrier = state.to_memory_barrier(
+                                            image, dst_state,
+                                            SwapchainContext::subresource_range_info(),
+                                        );
+                                        unsafe {
+                                            device.cmd_pipeline_barrier(
+                                                command_buffer,
+                                                state.pipeline_stage,
+                                                dst_state.pipeline_stage,
+                                                Default::default(),
+                                                Default::default(),
+                                                Default::default(),
+                                                &[memory_barrier]);
+                                        }
+                                        render_commands.frame_graph.frame_context.set_swapchain_image_state(dst_state);
+                                    }
+                                    resolve_image_view = view;
+                                    resolve_image_layout = dst_state.layout;
+                                },
+                            }
+                        }
+                        render_extent.width = render_extent.width.min(properties.dimensions.width);
+                        render_extent.height = render_extent.height.min(properties.dimensions.height);
+                        let (image_view, image_layout) =
+                            if let Some(info) = range_info {
+                                render_commands.frame_graph.frame_context.create_image_view(resource_id, info)?
+                            } else {
+                                render_commands.frame_graph.frame_context.get_image_view(resource_id)?
+                            };
+                        Ok(vk::RenderingAttachmentInfo {
+                            s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
+                            image_view,
+                            image_layout,
+                            load_op: write.load_op.into(),
+                            store_op: write.store_op.into(),
+                            clear_value: write.clear_value.into(),
+                            resolve_image_view,
+                            resolve_image_layout,
+                            resolve_mode,
+                            ..Default::default()
+                        })
+                    },
+                    ImageSource::Swapchain(image, view, state) => {
+                        let (access, layout, stage) = match ty {
+                            AttachmentType::Color => {
+                                (
+                                    vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+                                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                )
+                            },
+                            _ => return Err(Error::just_context("swapchain images can only be used as color attachments"
+                            )).context(ErrorContext::EventError(resource_id.location_or_this()))
+                            .context(format_compact!("error while processing pass at {}", pass.location_or_this())),
                         };
-                    resolve_image_view = image_view;
-                    resolve_image_layout = image_layout;
+                        let dst_state = ImageState::new(
+                            access,
+                            layout,
+                            graphics_queue_index,
+                            stage,
+                        );
+                        if write.resolve.is_some() {
+                            return Err(Error::just_context("swapchain images can't be resolved"
+                            )).context(ErrorContext::EventError(resource_id.location_or_this()))
+                            .context(format_compact!("error while processing pass at {}", pass.location_or_this()))
+                        }
+                        if state != dst_state {
+                            let memory_barrier = state.to_memory_barrier(
+                                image, dst_state,
+                                SwapchainContext::subresource_range_info(),
+                            );
+                            unsafe {
+                                device.cmd_pipeline_barrier(
+                                    command_buffer,
+                                    state.pipeline_stage,
+                                    dst_state.pipeline_stage,
+                                    Default::default(),
+                                    Default::default(),
+                                    Default::default(),
+                                    &[memory_barrier]);
+                            }
+                            render_commands.frame_graph.frame_context.set_swapchain_image_state(dst_state);
+                        }
+                        let dimensions = render_commands.frame_graph.frame_context
+                            .gpu()
+                            .frame_buffer_size();
+                        render_extent.width = render_extent.width.min(dimensions.width);
+                        render_extent.height = render_extent.height.min(dimensions.height);
+                        Ok(vk::RenderingAttachmentInfo {
+                            s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
+                            image_view: view,
+                            image_layout: dst_state.layout,
+                            load_op: write.load_op.into(),
+                            store_op: write.store_op.into(),
+                            clear_value: write.clear_value.into(),
+                            ..Default::default()
+                        })
+                    },
                 }
-                render_extent.width = render_extent.width.min(properties.dimensions.width);
-                render_extent.height = render_extent.height.min(properties.dimensions.height);
-                let (image_view, image_layout) =
-                    if let Some(info) = range_info {
-                        render_commands.frame_graph.frame_context.create_image_view(resource_id, info)?
-                    } else {
-                        render_commands.frame_graph.frame_context.get_image_view(resource_id)?
-                    };
-                Ok(vk::RenderingAttachmentInfo {
-                    s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
-                    image_view,
-                    image_layout,
-                    load_op: write.load_op.into(),
-                    store_op: write.store_op.into(),
-                    clear_value: write.clear_value.into(),
-                    resolve_image_view,
-                    resolve_image_layout,
-                    resolve_mode,
-                    ..Default::default()
-                })
             };
             let mut color_outputs = FixedVec::with_no_alloc();
             let writes = &pass.writes;

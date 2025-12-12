@@ -13,6 +13,7 @@ use crate::gpu::*;
 pub enum ResourceFlags {
     Transient = 0x1,
     Sampleable = 0x2,
+    SwapchainImage = 0x4,
 }
 
 impl_as_raw_bit_op!(ResourceFlags);
@@ -24,7 +25,7 @@ pub struct ResourceId {
     pub(crate) format: vk::Format,
     pub(crate) samples: MSAA,
     pub(crate) flags: u32,
-    pub(super) loc: Location,
+    pub(super) loc: Option<Location>,
 }
 
 impl ResourceId {
@@ -32,6 +33,11 @@ impl ResourceId {
     #[inline(always)]
     pub(crate) fn samples(&self) -> MSAA {
         self.samples
+    }
+
+    #[inline(always)]
+    pub fn is_swapchain_image(&self) -> bool {
+        self.flags & ResourceFlags::SwapchainImage == ResourceFlags::SwapchainImage
     }
 }
 
@@ -54,6 +60,6 @@ impl Tracked for ResourceId {
 
     #[inline(always)]
     fn location(&self) -> Option<Location> {
-        Some(self.loc)
+        self.loc
     }
 }

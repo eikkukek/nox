@@ -62,7 +62,7 @@ impl<'a> Pass<'a> {
         })
     }
 
-    pub fn validate(&self, alloc: &ArenaAlloc) -> Result<bool> {
+    pub fn validate(&self, alloc: &ArenaAlloc) -> Result<Option<Error>> {
 
         enum WriteAccess<'a> {
             Whole,
@@ -77,20 +77,20 @@ impl<'a> Pass<'a> {
                 .context_with(|| ErrorContext::VecError(location!()))?;
             for write in writes {
 
-                let id = write.main_id;
+                let id = write.id;
 
-                if write.range_info.is_none() {
-                    if reads.iter().any(|r| r.resource_id == id) ||
+                let Some(current_range) = write.range else {
+                    if reads.iter().any(|r| r.id == id) ||
                         write_ranges.iter().any(|(v_id, _)| *v_id == id)
                     {
-                        // Whole write / Partial read overlap
-                        return Ok(false)
+                        return Ok(Some(Error::just_context(format_compact!(
+                            "write at {} has overlapping ranges while processing pass at {} (whole write overlaps with a read or another write)",
+                            write.location_or_this(), self.location_or_this(),
+                        ))))
                     }
                     write_ranges.push((id, WriteAccess::Whole)).unwrap();
                     continue
-                }
-
-                let current_range = write.range_info.unwrap();
+                };
 
                 if let Some((_, access)) = write_ranges
                     .iter_mut()
@@ -98,14 +98,37 @@ impl<'a> Pass<'a> {
                 {
                     match access {
                         WriteAccess::Whole => {
-                            // Whole write / Partial write overlap
-                            return Ok(false)
+                            return Ok(Some(Error::just_context(format_compact!(
+                                "write at {} has overlapping ranges while processing pass at {} (whole write overlaps with another write)",
+                                write.location_or_this(), self.location_or_this(),
+                            ))))
                         }
                         WriteAccess::Partial(ranges) => {
-                            for r in ranges.iter() {
-                                if r.overlaps(current_range.subresource_info) {
-                                    // Partial write / Partial write overlap
-                                    return Ok(false)
+                            for range in ranges.iter() {
+                                if range.overlaps(current_range.subresource_info) {
+                                    return Ok(Some(Error::just_context(format_compact!(
+                                        "write at {} has overlapping ranges while processing pass at {} (partial write overlaps with another partial write)",
+                                        write.location_or_this(), self.location_or_this(),
+                                    ))))
+                                }
+                            }
+                            for range in reads
+                                .iter()
+                                .filter(|read| read.id == id)
+                                .map(|read| read.range)
+                            {
+                                if let Some(range) = range {
+                                    if range.subresource_info.overlaps(current_range.subresource_info) {
+                                        return Ok(Some(Error::just_context(format_compact!(
+                                            "write at {} has overlapping ranges while processing pass at {} (partial write overlaps with a partial read)",
+                                            write.location_or_this(), self.location_or_this(),
+                                        ))))
+                                    }
+                                } else {
+                                    return Ok(Some(Error::just_context(format_compact!(
+                                        "write at {} has overlapping ranges while processing pass at {} (partial write overlaps with a whole read)",
+                                        write.location_or_this(), self.location_or_this(),
+                                    ))))
                                 }
                             }
                             ranges.push(current_range.subresource_info).unwrap();
@@ -121,7 +144,7 @@ impl<'a> Pass<'a> {
                 }
             }
         }
-        Ok(true)
+        Ok(None)
     }
 }
 
@@ -141,7 +164,7 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
 
     #[track_caller]
     pub fn with_read(&mut self, read_info: ReadInfo) -> Result<&mut Self> {
-        if has_not_bits!(read_info.resource_id.flags, ResourceFlags::Sampleable) {
+        if has_not_bits!(read_info.id.flags, ResourceFlags::Sampleable) {
             return Err(Error::just_context("image read must be sampleable")
             ).context_with(|| ErrorContext::EventError(caller!()))
         }
@@ -153,7 +176,8 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
     }
 
     #[track_caller]
-    pub fn with_write(&mut self, write: WriteInfo) -> Result<&mut Self> {
+    pub fn with_write(&mut self, write: impl Into<WriteInfo>) -> Result<&mut Self> {
+        let write = write.into();
         if write.samples() != self.pass.msaa_samples {
             return Err(Error::just_context(
                 format_compact!("write MSAA sample count {} must match pass sample count {}",
@@ -162,7 +186,7 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
             )).context(ErrorContext::EventError(caller!()))
         }
         if write.samples() != MSAA::X1 {
-            if let Some(resolve) = write.resolve.map(|v| v.0) {
+            if let Some(resolve) = write.resolve.map(|r| r.id) {
                 if resolve.samples() != MSAA::X1 {
                     return Err(Error::just_context(
                         format_compact!("write resolve image sample count must be 1, given sample count was {}",
@@ -170,10 +194,10 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
                         )
                     )).context(ErrorContext::EventError(caller!()))
                 }
-                if write.main_id.format != resolve.format {
+                if write.id.format != resolve.format {
                     return Err(Error::just_context(
                         format_compact!("write resolve image format {:?} must be the same as the main image format {:?}",
-                            resolve.samples(), write.main_id.format,
+                            resolve.samples(), write.id.format,
                         )
                     )).context(ErrorContext::EventError(caller!()))
                 }
@@ -187,7 +211,8 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
     }
 
     #[track_caller]
-    pub fn with_depth_write(&mut self, write: WriteInfo) -> Result<&mut Self> {
+    pub fn with_depth_write(&mut self, write: impl Into<WriteInfo>) -> Result<&mut Self> {
+        let write = write.into();
         if write.samples() != self.pass.msaa_samples {
             return Err(Error::just_context(
                 format_compact!("write MSAA sample count {} must match pass sample count {}",
@@ -196,7 +221,7 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
             )).context(ErrorContext::EventError(caller!()))
         }
         if write.samples() != MSAA::X1 {
-            if let Some(resolve) = write.resolve.map(|v| v.0) {
+            if let Some(resolve) = write.resolve.map(|r| r.id) {
                 if resolve.samples() != MSAA::X1 {
                     return Err(Error::just_context(
                         format_compact!("write resolve image sample count must be 1, given sample count was {}",
@@ -204,11 +229,11 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
                         )
                     )).context(ErrorContext::EventError(caller!()))
                 }
-                if write.main_id.format != resolve.format {
+                if write.id.format != resolve.format {
                     return Err(Error::just_context(
                         format_compact!(
                             "write resolve image format {:?} must be the same as the main image format {:?}",
-                            resolve.samples(), write.main_id.format,
+                            resolve.samples(), write.id.format,
                         )
                     )).context(ErrorContext::EventError(caller!()))
                 }
@@ -219,7 +244,8 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
     }
 
     #[track_caller]
-    pub fn with_depth_stencil_write(&mut self, write: WriteInfo) -> Result<&mut Self> {
+    pub fn with_depth_stencil_write(&mut self, write: impl Into<WriteInfo>) -> Result<&mut Self> {
+        let write = write.into();
         if write.samples() != self.pass.msaa_samples {
             return Err(Error::just_context(
                 format_compact!("write MSAA sample count {} must match pass sample count {}",
@@ -228,7 +254,7 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
             )).context(ErrorContext::EventError(caller!()))
         }
         if write.samples() != MSAA::X1 {
-            if let Some(resolve) = write.resolve.map(|v| v.0) {
+            if let Some(resolve) = write.resolve.map(|r| r.id) {
                 if resolve.samples() != MSAA::X1 {
                     return Err(Error::just_context(
                         format_compact!("write resolve image sample count must be 1, given sample count was {}",
@@ -236,11 +262,11 @@ impl<'a, 'b> PassBuilder<'a, 'b> {
                         )
                     )).context(ErrorContext::EventError(caller!()))
                 }
-                if write.main_id.format != resolve.format {
+                if write.id.format != resolve.format {
                     return Err(Error::just_context(
                         format_compact!(
                             "write resolve image format {:?} must be the same as the main image format {:?}",
-                            resolve.samples(), write.main_id.format,
+                            resolve.samples(), write.id.format,
                         )
                     )).context(ErrorContext::EventError(caller!()))
                 }

@@ -1,3 +1,4 @@
+mod format;
 mod enums;
 mod structs;
 mod builder;
@@ -19,6 +20,7 @@ use crate::dev::{has_bits, has_not_bits};
 
 use super::MSAA;
 
+pub use format::*;
 pub use enums::*;
 pub use structs::*;
 pub use error::*;
@@ -26,11 +28,3 @@ pub use builder::*;
 pub use sampler::*;
 pub use properties::ImageProperties;
 pub(crate) use image::*;
-
-pub(crate) fn make_aspect_mask(aspects: &[ImageAspect]) -> u32 {
-    let mut mask = 0;
-    for aspect in aspects {
-        mask |= *aspect;
-    }
-    mask
-}

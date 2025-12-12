@@ -30,10 +30,11 @@ pub enum Event<'a, 'b, 'c> {
         request_id: gpu::CommandRequestId,
         commands: &'a mut gpu::TransferCommands<'b, 'c>,
     },
-    /// The frame buffer has been resized or (re)created.
-    FrameBufferResized {
+    /// The frame buffer has been (re)created.
+    FrameBufferCreated {
         gpu: &'a mut gpu::GpuContext<'b>,
         new_size: gpu::Dimensions,
+        new_format: gpu::ImageFormat,
     },
     /// Nox is constructing a [`FrameGraph`].
     ///

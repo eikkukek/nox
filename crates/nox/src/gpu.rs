@@ -20,8 +20,6 @@ mod buffer;
 mod global_resources;
 mod commands;
 
-mod swapchain_pass;
-
 use std::{
     sync::{Arc, RwLock},
 };
@@ -30,7 +28,11 @@ use core::{
     cell::{UnsafeCell},
 };
 
+pub use ash;
+
 use ash::vk;
+
+pub use vk::Format as VkFormat;
 
 use winit::{
     dpi::PhysicalSize, window::Window
@@ -51,8 +53,6 @@ use crate::dev::{
     error::{self, Result, Error, Context, ErrorContext, Tracked, location},
     format_location,
 };
-
-pub use vk::Format as VkFormat;
 
 pub use context::GpuContext;
 pub use enums::*;
@@ -76,8 +76,6 @@ use swapchain_context::SwapchainContext;
 use frame_context::{FrameContext, ResourcePool};
 use swapchain_context::PresentResult;
 use thread_context::ThreadContext;
-
-use swapchain_pass::SwapchainPassPipelineData;
 
 pub type DeviceName = ArrayString<{ash::vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 
@@ -134,7 +132,6 @@ pub(crate) struct Gpu<'a> {
     main_thread_context: ThreadContext,
     frame_resource_pools: ArrayVec<ResourcePool, {MAX_BUFFERED_FRAMES as usize}>,
     compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
-    swapchain_pass_pipeline_data: SwapchainPassPipelineData,
     global_resources: Arc<RwLock<GlobalResources>>,
     device: Arc<ash::Device>,
     vulkan_context: VulkanContext<'a>,
@@ -192,15 +189,11 @@ impl<'a> Gpu<'a> {
                     memory_layout
                 ).context("failed to initialize global resources")?
         ));
-        let swapchain_pass_pipeline_data = SwapchainPassPipelineData
-            ::new(global_resources.clone(), buffered_frames, &tmp_alloc)
-            .context("failed to create main render pass")?;
         let mut s = Self {
             main_thread_context,
             vulkan_context,
             frame_resource_pools: Default::default(),
             compute_states: Default::default(),
-            swapchain_pass_pipeline_data,
             global_resources: global_resources.clone(),
             device: device.clone(),
             _memory_layout: memory_layout,
@@ -713,9 +706,10 @@ impl<'a> Gpu<'a> {
                     &mut self.transfer_requests,
                     frame_buffer_size
                 );
-                interface.event(Event::FrameBufferResized {
+                interface.event(Event::FrameBufferCreated {
                     gpu: &mut context,
                     new_size: frame_buffer_size,
+                    new_format: ImageFormat(frame_data.format, vk::ImageAspectFlags::COLOR),
                 }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             }
             self.async_transfer_requests(interface)
@@ -817,8 +811,6 @@ impl<'a> Gpu<'a> {
         helpers
             ::begin_command_buffer(&device, frame_data.command_buffer)
             .context_with(|| format_compact!("failed to begin command buffer at {}", location!()))?;
-        let pipeline = self.swapchain_pass_pipeline_data
-            .get_pipeline(frame_data.format, &self.tmp_alloc)?;
         let alloc = &host_allocators.frame_graphs()[frame_data.frame_index as usize];
         unsafe {
             alloc.force_clear();
@@ -834,7 +826,6 @@ impl<'a> Gpu<'a> {
             let mut frame_graph = FrameGraph::new(
                 FrameContext::new(
                     frame_data.command_buffer,
-                    device.clone(),
                     GpuContext::new(
                         self.global_resources
                             .write()
@@ -843,6 +834,10 @@ impl<'a> Gpu<'a> {
                         frame_data.extent.into(),
                     ),
                     &mut self.frame_resource_pools[frame_data.frame_index as usize],
+                    frame_data.image,
+                    frame_data.image_view,
+                    frame_data.format,
+                    frame_data.image_state,
                 ),
                 frame_data.command_buffer,
                 alloc,
@@ -870,104 +865,11 @@ impl<'a> Gpu<'a> {
                 &mut self.sync_transfer_commands,
             )?
         };
-        let mut frame_context = frame_context.take().unwrap();
-        let mut image_state = frame_data.image_state;
-        let graphics_queue_index = queue_family_indices.graphics_index();
-        if let Some((render_image, range_info)) = frame_context
-            .get_render_image(queue_family_indices.graphics_index())?
-        {
-            let command_buffer = frame_data.command_buffer;
-            let write_image_state = ImageState::new(
-                vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                graphics_queue_index,
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            );
-            let memory_barrier = image_state.to_memory_barrier(
-                frame_data.image,
-                write_image_state,
-                SwapchainContext::subresource_range_info(),
-            );
-            unsafe {
-                device.cmd_pipeline_barrier(
-                    command_buffer,
-                    image_state.pipeline_stage,
-                    write_image_state.pipeline_stage,
-                    Default::default(), Default::default(), Default::default(),
-                    &[memory_barrier]
-                );
-            };
-            image_state = write_image_state;
-            let render_area = vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: frame_data.extent,
-            };
-            let color_attachment = vk::RenderingAttachmentInfo {
-                s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
-                image_view: frame_data.image_view,
-                image_layout: image_state.layout,
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::STORE,
-                ..Default::default()
-            };
-            let rendering_info = vk::RenderingInfo {
-                s_type: vk::StructureType::RENDERING_INFO,
-                render_area,
-                layer_count: 1,
-                color_attachment_count: 1,
-                p_color_attachments: &color_attachment,
-                ..Default::default()
-            };
-            unsafe {
-
-                device.cmd_set_viewport(
-                    command_buffer, 0,
-                    &[
-                        vk::Viewport {
-                            x: 0.0,
-                            y: 0.0,
-                            width: frame_data.extent.width as f32,
-                            height: frame_data.extent.height as f32,
-                            min_depth: 0.0,
-                            max_depth: 1.0,
-                        }
-                    ]
-                );
-                device.cmd_set_scissor(
-                    command_buffer, 0,
-                    &[
-                        vk::Rect2D {
-                            offset: Default::default(),
-                            extent: frame_data.extent,
-                        },
-                    ]
-                );
-                device.cmd_begin_rendering(command_buffer, &rendering_info);
-
-                device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
-                device.cmd_bind_descriptor_sets(
-                    command_buffer,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.swapchain_pass_pipeline_data.get_pipeline_layout(frame_context.gpu_mut()).unwrap(),
-                    0,
-                    &[self.swapchain_pass_pipeline_data.get_descriptor_set(
-                        frame_context.gpu_mut(),
-                        render_image,
-                        range_info,
-                        frame_data.frame_index,
-                        &self.tmp_alloc
-                    ).unwrap()],
-                    Default::default(),
-                );
-                device.cmd_draw(command_buffer, 6, 1, 0, 0);
-                device.cmd_end_rendering(command_buffer);
-                frame_context.render_done();
-            }
-        }
+        let frame_context = frame_context.take().unwrap();
         let (semaphores, fence) = swapchain_context
             .setup_submit(
                 &device,
-                image_state,
+                frame_context.get_swapchain_image_state(),
                 queue_family_indices.graphics_index()
             );
         unsafe { device

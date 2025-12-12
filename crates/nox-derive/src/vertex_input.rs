@@ -37,25 +37,25 @@ pub fn vertex_input(item: TokenStream) -> TokenStream {
             let ty = f.ty.to_token_stream();
             let str = ty.to_string();
             let format = match str.as_str() {
-                "u32" => quote!(nox::VkFormat::R32_UINT),
-                "[u32; 2]" => quote!(nox::VkFormat::R32G32_UINT),
-                "[u32; 3]" => quote!(nox::VkFormat::R32G32B32_UINT),
-                "[u32; 4]" => quote!(nox::VkFormat::R32G32B32A32_UINT),
-                "i32" => quote!(nox::VkFormat::R32_SINT),
-                "[i32; 2]" => quote!(nox::VkFormat::R32G32_SINT),
-                "[i32; 3]" => quote!(nox::VkFormat::R32G32B32_SINT),
-                "[i32; 4]" => quote!(nox::VkFormat::R32G32B32A32_SINT),
-                "f32" => quote!(nox::VkFormat::R32_SFLOAT),
-                "[f32; 2]" => quote!(nox::VkFormat::R32G32_SFLOAT),
-                "[f32; 3]" => quote!(nox::VkFormat::R32G32B32_SFLOAT),
-                "[f32; 4]" => quote!(nox::VkFormat::R32G32B32A32_SFLOAT),
-                _ if str.ends_with("Vec2") => quote!(nox::VkFormat::R32G32_SFLOAT),
-                _ if str.ends_with("Vec3") => quote!(nox::VkFormat::R32G32B32_SFLOAT),
-                _ if str.ends_with("Vec4") => quote!(nox::VkFormat::R32G32B32A32_SFLOAT),
+                "u32" => quote!(nox::gpu::VkFormat::R32_UINT),
+                "[u32; 2]" => quote!(nox::gpu::VkFormat::R32G32_UINT),
+                "[u32; 3]" => quote!(nox::gpu::VkFormat::R32G32B32_UINT),
+                "[u32; 4]" => quote!(nox::gpu::VkFormat::R32G32B32A32_UINT),
+                "i32" => quote!(nox::gpu::VkFormat::R32_SINT),
+                "[i32; 2]" => quote!(nox::gpu::VkFormat::R32G32_SINT),
+                "[i32; 3]" => quote!(nox::gpu::VkFormat::R32G32B32_SINT),
+                "[i32; 4]" => quote!(nox::gpu::VkFormat::R32G32B32A32_SINT),
+                "f32" => quote!(nox::gpu::VkFormat::R32_SFLOAT),
+                "[f32; 2]" => quote!(nox::gpu::VkFormat::R32G32_SFLOAT),
+                "[f32; 3]" => quote!(nox::gpu::VkFormat::R32G32B32_SFLOAT),
+                "[f32; 4]" => quote!(nox::gpu::VkFormat::R32G32B32A32_SFLOAT),
+                _ if str.ends_with("Vec2") => quote!(nox::gpu::VkFormat::R32G32_SFLOAT),
+                _ if str.ends_with("Vec3") => quote!(nox::gpu::VkFormat::R32G32B32_SFLOAT),
+                _ if str.ends_with("Vec4") => quote!(nox::gpu::VkFormat::R32G32B32A32_SFLOAT),
                 _ => quote!(#ty::VK_FORMAT),
             };
             quote! {
-                nox::VertexInputAttribute {
+                nox::gpu::VertexInputAttribute {
                     location: FIRST_LOCATION + #i,
                     format: #format,
                     offset: core::mem::offset_of!(#name, #n) as u32,
@@ -64,9 +64,9 @@ pub fn vertex_input(item: TokenStream) -> TokenStream {
         })
         .collect();
     let expanded = quote! {
-        unsafe impl nox::VertexInput for #name {
+        unsafe impl nox::gpu::VertexInput for #name {
 
-            fn get_attributes<const FIRST_LOCATION: u32>() -> &'static [nox::VertexInputAttribute] {
+            fn get_attributes<const FIRST_LOCATION: u32>() -> &'static [nox::gpu::VertexInputAttribute] {
                 &[ #( #inputs ),*
                 ]
             }

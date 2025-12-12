@@ -10,6 +10,8 @@ use memmap2::Mmap;
 
 use nox::{
     mem::{size_of, slice_as_bytes, vec_types::ArrayVec, GlobalAlloc},
+    gpu::{self, VertexInput},
+    error::Context,
     *,
 };
 
@@ -120,13 +122,13 @@ struct LightInfo {
 #[derive(Default)]
 struct ImageAsset {
     ptr: Option<NonNull<u8>>,
-    dim: Dimensions,
+    dim: gpu::Dimensions,
     ch: u32,
 }
 
 impl ImageAsset {
 
-    fn new(filepath: &Path, channels: u32) -> Result<Self, nox::Error> {
+    fn new(filepath: &Path, channels: u32) -> Result<Self> {
         let mut x = 0;
         let mut y = 0;
         let mut ch = 0;
@@ -140,12 +142,12 @@ impl ImageAsset {
                 channels as i32,
             ))
         };
-        let dim = Dimensions::new(x as u32, y as u32, 1);
+        let dim = gpu::Dimensions::new(x as u32, y as u32, 1);
         if ptr.is_none() {
             unsafe {
                 let err = stb_image::stb_image::stbi_failure_reason();
-                return Err(nox::Error::UserError(
-                    std::ffi::CStr::from_ptr(err).to_str().unwrap().into()
+                return Err(Error::just_context(
+                    std::ffi::CStr::from_ptr(err).to_str().unwrap().to_string()
                 ))
             }
         }
@@ -179,46 +181,46 @@ impl Drop for ImageAsset {
 
 struct App {
     assets: [ImageAsset; 8],
-    color_format: ColorFormat,
-    depth_stencil_format: DepthStencilFormat,
-    depth_format: DepthStencilFormat,
-    fire_format: FloatFormat,
-    image: ImageId,
-    fire_images: [ImageId; 2],
-    sampler: SamplerId,
-    vertex_shader: ShaderId,
-    fragment_shader: ShaderId,
-    outline_vertex: ShaderId,
-    outline_fragment: ShaderId,
-    fire_effect_compute: ShaderId,
-    fire_effect_vertex: ShaderId,
-    fire_effect_fragment: ShaderId,
-    pipeline_layouts: [PipelineLayoutId; 4],
-    pipelines: [GraphicsPipelineId; 3],
-    fire_pipeline: ComputePipelineId,
-    vertex_buffer: BufferId,
-    vertex_instance_buffer: BufferId,
-    index_buffer: BufferId,
-    matrices_buffer: BufferId,
+    color_format: gpu::ColorFormat,
+    depth_stencil_format: gpu::DepthStencilFormat,
+    depth_format: gpu::DepthStencilFormat,
+    fire_format: gpu::FloatFormat,
+    image: gpu::ImageId,
+    fire_images: [gpu::ImageId; 2],
+    sampler: gpu::SamplerId,
+    vertex_shader: gpu::ShaderId,
+    fragment_shader: gpu::ShaderId,
+    outline_vertex: gpu::ShaderId,
+    outline_fragment: gpu::ShaderId,
+    fire_effect_compute: gpu::ShaderId,
+    fire_effect_vertex: gpu::ShaderId,
+    fire_effect_fragment: gpu::ShaderId,
+    pipeline_layouts: [gpu::PipelineLayoutId; 4],
+    pipelines: [gpu::GraphicsPipelineId; 3],
+    fire_pipeline: gpu::ComputePipelineId,
+    vertex_buffer: gpu::BufferId,
+    vertex_instance_buffer: gpu::BufferId,
+    index_buffer: gpu::BufferId,
+    matrices_buffer: gpu::BufferId,
     matrices_map: NonNull<Matrices>,
-    light_info_buffer: BufferId,
+    light_info_buffer: gpu::BufferId,
     light_info_map: NonNull<LightInfo>,
-    shader_resources: [ShaderResourceId; 4],
-    fire_pass: PassId,
-    cube_pass: PassId,
-    outline_pass: PassId,
-    frame_buffer_size: image::Dimensions,
+    shader_resources: [gpu::ShaderResourceId; 4],
+    fire_pass: gpu::PassId,
+    cube_pass: gpu::PassId,
+    outline_pass: gpu::PassId,
+    frame_buffer_size: gpu::Dimensions,
     cache_dir: PathBuf,
-    pipeline_cache: PipelineCacheId,
+    pipeline_cache: gpu::PipelineCacheId,
     heat_in: u32,
-    fire_transfer_id: CommandRequestId,
+    fire_transfer_id: gpu::CommandRequestId,
     rot: f32,
-    semaphore: TimelineSemaphoreId,
+    semaphore: gpu::TimelineSemaphoreId,
     semaphore_value: u64,
-    fire_semaphore: TimelineSemaphoreId,
+    fire_semaphore: gpu::TimelineSemaphoreId,
     fire_semaphore_value: u64,
-    staging_alloc: LinearDeviceAllocId,
-    image_alloc: LinearDeviceAllocId,
+    staging_alloc: gpu::LinearDeviceAllocId,
+    image_alloc: gpu::LinearDeviceAllocId,
 }
 
 impl App {
@@ -229,11 +231,11 @@ impl App {
         cache_dir.push("example.cache");
         Self {
             assets: Default::default(),
-            color_format: ColorFormat::SrgbRGBA8,
-            depth_stencil_format: DepthStencilFormat::D32S8,
-            depth_format: DepthStencilFormat::D32,
+            color_format: gpu::ColorFormat::SrgbRGBA8,
+            depth_stencil_format: gpu::DepthStencilFormat::D32S8,
+            depth_format: gpu::DepthStencilFormat::D32,
             image: Default::default(),
-            fire_format: FloatFormat::R32,
+            fire_format: gpu::FloatFormat::R32,
             fire_images: Default::default(),
             sampler: Default::default(),
             vertex_shader: Default::default(),
@@ -279,13 +281,13 @@ impl Interface for App {
         InitSettings::new("Test", Version::default(), [540, 540], true, true)
     }
 
-    fn init_callback(
+    fn init(
         &mut self,
-        nox: &Nox<Self>,
-        renderer: &mut RendererContext
-    ) -> Result<(), nox::Error>
+        _win: &mut win::WindowContext,
+        gpu: &mut gpu::GpuContext, 
+    ) -> Result<()>
     {
-        println!("GPU: {}", nox.gpu_name());
+        println!("GPU: {}", gpu.physical_device_info().device_name());
         let mut path = match std::env::current_exe() {
             Ok(path) => path,
             Err(_) => PathBuf::new(),
@@ -304,865 +306,798 @@ impl Interface for App {
         for (i, path) in paths.iter().enumerate() {
             self.assets[i] = ImageAsset
                 ::new(path, 4)
-                .map_err(|e| nox::Error::UserError(format!("failed to open {:?} ( {:?} )", path, e)))?;
+                .map_err(|err| nox::Error::new(format!("failed to open {:?}", path), err))?;
         }
-        renderer.edit_resources(|r| {
-            self.pipeline_cache =
-                if fs::exists(&self.cache_dir)? {
-                    let file = File::open(&self.cache_dir)?;
-                    let map = unsafe {
-                        Mmap::map(&file)?
-                    };
-                    r.create_pipeline_cache(Some(&map))?
+        self.pipeline_cache =
+            if fs::exists(&self.cache_dir).context("io error")? {
+                let file = File
+                    ::open(&self.cache_dir)
+                    .context("failed to open pipeline cache")?;
+                let map = unsafe {
+                    Mmap::map(&file)
+                        .context("failed to map pipeline cache")?
+                };
+                gpu.create_pipeline_cache(Some(&map))?
+            }
+            else {
+                File::create_new(&self.cache_dir)
+                    .context("failed to create pipeline cache file")?;
+                gpu.create_pipeline_cache(None)?
+            };
+        self.vertex_shader = gpu.create_shader(
+            "#version 450
+
+            layout(location = 0) in vec3 in_pos;
+            layout(location = 1) in vec3 in_normal;
+            layout(location = 2) in vec2 in_uv;
+
+            layout(location = 3) in float in_off;
+
+            layout(location = 0) out vec3 out_normal;
+            layout(location = 1) out vec2 out_uv;
+            layout(location = 2) out vec3 out_pos;
+            layout(location = 3) out flat uint instance_index;
+
+            layout(set = 0, binding = 0) uniform Matrices {
+                mat4 model;
+                mat4 projection;
+                mat4 view;
+            } matrices;
+
+            void main() {
+                mat3 normal_matrix = transpose(inverse(mat3(matrices.model)));
+                out_normal = normal_matrix * in_normal;
+                mat4 model = matrices.model;
+                vec4 off = vec4(
+                    cos(in_off) * 3.0,
+                    sin(in_off) * 3.0,
+                    0.0,
+                    0.0
+                );
+                model[3] += off;
+                gl_Position = matrices.projection * matrices.view * model * vec4(in_pos, 1.0);
+                out_uv = in_uv;
+                vec4 pos = model * vec4(in_pos, 1.0);
+                out_pos = pos.xyz;
+                instance_index = gl_InstanceIndex;
+            }
+            ",
+            "vertex shader",
+            gpu::ShaderStage::Vertex,
+        )?;
+        self.fragment_shader = gpu.create_shader(
+            "#version 450
+
+            layout(location = 0) in vec3 in_normal;
+            layout(location = 1) in vec2 in_uv;
+            layout(location = 2) in vec3 in_pos;
+            layout(location = 3) in flat uint instance_index;
+
+            layout(location = 0) out vec4 out_color;
+
+            layout(set = 1, binding = 0) uniform sampler2DArray tex;
+            layout(set = 1, binding = 1) uniform LightInfo {
+                vec3 pos;
+            } light_info;
+            
+            void main() {
+
+                vec3 light_color = vec3(0.4, 0.4, 0.4);
+                vec3 light_dir = normalize(light_info.pos - in_pos);
+                const float diff = max(dot(normalize(in_normal), light_dir), 0.0);
+                vec3 diffuse = diff * light_color;
+                vec4 color = texture(tex, vec3(in_uv, instance_index));
+                out_color = vec4(color.xyz * 0.8f + (diffuse * light_color), 1.0);
+            }
+            ",
+            "fragment shader",
+            gpu::ShaderStage::Fragment,
+        )?;
+        self.outline_vertex = gpu.create_shader(
+            "#version 450
+
+            layout(location = 0) in vec3 in_pos;
+            layout(location = 1) in vec3 in_normal;
+            layout(location = 2) in vec2 in_uv;
+
+            layout(location = 3) in float in_off;
+
+            layout(set = 0, binding = 0) uniform Matrices {
+                mat4 model;
+                mat4 projection;
+                mat4 view;
+            } matrices;
+
+            void main() {
+                mat4 model = matrices.model;
+                vec4 off = vec4(
+                    cos(in_off) * 3.0,
+                    sin(in_off) * 3.0,
+                    0.0,
+                    0.0
+                );
+                model[0] *= 1.08;
+                model[1] *= 1.08;
+                model[2] *= 1.08;
+                model[3] += off;
+
+                gl_Position = matrices.projection * matrices.view * model * vec4(in_pos, 1.0);
+            }
+            ",
+            "outline vertex",
+            gpu::ShaderStage::Vertex
+        )?;
+        self.outline_fragment = gpu.create_shader(
+            "#version 450
+            layout(location = 0) out vec4 out_color;
+
+            void main() {
+                out_color = vec4(1.0, 1.0, 1.0, 1.0);
+            }
+            ",
+            "outline fragment",
+            gpu::ShaderStage::Fragment,
+        )?;
+        self.fire_effect_compute = gpu.create_shader(
+            "#version 450
+
+            layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+            layout(binding = 0, r32F) uniform image2D smoke_in;
+            layout(binding = 1, r32F) uniform image2D smoke_out;
+
+            layout(push_constant) uniform Params {
+                float density;
+                float noise_strength;
+                float time;
+            } params;
+
+            float rand(vec2 co) {
+                return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+            }
+
+            void main() {
+
+                ivec2 uv = ivec2(gl_GlobalInvocationID.xy);
+                ivec2 size = imageSize(smoke_in);
+
+                float s = imageLoad(smoke_in, uv).r;
+
+                float down = imageLoad(smoke_in, uv + ivec2(0, 1)).r;
+                float right = imageLoad(smoke_in, uv + ivec2(1, 0)).r;
+                float left = imageLoad(smoke_in, uv - ivec2(1, 0)).r;
+
+                if (down > right && down > left) {
+                    s = max(mix(s, down, 0.5), s);
+                }
+                if (right > left) {
+                    s = mix(s, right, 0.00);
                 }
                 else {
-                    File::create_new(&self.cache_dir)?;
-                    r.create_pipeline_cache(None)?
-                };
-            self.vertex_shader = r.create_shader(
-                "#version 450
-
-                layout(location = 0) in vec3 in_pos;
-                layout(location = 1) in vec3 in_normal;
-                layout(location = 2) in vec2 in_uv;
-
-                layout(location = 3) in float in_off;
-
-                layout(location = 0) out vec3 out_normal;
-                layout(location = 1) out vec2 out_uv;
-                layout(location = 2) out vec3 out_pos;
-                layout(location = 3) out flat uint instance_index;
-
-                layout(set = 0, binding = 0) uniform Matrices {
-                    mat4 model;
-                    mat4 projection;
-                    mat4 view;
-                } matrices;
-
-                void main() {
-                    mat3 normal_matrix = transpose(inverse(mat3(matrices.model)));
-                    out_normal = normal_matrix * in_normal;
-                    mat4 model = matrices.model;
-                    vec4 off = vec4(
-                        cos(in_off) * 3.0,
-                        sin(in_off) * 3.0,
-                        0.0,
-                        0.0
-                    );
-                    model[3] += off;
-                    gl_Position = matrices.projection * matrices.view * model * vec4(in_pos, 1.0);
-                    out_uv = in_uv;
-                    vec4 pos = model * vec4(in_pos, 1.0);
-                    out_pos = pos.xyz;
-                    instance_index = gl_InstanceIndex;
-                }
-                ",
-                "vertex shader",
-                ShaderStage::Vertex,
-            )?;
-            self.fragment_shader = r.create_shader(
-                "#version 450
-
-                layout(location = 0) in vec3 in_normal;
-                layout(location = 1) in vec2 in_uv;
-                layout(location = 2) in vec3 in_pos;
-                layout(location = 3) in flat uint instance_index;
-
-                layout(location = 0) out vec4 out_color;
-
-                layout(set = 1, binding = 0) uniform sampler2DArray tex;
-                layout(set = 1, binding = 1) uniform LightInfo {
-                    vec3 pos;
-                } light_info;
-                
-                void main() {
-
-                    vec3 light_color = vec3(0.4, 0.4, 0.4);
-                    vec3 light_dir = normalize(light_info.pos - in_pos);
-                    const float diff = max(dot(normalize(in_normal), light_dir), 0.0);
-                    vec3 diffuse = diff * light_color;
-                    vec4 color = texture(tex, vec3(in_uv, instance_index));
-                    out_color = vec4(color.xyz * 0.8f + (diffuse * light_color), 1.0);
-                }
-                ",
-                "fragment shader",
-                ShaderStage::Fragment,
-            )?;
-            self.outline_vertex = r.create_shader(
-                "#version 450
-
-                layout(location = 0) in vec3 in_pos;
-                layout(location = 1) in vec3 in_normal;
-                layout(location = 2) in vec2 in_uv;
-
-                layout(location = 3) in float in_off;
-
-                layout(set = 0, binding = 0) uniform Matrices {
-                    mat4 model;
-                    mat4 projection;
-                    mat4 view;
-                } matrices;
-
-                void main() {
-                    mat4 model = matrices.model;
-                    vec4 off = vec4(
-                        cos(in_off) * 3.0,
-                        sin(in_off) * 3.0,
-                        0.0,
-                        0.0
-                    );
-                    model[0] *= 1.08;
-                    model[1] *= 1.08;
-                    model[2] *= 1.08;
-                    model[3] += off;
-
-                    gl_Position = matrices.projection * matrices.view * model * vec4(in_pos, 1.0);
-                }
-                ",
-                "outline vertex",
-                ShaderStage::Vertex
-            )?;
-            self.outline_fragment = r.create_shader(
-                "#version 450
-                layout(location = 0) out vec4 out_color;
-
-                void main() {
-                    out_color = vec4(1.0, 1.0, 1.0, 1.0);
-                }
-                ",
-                "outline fragment",
-                ShaderStage::Fragment,
-            )?;
-            self.fire_effect_compute = r.create_shader(
-                "#version 450
-
-                layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-
-                layout(binding = 0, r32F) uniform image2D smoke_in;
-                layout(binding = 1, r32F) uniform image2D smoke_out;
-
-                layout(push_constant) uniform Params {
-                    float density;
-                    float noise_strength;
-                    float time;
-                } params;
-
-                float rand(vec2 co) {
-                    return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+                    s = mix(s, left, 0.00);
                 }
 
-                void main() {
+                s *= params.density;
 
-                    ivec2 uv = ivec2(gl_GlobalInvocationID.xy);
-                    ivec2 size = imageSize(smoke_in);
-
-                    float s = imageLoad(smoke_in, uv).r;
-
-                    float down = imageLoad(smoke_in, uv + ivec2(0, 1)).r;
-                    float right = imageLoad(smoke_in, uv + ivec2(1, 0)).r;
-                    float left = imageLoad(smoke_in, uv - ivec2(1, 0)).r;
-
-                    if (down > right && down > left) {
-                        s = max(mix(s, down, 0.5), s);
-                    }
-                    if (right > left) {
-                        s = mix(s, right, 0.00);
-                    }
-                    else {
-                        s = mix(s, left, 0.00);
-                    }
-
-                    s *= params.density;
-
-                    if (uv.y == size.y - 1 && abs(s) < 0.5) {
-                        s = rand(uv * params.time);
-                        //if (s < 0.7) s = 0.0;
-                        //s = params.noise_strength * s;
-                    }
-
-                    imageStore(smoke_out, uv, vec4(s, 0.0, 0.0, 1.0));
-                }
-                ",
-                "fire effect",
-                ShaderStage::Compute,
-            )?;
-            self.fire_effect_vertex = r.create_shader(
-                "#version 450
-
-                layout(location = 0) out vec2 out_uv;
-
-                vec2 positions[6] = vec2[](
-                    vec2(1.0, 1.0),
-                    vec2(-1.0, 1.0),
-                    vec2(-1.0, -1.0),
-                    vec2(1.0, -1.0),
-                    vec2(1.0, 1.0),
-                    vec2(-1.0, -1.0)
-                );
-
-                vec2 uvs[6] = vec2[](
-                    vec2(0.0, 1.0),
-                    vec2(1.0, 1.0),
-                    vec2(1.0, 0.0),
-                    vec2(0.0, 0.0),
-                    vec2(0.0, 1.0),
-                    vec2(1.0, 0.0)
-                );
-
-                void main() {
-                    int vertex_index = gl_VertexIndex;
-                    out_uv = uvs[vertex_index];
-                    gl_Position = vec4(positions[vertex_index], 0.0, 1.0);
-                }
-                ",
-                "fire effect vertex",
-                ShaderStage::Vertex,
-            )?;
-            self.fire_effect_fragment = r.create_shader(
-                "#version 450
-
-                layout(location = 0) in vec2 in_uv;
-
-                layout(location = 0) out vec4 out_color;
-
-                layout(set = 0, binding = 0) uniform sampler2D fire_tex;
-
-                const float hot = 12.0 / 360.0;
-                const float warm = 188.0 / 360.0;
-
-                const float sat = 1.0;
-                const float light = 0.63;
-
-                float hue_to_rgb(float p, float q, float t) {
-                    if (t < 0.0) t += 1.0;
-                    if (t > 1.0) t -= 1.0;
-                    if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
-                    if (t < 0.5) return q;
-                    if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
-                    return p;
+                if (uv.y == size.y - 1 && abs(s) < 0.5) {
+                    s = rand(uv * params.time);
+                    //if (s < 0.7) s = 0.0;
+                    //s = params.noise_strength * s;
                 }
 
-                vec3 hsl_to_rgb(float h, float s, float l) {
-                    const float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
-                    const float p = 2.0 * l - q;
-                    float r = hue_to_rgb(p, q, h + 1.0 / 3.0);
-                    float g = hue_to_rgb(p, q, h);
-                    float b = hue_to_rgb(p, q, h - 1.0 / 3.0);
-                    return vec3(r, g, b);
-                }
+                imageStore(smoke_out, uv, vec4(s, 0.0, 0.0, 1.0));
+            }
+            ",
+            "fire effect",
+            gpu::ShaderStage::Compute,
+        )?;
+        self.fire_effect_vertex = gpu.create_shader(
+            "#version 450
 
-                void main() {
-                    float r = texture(fire_tex, in_uv).r;
-                    float a = r;
-                    float hue = mix(warm, hot, r);
-                    vec3 rgb = hsl_to_rgb(hue, sat, light);
-                    out_color = vec4(rgb * a, 1.0);
-                }
-                ",
-                "fire effect fragment",
-                ShaderStage::Fragment,
-            )?;
-            self.pipeline_layouts = [
-                    r.create_pipeline_layout(
-                        [self.vertex_shader, self.fragment_shader],
-                    )?,
-                    r.create_pipeline_layout(
-                        [self.outline_vertex, self.outline_fragment],
-                    )?,
-                    r.create_pipeline_layout(
-                        [self.fire_effect_compute],
-                    )?,
-                    r.create_pipeline_layout(
-                        [self.fire_effect_vertex, self.fire_effect_fragment],
-                    )?,
-            ];
-            self.color_format = r.supported_image_format(
-                &[ColorFormat::SrgbRGBA8, ColorFormat::UnormRGBA8],
-                FormatFeature::SampledImage | FormatFeature::ColorAttachment,
-            ).unwrap();
-            self.depth_stencil_format = r.supported_image_format(
-                DepthStencilFormat::all_depth_stencil(),
-                FormatFeature::DepthStencilAttachment,
-            ).unwrap();
-            self.depth_format = r.supported_image_format(
-                DepthStencilFormat::all_depth(),
-                FormatFeature::SampledImage | FormatFeature::DepthStencilAttachment,
-            ).unwrap();
-            self.fire_format = r.supported_image_format(
-                &[FloatFormat::R32],
-                FormatFeature::SampledImage | FormatFeature::StorageImage
-            ).unwrap();
-            self.image = r.create_image(
-                ResourceBinderImage::DefaultBinder,
-                |builder| {
-                    builder
-                        .with_usage(ImageUsage::TransferDst)
-                        .with_usage(ImageUsage::Sampled)
-                        .with_dimensions(self.assets[0].dim)
-                        .with_format(self.color_format, false)
-                        .with_array_layers(8);
-                }
-            )?;
-            self.sampler = r.create_sampler(
-                |_| {},
-            )?;
-            let mut graphics_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[0]);
-            graphics_pipeline_info
-                .with_sample_shading(SampleShadingInfo::new(MSAA::X4, 0.2, false, false))
-                .with_color_output(
-                    self.color_format,
-                    WriteMask::all(),
-                    None,
-                )
-                .with_depth_output(self.depth_stencil_format)
-                .with_stencil_output(self.depth_stencil_format)
-                .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
-                .with_vertex_input_binding(VertexInputBinding::new::<3, VertexOff>(1, VertexInputRate::Instance))
-                .with_depth_stencil(DepthStencilInfo {
-                    compare_op: CompareOp::Less,
-                    depth_bounds: Some(DepthBounds::new(0.0, 1.0)),
-                    stencil_test_info: Some(StencilTestInfo {
-                        front: Default::default(),
-                        back: StencilOpState {
-                            fail_op: StencilOp::Keep,
-                            pass_op: StencilOp::Replace,
-                            depth_fail_op: StencilOp::Keep,
-                            compare_op: CompareOp::Always,
-                            compare_mask: 0x0,
-                            write_mask: 0x1,
-                            reference: 0x1,
-                        },
-                    }),
-                    write_enable: true,
-                });
-            let mut outline_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[1]);
-            outline_pipeline_info
-                .with_sample_shading(SampleShadingInfo::new(MSAA::X4, 0.2, false, false))
-                .with_color_output(
-                    self.color_format,
-                    WriteMask::all(),
-                    None,
-                )
-                .with_depth_output(self.depth_stencil_format)
-                .with_stencil_output(self.depth_stencil_format)
-                .with_vertex_input_binding(VertexInputBinding::new::<0, Vertex>(0, VertexInputRate::Vertex))
-                .with_vertex_input_binding(VertexInputBinding::new::<3, VertexOff>(1, VertexInputRate::Instance))
-                .with_depth_stencil(DepthStencilInfo {
-                    compare_op: CompareOp::Less,
-                    depth_bounds: Some(DepthBounds::new(0.0, 1.0)),
-                    stencil_test_info: Some(StencilTestInfo {
-                        front: Default::default(),
-                        back: StencilOpState {
-                            fail_op: StencilOp::Keep,
-                            pass_op: StencilOp::Keep,
-                            depth_fail_op: StencilOp::Keep,
-                            compare_op: CompareOp::NotEqual,
-                            compare_mask: 0x1,
-                            write_mask: 0x0,
-                            reference: 0x1,
-                        },
-                    }),
-                    write_enable: true,
-                });
-            let mut fire_effect_pipeline_info = GraphicsPipelineInfo::new(self.pipeline_layouts[3]);
-            fire_effect_pipeline_info
-                .with_sample_shading(SampleShadingInfo::new(MSAA::X4, 0.2, false, false))
-                .with_color_output(
-                    self.color_format,
-                    WriteMask::all(),
-                    None,
-                );
-            r.create_graphics_pipelines(
-                &[graphics_pipeline_info, outline_pipeline_info, fire_effect_pipeline_info],
-                Some(self.pipeline_cache),
-                &GlobalAlloc,
-                |i, id| { self.pipelines[i] = id; },
-            )?;
-            let fire_pipeline_info = ComputePipelineInfo::new(self.pipeline_layouts[2]);
-            r.create_compute_pipelines(
-                &[fire_pipeline_info],
-                Some(self.pipeline_cache),
-                &GlobalAlloc,
-                |_, id| { self.fire_pipeline = id },
-            )?;
-            self.vertex_buffer = r.create_buffer(
-                (CUBE_VERTICES.len() * size_of!(Vertex)) as u64,
-                &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
-                ResourceBinderBuffer::DefaultBinder,
-            )?;
-            self.vertex_instance_buffer = r.create_buffer(
-                (CUBE_OFF.len() * size_of!(VertexOff)) as u64,
-                &[BufferUsage::VertexBuffer, BufferUsage::TransferDst],
-                ResourceBinderBuffer::DefaultBinder,
-            )?;
-            self.index_buffer = r.create_buffer(
-                (CUBE_INDICES.len() * size_of!(u32)) as u64,
-                &[BufferUsage::IndexBuffer , BufferUsage::TransferDst],
-                ResourceBinderBuffer::DefaultBinder,
-            )?;
-            self.matrices_buffer = r.create_buffer(
-                size_of!(Matrices) as u64,
-                &[BufferUsage::UniformBuffer],
-                ResourceBinderBuffer::DefaultBinderMappable,
-            )?;
-            self.matrices_map = unsafe {
-                r.map_buffer(self.matrices_buffer).unwrap().cast::<Matrices>()
-            };
-            self.light_info_buffer = r.create_buffer(
-                size_of!(LightInfo) as u64,
-                &[BufferUsage::UniformBuffer],
-                ResourceBinderBuffer::DefaultBinderMappable,
-            )?;
-            self.light_info_map = unsafe {
-                r.map_buffer(self.light_info_buffer).unwrap().cast::<LightInfo>()
-            };
-            r.allocate_shader_resources(
-                &[
-                    ShaderResourceInfo {
-                        layout_id: self.pipeline_layouts[0],
-                        set: 0,
+            layout(location = 0) out vec2 out_uv;
+
+            vec2 positions[6] = vec2[](
+                vec2(1.0, 1.0),
+                vec2(-1.0, 1.0),
+                vec2(-1.0, -1.0),
+                vec2(1.0, -1.0),
+                vec2(1.0, 1.0),
+                vec2(-1.0, -1.0)
+            );
+
+            vec2 uvs[6] = vec2[](
+                vec2(0.0, 1.0),
+                vec2(1.0, 1.0),
+                vec2(1.0, 0.0),
+                vec2(0.0, 0.0),
+                vec2(0.0, 1.0),
+                vec2(1.0, 0.0)
+            );
+
+            void main() {
+                int vertex_index = gl_VertexIndex;
+                out_uv = uvs[vertex_index];
+                gl_Position = vec4(positions[vertex_index], 0.0, 1.0);
+            }
+            ",
+            "fire effect vertex",
+            gpu::ShaderStage::Vertex,
+        )?;
+        self.fire_effect_fragment = gpu.create_shader(
+            "#version 450
+
+            layout(location = 0) in vec2 in_uv;
+
+            layout(location = 0) out vec4 out_color;
+
+            layout(set = 0, binding = 0) uniform sampler2D fire_tex;
+
+            const float hot = 12.0 / 360.0;
+            const float warm = 188.0 / 360.0;
+
+            const float sat = 1.0;
+            const float light = 0.63;
+
+            float hue_to_rgb(float p, float q, float t) {
+                if (t < 0.0) t += 1.0;
+                if (t > 1.0) t -= 1.0;
+                if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
+                if (t < 0.5) return q;
+                if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+                return p;
+            }
+
+            vec3 hsl_to_rgb(float h, float s, float l) {
+                const float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+                const float p = 2.0 * l - q;
+                float r = hue_to_rgb(p, q, h + 1.0 / 3.0);
+                float g = hue_to_rgb(p, q, h);
+                float b = hue_to_rgb(p, q, h - 1.0 / 3.0);
+                return vec3(r, g, b);
+            }
+
+            void main() {
+                float r = texture(fire_tex, in_uv).r;
+                float a = r;
+                float hue = mix(warm, hot, r);
+                vec3 rgb = hsl_to_rgb(hue, sat, light);
+                out_color = vec4(rgb * a, 1.0);
+            }
+            ",
+            "fire effect fragment",
+            gpu::ShaderStage::Fragment,
+        )?;
+        self.pipeline_layouts = [
+                gpu.create_pipeline_layout(
+                    [self.vertex_shader, self.fragment_shader],
+                )?,
+                gpu.create_pipeline_layout(
+                    [self.outline_vertex, self.outline_fragment],
+                )?,
+                gpu.create_pipeline_layout(
+                    [self.fire_effect_compute],
+                )?,
+                gpu.create_pipeline_layout(
+                    [self.fire_effect_vertex, self.fire_effect_fragment],
+                )?,
+        ];
+        self.color_format = gpu.supported_image_format(
+            &[gpu::ColorFormat::SrgbRGBA8, gpu::ColorFormat::UnormRGBA8],
+            &[gpu::FormatFeature::SampledImage, gpu::FormatFeature::ColorAttachment],
+        ).unwrap();
+        self.depth_stencil_format = gpu.supported_image_format(
+            gpu::DepthStencilFormat::all_depth_stencil(),
+            &[gpu::FormatFeature::DepthStencilAttachment],
+        ).unwrap();
+        self.depth_format = gpu.supported_image_format(
+            gpu::DepthStencilFormat::all_depth(),
+            &[gpu::FormatFeature::SampledImage, gpu::FormatFeature::DepthStencilAttachment],
+        ).unwrap();
+        self.fire_format = gpu.supported_image_format(
+            &[gpu::FloatFormat::R32],
+            &[gpu::FormatFeature::SampledImage, gpu::FormatFeature::StorageImage]
+        ).unwrap();
+        self.image = gpu.create_image(
+            gpu::ResourceBinderImage::DefaultBinder,
+            |builder| {
+                builder
+                    .with_usage(gpu::ImageUsage::TransferDst)
+                    .with_usage(gpu::ImageUsage::Sampled)
+                    .with_dimensions(self.assets[0].dim)
+                    .with_format(self.color_format, false)
+                    .with_array_layers(8);
+            }
+        )?;
+        self.sampler = gpu.create_sampler(
+            |_| {},
+        )?;
+        let mut graphics_pipeline_info = gpu::GraphicsPipelineInfo::new(self.pipeline_layouts[0]);
+        graphics_pipeline_info
+            .with_sample_shading(gpu::SampleShadingInfo::new(gpu::MSAA::X4, 0.2, false, false))
+            .with_color_output(
+                self.color_format,
+                gpu::WriteMask::all(),
+                None,
+            )
+            .with_depth_output(self.depth_stencil_format)
+            .with_stencil_output(self.depth_stencil_format)
+            .with_vertex_input_binding(gpu::VertexInputBinding::new::<0, Vertex>(0, gpu::VertexInputRate::Vertex))
+            .with_vertex_input_binding(gpu::VertexInputBinding::new::<3, VertexOff>(1, gpu::VertexInputRate::Instance))
+            .with_depth_stencil(gpu::DepthStencilInfo {
+                compare_op: gpu::CompareOp::Less,
+                depth_bounds: Some(gpu::DepthBounds::new(0.0, 1.0)),
+                stencil_test_info: Some(gpu::StencilTestInfo {
+                    front: Default::default(),
+                    back: gpu::StencilOpState {
+                        fail_op: gpu::StencilOp::Keep,
+                        pass_op: gpu::StencilOp::Replace,
+                        depth_fail_op: gpu::StencilOp::Keep,
+                        compare_op: gpu::CompareOp::Always,
+                        compare_mask: 0x0,
+                        write_mask: 0x1,
+                        reference: 0x1,
                     },
-                    ShaderResourceInfo {
-                        layout_id: self.pipeline_layouts[0],
-                        set: 1,
+                }),
+                write_enable: true,
+            });
+        let mut outline_pipeline_info = gpu::GraphicsPipelineInfo::new(self.pipeline_layouts[1]);
+        outline_pipeline_info
+            .with_sample_shading(gpu::SampleShadingInfo::new(gpu::MSAA::X4, 0.2, false, false))
+            .with_color_output(
+                self.color_format,
+                gpu::WriteMask::all(),
+                None,
+            )
+            .with_depth_output(self.depth_stencil_format)
+            .with_stencil_output(self.depth_stencil_format)
+            .with_vertex_input_binding(gpu::VertexInputBinding::new::<0, Vertex>(0, gpu::VertexInputRate::Vertex))
+            .with_vertex_input_binding(gpu::VertexInputBinding::new::<3, VertexOff>(1, gpu::VertexInputRate::Instance))
+            .with_depth_stencil(gpu::DepthStencilInfo {
+                compare_op: gpu::CompareOp::Less,
+                depth_bounds: Some(gpu::DepthBounds::new(0.0, 1.0)),
+                stencil_test_info: Some(gpu::StencilTestInfo {
+                    front: Default::default(),
+                    back: gpu::StencilOpState {
+                        fail_op: gpu::StencilOp::Keep,
+                        pass_op: gpu::StencilOp::Keep,
+                        depth_fail_op: gpu::StencilOp::Keep,
+                        compare_op: gpu::CompareOp::NotEqual,
+                        compare_mask: 0x1,
+                        write_mask: 0x0,
+                        reference: 0x1,
                     },
-                    ShaderResourceInfo {
-                        layout_id: self.pipeline_layouts[2],
-                        set: 0,
-                    },
-                    ShaderResourceInfo {
-                        layout_id: self.pipeline_layouts[3],
-                        set: 0,
-                    },
-                ],
-                |i, v| self.shader_resources[i] = v,
-                &GlobalAlloc,
-            )?;
-            r.update_shader_resources(
-                &[
-                    ShaderResourceImageUpdate {
-                        resource: self.shader_resources[1],
-                        binding: 0,
-                        starting_index: 0,
-                        infos: &[ShaderResourceImageInfo {
-                            sampler: self.sampler,
-                            image_source: (self.image, None),
-                            storage_image: false,
-                        }]
-                    },
-                ],
-                &[
-                    ShaderResourceBufferUpdate {
-                        resource: self.shader_resources[0],
-                        binding: 0,
-                        starting_index: 0,
-                        infos: &[ShaderResourceBufferInfo {
-                            buffer: self.matrices_buffer,
-                            offset: 0,
-                            size: size_of!(Matrices) as u64,
-                        }],
-                    },
-                    ShaderResourceBufferUpdate {
-                        resource: self.shader_resources[1],
-                        binding: 1,
-                        starting_index: 0,
-                        infos: &[ShaderResourceBufferInfo {
-                            buffer: self.light_info_buffer,
-                            offset: 0,
-                            size: size_of!(LightInfo) as u64,
-                        }],
-                    },
-                ],
-                &[],
-                &GlobalAlloc
-            )?;
-            self.semaphore = r.create_timeline_semaphore(0)?;
-            self.fire_semaphore = r.create_timeline_semaphore(0)?;
-            self.staging_alloc = r.create_default_linear_device_alloc_mappable(1 << 28)?;
-            self.image_alloc = r.create_default_linear_device_alloc(1 << 28)?;
-            Ok(())
-        })?;
-        renderer.edit_transfer_requests(|requests| {
-            requests.add_async_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
-            self.fire_semaphore_value += 1;
-        });
-        self.frame_buffer_size = renderer.frame_buffer_size();
+                }),
+                write_enable: true,
+            });
+        let mut fire_effect_pipeline_info = gpu::GraphicsPipelineInfo::new(self.pipeline_layouts[3]);
+        fire_effect_pipeline_info
+            .with_sample_shading(gpu::SampleShadingInfo::new(gpu::MSAA::X4, 0.2, false, false))
+            .with_color_output(
+                self.color_format,
+                gpu::WriteMask::all(),
+                None,
+            );
+        gpu.create_graphics_pipelines(
+            &[graphics_pipeline_info, outline_pipeline_info, fire_effect_pipeline_info],
+            Some(self.pipeline_cache),
+            &GlobalAlloc,
+            |i, id| { self.pipelines[i] = id; },
+        )?;
+        let fire_pipeline_info = gpu::ComputePipelineInfo::new(self.pipeline_layouts[2]);
+        gpu.create_compute_pipelines(
+            &[fire_pipeline_info],
+            Some(self.pipeline_cache),
+            &GlobalAlloc,
+            |_, id| { self.fire_pipeline = id },
+        )?;
+        self.vertex_buffer = gpu.create_buffer(
+            (CUBE_VERTICES.len() * size_of!(Vertex)) as u64,
+            &[gpu::BufferUsage::VertexBuffer, gpu::BufferUsage::TransferDst],
+            gpu::ResourceBinderBuffer::DefaultBinder,
+        )?;
+        self.vertex_instance_buffer = gpu.create_buffer(
+            (CUBE_OFF.len() * size_of!(VertexOff)) as u64,
+            &[gpu::BufferUsage::VertexBuffer, gpu::BufferUsage::TransferDst],
+            gpu::ResourceBinderBuffer::DefaultBinder,
+        )?;
+        self.index_buffer = gpu.create_buffer(
+            (CUBE_INDICES.len() * size_of!(u32)) as u64,
+            &[gpu::BufferUsage::IndexBuffer , gpu::BufferUsage::TransferDst],
+            gpu::ResourceBinderBuffer::DefaultBinder,
+        )?;
+        self.matrices_buffer = gpu.create_buffer(
+            size_of!(Matrices) as u64,
+            &[gpu::BufferUsage::UniformBuffer],
+            gpu::ResourceBinderBuffer::DefaultBinderMappable,
+        )?;
+        self.matrices_map = unsafe {
+            gpu.map_buffer(self.matrices_buffer).unwrap().cast::<Matrices>()
+        };
+        self.light_info_buffer = gpu.create_buffer(
+            size_of!(LightInfo) as u64,
+            &[gpu::BufferUsage::UniformBuffer],
+            gpu::ResourceBinderBuffer::DefaultBinderMappable,
+        )?;
+        self.light_info_map = unsafe {
+            gpu.map_buffer(self.light_info_buffer).unwrap().cast::<LightInfo>()
+        };
+        gpu.allocate_shader_resources(
+            &[
+                gpu::ShaderResourceInfo {
+                    layout_id: self.pipeline_layouts[0],
+                    set: 0,
+                },
+                gpu::ShaderResourceInfo {
+                    layout_id: self.pipeline_layouts[0],
+                    set: 1,
+                },
+                gpu::ShaderResourceInfo {
+                    layout_id: self.pipeline_layouts[2],
+                    set: 0,
+                },
+                gpu::ShaderResourceInfo {
+                    layout_id: self.pipeline_layouts[3],
+                    set: 0,
+                },
+            ],
+            |i, v| self.shader_resources[i] = v,
+            &GlobalAlloc,
+        )?;
+        gpu.update_shader_resources(
+            &[
+                gpu::ShaderResourceImageUpdate {
+                    resource: self.shader_resources[1],
+                    binding: 0,
+                    starting_index: 0,
+                    infos: &[gpu::ShaderResourceImageInfo {
+                        sampler: self.sampler,
+                        image_source: (self.image, None),
+                        storage_image: false,
+                    }]
+                },
+            ],
+            &[
+                gpu::ShaderResourceBufferUpdate {
+                    resource: self.shader_resources[0],
+                    binding: 0,
+                    starting_index: 0,
+                    infos: &[gpu::ShaderResourceBufferInfo {
+                        buffer: self.matrices_buffer,
+                        offset: 0,
+                        size: size_of!(Matrices) as u64,
+                    }],
+                },
+                gpu::ShaderResourceBufferUpdate {
+                    resource: self.shader_resources[1],
+                    binding: 1,
+                    starting_index: 0,
+                    infos: &[gpu::ShaderResourceBufferInfo {
+                        buffer: self.light_info_buffer,
+                        offset: 0,
+                        size: size_of!(LightInfo) as u64,
+                    }],
+                },
+            ],
+            &[],
+            &GlobalAlloc
+        )?;
+        self.semaphore = gpu.create_timeline_semaphore(0)?;
+        self.fire_semaphore = gpu.create_timeline_semaphore(0)?;
+        self.staging_alloc = gpu.create_default_linear_device_alloc_mappable(1 << 28)?;
+        self.image_alloc = gpu.create_default_linear_device_alloc(1 << 28)?;
+        gpu.add_async_transfer_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
+        self.fire_semaphore_value += 1;
+        self.frame_buffer_size = gpu.frame_buffer_size();
         Ok(())
     }
 
-    fn frame_buffer_size_callback(
-        &mut self,
-        renderer: &mut RendererContext,
-    ) -> Result<(), nox::Error>
-    {
-        renderer.edit_resources(|r| {
-            r.wait_for_semaphores(&[(self.fire_semaphore, self.fire_semaphore_value)], u64::MAX, &GlobalAlloc)?;
-            unsafe {
-                r.lock_linear_device_alloc(self.image_alloc, &[])?
-                    .reset();
-            }
-            for image in self.fire_images.iter_mut() {
-                if r.is_valid_image(*image) {
-                    r.destroy_image(*image);
+    fn event(&mut self, event: Event) -> Result<()> {
+        match event {
+            Event::FrameBufferCreated { gpu, new_size, new_format: _ } => {
+                gpu.wait_for_semaphores(&[(self.fire_semaphore, self.fire_semaphore_value)], u64::MAX, &GlobalAlloc)?;
+                unsafe {
+                    gpu.lock_linear_device_alloc(self.image_alloc, &[])?
+                        .reset();
                 }
-                *image = r.create_image(
-                    ResourceBinderImage::LinearDeviceAlloc(self.image_alloc),
+                for image in self.fire_images.iter_mut() {
+                    if gpu.is_valid_image(*image) {
+                        gpu.destroy_image(*image);
+                    }
+                    *image = gpu.create_image(
+                        gpu::ResourceBinderImage::LinearDeviceAlloc(self.image_alloc),
+                        |builder| {
+                            builder
+                                .with_usage(gpu::ImageUsage::Storage)
+                                .with_usage(gpu::ImageUsage::Sampled)
+                                .with_usage(gpu::ImageUsage::TransferDst)
+                                .with_dimensions(new_size)
+                                .with_format(self.fire_format, false);
+                        }
+                    )?;
+                    self.heat_in = 0;
+                }
+                let mut staging_alloc = gpu.lock_linear_device_alloc(self.staging_alloc, &[])?;
+                unsafe {
+                    staging_alloc.reset();
+                }
+                gpu.add_async_transfer_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
+                self.fire_semaphore_value += 1;
+                self.frame_buffer_size = new_size;
+                Ok(())
+            },
+            Event::Update { win, gpu: _ } => {
+                let (cursor_x, cursor_y) = win.cursor_position();
+                let relative_cursor = glam::vec3(
+                    1.0 - 2.0 * cursor_x as f32 / self.frame_buffer_size.width as f32,
+                    2.0 * cursor_y as f32 / self.frame_buffer_size.height as f32 - 1.0,
+                    0.0,
+                );
+                let proj = Mat4::perspective_lh(
+                    PI / 1.6,
+                    self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32,
+                    0.01,
+                    100.0
+                );
+                //let proj = fix * Mat4::orthographic_lh(-5.0, 5.0, -5.0, 5.0, 0.1, 100.0);
+                let view = Mat4::look_at_lh(vec3(0.0, 1.0, -2.0), vec3(0.0, 0.0, 3.0), vec3(0.0, 1.0, 0.0));
+                let inv_proj = proj.inverse();
+                let near_world = inv_proj * glam::vec4(relative_cursor.x, relative_cursor.y, 0.0, 1.0);
+                let far_world = inv_proj * glam::vec4(relative_cursor.x, relative_cursor.y, 1.0, 1.0);
+                let near_world = near_world.xyz() / near_world.w;
+                let far_world = far_world.xyz() / far_world.w;
+                let ray = (far_world - near_world).normalize();
+                let plane_normal = vec3(0.0, 0.0, -1.0);
+                let denom = plane_normal.dot(ray);
+                let t = (vec3(0.0, 0.0, 3.0) - near_world).dot(plane_normal) / denom;
+                let light_pos = near_world + ray * t;
+                let mut tf = glam::Mat4::from_axis_angle(vec3(0.23, 1.0, 0.41).normalize(), self.rot);
+                tf.col_mut(3).z = 3.0;
+                unsafe {
+                    self.matrices_map.write(
+                        Matrices {
+                            model: tf,
+                            projection: proj,
+                            view,
+                        }
+                    );
+                    self.light_info_map.write(
+                        LightInfo { pos: light_pos }
+                    );
+                }
+                self.rot = (self.rot + PI * win.delta_time().as_secs_f32()) % (PI * 2.0);
+                Ok(())
+            },
+            Event::ComputeWork { commands } => {
+                struct Params {
+                    _density: f32,
+                    _noise_strength: f32,
+                    _time: f32,
+                }
+                let params = &[Params {
+                    _density: 0.995,
+                    _noise_strength: 0.5,
+                    _time: self.rot,
+                }];
+                commands.gpu().update_shader_resources(
+                    &[
+                        gpu::ShaderResourceImageUpdate {
+                            resource: self.shader_resources[2],
+                            binding: 0,
+                            starting_index: 0,
+                            infos: &[gpu::ShaderResourceImageInfo {
+                                sampler: self.sampler,
+                                image_source: (self.fire_images[self.heat_in as usize], None),
+                                storage_image: true,
+                            }]
+                        },
+                        gpu::ShaderResourceImageUpdate {
+                            resource: self.shader_resources[2],
+                            binding: 1,
+                            starting_index: 0,
+                            infos: &[gpu::ShaderResourceImageInfo {
+                                sampler: self.sampler,
+                                image_source: (self.fire_images[(self.heat_in + 1) as usize % 2], None),
+                                storage_image: true,
+                            }]
+                        },
+                        gpu::ShaderResourceImageUpdate {
+                            resource: self.shader_resources[3],
+                            binding: 0,
+                            starting_index: 0,
+                            infos: &[gpu::ShaderResourceImageInfo {
+                                sampler: self.sampler,
+                                image_source: (self.fire_images[self.heat_in as usize], None),
+                                storage_image: false,
+                            }]
+                        }
+                    ],
+                    &[],
+                    &[],
+                    &GlobalAlloc
+                )?;
+                commands.prepare_storage_image(self.fire_images[0])?;
+                commands.prepare_storage_image(self.fire_images[1])?;
+                commands.bind_pipeline(self.fire_pipeline)?;
+                commands.bind_shader_resources(|_| self.shader_resources[2])?;
+                commands.push_constants(|_| unsafe { slice_as_bytes(params).unwrap() })?;
+                commands.dispatch((self.frame_buffer_size.width + 7) / 8, (self.frame_buffer_size.height + 7) / 8, 1)?;
+                commands.wait_semaphore(self.fire_semaphore, self.fire_semaphore_value, gpu::PipelineStage::Transfer);
+                self.heat_in = (self.heat_in + 1) % 2;
+                Ok(())
+            },
+            Event::Render { frame_graph, pending_transfers: _ } => {
+                let frame_buffer_size = self.frame_buffer_size;
+                let depth_stencil_output = frame_graph.add_transient_image(
                     |builder| {
                         builder
-                            .with_usage(ImageUsage::Storage)
-                            .with_usage(ImageUsage::Sampled)
-                            .with_usage(ImageUsage::TransferDst)
-                            .with_dimensions(renderer.frame_buffer_size())
-                            .with_format(self.fire_format, false);
+                            .with_samples(gpu::MSAA::X4)
+                            .with_usage(gpu::ImageUsage::DepthStencilAttachment)
+                            .with_format(self.depth_stencil_format, false)
+                            .with_dimensions(frame_buffer_size);
                     }
                 )?;
-                self.heat_in = 0;
-            }
-            let mut staging_alloc = r.lock_linear_device_alloc(self.staging_alloc, &[])?;
-            unsafe {
-                staging_alloc.reset();
-            }
-            Ok(())
-        })?;
-        renderer.edit_transfer_requests(|requests| {
-            self.fire_transfer_id = requests.add_async_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
-            self.fire_semaphore_value += 1;
-        });
-        self.frame_buffer_size = renderer.frame_buffer_size();
-        Ok(())
-    }
-
-    fn update(
-        &mut self,
-        _nox: &Nox<Self>,
-        ctx: &mut WindowCtx,
-        _renderer: &mut RendererContext,
-    ) -> Result<(), Error>
-    {
-        let (cursor_x, cursor_y) = ctx.cursor_position();
-        let relative_cursor = glam::vec3(
-            1.0 - 2.0 * cursor_x as f32 / self.frame_buffer_size.width as f32,
-            2.0 * cursor_y as f32 / self.frame_buffer_size.height as f32 - 1.0,
-            0.0,
-        );
-        let proj = Mat4::perspective_lh(
-            PI / 1.6,
-            self.frame_buffer_size.width as f32 / self.frame_buffer_size.height as f32,
-            0.01,
-            100.0
-        );
-        //let proj = fix * Mat4::orthographic_lh(-5.0, 5.0, -5.0, 5.0, 0.1, 100.0);
-        let view = Mat4::look_at_lh(vec3(0.0, 1.0, -2.0), vec3(0.0, 0.0, 3.0), vec3(0.0, 1.0, 0.0));
-        let inv_proj = proj.inverse();
-        let near_world = inv_proj * glam::vec4(relative_cursor.x, relative_cursor.y, 0.0, 1.0);
-        let far_world = inv_proj * glam::vec4(relative_cursor.x, relative_cursor.y, 1.0, 1.0);
-        let near_world = near_world.xyz() / near_world.w;
-        let far_world = far_world.xyz() / far_world.w;
-        let ray = (far_world - near_world).normalize();
-        let plane_normal = vec3(0.0, 0.0, -1.0);
-        let denom = plane_normal.dot(ray);
-        let t = (vec3(0.0, 0.0, 3.0) - near_world).dot(plane_normal) / denom;
-        let light_pos = near_world + ray * t;
-        let mut tf = glam::Mat4::from_axis_angle(vec3(0.23, 1.0, 0.41).normalize(), self.rot);
-        tf.col_mut(3).z = 3.0;
-        unsafe {
-            self.matrices_map.write(
-                Matrices {
-                    model: tf,
-                    projection: proj,
-                    view,
+                let color_output = frame_graph.add_transient_image(
+                    |builder| {
+                        builder
+                            .with_samples(gpu::MSAA::X4)
+                            .with_usage(gpu::ImageUsage::ColorAttachment)
+                            .with_format(self.color_format, false)
+                            .with_dimensions(frame_buffer_size);
+                    }
+                )?;
+                let color_output_resolve = frame_graph.add_transient_image(
+                    |builder| {
+                        builder
+                            .with_usage(gpu::ImageUsage::ColorAttachment)
+                            .with_usage(gpu::ImageUsage::Sampled)
+                            .with_format(self.color_format, false)
+                            .with_dimensions(frame_buffer_size);
+                    }
+                )?;
+                //frame_graph.set_render_image(color_output_resolve, None)?;
+                let fire_tex = frame_graph.add_image(self.fire_images[self.heat_in as usize])?;
+                self.fire_pass = frame_graph.add_pass(
+                    gpu::PassInfo { max_color_writes: 1, max_reads: 1, msaa_samples: gpu::MSAA::X4, ..Default::default() },
+                    |builder| {
+                        builder
+                            .with_read(gpu::ReadInfo::new(fire_tex, None))?
+                            .with_write(gpu::WriteInfo::new(color_output)
+                                .with_load_op(gpu::AttachmentLoadOp::Clear)
+                                .with_store_op(gpu::AttachmentStoreOp::Store)
+                            )?;
+                        Ok(())
+                    },
+                )?;
+                let texture = frame_graph.add_image(self.image)?;
+                self.cube_pass = frame_graph.add_pass(
+                    gpu::PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: gpu::MSAA::X4, ..Default::default() },
+                    |builder| {
+                        builder
+                            .with_read(gpu::ReadInfo::new(texture, None))?
+                            .with_write(gpu::WriteInfo::new(color_output))?
+                            .with_depth_stencil_write(gpu::WriteInfo::new(depth_stencil_output)
+                                .with_load_op(gpu::AttachmentLoadOp::Clear)
+                                .with_store_op(gpu::AttachmentStoreOp::Store)
+                                .with_clear_value(gpu::ClearValue::DepthStencil{ depth: 1.0, stencil: 0 })
+                            )?;
+                        Ok(())
+                    }
+                )?;
+                self.outline_pass = frame_graph.add_pass(
+                    gpu::PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: gpu::MSAA::X4 , signal_semaphores: 1, wait_semaphores: 1 },
+                    |builder| {
+                        builder
+                            .with_write(gpu::WriteInfo::new(color_output)
+                                .with_resolve(gpu::WriteResolveInfo::new(color_output_resolve, gpu::ResolveMode::Average, None))
+                            )?
+                            .with_depth_stencil_write(gpu::WriteInfo::new(depth_stencil_output))?
+                            .with_signal_semaphore(self.semaphore, self.semaphore_value + 1)?
+                            .with_wait_semaphore(self.fire_semaphore, self.fire_semaphore_value, gpu::PipelineStage::Transfer)?;
+                        self.semaphore_value += 1;
+                        Ok(())
+                    }
+                )?;
+                Ok(())
+            },
+            Event::RenderWork { pass_id, commands } => {
+                match pass_id {
+                    x if x == self.fire_pass => {
+                        commands.bind_pipeline(self.pipelines[2])?;
+                        commands.bind_shader_resources(|_|
+                            self.shader_resources[3]
+                        )?;
+                        commands.draw_bufferless(6, 1)?;
+                    },
+                    x if x == self.cube_pass => {
+                        commands.bind_pipeline(self.pipelines[0])?;
+                        commands.bind_shader_resources(|i| {
+                            self.shader_resources[i as usize]
+                        })?;
+                        commands.draw_indexed(
+                            gpu::DrawInfo {
+                                index_count: CUBE_INDICES.len() as u32,
+                                instance_count: 8,
+                                ..Default::default()
+                            },
+                            [
+                                gpu::DrawBufferInfo::new(self.vertex_buffer, 0),
+                                gpu::DrawBufferInfo::new(self.vertex_instance_buffer, 0),
+                            ].into(),
+                            gpu::DrawBufferInfo::new(self.index_buffer, 0),
+                        )?;
+                    },
+                    x if x == self.outline_pass => {
+                        commands.bind_pipeline(self.pipelines[1])?;
+                        commands.bind_shader_resources(|_| {
+                            self.shader_resources[0]
+                        })?;
+                        commands.draw_indexed(
+                            gpu::DrawInfo {
+                                index_count: CUBE_INDICES.len() as u32,
+                                instance_count: 8,
+                                ..Default::default()
+                            },
+                            [
+                                gpu::DrawBufferInfo::new(self.vertex_buffer, 0),
+                                gpu::DrawBufferInfo::new(self.vertex_instance_buffer, 0),
+                            ].into(),
+                            gpu::DrawBufferInfo::new(self.index_buffer, 0),
+                        )?;
+                    }
+                    _ => {}
                 }
-            );
-            self.light_info_map.write(
-                LightInfo { pos: light_pos }
-            );
-        }
-        self.rot = (self.rot + PI * ctx.delta_time().as_secs_f32()) % (PI * 2.0);
-        Ok(())
-    }
-
-    fn compute(
-        &mut self,
-        commands: &mut ComputeCommands,
-    ) -> Result<(), Error>
-    {
-        struct Params {
-            _density: f32,
-            _noise_strength: f32,
-            _time: f32,
-        }
-        let params = &[Params {
-            _density: 0.995,
-            _noise_strength: 0.5,
-            _time: self.rot,
-        }];
-        commands.edit_resources(|r| {
-            r.update_shader_resources(
-                &[
-                    ShaderResourceImageUpdate {
-                        resource: self.shader_resources[2],
-                        binding: 0,
-                        starting_index: 0,
-                        infos: &[ShaderResourceImageInfo {
-                            sampler: self.sampler,
-                            image_source: (self.fire_images[self.heat_in as usize], None),
-                            storage_image: true,
-                        }]
-                    },
-                    ShaderResourceImageUpdate {
-                        resource: self.shader_resources[2],
-                        binding: 1,
-                        starting_index: 0,
-                        infos: &[ShaderResourceImageInfo {
-                            sampler: self.sampler,
-                            image_source: (self.fire_images[(self.heat_in + 1) as usize % 2], None),
-                            storage_image: true,
-                        }]
-                    },
-                    ShaderResourceImageUpdate {
-                        resource: self.shader_resources[3],
-                        binding: 0,
-                        starting_index: 0,
-                        infos: &[ShaderResourceImageInfo {
-                            sampler: self.sampler,
-                            image_source: (self.fire_images[self.heat_in as usize], None),
-                            storage_image: false,
-                        }]
+                Ok(())
+            },
+            Event::TransferWork { request_id, commands } => {
+                if request_id == self.fire_transfer_id {
+                    for &image in &self.fire_images {
+                        commands.clear_color_image(image, [0.0, 0.0, 0.0, 0.0].into(), None, &GlobalAlloc)?;
                     }
-                ],
-                &[],
-                &[],
-                &GlobalAlloc
-            )?;
-            Ok(())
-        })?;
-        commands.prepare_storage_image(self.fire_images[0])?;
-        commands.prepare_storage_image(self.fire_images[1])?;
-        commands.bind_pipeline(self.fire_pipeline)?;
-        commands.bind_shader_resources(|_| self.shader_resources[2])?;
-        commands.push_constants(|_| unsafe { slice_as_bytes(params).unwrap() })?;
-        commands.dispatch((self.frame_buffer_size.width + 7) / 8, (self.frame_buffer_size.height + 7) / 8, 1);
-        commands.wait_semaphore(self.fire_semaphore, self.fire_semaphore_value, PipelineStage::Transfer);
-        self.heat_in = (self.heat_in + 1) % 2;
-        Ok(())
-    }
-
-    fn render<'a>(
-        &mut self,
-        frame_graph: &'a mut dyn FrameGraph,
-        _pending_transfers: &[CommandRequestId],
-    ) -> Result<(), Error>
-    {
-        let frame_buffer_size = frame_graph.frame_buffer_size();
-        let depth_stencil_output = frame_graph.add_transient_image(
-            &mut |builder| {
-                builder
-                    .with_samples(MSAA::X4)
-                    .with_usage(ImageUsage::DepthStencilAttachment)
-                    .with_format(self.depth_stencil_format, false)
-                    .with_dimensions(frame_buffer_size);
-            }
-        )?;
-        let color_output = frame_graph.add_transient_image(
-            &mut |builder| {
-                builder
-                    .with_samples(MSAA::X4)
-                    .with_usage(ImageUsage::ColorAttachment)
-                    .with_format(self.color_format, false)
-                    .with_dimensions(frame_buffer_size);
-            }
-        )?;
-        let color_output_resolve = frame_graph.add_transient_image(
-            &mut |builder| {
-                builder
-                    .with_usage(ImageUsage::ColorAttachment)
-                    .with_usage(ImageUsage::Sampled)
-                    .with_format(self.color_format, false)
-                    .with_dimensions(frame_buffer_size);
-            }
-        )?;
-        frame_graph.set_render_image(color_output_resolve, None)?;
-        let fire_tex = frame_graph.add_image(self.fire_images[self.heat_in as usize])?;
-        self.fire_pass = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, max_reads: 1, msaa_samples: MSAA::X4, ..Default::default() },
-            &mut |builder| {
-                builder
-                    .with_read(ReadInfo::new(fire_tex, None))
-                    .with_write(WriteInfo::new(
-                        color_output,
+                    return Ok(())
+                }
+                for (i, asset) in self.assets.iter().enumerate() {
+                    commands.copy_data_to_image(
+                        self.image,
+                        asset.as_bytes(),
+                        gpu::ImageSubresourceLayers::new(gpu::ImageAspect::Color, 0, i as u32, 1),
                         None,
                         None,
-                        None,
-                        AttachmentLoadOp::Clear,
-                        AttachmentStoreOp::Store,
-                        Default::default(),
-                    ));
-            },
-        )?;
-        let texture = frame_graph.add_image(self.image)?;
-        self.cube_pass = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4, ..Default::default() },
-            &mut |builder| {
-                builder
-                    .with_read(ReadInfo { resource_id: texture, range_info: None })
-                    .with_write(WriteInfo::new(
-                        color_output,
-                        None,
-                        None,
-                        None,
-                        AttachmentLoadOp::Load,
-                        AttachmentStoreOp::Store,
-                        Default::default()
-                    ))
-                    .with_depth_stencil_write(WriteInfo::new(
-                        depth_stencil_output,
-                        None,
-                        None,
-                        None,
-                        AttachmentLoadOp::Clear,
-                        AttachmentStoreOp::Store,
-                        ClearValue::DepthStencil{ depth: 1.0, stencil: 0 },
-                    ));
-            }
-        )?;
-        self.outline_pass = frame_graph.add_pass(
-            PassInfo { max_color_writes: 1, max_reads: 2, msaa_samples: MSAA::X4 , signal_semaphores: 1, wait_semaphores: 1 },
-            &mut |builder| {
-                builder
-                    .with_write(WriteInfo::new(
-                        color_output,
-                        None,
-                        Some((color_output_resolve, ResolveMode::Average)),
-                        None,
-                        AttachmentLoadOp::Load,
-                        AttachmentStoreOp::Store,
-                        Default::default()
-                    ))
-                    .with_depth_stencil_write(WriteInfo::new(
-                        depth_stencil_output,
-                        None,
-                        None,
-                        None,
-                        AttachmentLoadOp::Load,
-                        AttachmentStoreOp::Store,
-                        Default::default(),
-                    ))
-                    .with_signal_semaphore(self.semaphore, self.semaphore_value + 1)
-                    .with_wait_semaphore(self.fire_semaphore, self.fire_semaphore_value, PipelineStage::Transfer);
-                self.semaphore_value += 1;
-            }
-        )?;
-        Ok(())
-    }
-
-    fn transfer_commands(
-        &mut self,
-        id: CommandRequestId,
-        commands: &mut TransferCommands,
-    ) -> Result<(), Error>
-    {
-        if id == self.fire_transfer_id {
-            for &image in &self.fire_images {
-                commands.clear_color_image(image, [0.0, 0.0, 0.0, 0.0].into(), None, &GlobalAlloc)?;
-            }
-            return Ok(())
-        }
-        for (i, asset) in self.assets.iter().enumerate() {
-            commands.copy_data_to_image(
-                self.image,
-                asset.as_bytes(),
-                ImageSubresourceLayers::new(ImageAspect::Color, 0, i as u32, 1),
-                None,
-                None,
-            ).unwrap();
-        }
-        let vertices = unsafe { slice_as_bytes(CUBE_VERTICES) }.unwrap();
-        commands.copy_data_to_buffer(
-            self.vertex_buffer,
-            vertices, 0, vertices.len() as u64,
-        ).unwrap();
-        let vertices_instance = unsafe { slice_as_bytes(CUBE_OFF) }.unwrap();
-        commands.copy_data_to_buffer(
-            self.vertex_instance_buffer,
-            vertices_instance, 0, vertices_instance.len() as u64
-        ).unwrap();
-        let indices = unsafe { slice_as_bytes(CUBE_INDICES) }.unwrap();
-        commands.copy_data_to_buffer(
-            self.index_buffer,
-            indices,
-            0,
-            indices.len() as u64,
-        ).unwrap();
-        Ok(())
-    }
-
-    fn render_commands(
-        &mut self,
-        pass: PassId,
-        commands: &mut RenderCommands,
-    ) -> Result<(), Error>
-    {
-        match pass {
-            x if x == self.fire_pass => {
-                commands.bind_pipeline(self.pipelines[2])?;
-                commands.bind_shader_resources(|_|
-                    self.shader_resources[3]
+                    ).unwrap();
+                }
+                let vertices = unsafe { slice_as_bytes(CUBE_VERTICES) }.unwrap();
+                commands.copy_data_to_buffer(
+                    self.vertex_buffer,
+                    vertices, 0, vertices.len() as u64,
                 )?;
-                commands.draw_bufferless(6, 1);
-            },
-            x if x == self.cube_pass => {
-                commands.bind_pipeline(self.pipelines[0])?;
-                commands.bind_shader_resources(|i| {
-                    self.shader_resources[i as usize]
-                })?;
-                commands.draw_indexed(
-                    DrawInfo {
-                        index_count: CUBE_INDICES.len() as u32,
-                        instance_count: 8,
-                        ..Default::default()
-                    },
-                    [
-                        DrawBufferInfo::new(self.vertex_buffer, 0),
-                        DrawBufferInfo::new(self.vertex_instance_buffer, 0),
-                    ].into(),
-                    DrawBufferInfo::new(self.index_buffer, 0),
+                let vertices_instance = unsafe { slice_as_bytes(CUBE_OFF) }.unwrap();
+                commands.copy_data_to_buffer(
+                    self.vertex_instance_buffer,
+                    vertices_instance, 0, vertices_instance.len() as u64
                 )?;
+                let indices = unsafe { slice_as_bytes(CUBE_INDICES) }.unwrap();
+                commands.copy_data_to_buffer(
+                    self.index_buffer,
+                    indices,
+                    0,
+                    indices.len() as u64,
+                )?;
+                Ok(())
             },
-            x if x == self.outline_pass => {
-                commands.bind_pipeline(self.pipelines[1])?;
-                commands.bind_shader_resources(|_| {
-                    self.shader_resources[0]
-                })?;
-                commands.draw_indexed(
-                    DrawInfo {
-                        index_count: CUBE_INDICES.len() as u32,
-                        instance_count: 8,
-                        ..Default::default()
-                    },
-                    [
-                        DrawBufferInfo::new(self.vertex_buffer, 0),
-                        DrawBufferInfo::new(self.vertex_instance_buffer, 0),
-                    ].into(),
-                    DrawBufferInfo::new(self.index_buffer, 0),
-                )?
-            }
-            _ => {}
         }
-        Ok(())
     }
 
     fn clean_up(
         &mut self,
-        renderer: &mut RendererContext,
+        gpu: &mut gpu::GpuContext,
     )
     {
-        renderer.edit_resources(|r| {
-            let mut file = File::create(&self.cache_dir)?;
-            let data = r.retrieve_pipeline_cache_data(self.pipeline_cache)?;
-            file.write(&data)?;
-            println!("cache written, len {}", data.len());
-            Ok(())
-        }).ok();
+        if let Ok(mut file) = File::create(&self.cache_dir) {
+            if let Ok(data) = gpu.retrieve_pipeline_cache_data(self.pipeline_cache) {
+                if let Ok(_) = file.write(&data) {
+                    println!("cache written, len {}", data.len());
+                }
+            }
+        }
     }
 }
 

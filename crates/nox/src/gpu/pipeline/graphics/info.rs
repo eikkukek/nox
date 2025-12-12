@@ -134,25 +134,13 @@ impl GraphicsPipelineInfo {
         &mut self,
         format: impl Format,
         write_mask: WriteMask,
-        blend_state: Option<ColorOutputBlendState>
+        blend_state: Option<ColorOutputBlendState>,
     ) -> &mut Self
     {
         self.color_output_formats.push(format.as_vk_format());
         self.color_blend_info.add_attachment(write_mask, blend_state);
         self
-    }
-
-    pub(crate) fn with_color_output_vk(
-        &mut self,
-        format: vk::Format,
-        write_mask: WriteMask,
-        blend_state: Option<ColorOutputBlendState>
-    ) -> &mut Self
-    {
-        self.color_output_formats.push(format);
-        self.color_blend_info.add_attachment(write_mask, blend_state);
-        self
-    }
+    } 
 
     pub fn with_depth_output(&mut self, format: impl Format) -> &mut Self {
         self.depth_output_format = format.as_vk_format();

@@ -335,18 +335,6 @@ impl GlobalResources {
     }
 
     #[inline(always)]
-    pub(crate) fn get_descriptor_set(
-        &mut self,
-        resource_id: ShaderResourceId,
-    ) -> Result<vk::DescriptorSet>
-    {
-        self.shader_resources
-            .get(resource_id.0)
-            .map(|v| v.descriptor_set)
-            .context("failed to find shader resource")
-    }
-
-    #[inline(always)]
     pub fn update_shader_resources(
         &mut self,
         image_updates: &[ShaderResourceImageUpdate],

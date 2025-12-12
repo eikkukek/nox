@@ -9,7 +9,7 @@ use nox_mem::{
 
 use crate::dev::{
     has_bits,
-    error::{Result, Error, Context, ErrorContext, Location},
+    error::{Result, Context, ErrorContext, Location},
 };
 
 use crate::gpu::{*, memory_binder::MemoryBinder};
@@ -50,8 +50,6 @@ impl ResourcePool {
 pub(super) struct ResourcePoolContext<'a> {
     pub pool: &'a mut ResourcePool,
     pub context: GpuContext<'a>,
-    pub render_image: Option<(ImageId, Option<ImageRangeInfo>, Location)>,
-    pub render_image_reset: Option<(ImageState, ImageSubresourceRangeInfo)>,
 }
 
 impl<'a> ResourcePoolContext<'a>
@@ -79,30 +77,7 @@ impl<'a> ResourcePoolContext<'a>
         Self {
             pool: resource_pool,
             context,
-            render_image: None,
-            render_image_reset: None,
         }
-    }
-
-    #[inline(always)]
-    pub fn render_done(
-        &mut self,
-        command_buffer: vk::CommandBuffer,
-    )
-    {
-        if let Some((state, subresource)) = self.render_image_reset {
-            self.context
-                .get_image(self.render_image.unwrap().0).unwrap()
-                .cmd_memory_barrier(
-                    state,
-                    command_buffer,
-                    Some(subresource),
-                    false,
-                )
-                .unwrap();
-            self.render_image_reset = None;
-        }
-        self.render_image = None;
     }
 
     #[inline(always)]
@@ -124,7 +99,7 @@ impl<'a> ResourcePoolContext<'a>
             format: properties.format,
             samples: properties.samples,
             flags,
-            loc: loc,
+            loc: Some(loc),
         })
     }
 
@@ -157,79 +132,9 @@ impl<'a> ResourcePoolContext<'a>
             format: properties.format,
             samples: properties.samples,
             flags,
-            loc,
+            loc: Some(loc),
         })
-    }
-
-    #[inline(always)]
-    pub fn set_render_image(
-        &mut self,
-        resource_id: ResourceId,
-        range_info: Option<ImageRangeInfo>,
-        loc: Location,
-    ) -> Result<()>
-    {
-        let image = self.get_image(resource_id)?;
-        if let Some(info) = range_info {
-            if let Some(err) = image.validate_range(info) {
-                return Err(Error::new("invalid image range", err))
-            }
-        }
-        if let Some(err) = image.validate_usage(vk::ImageUsageFlags::SAMPLED) {
-            return Err(Error::new("image has incompatible usage", err))
-        }
-        self.render_image = Some((resource_id.image_id, range_info, loc));
-        Ok(())
-    }
-
-    #[inline(always)]
-    pub fn get_render_image(
-        &mut self,
-        graphics_queue: u32,
-        command_buffer: vk::CommandBuffer,
-    ) -> Result<Option<(ImageId, Option<ImageRangeInfo>)>>
-    {
-        if self.render_image.is_none() {
-            return Ok(None)
-        }
-        let Some((id, range_info, loc)) = self.render_image else {
-            return Ok(None);
-        };
-        let dst_state = ImageState::new(
-            vk::AccessFlags::SHADER_READ,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            graphics_queue,
-            vk::PipelineStageFlags::FRAGMENT_SHADER,
-        );
-        let image = self.context
-            .get_image(id)
-            .context(ErrorContext::EventError(loc))?;
-        let state = image.state();
-        if dst_state != state {
-            if range_info.is_some() && state.layout == vk::ImageLayout::UNDEFINED {
-                image.cmd_memory_barrier(
-                    dst_state,
-                    command_buffer,
-                    None,
-                    false,
-                ).unwrap();
-            }
-            else {
-                image.cmd_memory_barrier(
-                    dst_state,
-                    command_buffer,
-                    range_info.map(|v| v.subresource_info),
-                    false,
-                ).unwrap();
-                if let Some(info) = range_info {
-                    self.render_image_reset = Some((state, info.subresource_info));
-                }
-            }
-        }
-        Ok(Some(
-            (id, range_info)
-        ))
-    }
+    } 
 
     #[inline(always)]
     pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>> {
@@ -249,11 +154,11 @@ impl<'a> ResourcePoolContext<'a>
     {
         let image = self.context
             .get_image(id.image_id)
-            .context(ErrorContext::EventError(id.loc))?;
+            .context(ErrorContext::EventError(id.location_or_this()))?;
         image
             .cmd_memory_barrier(state, command_buffer, subresource_info, false)
             .context("image memory barrier failed")
-            .context(ErrorContext::EventError(id.loc))?;
+            .context(ErrorContext::EventError(id.location_or_this()))?;
         Ok(())
     }
 

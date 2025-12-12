@@ -148,8 +148,8 @@ impl From<ClearValue> for vk::ClearValue {
 #[must_use]
 #[derive(Clone, Copy)]
 pub struct ReadInfo {
-    pub resource_id: ResourceId,
-    pub range_info: Option<ImageRangeInfo>,
+    pub id: ResourceId,
+    pub range: Option<ImageRangeInfo>,
     loc: Option<Location>,
 }
 
@@ -157,10 +157,10 @@ impl ReadInfo {
 
     #[inline(always)]
     #[track_caller]
-    pub fn new(resource_id: ResourceId, range_info: Option<ImageRangeInfo>) -> Self {
+    pub fn new(id: ResourceId, range: Option<ImageRangeInfo>) -> Self {
         Self {
-            resource_id,
-            range_info,
+            id,
+            range,
             loc: caller!(),
         }
     }
@@ -174,11 +174,34 @@ impl Tracked for ReadInfo {
 }
 
 #[derive(Clone, Copy)]
+pub struct WriteResolveInfo {
+    pub id: ResourceId,
+    pub mode: ResolveMode,
+    pub range: Option<ImageRangeInfo>,
+}
+
+impl WriteResolveInfo {
+
+    #[inline(always)]
+    pub fn new(
+        id: ResourceId,
+        mode: ResolveMode,
+        range: impl Into<Option<ImageRangeInfo>>,
+    ) -> Self
+    {
+        Self {
+            id,
+            mode,
+            range: range.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct WriteInfo {
-    pub main_id: ResourceId,
-    pub range_info: Option<ImageRangeInfo>,
-    pub resolve: Option<(ResourceId, ResolveMode)>,
-    pub resolve_range_info: Option<ImageRangeInfo>,
+    pub id: ResourceId,
+    pub range: Option<ImageRangeInfo>,
+    pub resolve: Option<WriteResolveInfo>,
     pub load_op: AttachmentLoadOp,
     pub store_op: AttachmentStoreOp,
     pub clear_value: ClearValue,
@@ -189,31 +212,52 @@ impl WriteInfo {
 
     #[inline(always)]
     #[track_caller]
-    pub fn new(
-        main_id: ResourceId,
-        range_info: Option<ImageRangeInfo>,
-        resolve: Option<(ResourceId, ResolveMode)>,
-        resolve_range_info: Option<ImageRangeInfo>,
-        load_op: AttachmentLoadOp,
-        store_op: AttachmentStoreOp,
-        clear_value: impl Into<ClearValue>,
-    ) -> Self
+    pub fn new(id: ResourceId) -> Self
     {
         Self {
-            main_id,
-            range_info,
-            resolve,
-            resolve_range_info,
-            load_op,
-            store_op,
-            clear_value: clear_value.into(),
+            id,
             loc: caller!(),
+            range: None,
+            resolve: None,
+            load_op: Default::default(),
+            store_op: Default::default(),
+            clear_value: Default::default(),
         }
     }
 
     #[inline(always)]
+    pub fn with_range(&mut self, range: impl Into<Option<ImageRangeInfo>>) -> &mut Self {
+        self.range = range.into();
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_resolve(&mut self, info: impl Into<Option<WriteResolveInfo>>) -> &mut Self {
+        self.resolve = info.into();
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_load_op(&mut self, load_op: AttachmentLoadOp) -> &mut Self {
+        self.load_op = load_op;
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_store_op(&mut self, store_op: AttachmentStoreOp) -> &mut Self {
+        self.store_op = store_op;
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_clear_value(&mut self, value: impl Into<ClearValue>) -> &mut Self {
+        self.clear_value = value.into();
+        self
+    }
+
+    #[inline(always)]
     pub(crate) fn samples(&self) -> MSAA {
-        self.main_id.samples()
+        self.id.samples()
     }
 }
 
@@ -221,5 +265,12 @@ impl Tracked for WriteInfo {
 
     fn location(&self) -> Option<Location> {
         self.loc
+    }
+}
+
+impl<'a> Into<WriteInfo> for &'a mut WriteInfo {
+
+    fn into(self) -> WriteInfo {
+        self.clone()
     }
 }

@@ -5,7 +5,7 @@ use super::*;
 #[derive(Clone)]
 pub struct ImageBuilder {
     pub(super) device: Arc<ash::Device>,
-    aspects: &'static [ImageAspect],
+    aspects: vk::ImageAspectFlags,
     dimensions: Dimensions,
     component_mapping: ComponentMapping,
     pub(crate) format: vk::Format,
@@ -24,7 +24,7 @@ impl ImageBuilder {
     pub(crate) fn new(device: Arc<ash::Device>) -> Self {
         Self {
             device,
-            aspects: &[],
+            aspects: vk::ImageAspectFlags::empty(),
             dimensions: Dimensions::new(0, 0, 0),
             component_mapping: Default::default(),
             format: vk::Format::UNDEFINED,
@@ -154,7 +154,7 @@ impl ImageBuilder {
             properties: ImageProperties {
                 dimensions: self.dimensions,
                 format: self.format,
-                aspect_mask: make_aspect_mask(self.aspects),
+                aspect_mask: self.aspects.as_raw(),
                 usage: self.usage,
                 samples: self.samples,
                 array_layers: self.array_layers,
@@ -171,7 +171,7 @@ impl PartialEq for ImageBuilder {
     fn eq(&self, other: &Self) -> bool {
         self.dimensions == other.dimensions &&
         self.format == other.format &&
-        make_aspect_mask(self.aspects) == make_aspect_mask(other.aspects) &&
+        self.aspects == other.aspects &&
         self.usage == other.usage &&
         self.samples == other.samples &&
         self.array_layers == other.array_layers &&
@@ -187,7 +187,7 @@ impl Hash for ImageBuilder {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.dimensions.hash(state);
         self.format.hash(state);
-        make_aspect_mask(self.aspects).hash(state);
+        self.aspects.hash(state);
         self.usage.hash(state);
         self.samples.hash(state);
         self.array_layers.hash(state);

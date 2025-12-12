@@ -2,7 +2,7 @@ use ash::vk;
 
 use nox_mem::{AsRaw, impl_as_raw_bit_op};
 
-pub use vk::ImageAspectFlags as ImageAspectFlags;
+use super::Format;
 
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
@@ -39,15 +39,6 @@ impl From<ImageAspect> for vk::ImageAspectFlags {
 
 impl_as_raw_bit_op!(ImageAspect, ImageUsage);
 
-pub trait Format: Copy + AsRaw<Repr = i32> {
-
-    fn aspects(self) -> &'static [ImageAspect];
-
-    fn as_vk_format(self) -> vk::Format {
-        vk::Format::from_raw(self.as_raw())
-    }
-}
-
 #[repr(i32)]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum ColorFormat {
@@ -66,12 +57,12 @@ pub enum ColorFormat {
 impl Format for ColorFormat {
 
     #[inline(always)]
-    fn aspects(self) -> &'static [ImageAspect] {
+    fn aspects(self) -> vk::ImageAspectFlags {
         if self == Self::Undefined {
-            &[]
+            vk::ImageAspectFlags::empty()
         }
         else {
-            &[ImageAspect::Color]
+            vk::ImageAspectFlags::COLOR
         }
     }
 }
@@ -128,22 +119,20 @@ impl DepthStencilFormat {
 
 impl Format for DepthStencilFormat {
 
-    fn aspects(self) -> &'static [ImageAspect] {
+    fn aspects(self) -> vk::ImageAspectFlags {
         match self {
             Self::Undefined => {
-                &[]
+                vk::ImageAspectFlags::empty()
             }
             Self::D32 | Self::D16 => {
-                &[ImageAspect::Depth]
+                vk::ImageAspectFlags::DEPTH
             },
             Self::S8 => {
-                &[ImageAspect::Stencil]
+                vk::ImageAspectFlags::STENCIL
             },
             Self::D32S8 | Self::D24S8 => {
-                &[
-                    ImageAspect::Depth,
-                    ImageAspect::Stencil,
-                ]
+                vk::ImageAspectFlags::DEPTH |
+                vk::ImageAspectFlags::STENCIL
             }
         }
     }
@@ -164,8 +153,8 @@ pub enum IntegerFormat {
 
 impl Format for IntegerFormat {
 
-    fn aspects(self) -> &'static [ImageAspect] {
-        &[ImageAspect::Color]
+    fn aspects(self) -> vk::ImageAspectFlags {
+        vk::ImageAspectFlags::COLOR
     }
 }
 
@@ -180,8 +169,8 @@ pub enum FloatFormat {
 
 impl Format for FloatFormat {
 
-    fn aspects(self) -> &'static [ImageAspect] {
-        &[ImageAspect::Color]
+    fn aspects(self) -> vk::ImageAspectFlags {
+        vk::ImageAspectFlags::COLOR
     }
 }
 
