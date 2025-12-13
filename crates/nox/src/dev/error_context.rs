@@ -11,6 +11,9 @@ pub enum ErrorContext {
     #[display("internal string conversion error at {0}")]
     StringConversionError(Location),
 
+    #[display("init error at {0}")]
+    InitError(Location),
+
     #[display("event error at {0}")]
     EventError(Location),
 

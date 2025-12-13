@@ -53,4 +53,7 @@ pub enum Event<'a, 'b, 'c> {
         pass_id: gpu::PassId,
         commands: &'a mut gpu::RenderCommands<'b, 'c>,
     },
+    CleanUp {
+        gpu: &'a mut gpu::GpuContext<'b>,
+    },
 }

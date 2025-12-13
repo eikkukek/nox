@@ -3,7 +3,7 @@ use core::{
     fmt::{self, Debug, Display, Formatter},
 };
 
-use nox_derive::Error;
+use nox_proc::Error;
 
 use nox_error::BuildInternal;
 

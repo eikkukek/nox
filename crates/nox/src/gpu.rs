@@ -5,6 +5,8 @@ pub mod memory_binder;
 pub mod linear_device_alloc;
 mod context;
 
+pub mod util;
+
 mod memory_layout;
 mod handle;
 mod helpers;
@@ -65,7 +67,7 @@ pub use physical_device::{PhysicalDeviceInfo, QueueFamilyIndices};
 pub use global_resources::*;
 pub use pipeline::*;
 pub use commands::*;
-pub use nox_derive::VertexInput;
+pub use nox_proc::VertexInput;
 pub use shader::*;
 pub use pipeline::vertex_input::*;
 pub use frame_graph::*;
@@ -294,9 +296,10 @@ impl<'a> Gpu<'a> {
         self.vulkan_context.request_swapchain_update(self.buffered_frames, size);
     }
 
-    fn async_transfer_requests<I: Interface>(
+    fn async_transfer_requests<Token: CellToken>(
         &mut self,
-        interface: &mut I,
+        token: &mut Token,
+        process: &mut impl ProcessEvent<Token>,
     ) -> error::Result<()>
     {
         let count = self.transfer_requests.async_request_count();
@@ -381,12 +384,10 @@ impl<'a> Gpu<'a> {
 
             let mut commands = TransferCommands::new(&mut storage, &mut context);
 
-            interface
-                .event(Event::TransferWork {
-                    request_id: id,
-                    commands: &mut commands,
-                })
-                .context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
+            (process)(token, Event::TransferWork {
+                request_id: id,
+                commands: &mut commands,
+            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
 
             self.transfer_commands.push(storage);
         }
@@ -663,17 +664,18 @@ impl<'a> Gpu<'a> {
         Ok(result)
     }
 
-    pub(crate) fn render(
+    pub(crate) fn render<Token: CellToken>(
         &mut self,
         window: &Window,
-        interface: &mut impl Interface,
+        token: &mut Token,
+        process: &mut impl ProcessEvent<Token>,
         host_allocators: &'a HostAllocators,
     ) -> error::Result<()>
     {
         let graphics_queue = self.vulkan_context.graphics_queue();
         let transfer_queue = self.vulkan_context.transfer_queue();
         let compute_queue = self.vulkan_context.compute_queue();
-        self.async_transfer_requests(interface)
+        self.async_transfer_requests(token, process)
             .context("async transfer requests failed")?;
         let mut pending_transfers = GlobalVec::new();
         self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
@@ -706,13 +708,13 @@ impl<'a> Gpu<'a> {
                     &mut self.transfer_requests,
                     frame_buffer_size
                 );
-                interface.event(Event::FrameBufferCreated {
+                (process)(token, Event::FrameBufferCreated {
                     gpu: &mut context,
                     new_size: frame_buffer_size,
                     new_format: ImageFormat(frame_data.format, vk::ImageAspectFlags::COLOR),
                 }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             }
-            self.async_transfer_requests(interface)
+            self.async_transfer_requests(token, process)
                 .context("async transfer requests failed")?;
             self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
                 .context("failed to process transfer requests")?;
@@ -736,10 +738,9 @@ impl<'a> Gpu<'a> {
                 &self.tmp_alloc,
                 queue_family_indices.compute_index(),
             );
-            interface
-                .event(Event::ComputeWork {
-                    commands: &mut compute_commands
-                }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
+            (process)(token, Event::ComputeWork {
+                commands: &mut compute_commands
+            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             let compute_commands = compute_commands.finish();
             unsafe {
                 device.end_command_buffer(compute_state.command_buffer).unwrap();
@@ -844,13 +845,13 @@ impl<'a> Gpu<'a> {
                 frame_data.frame_index,
                 queue_family_indices,
             );
-            interface
-                .event(Event::Render {
-                    frame_graph: &mut frame_graph,
-                    pending_transfers: &pending_transfers,
-                }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
+            (process)(token, Event::Render {
+                frame_graph: &mut frame_graph,
+                pending_transfers: &pending_transfers,
+            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             let frame_graph = frame_graph.render(
-                interface,
+                token,
+                process,
                 compute_state.semaphore,
                 compute_state.timeline_value,
                 self.buffered_frames

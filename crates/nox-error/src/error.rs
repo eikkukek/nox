@@ -3,7 +3,7 @@ use core::{
     fmt::{self, Display, Debug, Formatter},
 };
 
-use nox_derive::Error;
+use nox_proc::Error;
 
 use nox_mem::dynamic::{Dyn, Pair};
 

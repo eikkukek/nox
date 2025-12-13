@@ -33,6 +33,8 @@ pub trait AsRaw {
     fn as_raw(self) -> Self::Repr;
 }
 
+pub use nox_proc::AsRaw;
+
 #[macro_export]
 macro_rules! impl_as_raw_bit_op {
     ($($t:ty),+ $(,)?) => {

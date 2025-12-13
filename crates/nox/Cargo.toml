@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 nox-mem = { path = "../nox-mem" }
 nox-alloc = { path = "../nox-alloc" }
-nox-derive = { path = "../nox-derive" }
+nox-proc = { path = "../nox-proc" }
 nox-error = { path = "../nox-error" }
 nox-log = { path = "../nox-log" }
 

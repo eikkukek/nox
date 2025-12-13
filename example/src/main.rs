@@ -9,7 +9,7 @@ use glam::{f32::*, Vec4Swizzles};
 use memmap2::Mmap;
 
 use nox::{
-    mem::{size_of, slice_as_bytes, vec_types::ArrayVec, GlobalAlloc},
+    mem::{size_of, slice_as_bytes, vec_types::ArrayVec, GlobalAlloc, cell::InitCell},
     gpu::{self, VertexInput},
     error::Context,
     *,
@@ -179,7 +179,7 @@ impl Drop for ImageAsset {
     }
 }
 
-struct App {
+struct Data {
     assets: [ImageAsset; 8],
     color_format: gpu::ColorFormat,
     depth_stencil_format: gpu::DepthStencilFormat,
@@ -202,9 +202,9 @@ struct App {
     vertex_buffer: gpu::BufferId,
     vertex_instance_buffer: gpu::BufferId,
     index_buffer: gpu::BufferId,
-    matrices_buffer: gpu::BufferId,
+    _matrices_buffer: gpu::BufferId,
     matrices_map: NonNull<Matrices>,
-    light_info_buffer: gpu::BufferId,
+    _light_info_buffer: gpu::BufferId,
     light_info_map: NonNull<LightInfo>,
     shader_resources: [gpu::ShaderResourceId; 4],
     fire_pass: gpu::PassId,
@@ -224,71 +224,16 @@ struct App {
     image_alloc: gpu::LinearDeviceAllocId,
 }
 
-impl App {
+impl Data {
 
-    fn new() -> Self {
+    fn init(
+        _win: &mut win::WindowContext,
+        gpu: &mut gpu::GpuContext, 
+    ) -> Result<Self>
+    {
         let mut cache_dir = std::env::current_exe().unwrap();
         cache_dir.pop();
         cache_dir.push("example.cache");
-        Self {
-            assets: Default::default(),
-            color_format: gpu::ColorFormat::SrgbRGBA8,
-            depth_stencil_format: gpu::DepthStencilFormat::D32S8,
-            depth_format: gpu::DepthStencilFormat::D32,
-            image: Default::default(),
-            fire_format: gpu::FloatFormat::R32,
-            fire_images: Default::default(),
-            sampler: Default::default(),
-            vertex_shader: Default::default(),
-            fragment_shader: Default::default(),
-            outline_vertex: Default::default(),
-            outline_fragment: Default::default(),
-            fire_effect_compute: Default::default(),
-            fire_effect_vertex: Default::default(),
-            fire_effect_fragment: Default::default(),
-            pipeline_layouts: Default::default(),
-            graphics_pipelines: Default::default(),
-            outline_pipeline: Default::default(),
-            fire_pipeline: Default::default(),
-            vertex_buffer: Default::default(),
-            vertex_instance_buffer: Default::default(),
-            index_buffer: Default::default(),
-            matrices_buffer: Default::default(),
-            matrices_map: NonNull::dangling(),
-            light_info_buffer: Default::default(),
-            light_info_map: NonNull::dangling(),
-            shader_resources: Default::default(),
-            fire_pass: Default::default(),
-            cube_pass: Default::default(),
-            outline_pass: Default::default(),
-            fire_transfer_id: Default::default(),
-            frame_buffer_size: Default::default(),
-            cache_dir,
-            pipeline_cache: Default::default(),
-            heat_in: 0,
-            rot: 0.0,
-            semaphore: Default::default(),
-            semaphore_value: 0,
-            fire_semaphore: Default::default(),
-            fire_semaphore_value: 0,
-            staging_alloc: Default::default(),
-            image_alloc: Default::default(),
-        }
-    }
-}
-
-impl Interface for App {
-
-    fn init_settings(&self) -> InitSettings {
-        InitSettings::new("Test", Version::default(), [540, 540], true, true)
-    }
-
-    fn init(
-        &mut self,
-        _win: &mut win::WindowContext,
-        gpu: &mut gpu::GpuContext, 
-    ) -> Result<()>
-    {
         println!("GPU: {}", gpu.physical_device_info().device_name());
         let mut path = match std::env::current_exe() {
             Ok(path) => path,
@@ -305,15 +250,16 @@ impl Interface for App {
         paths[5].push("ground.jpg");
         paths[6].push("marble.jpg");
         paths[7].push("wood_floor.jpg");
+        let mut assets: [ImageAsset; 8] = Default::default();
         for (i, path) in paths.iter().enumerate() {
-            self.assets[i] = ImageAsset
+            assets[i] = ImageAsset
                 ::new(path, 4)
                 .map_err(|err| nox::Error::new(format!("failed to open {:?}", path), err))?;
         }
-        self.pipeline_cache =
-            if fs::exists(&self.cache_dir).context("io error")? {
+        let pipeline_cache =
+            if fs::exists(&cache_dir).context("io error")? {
                 let file = File
-                    ::open(&self.cache_dir)
+                    ::open(&cache_dir)
                     .context("failed to open pipeline cache")?;
                 let map = unsafe {
                     Mmap::map(&file)
@@ -322,11 +268,11 @@ impl Interface for App {
                 gpu.create_pipeline_cache(Some(&map))?
             }
             else {
-                File::create_new(&self.cache_dir)
+                File::create_new(&cache_dir)
                     .context("failed to create pipeline cache file")?;
                 gpu.create_pipeline_cache(None)?
             };
-        self.vertex_shader = gpu.create_shader(
+        let vertex_shader = gpu.create_shader(
             "#version 450
 
             layout(location = 0) in vec3 in_pos;
@@ -367,7 +313,7 @@ impl Interface for App {
             "vertex shader",
             gpu::ShaderStage::Vertex,
         )?;
-        self.fragment_shader = gpu.create_shader(
+        let fragment_shader = gpu.create_shader(
             "#version 450
 
             layout(location = 0) in vec3 in_normal;
@@ -395,7 +341,7 @@ impl Interface for App {
             "fragment shader",
             gpu::ShaderStage::Fragment,
         )?;
-        self.outline_vertex = gpu.create_shader(
+        let outline_vertex = gpu.create_shader(
             "#version 450
 
             layout(location = 0) in vec3 in_pos;
@@ -429,7 +375,7 @@ impl Interface for App {
             "outline vertex",
             gpu::ShaderStage::Vertex
         )?;
-        self.outline_fragment = gpu.create_shader(
+        let outline_fragment = gpu.create_shader(
             "#version 450
             layout(location = 0) out vec4 out_color;
 
@@ -440,7 +386,7 @@ impl Interface for App {
             "outline fragment",
             gpu::ShaderStage::Fragment,
         )?;
-        self.fire_effect_compute = gpu.create_shader(
+        let fire_effect_compute = gpu.create_shader(
             "#version 450
 
             layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -493,7 +439,7 @@ impl Interface for App {
             "fire effect",
             gpu::ShaderStage::Compute,
         )?;
-        self.fire_effect_vertex = gpu.create_shader(
+        let fire_effect_vertex = gpu.create_shader(
             "#version 450
 
             layout(location = 0) out vec2 out_uv;
@@ -525,7 +471,7 @@ impl Interface for App {
             "fire effect vertex",
             gpu::ShaderStage::Vertex,
         )?;
-        self.fire_effect_fragment = gpu.create_shader(
+        let fire_effect_fragment = gpu.create_shader(
             "#version 450
 
             layout(location = 0) in vec2 in_uv;
@@ -569,60 +515,60 @@ impl Interface for App {
             "fire effect fragment",
             gpu::ShaderStage::Fragment,
         )?;
-        self.pipeline_layouts = [
+        let pipeline_layouts = [
                 gpu.create_pipeline_layout(
-                    [self.vertex_shader, self.fragment_shader],
+                    [vertex_shader, fragment_shader],
                 )?,
                 gpu.create_pipeline_layout(
-                    [self.outline_vertex, self.outline_fragment],
+                    [outline_vertex, outline_fragment],
                 )?,
                 gpu.create_pipeline_layout(
-                    [self.fire_effect_compute],
+                    [fire_effect_compute],
                 )?,
                 gpu.create_pipeline_layout(
-                    [self.fire_effect_vertex, self.fire_effect_fragment],
+                    [fire_effect_vertex, fire_effect_fragment],
                 )?,
         ];
-        self.color_format = gpu.supported_image_format(
+        let color_format = gpu.supported_image_format(
             &[gpu::ColorFormat::SrgbRGBA8, gpu::ColorFormat::UnormRGBA8],
             &[gpu::FormatFeature::SampledImage, gpu::FormatFeature::ColorAttachment],
         ).unwrap();
-        self.depth_stencil_format = gpu.supported_image_format(
+        let depth_stencil_format = gpu.supported_image_format(
             gpu::DepthStencilFormat::all_depth_stencil(),
             &[gpu::FormatFeature::DepthStencilAttachment],
         ).unwrap();
-        self.depth_format = gpu.supported_image_format(
+        let depth_format = gpu.supported_image_format(
             gpu::DepthStencilFormat::all_depth(),
             &[gpu::FormatFeature::SampledImage, gpu::FormatFeature::DepthStencilAttachment],
         ).unwrap();
-        self.fire_format = gpu.supported_image_format(
+        let fire_format = gpu.supported_image_format(
             &[gpu::FloatFormat::R32],
             &[gpu::FormatFeature::SampledImage, gpu::FormatFeature::StorageImage]
         ).unwrap();
-        self.image = gpu.create_image(
+        let image = gpu.create_image(
             gpu::ResourceBinderImage::DefaultBinder,
             |builder| {
                 builder
                     .with_usage(gpu::ImageUsage::TransferDst)
                     .with_usage(gpu::ImageUsage::Sampled)
-                    .with_dimensions(self.assets[0].dim)
-                    .with_format(self.color_format, false)
+                    .with_dimensions(assets[0].dim)
+                    .with_format(color_format, false)
                     .with_array_layers(8);
             }
         )?;
-        self.sampler = gpu.create_sampler(
+        let sampler = gpu.create_sampler(
             |_| {},
         )?;
-        let mut graphics_pipeline_info = gpu::GraphicsPipelineInfo::new(self.pipeline_layouts[0]);
+        let mut graphics_pipeline_info = gpu::GraphicsPipelineInfo::new(pipeline_layouts[0]);
         graphics_pipeline_info
             .with_sample_shading(gpu::SampleShadingInfo::new(gpu::MSAA::X4, 0.2, false, false))
             .with_color_output(
-                self.color_format,
+                color_format,
                 gpu::WriteMask::all(),
                 None,
             )
-            .with_depth_output(self.depth_stencil_format)
-            .with_stencil_output(self.depth_stencil_format)
+            .with_depth_output(depth_stencil_format)
+            .with_stencil_output(depth_stencil_format)
             .with_vertex_input_binding(gpu::VertexInputBinding::new::<0, Vertex>(0, gpu::VertexInputRate::Vertex))
             .with_vertex_input_binding(gpu::VertexInputBinding::new::<3, VertexOff>(1, gpu::VertexInputRate::Instance))
             .with_depth_stencil(gpu::DepthStencilInfo {
@@ -642,110 +588,113 @@ impl Interface for App {
                 }),
                 write_enable: true,
             });
-        let mut fire_effect_pipeline_info = gpu::GraphicsPipelineInfo::new(self.pipeline_layouts[3]);
+        let mut fire_effect_pipeline_info = gpu::GraphicsPipelineInfo::new(pipeline_layouts[3]);
         fire_effect_pipeline_info
             .with_sample_shading(gpu::SampleShadingInfo::new(gpu::MSAA::X4, 0.2, false, false))
             .with_color_output(
-                self.color_format,
+                color_format,
                 gpu::WriteMask::all(),
                 None,
             );
+        let mut graphics_pipelines = [Default::default(); 2];
         gpu.create_graphics_pipelines(
             &[graphics_pipeline_info, fire_effect_pipeline_info],
-            Some(self.pipeline_cache),
+            Some(pipeline_cache),
             &GlobalAlloc,
-            |i, id| { self.graphics_pipelines[i] = id; },
+            |i, id| { graphics_pipelines[i] = id; },
         )?;
-        let fire_pipeline_info = gpu::ComputePipelineInfo::new(self.pipeline_layouts[2]);
+        let mut fire_pipeline = Default::default();
+        let fire_pipeline_info = gpu::ComputePipelineInfo::new(pipeline_layouts[2]);
         gpu.create_compute_pipelines(
             &[fire_pipeline_info],
-            Some(self.pipeline_cache),
+            Some(pipeline_cache),
             &GlobalAlloc,
-            |_, id| { self.fire_pipeline = id },
+            |_, id| { fire_pipeline = id },
         )?;
-        self.vertex_buffer = gpu.create_buffer(
+        let vertex_buffer = gpu.create_buffer(
             (CUBE_VERTICES.len() * size_of!(Vertex)) as u64,
             &[gpu::BufferUsage::VertexBuffer, gpu::BufferUsage::TransferDst],
             gpu::ResourceBinderBuffer::DefaultBinder,
         )?;
-        self.vertex_instance_buffer = gpu.create_buffer(
+        let vertex_instance_buffer = gpu.create_buffer(
             (CUBE_OFF.len() * size_of!(VertexOff)) as u64,
             &[gpu::BufferUsage::VertexBuffer, gpu::BufferUsage::TransferDst],
             gpu::ResourceBinderBuffer::DefaultBinder,
         )?;
-        self.index_buffer = gpu.create_buffer(
+        let index_buffer = gpu.create_buffer(
             (CUBE_INDICES.len() * size_of!(u32)) as u64,
             &[gpu::BufferUsage::IndexBuffer , gpu::BufferUsage::TransferDst],
             gpu::ResourceBinderBuffer::DefaultBinder,
         )?;
-        self.matrices_buffer = gpu.create_buffer(
+        let matrices_buffer = gpu.create_buffer(
             size_of!(Matrices) as u64,
             &[gpu::BufferUsage::UniformBuffer],
             gpu::ResourceBinderBuffer::DefaultBinderMappable,
         )?;
-        self.matrices_map = unsafe {
-            gpu.map_buffer(self.matrices_buffer).unwrap().cast::<Matrices>()
+        let matrices_map = unsafe {
+            gpu.map_buffer(matrices_buffer).unwrap().cast::<Matrices>()
         };
-        self.light_info_buffer = gpu.create_buffer(
+        let light_info_buffer = gpu.create_buffer(
             size_of!(LightInfo) as u64,
             &[gpu::BufferUsage::UniformBuffer],
             gpu::ResourceBinderBuffer::DefaultBinderMappable,
         )?;
-        self.light_info_map = unsafe {
-            gpu.map_buffer(self.light_info_buffer).unwrap().cast::<LightInfo>()
+        let light_info_map = unsafe {
+            gpu.map_buffer(light_info_buffer).unwrap().cast::<LightInfo>()
         };
+        let mut shader_resources = [Default::default(); 4];
         gpu.allocate_shader_resources(
             &[
                 gpu::ShaderResourceInfo {
-                    layout_id: self.pipeline_layouts[0],
+                    layout_id: pipeline_layouts[0],
                     set: 0,
                 },
                 gpu::ShaderResourceInfo {
-                    layout_id: self.pipeline_layouts[0],
+                    layout_id: pipeline_layouts[0],
                     set: 1,
                 },
                 gpu::ShaderResourceInfo {
-                    layout_id: self.pipeline_layouts[2],
+                    layout_id: pipeline_layouts[2],
                     set: 0,
                 },
                 gpu::ShaderResourceInfo {
-                    layout_id: self.pipeline_layouts[3],
+                    layout_id: pipeline_layouts[3],
                     set: 0,
                 },
             ],
-            |i, v| self.shader_resources[i] = v,
+            |i, v| shader_resources[i] = v,
             &GlobalAlloc,
         )?;
         gpu.update_shader_resources(
             &[
                 gpu::ShaderResourceImageUpdate {
-                    resource: self.shader_resources[1],
+                    resource: shader_resources[1],
                     binding: 0,
                     starting_index: 0,
                     infos: &[gpu::ShaderResourceImageInfo {
-                        sampler: self.sampler,
-                        image_source: (self.image, None),
+                        sampler: sampler,
+                        image_source: (image, None),
                         storage_image: false,
                     }]
                 },
             ],
             &[
                 gpu::ShaderResourceBufferUpdate {
-                    resource: self.shader_resources[0],
+                    resource: shader_resources[0],
                     binding: 0,
                     starting_index: 0,
                     infos: &[gpu::ShaderResourceBufferInfo {
-                        buffer: self.matrices_buffer,
+                        buffer: matrices_buffer,
                         offset: 0,
                         size: size_of!(Matrices) as u64,
                     }],
                 },
                 gpu::ShaderResourceBufferUpdate {
-                    resource: self.shader_resources[1],
+                    resource: shader_resources[1],
                     binding: 1,
                     starting_index: 0,
                     infos: &[gpu::ShaderResourceBufferInfo {
-                        buffer: self.light_info_buffer,
+                        buffer: light_info_buffer,
                         offset: 0,
                         size: size_of!(LightInfo) as u64,
                     }],
@@ -754,14 +703,57 @@ impl Interface for App {
             &[],
             &GlobalAlloc
         )?;
-        self.semaphore = gpu.create_timeline_semaphore(0)?;
-        self.fire_semaphore = gpu.create_timeline_semaphore(0)?;
-        self.staging_alloc = gpu.create_default_linear_device_alloc_mappable(1 << 28)?;
-        self.image_alloc = gpu.create_default_linear_device_alloc(1 << 28)?;
-        gpu.add_async_transfer_request(self.staging_alloc, &[(self.fire_semaphore, self.fire_semaphore_value + 1)]);
-        self.fire_semaphore_value += 1;
-        self.frame_buffer_size = gpu.frame_buffer_size();
-        Ok(())
+        let semaphore = gpu.create_timeline_semaphore(0)?;
+        let fire_semaphore = gpu.create_timeline_semaphore(0)?;
+        let staging_alloc = gpu.create_default_linear_device_alloc_mappable(1 << 28)?;
+        let image_alloc = gpu.create_default_linear_device_alloc(1 << 28)?;
+        gpu.add_async_transfer_request(staging_alloc, &[(fire_semaphore, 1)]);
+        let fire_semaphore_value = 1;
+        let frame_buffer_size = gpu.frame_buffer_size();
+        Ok(Self {
+            assets,
+            color_format,
+            depth_format,
+            depth_stencil_format,
+            image,
+            fire_format,
+            fire_images: Default::default(),
+            sampler,
+            vertex_shader,
+            fragment_shader,
+            outline_vertex,
+            outline_fragment,
+            fire_effect_compute,
+            fire_effect_vertex,
+            fire_effect_fragment,
+            pipeline_layouts,
+            graphics_pipelines,
+            outline_pipeline: Default::default(),
+            fire_pipeline,
+            vertex_buffer,
+            vertex_instance_buffer,
+            index_buffer,
+            _matrices_buffer: matrices_buffer,
+            matrices_map,
+            _light_info_buffer: light_info_buffer,
+            light_info_map,
+            shader_resources,
+            fire_pass: Default::default(),
+            cube_pass: Default::default(),
+            outline_pass: Default::default(),
+            frame_buffer_size,
+            cache_dir,
+            pipeline_cache,
+            heat_in: 0,
+            fire_transfer_id: Default::default(),
+            rot: 0.0,
+            semaphore,
+            semaphore_value: 0,
+            fire_semaphore,
+            fire_semaphore_value,
+            staging_alloc,
+            image_alloc,
+        })
     }
 
     fn event(&mut self, event: Event) -> Result<()> {
@@ -1086,26 +1078,38 @@ impl Interface for App {
                 )?;
                 Ok(())
             },
-        }
-    }
-
-    fn clean_up(
-        &mut self,
-        gpu: &mut gpu::GpuContext,
-    )
-    {
-        if let Ok(mut file) = File::create(&self.cache_dir) {
-            if let Ok(data) = gpu.retrieve_pipeline_cache_data(self.pipeline_cache) {
-                if let Ok(_) = file.write(&data) {
-                    println!("cache written, len {}", data.len());
+            Event::CleanUp { gpu, } => {
+                if let Ok(mut file) = File::create(&self.cache_dir) {
+                    if let Ok(data) = gpu.retrieve_pipeline_cache_data(self.pipeline_cache) {
+                        if let Ok(_) = file.write(&data) {
+                            println!("cache written, len {}", data.len());
+                        }
+                    }
                 }
+                Ok(())
             }
         }
     }
 }
 
+nox::singleton_cell_token!(pub ExampleToken);
+
 fn main() {
-    let app = App::new();
     let mut memory = Default::default();
-    Nox::new(app, &mut memory).run();
+    let mut token = ExampleToken::new().unwrap();
+    assert!(matches!(ExampleToken::new(), None));
+    let data = InitCell::new(&mut token);
+    Nox::new(
+        token,
+        |token, win, gpu| { data.get_or_try_init(token, || Data::init(win, gpu))?; Ok(()) },
+        |token, event| { data.borrow_mut(token).unwrap().event(event) },
+        InitSettings::new(
+            "example",
+            Version::default(),
+            [540, 540],
+            true,
+            true,
+        ),
+        &mut memory
+    ).run();
 }

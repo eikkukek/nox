@@ -1,5 +1,5 @@
 [package]
-name = "nox-derive"
+name = "nox-proc"
 version = "0.1.0"
 edition = "2024"
 

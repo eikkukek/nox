@@ -74,14 +74,14 @@ impl<T: ?Sized, U: ?Sized> Pair<T, U> {
             ptr.write(u);
             ptr
         };
-        let t = NonNull::from_ref(unsafe {
-            TSource::from_raw_parts(DynRawParts {
+        let t = NonNull::from_mut(unsafe {
+            TSource::from_raw_parts_mut(DynRawParts {
                 data: t_ptr.as_ptr(),
                 vtable: t_vtable,
             })
         });
-        let u = NonNull::from_ref(unsafe {
-            USource::from_raw_parts(DynRawParts {
+        let u = NonNull::from_mut(unsafe {
+            USource::from_raw_parts_mut(DynRawParts {
                 data: u_ptr.as_ptr(),
                 vtable: u_vtable,
             })

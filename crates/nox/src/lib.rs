@@ -13,7 +13,7 @@ mod utility;
 
 mod clipboard;
 
-mod dev;
+pub mod dev;
 
 mod export {
 
@@ -28,12 +28,15 @@ mod export {
     pub use memory::Memory;
     pub use event::Event;
     pub use nox::*;
-    pub use interface::Interface;
+    pub use interface::{Initialize, ProcessEvent};
     pub use mem::array_string;
     pub use mem::GlobalAlloc;
+    pub use mem::cell::{InitCell, CellToken};
 }
 
 pub use export::*;
 
 pub use error::Error;
 pub type Result<T> = core::result::Result<T, Error>;
+
+pub use mem::singleton_cell_token;

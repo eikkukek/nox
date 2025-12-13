@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nox-derive = { path = "../nox-derive" }
+nox-proc = { path = "../nox-proc" }
 nox-mem = { path = "../nox-mem" }

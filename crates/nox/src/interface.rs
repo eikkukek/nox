@@ -1,27 +1,13 @@
 #![allow(unused_variables)]
 
+use nox_mem::cell::CellToken;
+
 use crate::*;
 
-pub trait Interface
-    where
-        Self: Sized
-{
-    /// Provides the initialization settings for Nox.
-    fn init_settings(&self) -> InitSettings;
+pub trait Initialize<Token: CellToken>: FnOnce(&mut Token, &mut win::WindowContext, &mut gpu::GpuContext) -> Result<()> {}
 
-    /// Gets called once right after start up.
-    fn init(
-        &mut self,
-        win: &mut win::WindowContext,
-        gpu: &mut gpu::GpuContext,
-    ) -> Result<()> { Ok(()) }
-   
-    /// Gets called when an [`Event`] is being processed.
-    fn event(&mut self, event: Event) -> Result<()>;
+impl<Token: CellToken, F: FnOnce(&mut Token, &mut win::WindowContext, &mut gpu::GpuContext) -> Result<()>> Initialize<Token> for F {}
 
-    /// Gets called once during app clean up.
-    fn clean_up(
-        &mut self,
-        gpu: &mut gpu::GpuContext,
-    ) {}
-}
+pub trait ProcessEvent<Token: CellToken>: FnMut(&mut Token, Event) -> Result<()> {}
+
+impl<Token: CellToken, F: FnMut(&mut Token, Event) -> Result<()>> ProcessEvent<Token> for F {}

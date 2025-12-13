@@ -8,10 +8,10 @@ mod context;
 pub use location::Location;
 pub use tracked::{Tracked};
 pub use error::{Error, BuildInternal};
-pub use nox_derive::Error;
+pub use nox_proc::Error;
 
 pub use core::fmt::Display;
-pub use nox_derive::Display;
+pub use nox_proc::Display;
 
 pub use context::Context;
 

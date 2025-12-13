@@ -120,9 +120,10 @@ impl<'a> FrameGraph<'a> {
 
 impl<'a> FrameGraph<'a> {
 
-    pub(crate) fn render(
+    pub(crate) fn render<Token: CellToken>(
         mut self,
-        interface: &mut impl Interface,
+        token: &mut Token,
+        process: &mut impl ProcessEvent<Token>,
         frame_semaphore: vk::Semaphore,
         frame_semaphore_value: u64,
         buffered_frames: u32,
@@ -543,7 +544,7 @@ impl<'a> FrameGraph<'a> {
                 device.cmd_set_scissor(command_buffer, 0, &[scissor]);
             }
             render_commands.set_current_sample_count(pass.msaa_samples);
-            interface.event(Event::RenderWork {
+            (process)(token, Event::RenderWork {
                 pass_id: pass.id,
                 commands: &mut render_commands,
             }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;

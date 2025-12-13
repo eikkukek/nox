@@ -10,7 +10,7 @@ members = [
 	"crates/nox-gui",
 	"crates/nox-log",
 	"crates/nox-error",
-	"crates/nox-derive",
+	"crates/nox-proc",
 ]
 exclude = [
 	"example",

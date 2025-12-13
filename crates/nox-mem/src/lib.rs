@@ -6,6 +6,7 @@ pub mod vec_types;
 pub mod string_types;
 pub mod slot_map;
 pub mod dynamic;
+pub mod cell;
 
 mod macros;
 mod as_raw;
@@ -24,8 +25,9 @@ pub use global_alloc::GlobalAlloc;
 pub use option_alloc::OptionAlloc;
 pub use capacity_policy::CapacityPolicy;
 pub use as_raw::AsRaw;
-pub use nox_derive::AsRaw;
 pub use hashable::Hashable;
 pub use mad_cell::MadCell;
 pub use slice_cast::*;
 pub use const_fn::*;
+
+pub use paste::paste;

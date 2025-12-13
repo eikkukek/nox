@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nox-derive = { path = "../nox-derive" }
+nox-proc = { path = "../nox-proc" }
+paste = "1.0"
+token-cell = "2.1.1"
