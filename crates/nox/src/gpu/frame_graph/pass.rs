@@ -44,10 +44,10 @@ impl<'a> Pass<'a> {
             ::with_capacity(info.max_color_writes as usize, alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
         let signal_semaphores = FixedVec
-            ::with_capacity(info.signal_semaphores as usize, alloc)
+            ::with_capacity(info.max_signal_semaphores as usize, alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
         let wait_semaphores = FixedVec
-            ::with_capacity(info.wait_semaphores as usize, alloc)
+            ::with_capacity(info.max_signal_semaphores as usize, alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
         Ok(Self {
             id,

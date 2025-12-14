@@ -5,13 +5,15 @@ use core::{
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use compact_str::format_compact;
+
 use nox::{
     mem::{
         vec_types::{ArrayVec, GlobalVec, Vector},
         Allocator,
     },
     alloc::arena_alloc::ArenaAlloc,
-    *,
+    gpu,
 };
 
 use nox_geom::{
@@ -19,7 +21,11 @@ use nox_geom::{
     *,
 };
 
-use crate::{image::{ImageSourceInternal, ImageSourceUnsafe, ImageData}, *};
+use crate::{
+    image::{ImageSourceInternal, ImageSourceUnsafe, ImageData},
+    error::*,
+    *,
+};
 
 #[derive(Default, Clone, Copy)]
 pub struct Stroke {
@@ -160,7 +166,7 @@ struct ReactionShapes {
     rendered_shapes: GlobalVec<ShapeParams>,
     prev_shapes: GlobalVec<(Shape, ArrayVec<f32, 4>)>,
     images_by_path: FxHashMap<CompactString, UnsafeCell<ImageData>>,
-    images_by_id: FxHashMap<ImageId, UnsafeCell<ImageData>>,
+    images_by_id: FxHashMap<gpu::ImageId, UnsafeCell<ImageData>>,
     prev_active_images: GlobalVec<ImageSourceUnsafe>,
     active_images: GlobalVec<ImageSourceUnsafe>,
 }
@@ -220,10 +226,10 @@ impl ReactionShapes {
     fn hide(
         &self,
         vertices: &mut [Vertex],
-        window_semaphore: (TimelineSemaphoreId, u64),
-        global_resources: &mut GlobalResources,
+        window_semaphore: (gpu::TimelineSemaphoreId, u64),
+        gpu: &mut gpu::GpuContext,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), GuiError>
+    ) -> Result<()>
     {
         for params in &self.rendered_shapes {
             hide_vertices(vertices, params.shape_vertex_range);
@@ -233,7 +239,10 @@ impl ReactionShapes {
         }
         for data in self.prev_image_iter() {
             if let Some(data) = data {
-                data.hide(window_semaphore, global_resources, tmp_alloc)?;
+                data.hide(window_semaphore, gpu, tmp_alloc)
+                    .context_with(|| format_compact!(
+                        "failed to hide image at location {}", data.location_or_this(),
+                    ))?;
             }
         }
         Ok(())
@@ -314,15 +323,16 @@ impl PainterStorage {
 
     pub fn end(
         &mut self,
-        window_semaphore: (TimelineSemaphoreId, u64),
-        global_resources: &mut GlobalResources,
+        window_semaphore: (gpu::TimelineSemaphoreId, u64),
+        gpu: &mut gpu::GpuContext,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), GuiError>
+    ) -> Result<()>
     {
         self.prev_active_reactions.retain(|v| !self.active_reactions.contains(v));
         for reaction in &self.prev_active_reactions {
             let shapes = self.reaction_shapes.get(reaction).unwrap();
-            shapes.hide(&mut self.vertices, window_semaphore, global_resources, tmp_alloc)?;
+            shapes.hide(&mut self.vertices, window_semaphore, gpu, tmp_alloc)
+                .context("failed to hide shape")?;
         }
         Ok(())
     }
@@ -488,15 +498,18 @@ impl PainterStorage {
 
     pub fn render(
         &mut self,
-        frame_graph: &mut dyn FrameGraph,
-        render_format: ColorFormat,
-        add_read: &mut dyn FnMut(ReadInfo),
-    ) -> Result<(), GuiError> {
+        frame_graph: &mut gpu::FrameGraph,
+        render_format: gpu::ColorFormat,
+        add_read: &mut dyn FnMut(gpu::ReadInfo),
+    ) -> Result<()> {
         for id in &self.active_reactions {
             if let Some(shapes) = self.reaction_shapes.get_mut(id) {
                 for data in shapes.active_image_iter() {
                     if let Some(data) = data {
-                        data.render(frame_graph, render_format, add_read)?;
+                        data.render(frame_graph, render_format, add_read)
+                            .context_with(|| format_compact!(
+                                "failed to render image at location {}", data.location_or_this(),
+                            ))?;
                     }
                 }
             }
@@ -504,14 +517,14 @@ impl PainterStorage {
         Ok(())
     }
 
-    pub fn transfer_commands(
+    pub fn transfer_work(
         &mut self,
-        transfer_commands: &mut TransferCommands,
-        window_semaphore: (TimelineSemaphoreId, u64),
-        sampler: SamplerId,
-        texture_pipeline_layout: PipelineLayoutId,
+        commands: &mut gpu::TransferCommands,
+        window_semaphore: (gpu::TimelineSemaphoreId, u64),
+        sampler: gpu::SamplerId,
+        texture_pipeline_layout: gpu::PipelineLayoutId,
         tmp_alloc: &impl Allocator,
-    ) -> Result<(), GuiError>
+    ) -> Result<()>
     {
         for id in &self.active_reactions {
             let shapes= self.reaction_shapes
@@ -519,44 +532,46 @@ impl PainterStorage {
                 .unwrap();
             for data in shapes.active_image_iter() {
                 if let Some(data) = data {
-                    data.transfer_commands(
-                        transfer_commands,
+                    data.transfer_work(
+                        commands,
                         window_semaphore,
                         sampler,
                         texture_pipeline_layout,
                         tmp_alloc
-                    )?;
+                    ).context_with(|| format_compact!(
+                        "transfer work failed for image at location {}", data.location_or_this()
+                    ))?;
                 }
             }
         }
         Ok(())
     }
 
-    pub fn render_commands(
+    pub fn render_work(
         &mut self,
-        render_commands: &mut RenderCommands,
-        sampler: SamplerId,
+        commands: &mut gpu::RenderCommands,
+        sampler: gpu::SamplerId,
         offset: Vec2,
         bounds: BoundingRect,
-        base_pipeline: GraphicsPipelineId,
-        text_pipeline: GraphicsPipelineId,
-        texture_pipeline: GraphicsPipelineId,
-        texture_pipeline_layout: PipelineLayoutId,
+        base_pipeline: gpu::GraphicsPipelineId,
+        text_pipeline: gpu::GraphicsPipelineId,
+        texture_pipeline: gpu::GraphicsPipelineId,
+        texture_pipeline_layout: gpu::PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
         unit_scale: f32,
         tmp_alloc: &impl Allocator,
-        get_custom_pipeline: &mut dyn FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<(), GuiError>
+        get_custom_pipeline: &mut dyn FnMut(&str) -> Option<gpu::GraphicsPipelineId>,
+    ) -> Result<()>
     {
         let vert_count = self.vertices.len();
         let idx_count = self.indices.len();
         let vert_mem = unsafe {
-            vertex_buffer.allocate(render_commands, vert_count)?
+            vertex_buffer.allocate(commands, vert_count)?
         };
         let idx_mem = unsafe {
-            index_buffer.allocate(render_commands, idx_count)?
+            index_buffer.allocate(commands, idx_count)?
         };
         unsafe {
             self.vertices
@@ -566,11 +581,11 @@ impl PainterStorage {
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
         }
-        let draw_info = DrawInfo {
+        let draw_info = gpu::DrawInfo {
             index_count: idx_count as u32,
             ..Default::default()
         };
-        render_commands.bind_pipeline(base_pipeline)?;
+        commands.bind_pipeline(base_pipeline)?;
         let pc_vertex = push_constants_vertex(
             offset,
             vec2(1.0, 1.0),
@@ -581,19 +596,19 @@ impl PainterStorage {
             bounds.min,
             bounds.max,
         );
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
+        commands.push_constants(|pc| unsafe {
+            if pc.stage == gpu::ShaderStage::Vertex {
                 pc_vertex.as_bytes()
             } else {
                 pc_fragment.as_bytes()
             }
         })?;
-        render_commands.draw_indexed(
+        commands.draw_indexed(
             draw_info,
             [
-                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
+                gpu::DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
             ],
-            DrawBufferInfo {
+            gpu::DrawBufferInfo {
                 id: index_buffer.id(),
                 offset: idx_mem.offset,
             },
@@ -604,12 +619,14 @@ impl PainterStorage {
                 .unwrap();
             for data in shapes.active_image_iter() {
                 if let Some(data) = data {
-                    data.render_commands(
-                        render_commands, sampler,
+                    data.render_work(
+                        commands, sampler,
                         texture_pipeline, texture_pipeline_layout,
                         offset, bounds,
                         inv_aspect_ratio, unit_scale, tmp_alloc
-                    )?;
+                    ).context_with(|| format_compact!(
+                        "image render work failed at location {}", data.location_or_this(),
+                    ))?;
                 }
             }
         }
@@ -741,6 +758,7 @@ impl<'a> Painter<'a>
     }
 
     #[inline(always)]
+    #[track_caller]
     pub fn image(
         &mut self,
         reaction_id: ReactionId,
@@ -759,7 +777,7 @@ impl<'a> Painter<'a>
                     .get_mut(p)
                 {
                     let data = data.get_mut();
-                    data.update_source(src, offset, size);
+                    data.update_source(src, caller!(), offset, size);
                     if data.requires_transfer_commands() {
                         self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
                     }
@@ -769,7 +787,7 @@ impl<'a> Painter<'a>
                         .entry(p.into())
                         .or_default();
                     let data = data.get_mut();
-                    data.update_source(src, offset, size);
+                    data.update_source(src, caller!(), offset, size);
                     if data.requires_transfer_commands() {
                         self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
                     }
@@ -789,7 +807,7 @@ impl<'a> Painter<'a>
                     .entry(id)
                     .or_default();
                 let data = data.get_mut();
-                data.update_source(src, offset, size);
+                data.update_source(src, caller!(), offset, size);
                 if data.requires_transfer_commands() {
                     self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
                 }

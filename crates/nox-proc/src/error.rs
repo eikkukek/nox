@@ -193,26 +193,32 @@ fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<TokenStream>
                         syn::Ident::new(&name, Span::call_site())
                     })
                     .collect();
-                
-                let mut fmt = attr.parse_args::<LitStr>()?.value();
-                let mut indices = Vec::new();
-                for (i, _) in names.iter().enumerate() {
-                    let mut search_for = String::new();
-                    write!(&mut search_for, "{{{i}").ok();
-                    let mut substr = &fmt[..];
-                    let len = search_for.len();
-                    let mut off = 0;
-                    while let Some(idx) = substr.find(&search_for) {
-                        substr = &substr[idx + len..];
-                        off += idx;
-                        indices.push(off + 1);
-                        off += len;
-                    }
-                }
-                indices.sort();
-                for &idx in indices.iter().rev() {
-                    fmt.insert(idx, '_');
-                }
+                let fmt =
+                    if let Ok(fmt) = attr.parse_args::<LitStr>() {
+                        let mut fmt = fmt.value();
+                        let mut indices = Vec::new();
+                        for (i, _) in names.iter().enumerate() {
+                            let mut search_for = String::new();
+                            write!(&mut search_for, "{{{i}").ok();
+                            let mut substr = &fmt[..];
+                            let len = search_for.len();
+                            let mut off = 0;
+                            while let Some(idx) = substr.find(&search_for) {
+                                substr = &substr[idx + len..];
+                                off += idx;
+                                indices.push(off + 1);
+                                off += len;
+                            }
+                        }
+                        indices.sort();
+                        for &idx in indices.iter().rev() {
+                            fmt.insert(idx, '_');
+                        }
+                        quote! { #fmt }
+                    } else {
+                        let expr = attr.parse_args::<Expr>()?;
+                        quote! { "{}", #expr }
+                    };
                 impl_display = quote! {
                     impl #generics core::fmt::Display for #name #generic_idents #where_clause
                     {

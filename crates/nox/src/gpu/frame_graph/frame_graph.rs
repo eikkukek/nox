@@ -28,7 +28,6 @@ pub struct FrameGraph<'a> {
     signal_semaphore_count: u32,
     wait_semaphore_count: u32,
     queue_family_indices: QueueFamilyIndices,
-    next_pass_id: u32,
     alloc: &'a ArenaAlloc,
     frame_index: u32,
 }
@@ -50,7 +49,6 @@ impl<'a> FrameGraph<'a> {
             signal_semaphore_count: 0,
             wait_semaphore_count: 0,
             queue_family_indices,
-            next_pass_id: 0,
             alloc,
             frame_index,
         }
@@ -69,6 +67,8 @@ impl<'a> FrameGraph<'a> {
         self.frame_context.gpu_mut()
     }
 
+    /// Currently active frame index synchronized with buffered image count.
+    #[inline(always)]
     pub fn frame_index(&self) -> u32 {
         self.frame_index
     }
@@ -99,12 +99,11 @@ impl<'a> FrameGraph<'a> {
     ) -> Result<PassId> {
         let alloc = self.alloc;
         let pass = self.passes.push(Pass::new(
-            PassId(self.next_pass_id),
+            PassId(self.passes.len() as u32, self.frame_context.current_frame()),
             info,
             alloc,
             caller!()
         )?);
-        self.next_pass_id += 1;
         f(&mut PassBuilder { pass, }).context("failed to build pass")?;
         self.signal_semaphore_count += pass.signal_semaphores.len() as u32;
         self.wait_semaphore_count += pass.wait_semaphores.len() as u32;

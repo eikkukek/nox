@@ -29,7 +29,7 @@ impl<T, Token: CellToken> InitCell<T, Token>
     }
 
     #[inline(always)]
-    pub fn get_or_init(
+    pub fn borrow_or_init(
         &self,
         token: &mut Token,
         f: impl FnOnce() -> T,
@@ -46,7 +46,7 @@ impl<T, Token: CellToken> InitCell<T, Token>
     }
    
     #[inline(always)]
-    pub fn get_or_try_init<E>(
+    pub fn borrow_or_try_init<E>(
         &self,
         token: &mut Token,
         f: impl FnOnce() -> Result<T, E>,

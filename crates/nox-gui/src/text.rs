@@ -2,23 +2,19 @@ use std::rc::Rc;
 
 use core::{
     cell::{RefCell, RefMut},
-    marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
-use nox_font::{text_segment_owned, RenderedText, TextOffset, TextSegmentOwned};
+use nox_font::{RenderedText, TextOffset};
 
 use nox_geom::{
-    shapes::*,
     *
 };
 
 use nox::{
-    alloc::arena_alloc::ArenaGuard,
     mem::{
         vec_types::{GlobalVec, Vector},
     },
-    *
 };
 
 use crate::*;
@@ -107,6 +103,38 @@ pub struct SharedText(pub Rc<RefCell<Text>>);
 
 pub struct SharedTextMut<'a>(pub RefMut<'a, Text>);
 
+impl SharedText {
+
+    pub fn new(text: Text) -> Self {
+        Self(Rc::new(RefCell::new(text)))
+    }
+
+    pub fn as_mut(&self) -> SharedTextMut<'_> {
+        SharedTextMut(self.0.borrow_mut())
+    }
+
+    pub fn edit(self, mut f: impl FnMut(&mut SharedTextMut)) -> Self {
+        f(&mut self.as_mut());
+        self
+    }
+}
+
+impl<'a> Deref for SharedTextMut<'a> {
+
+    type Target = Text;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> DerefMut for SharedTextMut<'a> {
+
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 pub struct SelectableTextData {}
 
 impl SelectableTextData {
@@ -122,6 +150,7 @@ impl SelectableTextData {
     }
 }
 
+/*
 pub struct SelectableText<Style>
 {
     text: GlobalVec<Text>,
@@ -921,35 +950,4 @@ impl<Style> Widget<Style> for SelectableText<Style>
         _tmp_alloc: &ArenaGuard,
     ) -> Result<(), Error> { Ok(()) }
 }
-
-impl SharedText {
-
-    pub fn new(text: Text) -> Self {
-        Self(Rc::new(RefCell::new(text)))
-    }
-
-    pub fn as_mut(&self) -> SharedTextMut<'_> {
-        SharedTextMut(self.0.borrow_mut())
-    }
-
-    pub fn edit(self, mut f: impl FnMut(&mut SharedTextMut)) -> Self {
-        f(&mut self.as_mut());
-        self
-    }
-}
-
-impl<'a> Deref for SharedTextMut<'a> {
-
-    type Target = Text;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<'a> DerefMut for SharedTextMut<'a> {
-
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+*/

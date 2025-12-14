@@ -1,6 +1,6 @@
 use compact_str::CompactString;
 
-use nox::{mem::vec_types::{Vector, GlobalVec}, *};
+use nox::{mem::vec_types::{Vector, GlobalVec}, gpu};
 
 use nox_font::{CombinedRenderedText, text_segment};
 
@@ -10,7 +10,7 @@ use nox_geom::{
 };
 
 use crate::*;
-
+use crate::error::*;
 
 pub struct HoverWindow {
     text: CompactString,
@@ -106,25 +106,25 @@ impl HoverWindow {
         color_vertices(&mut self.vertices, self.rect_vertex_range, style.hover_window_bg_col());
     }
 
-    pub fn render_commands(
+    pub fn render_work(
         &self,
-        render_commands: &mut RenderCommands,
+        commands: &mut gpu::RenderCommands,
         style: & impl UiStyle,
-        base_pipeline_id: GraphicsPipelineId,
-        text_pipeline_id: GraphicsPipelineId,
+        base_pipeline_id: gpu::GraphicsPipelineId,
+        text_pipeline_id: gpu::GraphicsPipelineId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
         unit_scale: f32,
-    ) -> Result<(), GuiError>
+    ) -> Result<()>
     {
         let vert_count = self.vertices.len();
         let vert_mem = unsafe {
-            vertex_buffer.allocate(render_commands, vert_count)?
+            vertex_buffer.allocate(commands, vert_count)?
         };
         let idx_count = self.indices.len();
         let idx_mem = unsafe {
-            index_buffer.allocate(render_commands, idx_count)?
+            index_buffer.allocate(commands, idx_count)?
         };
         unsafe {
             self.vertices
@@ -134,27 +134,27 @@ impl HoverWindow {
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
         }
-        render_commands.bind_pipeline(base_pipeline_id)?;
+        commands.bind_pipeline(base_pipeline_id)?;
         let pc_vertex = push_constants_vertex(self.position, vec2(1.0, 1.0), inv_aspect_ratio, unit_scale);
         let pc_fragment = base_push_constants_fragment(vec2(f32::MIN, f32::MIN), vec2(f32::MAX, f32::MAX));
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
+        commands.push_constants(|pc| unsafe {
+            if pc.stage == gpu::ShaderStage::Vertex {
                 pc_vertex.as_bytes()
             } else {
                 pc_fragment.as_bytes()
             }
         })?;
-        render_commands.draw_indexed(
-            DrawInfo {
+        commands.draw_indexed(
+            gpu::DrawInfo {
                 index_count: self.indices.len() as u32,
                 ..Default::default()
             },
             [
-                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
+                gpu::DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
             ],
-            DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
+            gpu::DrawBufferInfo::new(index_buffer.id(), idx_mem.offset)
         )?;
-        render_commands.bind_pipeline(text_pipeline_id)?;
+        commands.bind_pipeline(text_pipeline_id)?;
         let pc_vertex = push_constants_vertex(
             self.position + style.item_pad_inner(),
             vec2(style.font_scale(), style.font_scale()),
@@ -162,10 +162,10 @@ impl HoverWindow {
             unit_scale,
         );
         render_text(
-            render_commands,
+            commands,
             self.rendered_text.iter().map(|(c, (t, b))| (*c, t, b.as_slice())),
             pc_vertex, vertex_buffer, index_buffer
-        )?;
+        ).context("failed to render text")?;
         Ok(())
     }
 }

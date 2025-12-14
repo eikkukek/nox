@@ -3,14 +3,14 @@ use core::{
     fmt::{self, Debug, Display, Formatter},
 };
 
-use nox_proc::Error;
+pub use nox_proc::Error;
 
 use nox_error::BuildInternal;
 
 pub use nox_error::{Location, Context, Tracked, location, caller};
 
 #[derive(Error)] #[display("{0}")]
-pub struct Error(#[source(self.0.source())] nox_error::Error);
+pub struct Error(#[source(self.0.source())] pub nox_error::Error);
 
 impl Error {
 

@@ -32,7 +32,7 @@
 
 use core::{
     marker::PhantomData,
-    mem::{needs_drop, MaybeUninit},
+    mem::MaybeUninit,
     num::NonZeroU32,
     ops::{Index, IndexMut},
 };
@@ -563,7 +563,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
             return Err(StaleIndex { index: index.index, slot_version: slot.version, index_version: index_version })
         }
         let value = unsafe { slot.value.assume_init() };
-        slot.version += 1;
+        slot.version = slot.version.wrapping_add(1);
         slot.next_free_index = Some(self.free_head);
         slot.value = MaybeUninit::uninit();
         unsafe {
@@ -620,7 +620,7 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
     }
 
     #[inline(always)]
-    pub fn clear_elements(&mut self) {
+    pub fn clear(&mut self) {
         for i in 0..self.capacity() {
             unsafe {
                 let slot = self.data.add(i as usize).read();
@@ -631,30 +631,8 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
                 }
             }
         }
-    }
-
-    #[inline(always)]
-    pub fn clear(&mut self) {
-        if needs_drop::<T>() {
-            for i in 0..self.capacity {
-                unsafe {
-                    let mut slot = self.data.add(i as usize).read();
-                    if slot.next_free_index.is_none() {
-                        slot.value.assume_init_drop();
-                    }
-                }
-            }
-        }
-        if self.capacity != 0 {
-            unsafe {
-                self.alloc.free_uninit(*self.data, self.capacity as usize);
-            }
-        }
-        self.data = Pointer::dangling();
-        self.free_head = None;
         self.len = 0;
-        self.capacity = 0;
-    }
+    } 
 
     #[inline(always)]
     pub fn iter(&self) -> Iter<'_, T> {

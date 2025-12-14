@@ -9,7 +9,7 @@ use nox::{
     mem::{
         vec_types::{GlobalVec, Vector},
     },
-    *
+    win,
 };
 
 use nox_geom::{
@@ -90,12 +90,12 @@ impl<'a, Surface> CtxSurface<'a, Surface> {
     }
 }
 
-pub struct UiCtx<'a, 'b, Surface, Style>
+pub struct UiContext<'a, 'b, Surface, Style>
     where
         Surface: UiReactSurface,
         Style: UiStyle,
 {
-    win_ctx: &'a mut WindowCtx,
+    win: &'a mut win::WindowContext,
     style: &'a Style,
     surface: UnsafeCell<CtxSurface<'a, Surface>>,
     text_renderer: &'a mut TextRenderer<'b>,
@@ -115,7 +115,7 @@ pub struct UiCtx<'a, 'b, Surface, Style>
     flags: u32,
 }
 
-impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
+impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     where
         Surface: UiReactSurface,
         Style: UiStyle,
@@ -125,7 +125,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     const IS_COLLAPSED: u32 = 0x2;
 
     pub fn new(
-        win_ctx: &'a mut WindowCtx,
+        win: &'a mut win::WindowContext,
         surface: &'a mut Surface,
         style: &'a Style,
         start_off: Vec2,
@@ -133,7 +133,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         image_loader: &'a mut ImageLoader,
     ) -> Self {
         Self {
-            win_ctx,
+            win,
             surface: UnsafeCell::new(CtxSurface::Regular(surface)),
             style,
             text_renderer: text_renderer,
@@ -157,7 +157,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     fn new_collapsing(
         label: &str,
         mut surface: NonNull<&'a mut Surface>,
-        win_ctx: &'a mut WindowCtx,
+        win: &'a mut win::WindowContext,
         style: &'a Style,
         text_renderer: &'a mut TextRenderer<'b>,
         widget_off: Vec2,
@@ -180,7 +180,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         Self {
             widget_off: base_off,
             row_widget_off_x: widget_off.x + item_pad_outer.x,
-            win_ctx,
+            win,
             surface: UnsafeCell::new(CtxSurface::Collapsing(surface)),
             style,
             text_renderer: text_renderer,
@@ -237,8 +237,8 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     }
 
     #[inline(always)]
-    pub fn win_ctx(&mut self) -> &mut WindowCtx {
-        self.win_ctx
+    pub fn win(&mut self) -> &mut win::WindowContext {
+        self.win
     }
 
     #[inline(always)]
@@ -263,7 +263,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     #[inline(always)]
     pub fn add<'c, T>(
         &mut self,
-        (value, mut f): (T, impl FnMut(&mut UiReactCtx<Surface, Style>, &mut Reaction, T)),
+        (value, mut f): (T, impl FnMut(&mut UiReactContext<Surface, Style>, &mut Reaction, T)),
     ) -> ReactionRef<'_, Surface>
         where 
             T: RefAddr,
@@ -273,7 +273,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         };
         let reaction = surface.as_mut().reaction_from_addr(value, |surface, reaction, value| {
             reaction.offset = self.widget_off;
-            f(&mut UiReactCtx { ui: self, surface }, reaction.into(), value)
+            f(&mut UiReactContext { ui: self, surface }, reaction.into(), value)
         });
         let size = reaction.size;
         self.current_height = self.current_height.max(size.y);
@@ -290,7 +290,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
 
     pub fn collapsing<'c, F>(&'c mut self, label: &str, mut f: F)
         where 
-            F: FnMut(&mut UiCtx<'c, 'b, Surface, Style>),
+            F: FnMut(&mut UiContext<'c, 'b, Surface, Style>),
     {
         if self.is_collapsed() {
             return
@@ -301,8 +301,8 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
         self.widget_off.x = self.row_widget_off_x;
         let item_pad_outer = self.style.item_pad_outer();
         let mut surface = self.surface.get_mut().as_mut();
-        let mut collapsing = UiCtx::new_collapsing(
-            label, NonNull::new(&mut surface).unwrap(), self.win_ctx, self.style, self.text_renderer,
+        let mut collapsing = UiContext::new_collapsing(
+            label, NonNull::new(&mut surface).unwrap(), self.win, self.style, self.text_renderer,
             self.widget_off, self.slider_width, self.input_text_width,
             self.image_loader,
         );
@@ -930,7 +930,7 @@ impl<'a, 'b, Surface, Style> UiCtx<'a, 'b, Surface, Style>
     }
 }
 
-impl<'a, 'b, Surface, Style> Drop for UiCtx<'a, 'b, Surface, Style>
+impl<'a, 'b, Surface, Style> Drop for UiContext<'a, 'b, Surface, Style>
     where 
         Surface: UiReactSurface,
         Style: UiStyle,
@@ -943,12 +943,12 @@ impl<'a, 'b, Surface, Style> Drop for UiCtx<'a, 'b, Surface, Style>
     }
 }
 
-pub struct UiReactCtx<'a, 'b, 'c, Surface, Style>
+pub struct UiReactContext<'a, 'b, 'c, Surface, Style>
     where 
         Surface: UiReactSurface,
         Style: UiStyle,
 {
-    ui: &'a mut UiCtx<'b, 'c, Surface, Style>,
+    ui: &'a mut UiContext<'b, 'c, Surface, Style>,
     surface: &'a mut Surface::Surface
 }
 
@@ -956,7 +956,7 @@ pub trait UiReact {
 
     type Style: UiStyle;
 
-    fn win_ctx(&mut self) -> &mut WindowCtx;
+    fn win(&mut self) -> &mut win::WindowContext;
 
     fn style(&self) -> &Self::Style;
 
@@ -981,7 +981,7 @@ pub trait UiReact {
     fn tmp_data<T>(&mut self, count: usize) -> Option<NonNull<T>>;
 }
 
-impl<'a, 'b, 'c, Surface, Style> UiReact for UiReactCtx<'a, 'b, 'c, Surface, Style>
+impl<'a, 'b, 'c, Surface, Style> UiReact for UiReactContext<'a, 'b, 'c, Surface, Style>
     where
         Surface: UiReactSurface,
         Style: UiStyle,
@@ -990,8 +990,8 @@ impl<'a, 'b, 'c, Surface, Style> UiReact for UiReactCtx<'a, 'b, 'c, Surface, Sty
     type Style = Style;
 
     #[inline(always)]
-    fn win_ctx(&mut self) -> &mut WindowCtx {
-        self.ui.win_ctx
+    fn win(&mut self) -> &mut win::WindowContext {
+        self.ui.win
     }
 
     #[inline(always)]
@@ -1088,7 +1088,7 @@ macro_rules! impl_widget {
         fn $fn<'a, Surface: $crate::UiReactSurface, Style: $crate::UiStyle>(
             $first: $first_ty,
             $($arg: $arg_ty),*
-        ) -> ($first_ty, impl FnMut(&mut UiReactCtx<Surface, Style>, &mut Reaction, $first_ty))
+        ) -> ($first_ty, impl FnMut(&mut UiReactContext<Surface, Style>, &mut Reaction, $first_ty))
         {
             (
                 $first,

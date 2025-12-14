@@ -9,10 +9,10 @@ pub enum ShaderError {
     VulkanError(#[from] #[source] vk::Result),
 
     #[display("{0}")]
-    Shaderc(#[from] #[source] shaderc::Error),
+    Shaderc(#[from] shaderc::Error),
 
     #[display("{0}")]
-    SpirvCross(#[from] #[source] spirv_cross2::SpirvCrossError),
+    SpirvCross(#[from] spirv_cross2::SpirvCrossError),
 
     #[display("invalid spirv, spirv binary size must be a multiple of 4")]
     InvalidSpirv,

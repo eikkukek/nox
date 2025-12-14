@@ -1,12 +1,6 @@
-use core::{
-    marker::PhantomData,
-    fmt::Write,
-};
+use core::fmt::Write;
 
-use nox::{alloc::arena_alloc::ArenaGuard, mem::vec_types::Vector, *};
-
-use nox_font::RenderedText;
-use nox_geom::*;
+use nox::win;
 
 use crate::{
     surface::*,
@@ -143,7 +137,7 @@ impl DragValueData {
 
     pub fn update<Surface: UiReactSurface, Style: UiStyle>(
         &mut self,
-        ui: &mut UiReactCtx<Surface, Style>,
+        ui: &mut UiReactContext<Surface, Style>,
         reaction: &mut Reaction,
     )
     {
@@ -152,7 +146,7 @@ impl DragValueData {
         self.flags &= !Self::HOVERED;
         let rel_cursor_pos = reaction.rel_cursor_pos();
         let cursor_in_rect = reaction.hovered() || reaction.held();
-        let mouse_left_state = ui.win_ctx().mouse_button_state(MouseButton::Left);
+        let mouse_left_state = ui.win().mouse_button_state(win::MouseButton::Left);
         if cursor_in_rect && !self.input_text.active() {
             self.flags |= Self::HOVERED;
             if self.held() {
@@ -181,12 +175,13 @@ impl DragValueData {
         }
         self.last_cursor_x = rel_cursor_pos.x;
         if cursor_in_rect || self.held()  {
-            reaction.cursor(CursorIcon::ColResize);
+            reaction.cursor(win::CursorIcon::ColResize);
         }
         self.input_text.update(ui, reaction);
     }
 }
 
+/*
 pub struct DragValue<Style> {
     input_text: InputText<Style>,
     delta_cursor_x: f32,
@@ -545,3 +540,4 @@ impl<Style> Widget<Style> for DragValue<Style>
         Ok(())
     }
 }
+*/

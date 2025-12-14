@@ -1101,7 +1101,7 @@ fn main() {
     let data = InitCell::new(&mut token);
     Nox::new(
         token,
-        |token, win, gpu| { data.get_or_try_init(token, || Data::init(win, gpu))?; Ok(()) },
+        |token, win, gpu| { data.borrow_or_try_init(token, || Data::init(win, gpu))?; Ok(()) },
         |token, event| { data.borrow_mut(token).unwrap().event(event) },
         InitSettings::new(
             "example",

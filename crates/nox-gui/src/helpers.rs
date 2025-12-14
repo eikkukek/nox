@@ -1,22 +1,23 @@
-use nox::*;
+use nox::gpu;
 
 use nox_geom::*;
 
 use nox_font::InstancedText;
 
 use crate::*;
+use crate::error::*;
 
 pub fn render_text<'a>(
-    render_commands: &mut RenderCommands,
+    commands: &mut gpu::RenderCommands,
     text: impl IntoIterator<Item = (char, &'a InstancedText, &'a [BoundedTextInstance])>,
     pc_vertex: PushConstantsVertex,
     vertex_buffer: &mut RingBuf,
     index_buffer: &mut RingBuf,
-) -> Result<(), GuiError>
+) -> Result<()>
 {
-    render_commands.push_constants(|_| unsafe {
+    commands.push_constants(|_| unsafe {
         pc_vertex.as_bytes()
-    })?;
+    }).context("failed to push constants")?;
     let vertex_buffer_id = vertex_buffer.id();
     let index_buffer_id = index_buffer.id();
     for (_ , text, bounded_instances) in text {
@@ -24,16 +25,16 @@ pub fn render_text<'a>(
         let instance_count = text.offsets.len();
         let idx_count = text.trigs.indices.len();
         let vert_mem = unsafe {
-            vertex_buffer.allocate(render_commands, vert_count)?
+            vertex_buffer.allocate(commands, vert_count)?
         };
         let vert_off_mem = unsafe {
-            vertex_buffer.allocate(render_commands, instance_count)?
+            vertex_buffer.allocate(commands, instance_count)?
         };
         let instance_mem = unsafe {
-            vertex_buffer.allocate(render_commands, instance_count)?
+            vertex_buffer.allocate(commands, instance_count)?
         };
         let idx_mem = unsafe {
-            index_buffer.allocate(render_commands, idx_count)?
+            index_buffer.allocate(commands, idx_count)?
         };
         unsafe {
             text.trigs.vertices
@@ -50,19 +51,19 @@ pub fn render_text<'a>(
                 .as_ptr()
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
         }
-        render_commands.draw_indexed(
-            DrawInfo {
+        commands.draw_indexed(
+            gpu::DrawInfo {
                 index_count: idx_count as u32,
                 instance_count: instance_count as u32,
                 ..Default::default()
             },
             [
-                DrawBufferInfo::new(vertex_buffer_id, vert_mem.offset),
-                DrawBufferInfo::new(vertex_buffer_id, vert_off_mem.offset),
-                DrawBufferInfo::new(vertex_buffer_id, instance_mem.offset),
+                gpu::DrawBufferInfo::new(vertex_buffer_id, vert_mem.offset),
+                gpu::DrawBufferInfo::new(vertex_buffer_id, vert_off_mem.offset),
+                gpu::DrawBufferInfo::new(vertex_buffer_id, instance_mem.offset),
             ],
-            DrawBufferInfo::new(index_buffer_id, idx_mem.offset),
-        )?;
+            gpu::DrawBufferInfo::new(index_buffer_id, idx_mem.offset),
+        ).context("failed to draw text")?;
     }
     Ok(())
 }
@@ -193,7 +194,7 @@ pub fn calc_bounds(
 }
 
 #[inline(always)]
-pub fn load_rgba_image(path: &str) -> Result<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>, ::image::ImageError> {
+pub fn load_rgba_image(path: &str) -> ::image::ImageResult<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>> {
     let image = ::image::ImageReader::open(path)?.decode()?;
     Ok(image.to_rgba8())
 }

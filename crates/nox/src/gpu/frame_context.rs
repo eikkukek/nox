@@ -72,6 +72,11 @@ impl<'a> FrameContext<'a> {
     }
 
     #[inline(always)]
+    pub fn current_frame(&self) -> u64 {
+        self.resource_pool.current_frame()
+    }
+
+    #[inline(always)]
     pub fn add_image(
         &mut self,
         id: ImageId,

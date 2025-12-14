@@ -1,59 +1,43 @@
-use nox::{
-    error::Error,
-    ResourceError,
-    FrameGraphError,
-    CommandError,
-    mem::vec_types::VecError,
-};
+use core::fmt::Display;
 
-#[derive(Error, Debug)] #[any("nox gui error")]
-pub enum GuiError {
+use nox::dev::error::{self, BuildInternal};
 
-    #[display("undefined output samples")]
-    UndefinedOutputSamples,
+pub use error::{Context, Location, Tracked, caller};
 
-    #[display("begin not called")]
-    BeginNotCalled,
+#[derive(error::Error, Debug)] #[display("{0}")]
+pub struct Error(#[source] error::Error);
 
-    #[display("end not called")]
-    EndNotCalled,
+impl Error {
 
-    #[display("graphics pipelines not created")]
-    GraphicsPipelinesNotCreated,
+    #[track_caller]
+    pub fn new<C>(ctx: C, err: impl core::error::Error + Send + Sync + 'static) -> Self
+        where C: Display + Send + Sync + 'static
+    {
+        Self(error::Error::new_internal(ctx, err, caller!()))
+    }
 
-    #[display("ring buffer out of memory")]
-    RingBufferOutOfMemory,
-
-    #[display("nox resource error")]
-    ResourceError(#[source] #[from] ResourceError),
-
-    #[display("nox frame graph error")]
-    FrameGraphError(#[source] #[from] FrameGraphError),
-
-    #[display("nox command error")]
-    CommandError(#[source] #[from] CommandError),
-
-    #[display("nox vec error")]
-    VecError(#[source] #[from] VecError),
-}
-
-impl From<GuiError> for ResourceError {
-
-    fn from(value: GuiError) -> Self {
-        Self::Other(value.into())
+    #[track_caller]
+    pub fn just_context<C>(ctx: C) -> Self
+        where C: Display + Send + Sync + 'static,
+    {
+        Self(error::Error::just_context_internal(ctx, caller!()))
     }
 }
 
-impl From<GuiError> for nox::Error {
+impl From<nox::dev::error::Error> for Error {
 
-    fn from(value: GuiError) -> Self {
-        Self::Other(value.into())
+    #[track_caller]
+    fn from(value: nox::dev::error::Error) -> Self {
+        Self(value.with_location(caller!()))
     }
 }
 
-impl From<GuiError> for nox::CommandError {
+impl From<Error> for nox::error::Error {
 
-    fn from(value: GuiError) -> Self {
-        Self::Other(value.into())
+    #[track_caller]
+    fn from(value: Error) -> Self {
+        Self(value.0.with_location(caller!()))
     }
 }
+
+pub type Result<T> = core::result::Result<T, Error>;

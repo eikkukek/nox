@@ -9,7 +9,8 @@ use nox::{
         vec_types::{GlobalVec, Vector},
         Allocator,
     },
-    *
+    win,
+    gpu,
 };
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -25,6 +26,7 @@ use nox_geom::{
 use crate::{
     collapsing_header::*,
     surface::*,
+    error::*,
     *
 };
 
@@ -55,8 +57,8 @@ pub struct Window
     focused_stroke_vertex_range: Option<VertexRange>,
     stroke_vertex_range: Option<VertexRange>,
     title_stroke_vertex_range: Option<VertexRange>,
-    window_draw_info: DrawInfo,
-    content_draw_info: DrawInfo,
+    window_draw_info: gpu::DrawInfo,
+    content_draw_info: gpu::DrawInfo,
     position: Vec2,
     pub title: CompactString,
     pub title_text: Option<RenderedText>,
@@ -89,7 +91,7 @@ pub struct Window
     focused_stroke_thickness: f32,
     stroke_thickness: f32,
     distance_from_edge: Vec2,
-    signal_semaphore: Option<TimelineSemaphoreId>,
+    signal_semaphore: Option<gpu::TimelineSemaphoreId>,
     signal_semaphore_value: u64,
     reaction_data_alloc_0: ArenaAlloc,
     reaction_data_alloc_1: ArenaAlloc,
@@ -369,8 +371,8 @@ impl Window
 
     pub fn update(
         &mut self,
-        ctx: &mut WindowCtx,
-        renderer: &mut RendererContext,
+        win: &mut win::WindowContext,
+        gpu: &mut gpu::GpuContext,
         style: &impl UiStyle,
         text_renderer: &mut TextRenderer,
         cursor_pos: Vec2,
@@ -380,7 +382,7 @@ impl Window
         aspect_ratio: f32,
         unit_scale: f32,
         tmp_alloc: &ArenaGuard,
-    ) -> Result<WindowUpdateResult, GuiError>
+    ) -> Result<WindowUpdateResult>
     {
         let override_cursor = style.override_cursor();
         let mut cursor_in_this_window =
@@ -402,8 +404,8 @@ impl Window
         let mut min_size = self.widget_rect_max.max(title_text_box_size + item_pad_outer);
         let mut widget_off = vec2(0.0, 0.0);
         self.flags &= !(Self::VER_SCROLL_BAR_VISIBLE | Self::HOR_SCROLL_BAR_VISIBLE);
-        let mut delta_lines = ctx.mouse_scroll_delta_lines();
-        let mut delta_pixels = ctx.mouse_scroll_pixel_delta();
+        let mut delta_lines = win.mouse_scroll_delta_lines();
+        let mut delta_pixels = win.mouse_scroll_pixel_delta();
         if !style.natural_scroll() {
             delta_lines = (-delta_lines.0, -delta_lines.1);
             delta_pixels = (-delta_pixels.0, -delta_pixels.1);
@@ -481,7 +483,7 @@ impl Window
             self.ver_scroll_bar.held() ||
             self.hor_scroll_bar.held() ||
             self.content_held();
-        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
+        let mouse_left_state = win.mouse_button_state(win::MouseButton::Left);
         if !self.held() && !self.any_resize() && !hover_blocked {
             if cursor_in_this_window {
                 let mut flags = self.flags;
@@ -521,36 +523,36 @@ impl Window
                         or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
                     }
                     if override_cursor {
-                        ctx.set_cursor(CursorIcon::Default);
+                        win.set_cursor(win::CursorIcon::Default);
                     }
                 }
                 else {
                     hover_blocked = true;
                     if override_cursor {
                         if self.resize_nw() {
-                            ctx.set_cursor(CursorIcon::NwResize);
+                            win.set_cursor(win::CursorIcon::NwResize);
                         }
                         else if self.resize_ne() {
-                            ctx.set_cursor(CursorIcon::NeResize);
+                            win.set_cursor(win::CursorIcon::NeResize);
                         }
                         else if self.resize_sw() {
-                            ctx.set_cursor(CursorIcon::SwResize);
+                            win.set_cursor(win::CursorIcon::SwResize);
                         }
                         else if self.resize_se() {
-                            ctx.set_cursor(CursorIcon::SeResize);
+                            win.set_cursor(win::CursorIcon::SeResize);
                         }
                         else {
                             if self.resize_left() {
-                                ctx.set_cursor(CursorIcon::WResize);
+                                win.set_cursor(win::CursorIcon::WResize);
                             }
                             if self.resize_right() {
-                                ctx.set_cursor(CursorIcon::EResize);
+                                win.set_cursor(win::CursorIcon::EResize);
                             }
                             if self.resize_top() {
-                                ctx.set_cursor(CursorIcon::NResize);
+                                win.set_cursor(win::CursorIcon::NResize);
                             }
                             if self.resize_bottom() {
-                                ctx.set_cursor(CursorIcon::SResize);
+                                win.set_cursor(win::CursorIcon::SResize);
                             }
                         }
                     }
@@ -594,9 +596,9 @@ impl Window
             if reaction.animated_bool() {
                 if let Some((t, value)) = self.animated_bools.get_mut(&id) {
                     if *value {
-                        *t = (*t + style.animation_speed() * ctx.delta_time_secs_f32()).clamp(0.0, 1.0);
+                        *t = (*t + style.animation_speed() * win.delta_time_secs_f32()).clamp(0.0, 1.0);
                     } else {
-                        *t = (*t - style.animation_speed() * ctx.delta_time_secs_f32()).clamp(0.0, 1.0);
+                        *t = (*t - style.animation_speed() * win.delta_time_secs_f32()).clamp(0.0, 1.0);
                     }
                 }
             }
@@ -604,7 +606,7 @@ impl Window
                 data.ptr = (data.move_fn)(data.ptr, reaction_data_alloc);
             }
             if let Some(text) = reaction.update(
-                    ctx,
+                    win,
                     cursor_pos,
                     pos,
                     cursor_in_this_window,
@@ -621,7 +623,7 @@ impl Window
             }
             if let Some(cursor_override) = reaction.take_cursor() {
                 if override_cursor {
-                    ctx.set_cursor(cursor_override);
+                    win.set_cursor(cursor_override);
                 }
             }
         }
@@ -635,7 +637,7 @@ impl Window
             let (_, collapsing_header) = self.collapsing_headers.get_mut(collapsing_header).unwrap();
             collapsing_header.offset += widget_off;
             let width = collapsing_header.update(
-                ctx, pos,
+                win, pos,
                 content_area.0, content_area.1,
                 cursor_pos, style, window_moving,
                 |text, offset, bounded_text_instance| {
@@ -680,7 +682,7 @@ impl Window
             if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_LEFT;
                 if override_cursor {
-                    ctx.set_cursor(CursorIcon::Default);
+                    win.set_cursor(win::CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_col() {
@@ -705,7 +707,7 @@ impl Window
             if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_RIGHT;
                 if override_cursor {
-                    ctx.set_cursor(CursorIcon::Default);
+                    win.set_cursor(win::CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_col() {
@@ -727,7 +729,7 @@ impl Window
             if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_TOP;
                 if override_cursor {
-                    ctx.set_cursor(CursorIcon::Default);
+                    win.set_cursor(win::CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_row() {
@@ -753,7 +755,7 @@ impl Window
             if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_BOTTOM;
                 if override_cursor {
-                    ctx.set_cursor(CursorIcon::Default);
+                    win.set_cursor(win::CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_row() {
@@ -808,7 +810,7 @@ impl Window
                 0.0
             };
             let res = self.ver_scroll_bar.update(
-                ctx, style,
+                win, style,
                 self.scroll_y, offset,
                 pos, cursor_pos, height,
                 self.widget_rect_max.y,
@@ -827,7 +829,7 @@ impl Window
                 0.0
             };
             let res = self.hor_scroll_bar.update(
-                ctx, style,
+                win, style,
                 self.scroll_x, offset,
                 pos, cursor_pos, width,
                 self.widget_rect_max.x,
@@ -923,14 +925,9 @@ impl Window
         norm_size *= 0.5;
         transfer_commands_required |= self.painter_storage.requires_transfer_commands();
         if let Some(semaphore) = self.signal_semaphore {
-            renderer.edit_resources(|r| {
-                self.painter_storage.end(
-                    (semaphore, self.signal_semaphore_value),
-                    r,
-                    tmp_alloc,
-                )?;
-                Ok(())
-            })?;
+            self.painter_storage
+                .end((semaphore, self.signal_semaphore_value), gpu, tmp_alloc)
+                .context("failed to update painter storage")?;
         }
         Ok(WindowUpdateResult {
             cursor_in_window: cursor_in_this_window || self.any_resize(),
@@ -1028,7 +1025,7 @@ impl Window
                 self.flags &= !Self::RENDERABLE;
             }
             self.title_bar_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
-            self.window_draw_info = DrawInfo {
+            self.window_draw_info = gpu::DrawInfo {
                 first_index: 0,
                 index_count: indices_usize.len() as u32,
                 ..Default::default()
@@ -1052,7 +1049,7 @@ impl Window
             self.flags &= !Self::REQUIRES_TRIANGULATION;
             self.indices.append_map(&indices_usize, |&i| i as u32);
             self.last_triangulation = new_triangulation;
-            self.content_draw_info = DrawInfo {
+            self.content_draw_info = gpu::DrawInfo {
                 first_index,
                 index_count: indices_usize.len() as u32 - first_index,
                 ..Default::default()
@@ -1063,44 +1060,41 @@ impl Window
 
     pub fn render(
         &mut self,
-        frame_graph: &mut dyn FrameGraph,
-        render_format: ColorFormat,
-        add_read: &mut impl FnMut(ReadInfo),
-        add_signal_semaphore: &mut impl FnMut(TimelineSemaphoreId, u64),
-    ) -> Result<(), Error>
+        frame_graph: &mut gpu::FrameGraph,
+        render_format: gpu::ColorFormat,
+        add_read: &mut impl FnMut(gpu::ReadInfo),
+        add_signal_semaphore: &mut impl FnMut(gpu::TimelineSemaphoreId, u64),
+    ) -> Result<()>
     {
-        let mut signal_semaphore = Default::default();
-        frame_graph.edit_resources(&mut |r| {
-            signal_semaphore =
-                if let Some(id) = self.signal_semaphore {
-                    id
-                } else {
-                    *self.signal_semaphore.insert(r.create_timeline_semaphore(0)?)
-                };
-            Ok(())
-        })?;
-        add_signal_semaphore(unsafe { self.signal_semaphore.unwrap_unchecked() }, self.signal_semaphore_value + 1);
+        let signal_semaphore =
+            if let Some(id) = self.signal_semaphore {
+                id
+            } else {
+                *self.signal_semaphore.insert(frame_graph.gpu_mut().create_timeline_semaphore(0)?)
+            };
+        add_signal_semaphore(signal_semaphore, self.signal_semaphore_value + 1);
+        self.signal_semaphore_value += 1;
         self.painter_storage.render(frame_graph, render_format, add_read)?;
         Ok(())
     }
 
-    pub fn render_commands(
+    pub fn render_work(
         &mut self,
-        render_commands: &mut RenderCommands,
+        commands: &mut gpu::RenderCommands,
         style: &impl UiStyle,
-        sampler: SamplerId,
-        _pass: PassId,
-        base_pipeline: GraphicsPipelineId,
-        text_pipeline: GraphicsPipelineId,
-        texture_pipeline: GraphicsPipelineId,
-        texture_pipeline_layout: PipelineLayoutId,
+        sampler: gpu::SamplerId,
+        _pass: gpu::PassId,
+        base_pipeline: gpu::GraphicsPipelineId,
+        text_pipeline: gpu::GraphicsPipelineId,
+        texture_pipeline: gpu::GraphicsPipelineId,
+        texture_pipeline_layout: gpu::PipelineLayoutId,
         vertex_buffer: &mut RingBuf,
         index_buffer: &mut RingBuf,
         inv_aspect_ratio: f32,
         unit_scale: f32,
         tmp_alloc: &ArenaGuard,
-        get_custom_pipeline: &mut impl FnMut(&str) -> Option<GraphicsPipelineId>,
-    ) -> Result<(), GuiError>
+        get_custom_pipeline: &mut impl FnMut(&str) -> Option<gpu::GraphicsPipelineId>,
+    ) -> Result<()>
     {
         if !self.renderable() {
             return Ok(())
@@ -1108,11 +1102,11 @@ impl Window
         let item_pad_inner = style.item_pad_inner();
         let vert_total = self.vertices.len();
         let vert_mem = unsafe {
-            vertex_buffer.allocate(render_commands, vert_total)?
+            vertex_buffer.allocate(commands, vert_total)?
         };
         let idx_total = self.indices.len();
         let idx_mem = unsafe {
-            index_buffer.allocate(render_commands, idx_total)?
+            index_buffer.allocate(commands, idx_total)?
         };
         let vert_id = vertex_buffer.id();
         let idx_id = index_buffer.id();
@@ -1152,7 +1146,7 @@ impl Window
                 .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total);
         }
         let pos = self.position;
-        render_commands.bind_pipeline(base_pipeline)?;
+        commands.bind_pipeline(base_pipeline)?;
         let pc_vertex = push_constants_vertex(
             pos,
             vec2(1.0, 1.0),
@@ -1164,19 +1158,19 @@ impl Window
             pos - vec2(focused_stroke_thickness, focused_stroke_thickness),
             pos + self.main_rect.max + vec2(focused_stroke_thickness, focused_stroke_thickness),
         );
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
+        commands.push_constants(|pc| unsafe {
+            if pc.stage == gpu::ShaderStage::Vertex {
                 pc_vertex.as_bytes()
             } else {
                 pc_fragment.as_bytes()
             }
         })?;
-        render_commands.draw_indexed(
+        commands.draw_indexed(
             self.window_draw_info,
             [
-                DrawBufferInfo::new(vert_id, vert_mem.offset),
+                gpu::DrawBufferInfo::new(vert_id, vert_mem.offset),
             ],
-            DrawBufferInfo {
+            gpu::DrawBufferInfo {
                 id: idx_id,
                 offset: idx_mem.offset,
             },
@@ -1190,25 +1184,25 @@ impl Window
             content_bounds.min,
             content_bounds.max,
         );
-        render_commands.push_constants(|pc| unsafe {
-            if pc.stage == ShaderStage::Vertex {
+        commands.push_constants(|pc| unsafe {
+            if pc.stage == gpu::ShaderStage::Vertex {
                 pc_vertex.as_bytes()
             } else {
                 pc_fragment.as_bytes()
             }
         })?;
-        render_commands.draw_indexed(
+        commands.draw_indexed(
             self.content_draw_info,
             [
-                DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
+                gpu::DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
             ],
-            DrawBufferInfo {
+            gpu::DrawBufferInfo {
                 id: index_buffer.id(),
                 offset: idx_mem.offset,
             },
         )?;
-        self.painter_storage.render_commands(
-            render_commands,
+        self.painter_storage.render_work(
+            commands,
             sampler,
             pos + self.widget_scroll_off,
             content_bounds, base_pipeline,
@@ -1217,8 +1211,8 @@ impl Window
             index_buffer, inv_aspect_ratio,
             unit_scale, tmp_alloc,
             get_custom_pipeline
-        )?;
-        render_commands.bind_pipeline(text_pipeline)?;
+        ).context("painter render work failed")?;
+        commands.bind_pipeline(text_pipeline)?;
         let font_scale = style.font_scale();
         let pc_vertex = push_constants_vertex(
             pos,
@@ -1226,24 +1220,24 @@ impl Window
             inv_aspect_ratio, unit_scale
         );
         render_text(
-            render_commands,
+            commands,
             self.combined_text.iter().map(|(&c, (i, b))| (c, i, b.as_slice())),
             pc_vertex,
             vertex_buffer,
             index_buffer,
-        )?;
+        ).context("failed to render text")?;
         if (self.ver_scroll_bar_visible() && self.ver_scroll_bar_renderable()) ||
             (self.hor_scroll_bar_visible() && self.hor_scroll_bar_renderable())
         {
-            render_commands.bind_pipeline(base_pipeline)?;
+            commands.bind_pipeline(base_pipeline)?;
             let pc_vertex = push_constants_vertex(
                 pos,
                 vec2(1.0, 1.0),
                 inv_aspect_ratio,
                 unit_scale,
             );
-            render_commands.push_constants(|pc| unsafe {
-                if pc.stage == ShaderStage::Vertex {
+            commands.push_constants(|pc| unsafe {
+                if pc.stage == gpu::ShaderStage::Vertex {
                     pc_vertex.as_bytes()
                 } else {
                     pc_fragment.as_bytes()
@@ -1252,10 +1246,10 @@ impl Window
             let vert_count = self.scroll_bar_vertices.len();
             let idx_count = self.scroll_bar_indices.len();
             let vert_mem = unsafe {
-                vertex_buffer.allocate(render_commands, vert_count)?
+                vertex_buffer.allocate(commands, vert_count)?
             };
             let idx_mem = unsafe {
-                index_buffer.allocate(render_commands, idx_count)?
+                index_buffer.allocate(commands, idx_count)?
             };
             unsafe {
                 self.scroll_bar_vertices
@@ -1265,22 +1259,22 @@ impl Window
                     .as_ptr()
                     .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
             }
-            render_commands.draw_indexed(
-                DrawInfo {
+            commands.draw_indexed(
+                gpu::DrawInfo {
                     first_index: 0,
                     index_count: idx_count as u32,
                     ..Default::default()
                 },
                 [
-                    DrawBufferInfo::new(vert_id, vert_mem.offset)
+                    gpu::DrawBufferInfo::new(vert_id, vert_mem.offset)
                 ],
-                DrawBufferInfo::new(idx_id, idx_mem.offset)
+                gpu::DrawBufferInfo::new(idx_id, idx_mem.offset)
             )?;
         }
         if self.hover_window_active() {
             self.hover_window.set_vertex_params(style);
-            self.hover_window.render_commands(
-                render_commands,
+            self.hover_window.render_work(
+                commands,
                 style,
                 base_pipeline,
                 text_pipeline,
@@ -1288,20 +1282,20 @@ impl Window
                 index_buffer,
                 inv_aspect_ratio,
                 unit_scale,
-            )?;
+            ).context("hover window render work failed")?;
         }
         Ok(())
     }
 
-    pub fn transfer_commands(
+    pub fn transfer_work(
         &mut self,
-        transfer_commands: &mut TransferCommands,
-        sampler: SamplerId,
-        texture_pipeline_layout: PipelineLayoutId,
+        commands: &mut gpu::TransferCommands,
+        sampler: gpu::SamplerId,
+        texture_pipeline_layout: gpu::PipelineLayoutId,
         tmp_alloc: &ArenaGuard,
-    ) -> Result<(), GuiError> {
-        self.painter_storage.transfer_commands(
-            transfer_commands,
+    ) -> Result<()> {
+        self.painter_storage.transfer_work(
+            commands,
             self.signal_semaphore.map(|v| (v, self.signal_semaphore_value)).unwrap(),
             sampler,
             texture_pipeline_layout,

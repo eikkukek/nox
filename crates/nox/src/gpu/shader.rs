@@ -14,6 +14,8 @@ use nox_mem::{
     AsRaw,
 };
 
+use crate::{error::{Location, Tracked, caller}, gpu::shader_fn::glsl_to_spirv, Version};
+
 use super::{
     Handle,
     pipeline::create_shader_module,
@@ -63,6 +65,87 @@ impl From<ShaderStage> for shaderc::ShaderKind {
             ShaderStage::Fragment => Self::Fragment,
             ShaderStage::Compute => Self::Compute,
         }
+    }
+}
+
+enum ShaderSourceInternal<'a> {
+    Spirv(&'a [u32]),
+    Glsl(&'a str),
+}
+
+pub struct ShaderSource<'a> {
+    source: ShaderSourceInternal<'a>,
+    name: &'a str,
+    stage: ShaderStage,
+    loc: Location,
+}
+
+pub enum ShaderSourceCompiled<'a> {
+    Spirv(&'a [u32]),
+    Glsl(shaderc::CompilationArtifact),
+}
+
+impl<'a> ShaderSourceCompiled<'a> {
+
+    pub fn spirv(&self) -> &[u32] {
+        match self {
+            Self::Spirv(spirv) => spirv,
+            Self::Glsl(c) => c.as_binary(),
+        }
+    }
+}
+
+impl<'a> ShaderSource<'a> {
+
+    #[inline(always)]
+    #[track_caller]
+    pub fn spirv(bin: &'a [u32], name: &'a str, stage: ShaderStage) -> Self {
+        Self {
+            source: ShaderSourceInternal::Spirv(bin),
+            name,
+            stage,
+            loc: caller!(),
+        }
+    }
+
+    #[inline(always)]
+    #[track_caller]
+    pub fn glsl(input: &'a str, name: &'a str, stage: ShaderStage) -> Self {
+        Self {
+            source: ShaderSourceInternal::Glsl(input),
+            name,
+            stage,
+            loc: caller!(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn name(&self) -> &str {
+        self.name
+    }
+
+    #[inline(always)]
+    pub fn stage(&self) -> ShaderStage {
+        self.stage
+    }
+
+    #[inline(always)]
+    pub fn compile(&self,vulkan_version: Version) -> Result<ShaderSourceCompiled<'a>, ShaderError> {
+        match self.source {
+            ShaderSourceInternal::Spirv(bin) => Ok(
+                ShaderSourceCompiled::Spirv(bin)
+            ),
+            ShaderSourceInternal::Glsl(input) => Ok(
+                ShaderSourceCompiled::Glsl(glsl_to_spirv(input, self.name, self.stage.into(), vulkan_version)?)
+            ),
+        }
+    }
+}
+
+impl<'a> Tracked for ShaderSource<'a> {
+
+    fn location(&self) -> Option<Location> {
+        Some(self.loc)
     }
 }
 

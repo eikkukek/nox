@@ -1,6 +1,6 @@
 use nox::{
     mem::value_as_bytes,
-    *,
+    gpu::VertexInput,
 };
 
 use crate::*;

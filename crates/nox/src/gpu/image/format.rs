@@ -11,7 +11,7 @@ pub trait Format: Copy + AsRaw<Repr = i32> {
     fn aspects(self) -> vk::ImageAspectFlags;
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ImageFormat(pub vk::Format, pub vk::ImageAspectFlags);
 
 impl Format for ImageFormat {

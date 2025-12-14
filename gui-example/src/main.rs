@@ -4,11 +4,8 @@ use std::{
 
 use memmap2::Mmap;
 
-use nox::{
-    linear_device_alloc::LinearDeviceAlloc,
-    error::Context,
-    *
-};
+use nox::*;
+use nox::error::Context;
 
 use nox_gui::{geom::{shapes::circle, *}, *};
 
@@ -66,9 +63,8 @@ enum MyEnum {
     Third,
 }
 
-struct Example<'a> {
-    workspace: Workspace<'a, DefaultStyle>,
-    output_format: ColorFormat,
+struct Example {
+    output_format: gpu::ColorFormat,
     aspect_ratio: f32,
     slider_value: f32,
     slider_value_uint: u8,
@@ -76,34 +72,36 @@ struct Example<'a> {
     drag_value_int: i8,
     input_text: String,
     color: ColorSRGBA,
-    pipeline_cache: PipelineCacheId,
-    sampler: SamplerId,
+    pipeline_cache: gpu::PipelineCacheId,
+    sampler: gpu::SamplerId,
     cache_dir: PathBuf,
     show_other_window: bool,
-    output_image: ImageId,
-    output_resolve_image: ImageId,
+    output_image: gpu::ImageId,
+    output_resolve_image: gpu::ImageId,
     tag_color: ColorHSVA,
     resizeable: bool,
     clamp_width: bool,
     clamp_height: bool,
-    msaa: MSAA,
-    device_alloc: Option<LinearDeviceAlloc>,
+    msaa: gpu::MSAA,
+    device_alloc: gpu::linear_device_alloc::LinearDeviceAlloc,
 }
 
-impl<'a> Example<'a> {
+impl Example {
 
-    pub fn new(
-        workspace: Workspace<'a, DefaultStyle>,
-    ) -> Self
+    fn init(
+        gpu: &mut gpu::GpuContext,
+    ) -> Result<Self>
     {
         let mut cache_dir = std
             ::env::current_exe()
             .unwrap_or_default();
         cache_dir.pop();
         cache_dir.push("my_cache.cache");
-        Self {
-            workspace,
-            output_format: Default::default(),
+        Ok(Self {
+            output_format: gpu.supported_image_format(
+                &[gpu::ColorFormat::SrgbRGBA8, gpu::ColorFormat::UnormRGBA8],
+                &[gpu::FormatFeature::ColorAttachment, gpu::FormatFeature::SampledImage],
+            ).ok_or(Error::just_context("failed to find suitable output format"))?,
             aspect_ratio: 1.0,
             slider_value: 0.0,
             slider_value_uint: 0,
@@ -111,8 +109,26 @@ impl<'a> Example<'a> {
             drag_value_int: 0,
             input_text: Default::default(),
             color: Default::default(),
-            pipeline_cache: Default::default(),
-            sampler: Default::default(),
+            pipeline_cache: if fs::exists(&cache_dir).context("io error")? {
+                let file = File
+                    ::open(&cache_dir)
+                    .context("failed to open pipeline cache file")?;
+                let map = unsafe {
+                    Mmap::map(&file)
+                        .context("failed to map pipeline cache file")?
+                };
+                gpu.create_pipeline_cache(Some(&map))?
+            } else {
+                File::create_new(&cache_dir)
+                    .context("failed to create pipeline cache file")?;
+                gpu.create_pipeline_cache(None)?
+            },
+            sampler: gpu.create_sampler(|builder| {
+                builder
+                    .with_mag_filter(gpu::Filter::Linear)
+                    .with_min_filter(gpu::Filter::Linear)
+                    .max_lod_clamp_none();
+            })?,
             cache_dir,
             show_other_window: false,
             output_image: Default::default(),
@@ -121,280 +137,15 @@ impl<'a> Example<'a> {
             resizeable: true,
             clamp_width: true,
             clamp_height: true,
-            msaa: MSAA::X8,
-            device_alloc: None,
-        }
+            msaa: gpu::MSAA::X8,
+            device_alloc: gpu::linear_device_alloc::LinearDeviceAlloc
+                ::default(1 << 29, &gpu)
+                .context("failed to create device alloc")?,
+        })
     }
 }
 
-impl<'a> Interface for Example<'a> {
-
-    fn init_settings(&self) -> InitSettings {
-        InitSettings::new(
-            "example",
-            Default::default(),
-            [540, 540],
-            true,
-            false,
-        )
-    }
-
-    fn init_callback(
-        &mut self,
-        _nox: &Nox<Self>,
-        renderer: &mut RendererContext,
-    ) -> Result<(), Error>
-    {
-        self.device_alloc = Some(LinearDeviceAlloc::default(1 << 29, &renderer)?);
-        renderer.edit_resources(|r| {
-            self.output_format = r
-                .supported_image_format(
-                    &[ColorFormat::SrgbRGBA8, ColorFormat::UnormRGBA8],
-                    FormatFeature::ColorAttachment | FormatFeature::SampledImage,
-                ).unwrap();
-            self.pipeline_cache =
-                if fs::exists(&self.cache_dir).ctx_err("io error")? {
-                    let file = File
-                        ::open(&self.cache_dir)
-                        .ctx_err("failed to open pipeline cache file")?;
-                    let map = unsafe {
-                        Mmap::map(&file)
-                            .ctx_err("failed to map pipeline cache file")?
-                    };
-                    r.create_pipeline_cache(Some(&map))?
-                } else {
-                    File::create_new(&self.cache_dir)
-                        .ctx_err("failed to create pipeline cache file")?;
-                    r.create_pipeline_cache(None)?
-                };
-            self.sampler = r.create_sampler(|builder| {
-                builder
-                    .with_mag_filter(Filter::Linear)
-                    .with_min_filter(Filter::Linear)
-                    .max_lod_clamp_none();
-            })?;
-            Ok(())
-        })?;
-        self.workspace
-            .create_graphics_pipelines(renderer, self.msaa, self.output_format, None, &GlobalAlloc)?;
-        Ok(())
-    }
-
-    fn frame_buffer_size_callback(
-        &mut self,
-        renderer: &mut RendererContext
-    ) -> Result<(), Error>
-    {
-        let frame_buffer_size = renderer.frame_buffer_size();
-        renderer.edit_resources(|r| {
-            let device_alloc = self.device_alloc.as_mut().unwrap();
-            unsafe {
-               device_alloc.reset();
-            }
-            r.destroy_image(self.output_image);
-            r.destroy_image(self.output_resolve_image);
-            self.output_image = r
-                .create_image(ResourceBinderImage::Owned(device_alloc, None), |builder| {
-                    builder
-                        .with_dimensions(frame_buffer_size)
-                        .with_format(self.output_format, false)
-                        .with_samples(self.msaa)
-                        .with_usage(ImageUsage::ColorAttachment);
-            })?;
-            self.output_resolve_image = r
-                .create_image(ResourceBinderImage::Owned(device_alloc, None), |builder| {
-                    builder
-                        .with_dimensions(frame_buffer_size)
-                        .with_format(self.output_format, false)
-                        .with_usage(ImageUsage::ColorAttachment)
-                        .with_usage(ImageUsage::Sampled);
-            })?;
-            Ok(())
-        })?;
-        Ok(())
-    }
-
-    fn update(
-        &mut self,
-        _nox: &Nox<Self>,
-        ctx: &mut WindowCtx,
-        renderer: &mut RendererContext,
-    ) -> Result<(), Error> {
-        self.workspace.begin(ctx)?;
-        self.workspace.window(ctx, 0, "Widgets", [0.0, 0.0], [0.5, 0.5],
-            |ui| {
-                ui.checkbox(&mut self.resizeable, "Resizeable");
-                ui.checkbox(&mut self.clamp_width, "Clamp width");
-                ui.checkbox(&mut self.clamp_height, "Clamp height");
-                ui.resizeable(self.resizeable);
-                ui.clamp_height(self.clamp_height);
-                ui.clamp_width(self.clamp_width);
-
-                ui.collapsing("Show/hide widgets", |ui| {
-
-                    ui.checkbox(&mut self.show_other_window, "Show other window");
-                    ui.end_row();
-
-                    /*
-                    ui.color_picker(&mut self.color);
-                    ui.tag("Color picker");
-                    ui.end_row();
-                    */
-
-                    let image_source = image_source!("ferris.png");
-                    let image_size = ui.standard_interact_height() * 2.0;
-                    ui
-                        .image("ferris", image_source, geom::vec2(image_size, image_size))
-                        .hover_text("ferris!");
-                    if ui.button("Print \"hello\"").clicked() {
-                        println!("hello");
-                    }
-                    ui.end_row();
-
-                    ui.radio_button(&mut self.radio_value, MyEnum::First, "First");
-                    ui.radio_button(&mut self.radio_value, MyEnum::Second, "Second");
-                    ui.radio_button(&mut self.radio_value, MyEnum::Third, "Third");
-
-                    ui.end_row();
-
-                    ui.selectable_tag(&mut self.radio_value, MyEnum::First, "First");
-                    ui.selectable_tag(&mut self.radio_value, MyEnum::Second, "Second");
-                    ui.selectable_tag(&mut self.radio_value, MyEnum::Third, "Third");
-
-                    ui.end_row();
-
-                    /*
-                    ui.combo_box("My Combo", |builder| {
-                        builder.item(&mut self.radio_value, MyEnum::First, "First");
-                        builder.item(&mut self.radio_value, MyEnum::Second, "Second");
-                        builder.item(&mut self.radio_value, MyEnum::Third, "Third");
-                    });
-                    */
-
-                    ui.end_row();
-
-                    ui.input_text(
-                        &mut self.input_text,
-                        "Input text here",
-                        None,
-                    );
-
-                    ui.collapsing("Sliders", |ui| {
-                        ui.collapsing("f32", |ui| {
-                            ui.slider(&mut self.slider_value, 0.0, 100.0, 200.0);
-                            //ui.tag("f32 1");
-                            ui.end_row();
-                            ui.slider(&mut self.slider_value, 0.0, 200.0, 400.0);
-                            //ui.tag("f32 2");
-                        });
-                        ui.collapsing("u8", |ui| {
-                            ui.slider(&mut self.slider_value_uint, 0, 10, 20.0);
-                        });
-                    });
-
-                    ui.drag_value(
-                        &mut self.drag_value_int,
-                        i8::MIN,
-                        i8::MAX,
-                        500.0,
-                        0.01,
-                        None,
-                    );
-                    //ui.tag("Drag value");
-                    ui.end_row();
-                    ui.add(my_widget_ui(&mut self.show_other_window, "test"))
-                        .hover_text("Simple custom widget");
-                });
-            }
-        )?;
-        /*
-        if self.show_other_window {
-            let mut fmt = String::new();
-            <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / ctx.delta_time_secs_f32())).unwrap();
-            self.workspace.window(ctx, 1, fmt.as_str(), [0.25, 0.25], [0.4, 0.4], 
-                |ui| {
-                    let mut fmt = String::new();
-                    <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("Hue: {}°", (self.tag_color.hue * 180.0 / core::f32::consts::PI).round())).unwrap();
-                    ui.text("Sample text", true, |builder| {
-                        builder
-                            .with_text(None, |builder| {
-                                builder
-                                    .with_segment("This text be copied to ", None);
-                            })
-                            .color(ColorSRGBA::white(1.0))
-                            .with_text(Some("Ctrl+V"), |builder| {
-                                builder
-                                    .with_segment("clipboard", None);
-                            })
-                            .default_color()
-                            .with_text(None, |builder| {
-                                builder
-                                    .with_segment(" and it can have ", None);
-                            })
-                            .color(self.tag_color)
-                            .with_text(Some(&fmt), |builder| {
-                                builder
-                                    .with_segment("tooltips and color", None);
-                            });
-                    });
-            })?;
-        }
-        */
-        self.tag_color.hue = (self.tag_color.hue + core::f32::consts::PI * ctx.delta_time_secs_f32()) % core::f32::consts::TAU;
-        self.workspace.end(ctx, renderer)?;
-        Ok(())
-    }
-
-    fn render<'b>(
-        &mut self,
-        frame_graph: &'b mut dyn frame_graph::FrameGraph,
-        _pending_transfers: &[CommandRequestId],
-    ) -> Result<(), Error> {
-        let frame_buffer_size = frame_graph.frame_buffer_size();
-        self.aspect_ratio = frame_buffer_size.width as f32 / frame_buffer_size.height as f32;
-        let output = frame_graph.add_image(self.output_image)?;
-        let output_resolve = frame_graph.add_image(self.output_resolve_image)?;
-        self.workspace.render(
-            frame_graph,
-            (output, None), (Some((output_resolve, ResolveMode::Average)), None),
-            AttachmentLoadOp::Clear,
-            Default::default(),
-        )?;
-        frame_graph.set_render_image(output_resolve, None)?;
-        Ok(())
-    }
-
-    fn render_commands(
-        &mut self,
-        pass_id: frame_graph::PassId,
-        commands:&mut RenderCommands,
-    ) -> Result<(), Error> {
-        self.workspace.render_commands(
-            commands,
-            pass_id,
-            self.sampler,
-        )?;
-        Ok(())
-    }
-
-    fn clean_up(
-        &mut self,
-        renderer: &mut RendererContext,
-    )
-    {
-        renderer.edit_resources(|r| {
-            let mut file = File::create(&self.cache_dir).ctx_err("io error")?;
-            let data = r.retrieve_pipeline_cache_data(self.pipeline_cache)?;
-            file.write(&data).ctx_err("io error")?;
-            println!("cache written");
-            Ok(())
-        }).ok();
-        unsafe {
-            self.workspace.clean_up(&renderer);
-            self.device_alloc.take().unwrap().clean_up();
-        }
-    }
-}
+singleton_cell_token!(Token);
 
 fn main() {
     let font = unsafe {
@@ -404,12 +155,238 @@ fn main() {
             )
             .unwrap()
     };
-    let example = 
-        Example::new(Workspace::new(
-            [("regular", font::Face::parse(&font, 0).unwrap())], 
-            DefaultStyle::new("regular"),
-            0.2,
-            1 << 26
-        ));
-    Nox::new(example, &mut Default::default()).run();
+    let mut token = Token::new().unwrap();
+    let workspace = InitCell::new(&mut token);
+    let example = InitCell::new(&mut token);
+    Nox::new(
+        token,
+        |token, _win, gpu| {
+            let example = example.borrow_or_try_init(token, || {
+                Example::init(gpu)
+            })?;
+            workspace.borrow_or_try_init(token, || {
+                Workspace::init(
+                    [("regular", font::Face::parse(&font, 0).unwrap())], 
+                    DefaultStyle::new("regular"),
+                    0.2,
+                    gpu,
+                    1 << 26,
+                    Some(example.pipeline_cache),
+                    example.output_format,
+                    example.msaa,
+                    &GlobalAlloc,
+                )
+            })?;
+            Ok(())
+        },
+        |token, event| {
+            match event {
+                Event::FrameBufferCreated { gpu, new_size, new_format: _ } => {
+                    let example = example
+                        .borrow_mut(token)
+                        .unwrap();
+                    unsafe {
+                       example.device_alloc.reset();
+                    }
+                    gpu.destroy_image(example.output_image);
+                    gpu.destroy_image(example.output_resolve_image);
+                    example.output_image = gpu
+                        .create_image(gpu::ResourceBinderImage::Owned(&mut example.device_alloc, None), |builder| {
+                            builder
+                                .with_dimensions(new_size)
+                                .with_format(example.output_format, false)
+                                .with_samples(example.msaa)
+                                .with_usage(gpu::ImageUsage::ColorAttachment);
+                    })?;
+                    example.output_resolve_image = gpu
+                        .create_image(gpu::ResourceBinderImage::Owned(&mut example.device_alloc, None), |builder| {
+                            builder
+                                .with_dimensions(new_size)
+                                .with_format(example.output_format, false)
+                                .with_usage(gpu::ImageUsage::ColorAttachment)
+                                .with_usage(gpu::ImageUsage::Sampled);
+                    })?;
+                    Ok(())
+                },
+                Event::Update { win, mut gpu } => {
+                    let workspace = workspace
+                        .borrow_mut(token)
+                        .unwrap();
+                    let example = example
+                        .borrow_mut(token)
+                        .unwrap();
+                    workspace.begin(win)?;
+                    workspace.window(win, 0, "Widgets", [0.0, 0.0], [0.5, 0.5],
+                        |ui| {
+                            ui.checkbox(&mut example.resizeable, "Resizeable");
+                            ui.checkbox(&mut example.clamp_width, "Clamp width");
+                            ui.checkbox(&mut example.clamp_height, "Clamp height");
+                            ui.resizeable(example.resizeable);
+                            ui.clamp_height(example.clamp_height);
+                            ui.clamp_width(example.clamp_width);
+
+                            ui.collapsing("Show/hide widgets", |ui| {
+
+                                ui.checkbox(&mut example.show_other_window, "Show other window");
+                                ui.end_row();
+
+                                /*
+                                ui.color_picker(&mut self.color);
+                                ui.tag("Color picker");
+                                ui.end_row();
+                                */
+
+                                let image_source = image_source!("ferris.png");
+                                let image_size = ui.standard_interact_height() * 2.0;
+                                ui
+                                    .image("ferris", image_source, geom::vec2(image_size, image_size))
+                                    .hover_text("ferris!");
+                                if ui.button("Print \"hello\"").clicked() {
+                                    println!("hello");
+                                }
+                                ui.end_row();
+
+                                ui.radio_button(&mut example.radio_value, MyEnum::First, "First");
+                                ui.radio_button(&mut example.radio_value, MyEnum::Second, "Second");
+                                ui.radio_button(&mut example.radio_value, MyEnum::Third, "Third");
+
+                                ui.end_row();
+
+                                ui.selectable_tag(&mut example.radio_value, MyEnum::First, "First");
+                                ui.selectable_tag(&mut example.radio_value, MyEnum::Second, "Second");
+                                ui.selectable_tag(&mut example.radio_value, MyEnum::Third, "Third");
+
+                                ui.end_row();
+
+                                /*
+                                ui.combo_box("My Combo", |builder| {
+                                    builder.item(&mut self.radio_value, MyEnum::First, "First");
+                                    builder.item(&mut self.radio_value, MyEnum::Second, "Second");
+                                    builder.item(&mut self.radio_value, MyEnum::Third, "Third");
+                                });
+                                */
+
+                                ui.end_row();
+
+                                ui.input_text(
+                                    &mut example.input_text,
+                                    "Input text here",
+                                    None,
+                                );
+
+                                ui.collapsing("Sliders", |ui| {
+                                    ui.collapsing("f32", |ui| {
+                                        ui.slider(&mut example.slider_value, 0.0, 100.0, 200.0);
+                                        //ui.tag("f32 1");
+                                        ui.end_row();
+                                        ui.slider(&mut example.slider_value, 0.0, 200.0, 400.0);
+                                        //ui.tag("f32 2");
+                                    });
+                                    ui.collapsing("u8", |ui| {
+                                        ui.slider(&mut example.slider_value_uint, 0, 10, 20.0);
+                                    });
+                                });
+
+                                ui.drag_value(
+                                    &mut example.drag_value_int,
+                                    i8::MIN,
+                                    i8::MAX,
+                                    500.0,
+                                    0.01,
+                                    None,
+                                );
+                                //ui.tag("Drag value");
+                                ui.end_row();
+                                ui.add(my_widget_ui(&mut example.show_other_window, "test"))
+                                    .hover_text("Simple custom widget");
+                            });
+                        }
+                    )?;
+                    /*
+                    if self.show_other_window {
+                        let mut fmt = String::new();
+                        <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("fps: {:.0}", 1.0 / ctx.delta_time_secs_f32())).unwrap();
+                        self.workspace.window(ctx, 1, fmt.as_str(), [0.25, 0.25], [0.4, 0.4], 
+                            |ui| {
+                                let mut fmt = String::new();
+                                <String as core::fmt::Write>::write_fmt(&mut fmt, format_args!("Hue: {}°", (self.tag_color.hue * 180.0 / core::f32::consts::PI).round())).unwrap();
+                                ui.text("Sample text", true, |builder| {
+                                    builder
+                                        .with_text(None, |builder| {
+                                            builder
+                                                .with_segment("This text be copied to ", None);
+                                        })
+                                        .color(ColorSRGBA::white(1.0))
+                                        .with_text(Some("Ctrl+V"), |builder| {
+                                            builder
+                                                .with_segment("clipboard", None);
+                                        })
+                                        .default_color()
+                                        .with_text(None, |builder| {
+                                            builder
+                                                .with_segment(" and it can have ", None);
+                                        })
+                                        .color(self.tag_color)
+                                        .with_text(Some(&fmt), |builder| {
+                                            builder
+                                                .with_segment("tooltips and color", None);
+                                        });
+                                });
+                        })?;
+                    }
+                    */
+                    example.tag_color.hue = (example.tag_color.hue + core::f32::consts::PI * win.delta_time_secs_f32()) % core::f32::consts::TAU;
+                    workspace.end(win, &mut gpu)?;
+                    Ok(())
+                },
+                Event::Render { frame_graph, pending_transfers: _ } => {
+                    let example = example
+                        .borrow_mut(token)
+                        .unwrap();
+                    let workspace = workspace
+                        .borrow_mut(token)
+                        .unwrap();
+                    let frame_buffer_size = frame_graph.gpu().frame_buffer_size();
+                    example.aspect_ratio = frame_buffer_size.width as f32 / frame_buffer_size.height as f32;
+                    let output = frame_graph.add_image(example.output_image)?;
+                    let output_resolve = frame_graph.add_image(example.output_resolve_image)?;
+                    workspace.render(
+                        frame_graph,
+                        (output, None),
+                        Some(gpu::WriteResolveInfo::new(output_resolve, gpu::ResolveMode::Average, None)),
+                        gpu::AttachmentLoadOp::Clear,
+                        Default::default(),
+                    )?;
+                    //frame_graph.set_render_image(output_resolve, None)?;
+                    Ok(())
+                },
+                Event::CleanUp { gpu } => {
+                    let example = example
+                        .borrow_mut(token)
+                        .unwrap();
+                    let mut file = File::create(&example.cache_dir).context("io error")?;
+                    let data = gpu.retrieve_pipeline_cache_data(example.pipeline_cache)?;
+                    file.write(&data).context("io error")?;
+                    println!("cache written");
+                    unsafe {
+                        example.device_alloc.clean_up();
+                        workspace
+                            .borrow_mut(token)
+                            .unwrap()
+                            .clean_up(gpu)?;
+                    }
+                    Ok(())
+                },
+                _ => { Ok(()) }
+            }
+        },
+        InitSettings::new(
+            "gui example",
+            Default::default(),
+            [540, 540],
+            true,
+            false,
+        ),
+        &mut Default::default(),
+    ).run();
 }

@@ -189,37 +189,20 @@ impl GlobalResources {
     #[inline(always)]
     pub fn create_shader(
         &mut self,
-        glsl: &str,
-        name: &str,
-        stage: ShaderStage,
+        source: ShaderSource,
     ) -> Result<ShaderId>
     {
-        let spriv = shader_fn::glsl_to_spirv(
-            &glsl,
-            name,
-            stage.into(),
-            self.api_version,
-        ).context("failed to compile shader")?;
+        let compiled = source
+            .compile(self.api_version)
+            .context_with(|| format_compact!(
+                "failed to compile shader {} at {}",
+                source.name(), source.location_or_this(),
+            ))?;
         let shader = Shader::new(
             self.device.clone(),
-            spriv.as_binary(),
-            stage,
-        ).context("failed to create shader")?;
-        Ok(ShaderId(self.shaders.insert(shader)))
-    }
-
-    #[inline(always)]
-    pub fn add_shader(
-        &mut self,
-        spirv: &[u32],
-        stage: ShaderStage,
-    ) -> Result<ShaderId>
-    {
-        let shader = Shader::new(
-            self.device.clone(),
-            spirv,
-            stage,
-        ).context("failed to create shader")?;
+            compiled.spirv(),
+            source.stage(),
+        ).context_with(|| format_compact!("failed to create shader {} at {}", source.name(), source.location_or_this()))?;
         Ok(ShaderId(self.shaders.insert(shader)))
     }
 

@@ -2,9 +2,7 @@ use core::f32::consts::FRAC_PI_2;
 
 use compact_str::CompactString;
 
-use nox::{
-    *
-};
+use nox::win;
 
 use nox_font::{RenderedText, text_segment};
 
@@ -86,7 +84,7 @@ impl CollapsingHeader {
     #[inline(always)]
     pub fn update(
         &mut self,
-        ctx: &WindowCtx,
+        win: &win::WindowContext,
         window_pos: Vec2,
         min_bounds: Vec2,
         max_bounds: Vec2,
@@ -106,16 +104,16 @@ impl CollapsingHeader {
         );
         self.flags &= !Self::HOVERED;
         or_flag!(self.flags, Self::HOVERED, bounding_rect.is_point_inside(cursor_pos) && !widget_active);
-        if !widget_active && self.hovered() && ctx.mouse_button_state(MouseButton::Left).pressed() {
+        if !widget_active && self.hovered() && win.mouse_button_state(win::MouseButton::Left).pressed() {
             self.flags ^= Self::COLLAPSED;
         }
         if self.collapsed() {
             self.rotation =
-                (self.rotation - FRAC_PI_2 * style.animation_speed() * ctx.delta_time_secs_f32())
+                (self.rotation - FRAC_PI_2 * style.animation_speed() * win.delta_time_secs_f32())
                 .clamp(0.0, FRAC_PI_2);
         } else {
             self.rotation =
-                (self.rotation + FRAC_PI_2 * style.animation_speed() * ctx.delta_time_secs_f32())
+                (self.rotation + FRAC_PI_2 * style.animation_speed() * win.delta_time_secs_f32())
                 .clamp(0.0, FRAC_PI_2);
         }
         collect_text(

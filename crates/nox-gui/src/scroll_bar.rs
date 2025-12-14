@@ -1,4 +1,4 @@
-use nox::{mem::vec_types::{GlobalVec, Vector}, *};
+use nox::{mem::vec_types::{GlobalVec, Vector}, win};
 
 use nox_geom::{
     shapes::*,
@@ -116,7 +116,7 @@ impl VerScrollBar {
 
     pub fn update(
         &mut self,
-        ctx: &mut WindowCtx,
+        win: &mut win::WindowContext,
         style: &impl UiStyle,
         current_t: f32,
         offset: Vec2,
@@ -142,7 +142,7 @@ impl VerScrollBar {
         self.rounding = style.rounding();
         self.offset = offset;
         self.flags &= !Self::HOVERING;
-        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
+        let mouse_left_state = win.mouse_button_state(win::MouseButton::Left);
         if self.held() {
             if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
@@ -165,7 +165,7 @@ impl VerScrollBar {
         }
         self.flags &= !Self::HIDING;
         or_flag!(self.flags, Self::HIDING, hover_blocked && !self.held());
-        let anim_delta = ctx.delta_time_secs_f32() * style.animation_speed();
+        let anim_delta = win.delta_time_secs_f32() * style.animation_speed();
         if self.hiding() {
             self.opacity = (self.opacity - anim_delta).clamp(0.0, 1.0);
         } else {
@@ -333,7 +333,7 @@ impl HorScrollBar {
 
     pub fn update(
         &mut self,
-        ctx: &mut WindowCtx,
+        win: &mut win::WindowContext,
         style: &impl UiStyle,
         current_t: f32,
         offset: Vec2,
@@ -359,7 +359,7 @@ impl HorScrollBar {
         self.rounding = style.rounding();
         self.offset = offset;
         self.flags &= !Self::HOVERING;
-        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
+        let mouse_left_state = win.mouse_button_state(win::MouseButton::Left);
         if self.held() {
             if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
@@ -382,7 +382,7 @@ impl HorScrollBar {
         }
         self.flags &= !Self::HIDING;
         or_flag!(self.flags, Self::HIDING, hover_blocked && !self.held());
-        let anim_delta = ctx.delta_time_secs_f32() * style.animation_speed();
+        let anim_delta = win.delta_time_secs_f32() * style.animation_speed();
         if self.hiding() {
             self.opacity = (self.opacity - anim_delta).clamp(0.0, 1.0);
         } else {

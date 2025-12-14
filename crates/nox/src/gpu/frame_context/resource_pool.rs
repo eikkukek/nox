@@ -24,6 +24,7 @@ pub(crate) struct ResourcePool
     transient_images: GlobalSlotMap<ImageId>,
     subviews: GlobalVec<(ImageId, SlotIndex<vk::ImageView>)>,
     device_alloc: LinearDeviceAlloc,
+    frame: u64,
 }
 
 impl ResourcePool {
@@ -36,6 +37,7 @@ impl ResourcePool {
             transient_images: GlobalSlotMap::new(),
             subviews: GlobalVec::new(),
             device_alloc,
+            frame: 0,
         }
     }
 
@@ -64,20 +66,26 @@ impl<'a> ResourcePoolContext<'a>
         for (_, resource) in &resource_pool.transient_images {
             context.destroy_image(*resource);
         }
-        resource_pool.transient_images.clear_elements();
+        resource_pool.transient_images.clear();
         for (image, index) in &resource_pool.subviews {
             if let Ok(image) = context.get_image(*image) {
                 image.destroy_subview(*index).unwrap();
             }
         }
-        resource_pool.subviews.resize(0, Default::default());
+        resource_pool.subviews.clear();
         unsafe {
             resource_pool.device_alloc.reset();
         }
+        resource_pool.frame += 1;
         Self {
             pool: resource_pool,
             context,
         }
+    }
+
+    #[inline(always)]
+    pub fn current_frame(&self) -> u64 {
+        self.pool.frame
     }
 
     #[inline(always)]

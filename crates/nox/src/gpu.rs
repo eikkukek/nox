@@ -281,6 +281,7 @@ impl<'a> Gpu<'a> {
             global_resources: self.global_resources.write().unwrap(),
             transfer_requests: &mut self.transfer_requests,
             frame_buffer_size: self.frame_buffer_size,
+            buffered_frames: self.buffered_frames,
         }
     }
 
@@ -380,6 +381,7 @@ impl<'a> Gpu<'a> {
                 global_resources.write().unwrap(),
                 &mut new_requests,
                 self.frame_buffer_size,
+                self.buffered_frames,
             );
 
             let mut commands = TransferCommands::new(&mut storage, &mut context);
@@ -416,6 +418,7 @@ impl<'a> Gpu<'a> {
                 self.global_resources.write().unwrap(),
                 &mut dummy_requests,
                 Default::default(),
+                self.buffered_frames,
             );
             for i in 0..self.transfer_commands.len()
             {
@@ -706,7 +709,8 @@ impl<'a> Gpu<'a> {
                 let mut context = GpuContext::new(
                     self.global_resources.write().unwrap(),
                     &mut self.transfer_requests,
-                    frame_buffer_size
+                    frame_buffer_size,
+                    self.buffered_frames,
                 );
                 (process)(token, Event::FrameBufferCreated {
                     gpu: &mut context,
@@ -734,6 +738,7 @@ impl<'a> Gpu<'a> {
                     self.global_resources.write().unwrap(),
                     &mut self.transfer_requests,
                     self.frame_buffer_size,
+                    self.buffered_frames,
                 ),
                 &self.tmp_alloc,
                 queue_family_indices.compute_index(),
@@ -833,6 +838,7 @@ impl<'a> Gpu<'a> {
                             .unwrap(),
                         &mut self.transfer_requests,
                         frame_data.extent.into(),
+                        self.buffered_frames,
                     ),
                     &mut self.frame_resource_pools[frame_data.frame_index as usize],
                     frame_data.image,

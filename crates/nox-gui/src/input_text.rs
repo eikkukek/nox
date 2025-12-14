@@ -1,12 +1,14 @@
 use core::{
-    marker::PhantomData,
     fmt::{Display, Write},
     str::FromStr,
 };
 
 use compact_str::CompactString;
 
-use nox::{alloc::arena_alloc::ArenaGuard, mem::vec_types::{GlobalVec, Vector}, *};
+use nox::{
+    mem::vec_types::{GlobalVec, Vector},
+    win,
+};
 
 use nox_geom::{
     shapes::*,
@@ -225,7 +227,7 @@ impl InputTextData {
 
     pub fn update<Surface: UiReactSurface, Style: UiStyle>(
         &mut self,
-        ui: &mut UiReactCtx<Surface, Style>,
+        ui: &mut UiReactContext<Surface, Style>,
         reaction: &mut Reaction,
     )
     {
@@ -243,7 +245,7 @@ impl InputTextData {
             .unwrap_or_default();
         let active_this_frame = self.active();
         if active_this_frame {
-            let mut cursor_timer = self.cursor_timer + ui.win_ctx().delta_time_secs_f32();
+            let mut cursor_timer = self.cursor_timer + ui.win().delta_time_secs_f32();
             if cursor_timer >= ui.style().input_text_cursor_switch_speed() {
                 self.toggle_cursor_visible();
                 cursor_timer = 0.0;
@@ -256,10 +258,10 @@ impl InputTextData {
                 } else {
                     self.text_cursor_pos = selection.1;
                 }
-                let input_empty = ui.win_ctx().get_input_text().0 == 0;
-                if ui.win_ctx().key_state(KeyCode::ControlLeft).held() {
-                    if ui.win_ctx().key_state(KeyCode::KeyV).pressed() &&
-                        let Some(text) = ui.win_ctx().get_clipboard()
+                let input_empty = ui.win().get_input_text().0 == 0;
+                if ui.win().key_state(win::KeyCode::ControlLeft).held() {
+                    if ui.win().key_state(win::KeyCode::KeyV).pressed() &&
+                        let Some(text) = ui.win().get_clipboard()
                     {
                         let start_count = self.input.char_indices().count();
                         for i in (selection.0..selection.1).rev() {
@@ -285,21 +287,21 @@ impl InputTextData {
                         } else {
                             cursor_move = CursorMove::Right;
                         }
-                    } else if ui.win_ctx().key_state(KeyCode::KeyC).pressed() {
+                    } else if ui.win().key_state(win::KeyCode::KeyC).pressed() {
                         let mut text = CompactString::default();
                         let mut iter = self.input.char_indices().skip(selection.0);
                         for _ in selection.0..selection.1  {
                             text.push(iter.next().unwrap().1);
                         }
-                        ui.win_ctx().set_clipboard(&text);
+                        ui.win().set_clipboard(&text);
                         self.selection = Some(selection);
-                    } else if ui.win_ctx().key_state(KeyCode::KeyX).pressed() {
+                    } else if ui.win().key_state(win::KeyCode::KeyX).pressed() {
                         let mut text = CompactString::default();
                         let mut iter = self.input.char_indices().skip(selection.0);
                         for _ in selection.0..selection.1  {
                             text.push(iter.next().unwrap().1);
                         }
-                        ui.win_ctx().set_clipboard(&text);
+                        ui.win().set_clipboard(&text);
                         for i in (selection.0..selection.1).rev() {
                             let (index, _) = self.input.char_indices().skip(i).next().unwrap();
                             self.input.remove(index);
@@ -311,16 +313,16 @@ impl InputTextData {
                         self.selection = Some(selection);
                     }
                 }
-                else if ui.win_ctx().key_state(KeyCode::Backspace).pressed() || !input_empty {
+                else if ui.win().key_state(win::KeyCode::Backspace).pressed() || !input_empty {
                     let start_count = self.input.char_indices().count();
                     for i in (selection.0..selection.1).rev() {
                         let (index, _) = self.input.char_indices().skip(i).next().unwrap();
                         self.input.remove(index);
                     }
                     let mut text_cursor_pos = selection.0;
-                    for text in ui.win_ctx().get_input_text().1 {
-                        if text.0 != KeyCode::Backspace && text.0 != KeyCode::Enter &&
-                            text.0 != KeyCode::Escape
+                    for text in ui.win().get_input_text().1 {
+                        if text.0 != win::KeyCode::Backspace && text.0 != win::KeyCode::Enter &&
+                            text.0 != win::KeyCode::Escape
                         {
                             self.input.insert_str(
                                 self.input
@@ -342,8 +344,8 @@ impl InputTextData {
                         cursor_move = CursorMove::Right;
                     }
                     self.input_text = None;
-                } else if ui.win_ctx().key_state(KeyCode::ArrowLeft).pressed() {
-                    if ui.win_ctx().key_state(KeyCode::ShiftLeft).held() {
+                } else if ui.win().key_state(win::KeyCode::ArrowLeft).pressed() {
+                    if ui.win().key_state(win::KeyCode::ShiftLeft).held() {
                         if self.selection_left() {
                             if selection.0 != 0 {
                                 selection.0 -= 1;
@@ -360,8 +362,8 @@ impl InputTextData {
                     }
                     self.flags |= Self::CURSOR_VISIBLE;
                     self.cursor_timer = 0.0;
-                } else if ui.win_ctx().key_state(KeyCode::ArrowRight).pressed() {
-                    if ui.win_ctx().key_state(KeyCode::ShiftLeft).held() {
+                } else if ui.win().key_state(win::KeyCode::ArrowRight).pressed() {
+                    if ui.win().key_state(win::KeyCode::ShiftLeft).held() {
                         if self.selection_left() {
                             if selection.0 != selection.1 {
                                 selection.0 += 1;
@@ -388,14 +390,14 @@ impl InputTextData {
                 let start_pos = text_cursor_pos;
                 let start_count = self.input.char_indices().count();
                 if text_cursor_pos != 0 {
-                    if ui.win_ctx().key_state(KeyCode::Backspace).pressed() {
+                    if ui.win().key_state(win::KeyCode::Backspace).pressed() {
                         let remove = text_cursor_pos - 1;
                         let (index, _) = self.input.char_indices().skip(remove).next().unwrap();
                         self.input.remove(index);
                         self.input_text = None;
                         text_cursor_pos = remove;
-                    } else if ui.win_ctx().key_state(KeyCode::ArrowLeft).pressed() {
-                        if ui.win_ctx().key_state(KeyCode::ShiftLeft).held() {
+                    } else if ui.win().key_state(win::KeyCode::ArrowLeft).pressed() {
+                        if ui.win().key_state(win::KeyCode::ShiftLeft).held() {
                             self.selection = Some((text_cursor_pos - 1, text_cursor_pos));
                             self.flags |= Self::SELECTION_LEFT;
                         }
@@ -404,9 +406,9 @@ impl InputTextData {
                         self.flags |= Self::CURSOR_VISIBLE;
                     }
                 }
-                if ui.win_ctx().key_state(KeyCode::ControlLeft).held()
+                if ui.win().key_state(win::KeyCode::ControlLeft).held()
                 {
-                    if ui.win_ctx().key_state(KeyCode::KeyV).pressed() && let Some(text) = ui.win_ctx().get_clipboard() {
+                    if ui.win().key_state(win::KeyCode::KeyV).pressed() && let Some(text) = ui.win().get_clipboard() {
                         self.input.insert_str(
                             self.input
                                 .char_indices()
@@ -420,11 +422,11 @@ impl InputTextData {
                         self.input_text = None;
                     }
                 } else {
-                    let input = ui.win_ctx().get_input_text();
+                    let input = ui.win().get_input_text();
                     if input.0 != 0 {
                         for text in input.1 {
-                            if text.0 != KeyCode::Backspace &&
-                                text.0 != KeyCode::Enter && text.0 != KeyCode::Escape
+                            if text.0 != win::KeyCode::Backspace &&
+                                text.0 != win::KeyCode::Enter && text.0 != win::KeyCode::Escape
                             {
                                 self.input.insert_str(
                                     self.input
@@ -442,9 +444,9 @@ impl InputTextData {
                     }
                 }
                 let end_count = self.input.char_indices().count();
-                if ui.win_ctx().key_state(KeyCode::ArrowRight).pressed() {
+                if ui.win().key_state(win::KeyCode::ArrowRight).pressed() {
                     text_cursor_pos = (text_cursor_pos + 1).clamp(0, end_count);
-                    if text_cursor_pos != end_count && ui.win_ctx().key_state(KeyCode::ShiftLeft).held() {
+                    if text_cursor_pos != end_count && ui.win().key_state(win::KeyCode::ShiftLeft).held() {
                         self.selection  = Some((text_cursor_pos - 1, text_cursor_pos));
                     }
                     self.cursor_timer = 0.0;
@@ -585,18 +587,18 @@ impl InputTextData {
                 }
             }
         }
-        if ui.win_ctx().cursor_moved() {
+        if ui.win().cursor_moved() {
             self.flags |= Self::MOUSE_VISIBLE;
         }
         let mouse_visible = self.mouse_visible();
         let rel_cursor_pos = reaction.rel_cursor_pos() + reaction.offset();
         let override_cursor = ui.style().override_cursor();
-        let mouse_left_state = ui.win_ctx().mouse_button_state(MouseButton::Left);
+        let mouse_left_state = ui.win().mouse_button_state(win::MouseButton::Left);
         if override_cursor {
             if self.active() {
-                ui.win_ctx().set_cursor_hide(!mouse_visible);
+                ui.win().set_cursor_hide(!mouse_visible);
             } else if self.active_last_frame() {
-                ui.win_ctx().set_cursor_hide(false);
+                ui.win().set_cursor_hide(false);
             }
         }
         self.flags &= !Self::ACTIVE_LAST_FRAME;
@@ -623,7 +625,7 @@ impl InputTextData {
                 self.double_click_timer = 0.0;
             }
             if reaction.held() || reaction.hovered() {
-                reaction.cursor(CursorIcon::Text);
+                reaction.cursor(win::CursorIcon::Text);
             }
             select_all &= self.selection.is_none();
             if select_all || self.select_all() {
@@ -666,11 +668,11 @@ impl InputTextData {
                                 if offset < 0.0 {
                                     self.input_text_offset_x -=
                                         ui.style().input_text_selection_scroll_speed() *
-                                        ui.win_ctx().delta_time_secs_f32();
+                                        ui.win().delta_time_secs_f32();
                                 } else if offset > input_text_max_x {
                                     self.input_text_offset_x +=
                                         ui.style().input_text_selection_scroll_speed() *
-                                        ui.win_ctx().delta_time_secs_f32();
+                                        ui.win().delta_time_secs_f32();
                                 }
                                 if selection.1 < selection.0 {
                                     let tmp = selection.0;
@@ -684,11 +686,11 @@ impl InputTextData {
                                 if offset > input_text_max_x {
                                     self.input_text_offset_x +=
                                         ui.style().input_text_selection_scroll_speed() *
-                                        ui.win_ctx().delta_time_secs_f32();
+                                        ui.win().delta_time_secs_f32();
                                 } else if offset < 0.0 {
                                     self.input_text_offset_x -=
                                         ui.style().input_text_selection_scroll_speed() *
-                                        ui.win_ctx().delta_time_secs_f32();
+                                        ui.win().delta_time_secs_f32();
                                 }
                                 if selection.1 < selection.0 {
                                     let tmp = selection.0;
@@ -709,7 +711,7 @@ impl InputTextData {
                             self.text_cursor_pos = text_cursor_pos;
                         }
                         if override_cursor {
-                            ui.win_ctx().set_cursor(CursorIcon::Text);
+                            ui.win().set_cursor(win::CursorIcon::Text);
                         }
                     }
                 }
@@ -721,8 +723,8 @@ impl InputTextData {
             or_flag!(self.flags, Self::CLICKED_LAST_FRAME, mouse_left_state.pressed());
         }
         let deactivate =
-            ui.win_ctx().key_state(KeyCode::Enter).pressed() ||
-            ui.win_ctx().key_state(KeyCode::Escape).pressed() ||
+            ui.win().key_state(win::KeyCode::Enter).pressed() ||
+            ui.win().key_state(win::KeyCode::Escape).pressed() ||
             (mouse_left_state.pressed() && !reaction.held() && !reaction.hovered());
         if deactivate {
             self.flags &= !Self::ACTIVE;
@@ -804,7 +806,7 @@ impl InputTextData {
                     text_col,
                 );
         });
-        self.double_click_timer += ui.win_ctx().delta_time_secs_f32();
+        self.double_click_timer += ui.win().delta_time_secs_f32();
         self.flags &= !Self::ACTIVATED_LAST_FRAME;
         or_flag!(self.flags, Self::ACTIVATED_LAST_FRAME, !active_this_frame && self.active());
         let text = SharedText::new(Text::new(
@@ -904,7 +906,7 @@ impl InputTextData {
         self.flags & Self::ACTIVE_LAST_FRAME == Self::ACTIVE_LAST_FRAME
     }
 }
-
+/*
 pub struct InputText<Style> {
     offset: Vec2,
     input: CompactString,
@@ -2041,3 +2043,4 @@ impl<Style> Widget<Style> for InputText<Style>
         Ok(None)
     }
 }
+*/

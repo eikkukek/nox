@@ -18,19 +18,20 @@ macro_rules! singleton_cell_token {
             #[allow(non_snake_case)]
             mod [<__ $ident Mod __>] {
 
+                use core::sync::atomic;
+
                 pub struct $ident(());
 
-                static INSTANCE: std::sync::OnceLock<$ident> = std::sync::OnceLock::new();
+                static LOCK: atomic::AtomicBool = atomic::AtomicBool::new(false);
 
                 impl $ident {
 
                     pub fn new() -> Option<Self> {
-                        if INSTANCE.get().is_none()
-                        {
-                            INSTANCE.get_or_init(|| $ident(()));
-                            Some($ident(()))
-                        } else {
+                        if LOCK.load(atomic::Ordering::Relaxed) {
                             None
+                        } else {
+                            LOCK.store(true, atomic::Ordering::Relaxed);
+                            Some($ident(()))
                         }
                     }
                 }
@@ -39,11 +40,20 @@ macro_rules! singleton_cell_token {
 
                     type Identifier = ();
 
+                    #[inline(always)]
                     fn identifier(&self) -> Self::Identifier {
                         ()
                     }
-
+                    
+                    #[inline(always)]
                     fn validate(&self, id: &Self::Identifier) {}
+                }
+
+                impl Drop for $ident {
+
+                    fn drop(&mut self) {
+                        LOCK.store(false, atomic::Ordering::Relaxed);
+                    }
                 }
             }
             $vis use [<__ $ident Mod __>]::$ident;

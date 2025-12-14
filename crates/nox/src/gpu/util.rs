@@ -1,3 +1,3 @@
-//mod full_screen_pass;
+mod full_screen_pass;
 
-//pub use full_screen_pass::FullScreenPass;
+pub use full_screen_pass::FullScreenPass;

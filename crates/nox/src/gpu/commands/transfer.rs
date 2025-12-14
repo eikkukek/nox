@@ -550,7 +550,7 @@ impl<'a, 'b> TransferCommands<'a, 'b> {
     } 
 
     #[inline(always)]
-    pub fn gen_mip_maps_internal(
+    pub fn gen_mip_maps(
         &mut self,
         image: ImageId,
         filter: Filter,

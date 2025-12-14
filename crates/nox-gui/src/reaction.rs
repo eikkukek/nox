@@ -1,6 +1,6 @@
 use compact_str::CompactString;
 
-use nox::*;
+use nox::win;
 
 use nox_geom::*;
 
@@ -14,7 +14,7 @@ pub struct Reaction {
     pub offset: Vec2,
     pub size: Vec2,
     rel_cursor_pos: Vec2,
-    cursor: Option<CursorIcon>,
+    cursor: Option<win::CursorIcon>,
     id: ReactionId,
     hover_text: Option<CompactString>,
     flags: u32,
@@ -104,19 +104,19 @@ impl Reaction {
     }
 
     #[inline(always)]
-    pub fn cursor(&mut self, cursor: CursorIcon) {
+    pub fn cursor(&mut self, cursor: win::CursorIcon) {
         self.cursor = Some(cursor);
     }
 
     #[inline(always)]
-    pub fn take_cursor(&mut self) -> Option<CursorIcon> {
+    pub fn take_cursor(&mut self) -> Option<win::CursorIcon> {
         self.cursor.take()
     }
 
     #[inline(always)]
     pub fn update(
         &mut self,
-        ctx: &WindowCtx,
+        win: &win::WindowContext,
         cursor_pos: Vec2,
         surface_pos: Vec2,
         cursor_in_window: bool,
@@ -134,7 +134,7 @@ impl Reaction {
         let cursor_in_self = BoundingRect::from_position_size(
             self.offset, self.size
         ).is_point_inside(rel_cursor_pos);
-        let mouse_left_state = ctx.mouse_button_state(MouseButton::Left);
+        let mouse_left_state = win.mouse_button_state(win::MouseButton::Left);
         if self.held() {
             if mouse_left_state.released() {
                 self.flags &= !Self::HELD;

@@ -9,12 +9,12 @@ use crate::gpu::*;
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PassId(pub(crate) u32);
+pub struct PassId(pub(crate) u32, pub(crate) u64);
 
 impl Default for PassId {
 
     fn default() -> Self {
-        Self(u32::MAX)
+        Self(u32::MAX, u64::MAX)
     }
 }
 
@@ -23,8 +23,8 @@ pub struct PassInfo {
     pub max_reads: u32,
     pub max_color_writes: u32,
     pub msaa_samples: MSAA,
-    pub signal_semaphores: u32,
-    pub wait_semaphores: u32,
+    pub max_signal_semaphores: u32,
+    pub max_wait_semaphores: u32,
 }
 
 #[derive(Clone, Copy)]

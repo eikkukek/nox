@@ -2,7 +2,7 @@ use core::f32::consts;
 
 use core::fmt::Display;
 
-use nox::VkFormat;
+use nox::gpu::VkFormat;
 
 pub trait Color: Copy + Display {
 

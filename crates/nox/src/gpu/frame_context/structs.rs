@@ -31,6 +31,11 @@ pub struct ResourceId {
 impl ResourceId {
 
     #[inline(always)]
+    pub(crate) fn image_id(&self) -> ImageId {
+        self.image_id
+    }
+
+    #[inline(always)]
     pub(crate) fn samples(&self) -> MSAA {
         self.samples
     }
