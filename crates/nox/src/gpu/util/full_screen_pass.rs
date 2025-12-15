@@ -121,7 +121,9 @@ impl FullScreenPass {
                 cache.into(),
                 &GlobalAlloc,
                 |_, p| pipeline = p,
-            ).context_with(|| format_compact!("failed to create full screen pass pipeline with format {:?}", new_format))?;
+            ).context_with(|| format_compact!(
+                "failed to create full screen pass pipeline with format {:?}", new_format)
+            )?;
             self.current_pipeline = Some(*self.pipelines.entry(new_format).or_insert(pipeline));
             Ok(())
         }

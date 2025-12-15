@@ -50,3 +50,5 @@ impl Tracked for Error {
         self.0.location()
     }
 }
+
+pub type Result<T> = core::result::Result<T, Error>;

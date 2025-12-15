@@ -374,8 +374,9 @@ impl<'a> SwapchainContext<'a> {
             pre_transform = vk::SurfaceTransformFlagsKHR::IDENTITY;
         }
         let mut composite_alpha = vk::CompositeAlphaFlagsKHR::OPAQUE;
-        if has_bits!(capabilities.supported_composite_alpha, vk::CompositeAlphaFlagsKHR::INHERIT) {
-            composite_alpha = vk::CompositeAlphaFlagsKHR::INHERIT;
+        if has_bits!(capabilities.supported_composite_alpha, vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED)
+        {
+            composite_alpha = vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED;
         }
         let image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
         if has_not_bits!(capabilities.supported_usage_flags, image_usage) {

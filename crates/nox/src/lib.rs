@@ -1,7 +1,7 @@
 #[macro_use]
 
 mod version;
-mod init_settings;
+mod attributes;
 mod memory;
 
 pub mod error;
@@ -15,6 +15,9 @@ mod clipboard;
 
 pub mod dev;
 
+mod on_init;
+pub use on_init::OnInit;
+
 mod export {
 
     use super::*;
@@ -24,19 +27,15 @@ mod export {
     pub use nox_log as log;
 
     pub use version::Version;
-    pub use init_settings::InitSettings;
+    pub use attributes::*;
     pub use memory::Memory;
     pub use event::Event;
     pub use nox::*;
-    pub use interface::{Initialize, ProcessEvent};
+    pub use interface::Interface;
     pub use mem::array_string;
     pub use mem::GlobalAlloc;
-    pub use mem::cell::{InitCell, CellToken};
 }
 
 pub use export::*;
 
-pub use error::Error;
-pub type Result<T> = core::result::Result<T, Error>;
-
-pub use mem::singleton_cell_token;
+pub use error::{Error, Result};

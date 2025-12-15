@@ -33,3 +33,10 @@ macro_rules! format_location {
     };
 }
 pub(crate) use format_location;
+
+macro_rules! or_flag {
+    ($flags:expr, $flag:expr, $value:expr $(,)?) => {
+        $flags |= $flag & ($value as u32) << $flag.trailing_zeros();
+    };
+}
+pub(crate) use or_flag;

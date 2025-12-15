@@ -147,7 +147,7 @@ impl<'a> Gpu<'a> {
 
     pub fn new(
         window: &Window,
-        app_name: &AppName,
+        app_name: &str,
         app_version: Version,
         enable_validation: bool,
         memory_layout: MemoryLayout,
@@ -297,10 +297,9 @@ impl<'a> Gpu<'a> {
         self.vulkan_context.request_swapchain_update(self.buffered_frames, size);
     }
 
-    fn async_transfer_requests<Token: CellToken>(
+    fn async_transfer_requests(
         &mut self,
-        token: &mut Token,
-        process: &mut impl ProcessEvent<Token>,
+        interface: &mut impl Interface,
     ) -> error::Result<()>
     {
         let count = self.transfer_requests.async_request_count();
@@ -386,7 +385,7 @@ impl<'a> Gpu<'a> {
 
             let mut commands = TransferCommands::new(&mut storage, &mut context);
 
-            (process)(token, Event::TransferWork {
+            (interface)(Event::TransferWork {
                 request_id: id,
                 commands: &mut commands,
             }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
@@ -667,18 +666,17 @@ impl<'a> Gpu<'a> {
         Ok(result)
     }
 
-    pub(crate) fn render<Token: CellToken>(
+    pub(crate) fn render(
         &mut self,
         window: &Window,
-        token: &mut Token,
-        process: &mut impl ProcessEvent<Token>,
+        interface: &mut impl Interface,
         host_allocators: &'a HostAllocators,
     ) -> error::Result<()>
     {
         let graphics_queue = self.vulkan_context.graphics_queue();
         let transfer_queue = self.vulkan_context.transfer_queue();
         let compute_queue = self.vulkan_context.compute_queue();
-        self.async_transfer_requests(token, process)
+        self.async_transfer_requests(interface)
             .context("async transfer requests failed")?;
         let mut pending_transfers = GlobalVec::new();
         self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
@@ -712,13 +710,13 @@ impl<'a> Gpu<'a> {
                     frame_buffer_size,
                     self.buffered_frames,
                 );
-                (process)(token, Event::FrameBufferCreated {
+                (interface)(Event::FrameBufferCreated {
                     gpu: &mut context,
                     new_size: frame_buffer_size,
                     new_format: ImageFormat(frame_data.format, vk::ImageAspectFlags::COLOR),
                 }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             }
-            self.async_transfer_requests(token, process)
+            self.async_transfer_requests(interface)
                 .context("async transfer requests failed")?;
             self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
                 .context("failed to process transfer requests")?;
@@ -743,7 +741,7 @@ impl<'a> Gpu<'a> {
                 &self.tmp_alloc,
                 queue_family_indices.compute_index(),
             );
-            (process)(token, Event::ComputeWork {
+            (interface)(Event::ComputeWork {
                 commands: &mut compute_commands
             }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             let compute_commands = compute_commands.finish();
@@ -851,16 +849,15 @@ impl<'a> Gpu<'a> {
                 frame_data.frame_index,
                 queue_family_indices,
             );
-            (process)(token, Event::Render {
+            (interface)(Event::Render {
                 frame_graph: &mut frame_graph,
                 pending_transfers: &pending_transfers,
             }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             let frame_graph = frame_graph.render(
-                token,
-                process,
+                interface,
                 compute_state.semaphore,
                 compute_state.timeline_value,
-                self.buffered_frames
+                self.buffered_frames,
             )?;
             Self::process_frame_graph(
                 alloc,

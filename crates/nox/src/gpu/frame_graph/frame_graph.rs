@@ -119,10 +119,9 @@ impl<'a> FrameGraph<'a> {
 
 impl<'a> FrameGraph<'a> {
 
-    pub(crate) fn render<Token: CellToken>(
+    pub(crate) fn render(
         mut self,
-        token: &mut Token,
-        process: &mut impl ProcessEvent<Token>,
+        interface: &mut impl Interface,
         frame_semaphore: vk::Semaphore,
         frame_semaphore_value: u64,
         buffered_frames: u32,
@@ -177,13 +176,17 @@ impl<'a> FrameGraph<'a> {
                     ImageSource::Swapchain(_, _, _,) => return Err(Error::just_context(
                         "swapchain images are write only"
                     )).context(ErrorContext::EventError(read.location_or_this()))
-                        .context(format_compact!("error while processing pass at {}", pass.location_or_this())),
+                        .context(format_compact!("error while processing pass at {}",
+                            pass.location_or_this())
+                        ),
                 };
                 let properties = image.properties;
                 if has_not_bits!(properties.usage, vk::ImageUsageFlags::SAMPLED) {
                     return Err(Error::just_context("image read must be sampleable"
                     )).context(ErrorContext::EventError(read.location_or_this()))
-                        .context(format_compact!("error while processing pass at {}", pass.location_or_this()))
+                        .context(format_compact!("error while processing pass at {}",
+                            pass.location_or_this())
+                        )
                 }
                 let state = image.state();
                 let dst_state = ImageState::new(
@@ -225,7 +228,8 @@ impl<'a> FrameGraph<'a> {
                 Depth,
                 DepthStencil,
             }
-            let mut process_write = |write: &WriteInfo, ty: AttachmentType| -> Result<vk::RenderingAttachmentInfo<'static>>
+            let mut process_write = |write: &WriteInfo, ty: AttachmentType|
+                -> Result<vk::RenderingAttachmentInfo<'static>>
             {
                 let resource_id = write.id;
                 let image = render_commands.frame_graph.frame_context.get_image(resource_id)?;
@@ -246,7 +250,9 @@ impl<'a> FrameGraph<'a> {
                                 )
                             },
                             AttachmentType::Depth => {
-                                if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
+                                if has_not_bits!(properties.usage,
+                                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                                ) {
                                     return Err(Error::just_context(
                                         "depth/stencil write image must be usable as an depth/stencil attachment"
                                     )).context(ErrorContext::EventError(write.location_or_this()))
@@ -259,7 +265,9 @@ impl<'a> FrameGraph<'a> {
                                 )
                             },
                             AttachmentType::DepthStencil => {
-                                if has_not_bits!(properties.usage, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
+                                if has_not_bits!(properties.usage,
+                                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+                                ) {
                                     return Err(Error::just_context(
                                         "depth/stencil write image must be usable as an depth/stencil attachment"
                                     )).context(ErrorContext::EventError(write.location_or_this()))
@@ -309,7 +317,8 @@ impl<'a> FrameGraph<'a> {
                         let mut resolve_mode = Default::default();
                         if let Some(resolve) = write.resolve {
                             resolve_mode = resolve.mode.into();
-                            let resolve_image = render_commands.frame_graph.frame_context.get_image(resolve.id)?;
+                            let resolve_image = render_commands.frame_graph.frame_context
+                                .get_image(resolve.id)?;
                             match resolve_image {
                                 ImageSource::Owned(resolve_image) => {
                                     let resolve_properties = resolve_image.properties;
@@ -368,7 +377,9 @@ impl<'a> FrameGraph<'a> {
                                     if resolve.range.is_some() {
                                         return Err(Error::just_context("swapchain images don't support image ranges"
                                         )).context(ErrorContext::EventError(resource_id.location_or_this()))
-                                            .context(format_compact!("error while processing pass at {}", pass.location_or_this()))
+                                            .context(format_compact!("error while processing pass at {}",
+                                                pass.location_or_this())
+                                            )
                                     }
                                     if state != dst_state {
                                         let memory_barrier = state.to_memory_barrier(
@@ -543,7 +554,7 @@ impl<'a> FrameGraph<'a> {
                 device.cmd_set_scissor(command_buffer, 0, &[scissor]);
             }
             render_commands.set_current_sample_count(pass.msaa_samples);
-            (process)(token, Event::RenderWork {
+            (interface)(Event::RenderWork {
                 pass_id: pass.id,
                 commands: &mut render_commands,
             }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;

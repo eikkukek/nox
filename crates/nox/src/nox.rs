@@ -16,43 +16,39 @@ use winit::{
     application::ApplicationHandler,
     event::*,
     window::{WindowId, Window},
-    dpi::LogicalSize,
     keyboard::*,
 };
 
 use nox_error::Context;
-use nox_mem::string_types::ArrayString;
 use nox_mem::vec_types::Vector;
 
 use crate::{
-    dev::error::{ErrorContext, Tracked},
+    dev::{
+        error::{ErrorContext, Tracked},
+        or_flag,
+    },
     log,
-    InitSettings,
+    Attributes,
+    AttributesInternal,
     Event,
     gpu,
     expand_error,
-    CellToken,
 };
 
 use super::{
-    interface::{Initialize, ProcessEvent},
+    interface::Interface,
     memory::Memory,
     clipboard::Clipboard,
 };
 
-pub type AppName = ArrayString<128>;
-
 pub static ERROR_CAUSE_FMT: OnceLock<log::CustomFmt> = OnceLock::new();
 
-pub struct Nox<'a, Token: CellToken, Init, Process>
+pub struct Nox<'a, I>
     where
-        Init: Initialize<Token>,
-        Process: ProcessEvent<Token>,
+        I: Interface,
 {
-    token: Token,
-    init: Option<Init>,
-    process: Process,
-    init_settings: InitSettings,
+    interface: I,
+    attributes: AttributesInternal,
     window_context: win::WindowContext,
     window: Option<Arc<Window>>,
     memory: &'a Memory,
@@ -60,21 +56,17 @@ pub struct Nox<'a, Token: CellToken, Init, Process>
     flags: u32,
 }
 
-impl<'a, Token: CellToken, Init, Process> Nox<'a, Token, Init, Process>
-    where 
-        Init: Initialize<Token>,
-        Process: ProcessEvent<Token>,
-
+impl<'a, I> Nox<'a, I>
+    where
+        I: Interface,
 {
 
     const ERROR: u32 = 0x1;
 
     pub fn new(
-        token: Token,
-        init: Init,
-        process: Process,
-        init_settings: InitSettings,
+        attributes: Attributes,
         memory: &'a mut Memory,
+        interface: I,
     ) -> Self
         where 
     {
@@ -113,10 +105,8 @@ impl<'a, Token: CellToken, Init, Process> Nox<'a, Token, Init, Process>
             ERROR_CAUSE_FMT.set(log::custom_fmt(error_cause_fmt)).ok();
         }
         Nox {
-            token,
-            init: Some(init),
-            process,
-            init_settings,
+            interface,
+            attributes: AttributesInternal::new(attributes),
             window: None,
             memory,
             gpu: None,
@@ -137,18 +127,18 @@ impl<'a, Token: CellToken, Init, Process> Nox<'a, Token, Init, Process>
     }
 }
 
-impl<'a, Token: CellToken, Init: Initialize<Token>, Process: ProcessEvent<Token>> Drop for Nox<'a, Token, Init, Process> {
+impl<'a, I: Interface> Drop for Nox<'a, I> {
 
     fn drop(&mut self) {
         if let Some(mut gpu) = self.gpu.take() {
             gpu.wait_idle();
-            (self.process)(&mut self.token, Event::CleanUp { gpu: &mut gpu.context() }).ok();
+            (self.interface)(Event::CleanUp { gpu: &mut gpu.context() }).ok();
             gpu.clean_up(self.memory.gpu().host_allocators());
         }
     }
 }
 
-impl<'a, Token: CellToken, Init: Initialize<Token>, Process: ProcessEvent<Token>> ApplicationHandler for Nox<'a, Token, Init, Process> {
+impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
         if self.error_set() {
@@ -215,7 +205,7 @@ impl<'a, Token: CellToken, Init: Initialize<Token>, Process: ProcessEvent<Token>
                     if let Some(gpu) = &mut self.gpu {
                         self.window_context.delta_time = self.window_context.delta_counter.elapsed();
                         self.window_context.delta_counter = time::Instant::now();
-                        if let Err(err) = (self.process)(&mut self.token, Event::Update {
+                        if let Err(err) = (self.interface)(Event::Update {
                             win: &mut self.window_context,
                             gpu: gpu.context(),
                         }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
@@ -225,6 +215,7 @@ impl<'a, Token: CellToken, Init: Initialize<Token>, Process: ProcessEvent<Token>
                             expand_error!(err);
                             return
                         }
+
                         if self.window_context.cursor_set() {
                             window.set_cursor(self.window_context.current_cursor);
                         }
@@ -233,8 +224,13 @@ impl<'a, Token: CellToken, Init: Initialize<Token>, Process: ProcessEvent<Token>
                         );
                         self.window_context.input_text.clear();
                         window.request_redraw();
+                        if self.window_context.transparent_set() {
+                            let is = self.window_context.is_transparent();
+                            window.set_transparent(is);
+                            self.window_context.flags &= !win::WindowContext::TRANSPARENT_SET;
+                        }
                         if let Err(err) = gpu 
-                            .render(&window, &mut self.token, &mut self.process, host_allocators)
+                            .render(&window, &mut self.interface, host_allocators)
                             .context("failed to render")
                         {
                             event_loop.exit();
@@ -251,22 +247,19 @@ impl<'a, Token: CellToken, Init: Initialize<Token>, Process: ProcessEvent<Token>
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let init_settings = self.init_settings;
         self.window_context.monitors.clear();
         for monitor in event_loop.available_monitors() {
             self.window_context.monitors.push(monitor);
         }
+        let (nox_attr, window_attr) = self.attributes.separate();
         if self.window.is_none() {
-            let window_attributes = Window::default_attributes()
-                .with_title(init_settings.app_name.as_str())
-                .with_inner_size(LogicalSize::new(
-                    init_settings.window_size[0],
-                    init_settings.window_size[1],
-                ))
-                .with_min_inner_size(LogicalSize::new(1.0, 1.0))
-                .with_resizable(init_settings.window_resizeable);
+            or_flag!(
+                self.window_context.flags,
+                win::WindowContext::TRANSPARENT,
+                window_attr.transparent
+            );
             let window = match event_loop
-                .create_window(window_attributes)
+                .create_window(window_attr)
                 .context("failed to create window")
             {
                 Ok(window) => window,
@@ -286,9 +279,9 @@ impl<'a, Token: CellToken, Init: Initialize<Token>, Process: ProcessEvent<Token>
             self.gpu = match gpu::Gpu
                 ::new(
                     &window,
-                    &init_settings.app_name,
-                    init_settings.app_version,
-                    init_settings.enable_vulkan_validation,
+                    &nox_attr.app_name,
+                    nox_attr.app_version,
+                    nox_attr.vulkan_validation,
                     *self.memory.gpu().layout(),
                     3,
                     host_allocators,
@@ -316,18 +309,19 @@ impl<'a, Token: CellToken, Init: Initialize<Token>, Process: ProcessEvent<Token>
             };
             self.window = Some(Arc::new(window));
             self.window_context.window = self.window.clone();
-            let mut gpu = self.gpu.as_mut().unwrap().context();
-            match (self.init.take().unwrap())(&mut self.token, &mut self.window_context, &mut gpu)
-                .context_from_tracked(|orig| ErrorContext::InitError(orig.or_this()))
+            if let Err(err) = (self.interface)(Event::Initialized {
+                win: &mut self.window_context,
+                gpu: self.gpu
+                    .as_mut()
+                    .unwrap()
+                    .context(),
+            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
             {
-                Ok(_) => {},
-                Err(err) => {
-                    event_loop.exit();
-                    self.flags |= Self::ERROR;
-                    expand_error!(err);
-                    return
-                }
-            };
+                event_loop.exit();
+                self.flags |= Self::ERROR;
+                expand_error!(err);
+                return
+            }
         }
     }
 }

@@ -12,7 +12,7 @@ use ash::{
 };
 use ash_window;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle,};
-use compact_str::format_compact;
+use compact_str::{format_compact, CompactString};
 
 use nox_mem::{
     vec_types::{FixedVec, ArrayVec, Vector},
@@ -32,7 +32,7 @@ use super::{
 };
 
 use crate::dev::{
-    export::{Version, AppName},
+    export::Version,
     error::{Result, Error, Context, ErrorContext, location},
 };
 
@@ -40,7 +40,10 @@ use crate::dev::{
 #[derive(Clone, Copy)]
 enum SwapchainState {
     Valid,
-    OutOfDate(u32, PhysicalSize<u32>),
+    OutOfDate {
+        buffered_frames: u32,
+        size: PhysicalSize<u32>,
+    },
 }
 
 pub(crate) struct VulkanContext<'a> {
@@ -64,7 +67,7 @@ impl<'a> VulkanContext<'a> {
 
     pub fn new(
         window: &Window,
-        app_name: &AppName,
+        app_name: &str,
         app_version: Version,
         buffered_frame_count: u32,
         enable_validation: bool,
@@ -91,7 +94,11 @@ impl<'a> VulkanContext<'a> {
                 warn!("failed to enumerate vulkan loader version {}", result);
             },
         };
-        let app_name = CString::new(app_name.as_str()).unwrap();
+        let app_name = CString
+            ::new(app_name
+                .chars()
+                .filter(|&c| c != '\0').collect::<CompactString>()
+            ).unwrap();
         let engine_name = CString::new("nox").unwrap();
         let application_info = vk::ApplicationInfo {
             s_type: vk::StructureType::APPLICATION_INFO,
@@ -105,7 +112,10 @@ impl<'a> VulkanContext<'a> {
         let mut instance_extensions = FixedVec::<*const i8, ArenaGuard>
             ::with_capacity(8, &tmp_alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
-        let mut layers = FixedVec::<*const i8, ArenaGuard>
+        let mut layers = FixedVec::<(*const i8, bool), ArenaGuard>
+            ::with_capacity(8, &tmp_alloc)
+            .context_with(|| ErrorContext::VecError(location!()))?;
+        let mut found_layers = FixedVec::<*const i8, ArenaGuard>
             ::with_capacity(8, &tmp_alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
         get_required_instance_extensions(window, &mut instance_extensions)?;
@@ -116,18 +126,18 @@ impl<'a> VulkanContext<'a> {
                 .push(ext_debug_utils.as_ptr())
                 .context_with(|| ErrorContext::VecError(location!()))?;
             layers
-                .push(validation_layer_name.as_ptr())
+                .push((validation_layer_name.as_ptr(), true))
                 .context_with(|| ErrorContext::VecError(location!()))?;
         }
-        verify_instance_layers(&entry, &layers)?;
+        verify_instance_layers(&entry, &layers, &mut found_layers)?;
         verify_instance_extensions(&entry, &instance_extensions)?;
         let instance_create_info = vk::InstanceCreateInfo {
             s_type: vk::StructureType::INSTANCE_CREATE_INFO,
             p_application_info: &application_info,
             enabled_extension_count: instance_extensions.len() as u32,
             pp_enabled_extension_names: instance_extensions.as_ptr() as _,
-            enabled_layer_count: layers.len() as u32,
-            pp_enabled_layer_names: layers.as_ptr() as _,
+            enabled_layer_count: found_layers.len() as u32,
+            pp_enabled_layer_names: found_layers.as_ptr() as _,
             ..Default::default()
         };
         let instance = unsafe {
@@ -243,7 +253,10 @@ impl<'a> VulkanContext<'a> {
                 transfer_queue: transfer_queue,
                 compute_queue: compute_queue,
                 swapchain_context: None,
-                swapchain_state: SwapchainState::OutOfDate(buffered_frame_count, window.inner_size()),
+                swapchain_state: SwapchainState::OutOfDate {
+                    buffered_frames: buffered_frame_count,
+                    size: window.inner_size(),
+                },
             },
         )
     }
@@ -284,8 +297,15 @@ impl<'a> VulkanContext<'a> {
         &self.physical_device_info
     }
 
-    pub fn request_swapchain_update(&mut self, buffered_frame_count: u32, size: PhysicalSize<u32>) {
-        self.swapchain_state = SwapchainState::OutOfDate(buffered_frame_count, size);
+    pub fn request_swapchain_update(
+        &mut self,
+        buffered_frame_count: u32,
+        size: PhysicalSize<u32>,
+    ) {
+        self.swapchain_state = SwapchainState::OutOfDate {
+            buffered_frames: buffered_frame_count,
+            size,
+        };
     }
 
     pub fn update_swapchain(
@@ -334,14 +354,14 @@ impl<'a> VulkanContext<'a> {
         let mut recreated = false;
         match self.swapchain_state {
             SwapchainState::Valid => {},
-            SwapchainState::OutOfDate(buffered_frame_count, framebuffer_size) => {
+            SwapchainState::OutOfDate { buffered_frames, size, } => {
                 recreated = true;
                 self.update_swapchain(
-                        framebuffer_size,
-                        graphics_command_pool,
-                        buffered_frame_count,
-                        tmp_alloc, host_allocators
-                    )?;
+                    size,
+                    graphics_command_pool,
+                    buffered_frames,
+                    tmp_alloc, host_allocators
+                )?;
             },
         }
         Ok((self.swapchain_context.clone().unwrap(), recreated))
@@ -401,17 +421,18 @@ fn get_required_instance_extensions<W>(
 
 fn verify_instance_layers(
     entry: &Entry,
-    layers: &FixedVec::<*const i8, ArenaGuard>,
+    layers: &FixedVec::<(*const i8, bool), ArenaGuard>,
+    found: &mut FixedVec<*const i8, ArenaGuard>,
 ) -> Result<()>
 {
     let available = unsafe { entry
         .enumerate_instance_layer_properties()
         .context("failed to enumerate instance layers")?
     };
-    for layer in layers {
+    for &(layer, optional) in layers {
         let string = unsafe {
             ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>
-                ::from_ascii_ptr(*layer)
+                ::from_ascii_ptr(layer)
                 .context_with(|| ErrorContext::StringConversionError(location!()))?
         };
         if available
@@ -423,7 +444,13 @@ fn verify_instance_layers(
                 }
             }).is_none()
         {
-            return Err(Error::just_context(format_compact!("instance layer {string:?} not present")))
+            if optional {
+                warn!("optional instance layer {string} not present");
+            } else {
+                return Err(Error::just_context(format_compact!("instance layer {string} not present")))
+            }
+        } else {
+            found.push(layer).context(ErrorContext::VecError(location!()))?;
         }
     }
     Ok(())
@@ -431,7 +458,7 @@ fn verify_instance_layers(
 
 fn verify_instance_extensions(
     entry: &Entry,
-    extensions: &FixedVec::<*const i8, ArenaGuard>
+    extensions: &FixedVec::<*const i8, ArenaGuard>,
 ) -> Result<()>
 {
     let available = unsafe {
@@ -454,7 +481,7 @@ fn verify_instance_extensions(
                 }
             }).is_none()
         {
-            return Err(Error::just_context(format_compact!("instance extension {string:?} not present")))
+            return Err(Error::just_context(format_compact!("instance extension {string} not present")))
         }
     }
     Ok(())

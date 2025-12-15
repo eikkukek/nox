@@ -15,14 +15,179 @@ use compact_str::CompactString;
 use crate::{
     export::mem::vec_types::GlobalVec,
     clipboard::Clipboard,
+    dev::or_flag,
 };
 
 use super::*;
 
+pub use winit::window::WindowButtons;
+pub use winit::window::Icon as WindowIcon;
 pub use winit::keyboard::KeyCode;
 pub use winit::event::MouseButton;
 pub use winit::window::CursorIcon;
 pub use winit::monitor::MonitorHandle;
+
+use winit::dpi::LogicalSize;
+
+#[derive(Clone)]
+pub struct WindowAttributes {
+    title: String,
+    size: [u32; 2],
+    enabled_buttons: win::WindowButtons,
+    icon: Option<win::WindowIcon>,
+    attr: u32,
+}
+
+impl WindowAttributes {
+
+    const RESIZABLE: u32 = 0x1;
+    const MAXIMIZED: u32 = 0x2;
+    const TRANSPARENT: u32 = 0x4;
+    const BLUR: u32 = 0x8;
+    const DECORATIONS: u32 = 0x10;
+
+    /// Creates [`WindowAttributes`] with default values.
+    #[inline(always)]
+    pub fn new(
+        title: &str,
+        size: [u32; 2],
+    ) -> Self
+    {
+        Self {
+            title: String::from(title),
+            size,
+            enabled_buttons: win::WindowButtons::all(),
+            icon: None,
+            attr: Self::DECORATIONS,
+        }
+    }
+
+    /// Sets whether the window is resizeble or not.
+    ///
+    /// The default is `false`.
+    #[inline(always)]
+    pub fn with_resizable(mut self, value: bool) -> Self {
+        self.attr &= !Self::RESIZABLE;
+        or_flag!(self.attr, Self::RESIZABLE, value);
+        self
+    }
+
+    /// Requests that the window is maximized upon creation.
+    ///
+    /// The default is `false`
+    #[inline(always)]
+    pub fn with_maximized(mut self, value: bool) -> Self {
+        self.attr &= !Self::MAXIMIZED;
+        or_flag!(self.attr, Self::MAXIMIZED, value);
+        self
+    }
+
+    /// Sets whether the background of the window should be transparent.
+    ///
+    /// If this is set to `true`, alpha values different than `1.0` on the swapchain image will
+    /// produce a transparent window.
+    ///
+    /// The default is `false`.
+    #[inline(always)]
+    pub fn with_transparent(mut self, value: bool) -> Self {
+        self.attr &= !Self::TRANSPARENT;
+        or_flag!(self.attr, Self::TRANSPARENT, value);
+        self
+    }
+
+    /// Sets whether the background of the window should be blurred.
+    ///
+    /// The default is `false`.
+    #[inline(always)]
+    pub fn with_blur(mut self, value: bool) -> Self {
+        self.attr &= !Self::BLUR;
+        or_flag!(self.attr, Self::BLUR, value);
+        self
+    }
+
+    /// Sets whether the window should have a border, a title bar, etc.
+    ///
+    /// The default is `false`.
+    #[inline(always)]
+    pub fn with_decorations(mut self, value: bool) -> Self {
+        self.attr &= !Self::DECORATIONS;
+        or_flag!(self.attr, Self::DECORATIONS, value);
+        self
+    }
+
+    /// Sets the enabled window buttons
+    ///
+    /// The default is [`WindowButtons::all`].
+    ///
+    /// Primarily effective on Windows systems.
+    #[inline(always)]
+    pub fn with_enabled_buttons(mut self, buttons: win::WindowButtons) -> Self {
+        self.enabled_buttons = buttons;
+        self
+    }
+
+    /// Sets the window icon.
+    ///
+    /// The default is `None`
+    #[inline(always)]
+    pub fn with_window_icon(mut self, icon: impl Into<Option<win::WindowIcon>>) -> Self {
+        self.icon = icon.into();
+        self
+    }
+
+    #[inline(always)]
+    pub fn resizable(&self) -> bool {
+        self.attr & Self::RESIZABLE == Self::RESIZABLE
+    }
+
+    #[inline(always)]
+    pub fn maximized(&self) -> bool {
+        self.attr & Self::MAXIMIZED == Self::MAXIMIZED
+    }
+
+    #[inline(always)]
+    pub fn transparent(&self) -> bool {
+        self.attr & Self::TRANSPARENT == Self::TRANSPARENT
+    }
+
+    #[inline(always)]
+    pub fn blur(&self) -> bool {
+        self.attr & Self::BLUR == Self::BLUR
+    }
+
+    #[inline(always)]
+    pub fn decorations(&self) -> bool {
+        self.attr & Self::DECORATIONS == Self::DECORATIONS
+    }
+
+    #[inline(always)]
+    pub fn enabled_buttons(&self) -> win::WindowButtons {
+        self.enabled_buttons
+    }
+
+    #[inline(always)]
+    pub fn icon(&self) -> Option<&win::WindowIcon> {
+        self.icon.as_ref()
+    }
+
+    #[inline(always)]
+    pub(crate) fn to_winit_attr(self) -> winit::window::WindowAttributes {
+        Window::default_attributes()
+            .with_resizable(self.resizable())
+            .with_maximized(self.maximized())
+            .with_transparent(self.transparent())
+            .with_blur(self.blur())
+            .with_decorations(self.decorations())
+            .with_enabled_buttons(self.enabled_buttons)
+            .with_window_icon(self.icon)
+            .with_title(self.title)
+            .with_inner_size(LogicalSize::new(
+                self.size[0],
+                self.size[1],
+            ))
+            .with_min_inner_size(LogicalSize::new(1.0, 1.0))
+    }
+}
 
 #[derive(Default, Clone, Copy)]
 pub struct InputState {
@@ -77,6 +242,8 @@ impl WindowContext {
 
     pub(super) const CURSOR_MOVED: u32 = 0x1;
     pub(super) const CURSOR_SET: u32 = 0x2;
+    pub(super) const TRANSPARENT: u32 = 0x4;
+    pub(super) const TRANSPARENT_SET: u32 = 0x8;
 
     #[inline(always)]
     pub(crate) fn new() -> Self {
@@ -102,6 +269,23 @@ impl WindowContext {
     #[inline(always)]
     pub fn monitors(&self) -> &[MonitorHandle] {
         &self.monitors
+    }
+
+    #[inline(always)]
+    pub fn is_transparent(&self) -> bool {
+        self.flags & Self::TRANSPARENT == Self::TRANSPARENT
+    }
+
+    #[inline(always)]
+    pub fn set_transparent(&mut self, value: bool) {
+        self.flags &= !Self::TRANSPARENT;
+        self.flags |= Self::TRANSPARENT_SET;
+        or_flag!(self.flags, Self::TRANSPARENT, value);
+    }
+
+    #[inline(always)]
+    pub(super) fn transparent_set(&self) -> bool {
+        self.flags & Self::TRANSPARENT_SET == Self::TRANSPARENT_SET
     }
 
     #[inline(always)]

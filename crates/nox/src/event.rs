@@ -4,6 +4,13 @@ use crate::{
 };
 
 pub enum Event<'a, 'b, 'c> {
+    /// Nox has initialized.
+    ///
+    /// Gets called once at the beginning before any other events.
+    Initialized {
+        win: &'a mut win::WindowContext,
+        gpu: gpu::GpuContext<'a>,
+    },
     /// Nox is updating.
     ///
     /// Happens once per frame.
