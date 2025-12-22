@@ -30,16 +30,16 @@ impl<T: ?Sized, U: ?Sized> Pair<T, U> {
             USource: Dyn<Target = U>,
     {
         let t_vtable = unsafe {
-            t.raw_parts()
+            TSource::raw_parts(&t)
         }.vtable;
         let u_vtable = unsafe {
-            u.raw_parts()
+            USource::raw_parts(&u)
         }.vtable;
         let t_align = align_of_val(&t);
         let u_align = align_of_val(&u);
         let alloc_align = align_of::<Allocation>();
-        let mut align = alloc_align;
         let mut size = 0;
+        let mut align = alloc_align;
         let (t_off, u_off) =
         if t_align > u_align {
             align = t_align.max(align);
@@ -74,18 +74,18 @@ impl<T: ?Sized, U: ?Sized> Pair<T, U> {
             ptr.write(u);
             ptr
         };
-        let t = NonNull::from_mut(unsafe {
-            TSource::from_raw_parts_mut(DynRawParts {
+        let t = NonNull::new(unsafe {
+            TSource::from_raw_parts(DynRawParts {
                 data: t_ptr.as_ptr(),
                 vtable: t_vtable,
-            })
-        });
-        let u = NonNull::from_mut(unsafe {
-            USource::from_raw_parts_mut(DynRawParts {
+            }).cast_mut()
+        }).unwrap();
+        let u = NonNull::new(unsafe {
+            USource::from_raw_parts(DynRawParts {
                 data: u_ptr.as_ptr(),
                 vtable: u_vtable,
-            })
-        });
+            }).cast_mut()
+        }).unwrap();
         let a = unsafe {
             let _ptr = ptr.add(alloc_off).cast();
             _ptr.write(Allocation { ptr, size, align });

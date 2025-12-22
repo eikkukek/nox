@@ -180,7 +180,7 @@ pub fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<Option<p
                     fmt.insert(idx, '_');
                 }
                 Some(quote! {
-                    impl #generics #generics core::fmt::Display for #name #generic_idents #where_clause
+                    impl #generics core::fmt::Display for #name #generic_idents #where_clause
                     {
                         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                             let Self(#( #names ),*) = self;

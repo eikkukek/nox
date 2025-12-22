@@ -4,16 +4,16 @@ use crate::version::Version;
 use crate::win;
 
 pub struct Attributes {
-    pub app_name: CompactString,
-    pub window_attributes: win::WindowAttributes,
-    pub app_version: Version,
-    pub vulkan_validation: bool,
+    app_name: CompactString,
+    window_attributes: win::WindowAttributes,
+    app_version: Version,
+    vulkan_validation: bool,
 }
 
 impl Attributes {
 
     #[inline(always)]
-    pub fn new(
+    pub(crate) fn new(
         app_name: impl AsRef<str>,
         window_attributes: win::WindowAttributes,
     ) -> Self
@@ -34,6 +34,10 @@ impl Attributes {
     pub fn with_vulkan_validation(mut self, value: bool) -> Self {
         self.vulkan_validation = value;
         self
+    }
+
+    pub fn on_init<'a>(&self, token: &'a mut ()) -> &'a mut u8 {
+        todo!()
     }
 }
 

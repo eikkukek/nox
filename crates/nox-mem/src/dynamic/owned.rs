@@ -4,9 +4,46 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{Allocator, global_alloc::GlobalAlloc};
+use crate::{
+    Allocator,
+    global_alloc::GlobalAlloc,
+    const_assert,
+};
 
 use super::{Dyn, DynRawParts};
+
+pub unsafe trait InitKind {
+
+    fn new(size: usize, align: usize) -> Self;
+
+    fn uninit_size_align(&self) -> Option<(usize, usize)>;
+}
+
+pub struct Init;
+
+unsafe impl InitKind for Init {
+
+    fn new(_size: usize, _align: usize) -> Self {
+        Self
+    }
+
+    fn uninit_size_align(&self) -> Option<(usize, usize)> {
+        None
+    }
+}
+
+pub struct Uninit(usize, usize);
+
+unsafe impl InitKind for Uninit {
+
+    fn new(size: usize, align: usize) -> Self {
+        Self(size, align)
+    }
+
+    fn uninit_size_align(&self) -> Option<(usize, usize)> {
+        Some((self.0, self.1))
+    }
+}
 
 union Data<T: ?Sized> {
     non_null: NonNull<T>,
@@ -28,23 +65,36 @@ impl<T: ?Sized> Data<T> {
     }
 }
 
-pub struct Owned<T: ?Sized> {
+pub struct OwnedBase<T, Kind>
+    where 
+        T: ?Sized,
+        Kind: InitKind,
+{
     data: Data<T>,
+    kind: Kind,
 }
 
-impl<T: ?Sized> Owned<T> {
+const_assert!(size_of::<Owned<dyn core::any::Any>>() == 16);
+const_assert!(size_of::<OwnedMaybeUninit<dyn core::any::Any>>() == 32);
+
+impl<T, Kind> OwnedBase<T, Kind>
+    where 
+        T: ?Sized,
+        Kind: InitKind,
+{
 
     pub fn new<Source>(t: Source) -> Self
         where 
-            Source: Dyn<Target = T>
+            Source: Dyn<Target = T>,
     {
         unsafe {
-            let vtable = t
-                .raw_parts().vtable;
-            if size_of::<Source>() == 0 {
+            let vtable = Source::raw_parts(&t).vtable;
+            let size = size_of::<Source>();
+            if size == 0 {
                 let _ = MaybeUninit::new(t);
                 return Self {
                     data: Data::just_vtable(vtable),
+                    kind: InitKind::new(0, 0),
                 }
             }
             let data = GlobalAlloc
@@ -52,23 +102,103 @@ impl<T: ?Sized> Owned<T> {
                 .expect("global alloc failed");
             data.write(t);
             Self {
-                data: Data::non_null(NonNull::from_mut(Source::from_raw_parts_mut(
+                data: Data::non_null(NonNull::new(Source::from_raw_parts(
                     DynRawParts { data: data.as_ptr(), vtable }
-                )))
+                ).cast_mut()).unwrap()),
+                kind: InitKind::new(size, align_of::<Source>()),
             }
         }
     }
 
-    /// If the vtable of [Source] matches the vtable of [T], this function moves the value
-    /// and returns [Source], otherwise it returns [None].
-    pub unsafe fn take_value<Source>(self) -> Option<Source>
+    #[inline(always)]
+    fn as_ptr_internal(&self) -> *const T {
+        unsafe {
+            if self.data.raw_parts.0.is_null() {
+                let addr = &self.data;
+                let data = Data {
+                    raw_parts: (addr as *const _ as *const (), self.data.raw_parts.1),
+                };
+                data.non_null.as_ptr()
+            } else {
+                self.data.non_null.as_ptr()
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn as_ref_internal(&self) -> &T {
+        unsafe {
+            self.as_ptr_internal()
+                .as_ref()
+                .unwrap()
+        }
+    }
+
+    #[inline(always)]
+    fn as_mut_internal(&mut self) -> &mut T {
+        unsafe {
+            self.as_ptr_internal()
+                .cast_mut()
+                .as_mut()
+                .unwrap()
+        }
+    }
+
+    #[inline(always)]
+    fn as_source_ptr_internal<Source>(&self) -> Option<*const Source>
+        where 
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        unsafe {
+            let vtable = Source::raw_parts_uninit().vtable;
+            if self.data.raw_parts.1 != vtable {
+                return None
+            }
+            if self.data.raw_parts.0.is_null() {
+                let addr = &self.data;
+                Some(mem::transmute::<*const Data<T>, *const Source>(addr))
+            } else {
+                let non_null = self.data.non_null;
+                Some(Source
+                    ::get_self(non_null.as_ptr())
+                )
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn as_source_ref_internal<Source>(&self) -> Option<&Source>
         where
             T: 'static,
             Source: Dyn<Target = T>,
     {
         unsafe {
-            let uninit = MaybeUninit::<Source>::uninit();
-            let vtable = uninit.assume_init_ref().raw_parts().vtable;
+            self.as_source_ptr_internal::<Source>()
+                .map(|v| v.as_ref().unwrap())
+        }
+    }
+
+    #[inline(always)]
+    fn as_source_mut_internal<Source>(&mut self) -> Option<&mut Source>
+        where
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        unsafe {
+            self.as_source_ptr_internal::<Source>()
+                .map(|v| v.cast_mut().as_mut().unwrap())
+        }
+    }
+
+    #[inline(always)]
+    pub fn take_source_internal<Source>(self) -> Option<Source>
+        where
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        unsafe {
+            let vtable = Source::raw_parts_uninit().vtable;
             if self.data.raw_parts.1 != vtable {
                 return None
             }
@@ -77,16 +207,19 @@ impl<T: ?Sized> Owned<T> {
                 let value = mem
                     ::transmute::<*mut (), *const Source>(&mut unit)
                     .read();
+                let _ = MaybeUninit::new(self);
                 Some(value)
             } else {
                 let non_null = self.data.non_null;
-                let value = Source::read_self(non_null.as_ptr());
+                let value = Source
+                    ::get_self(non_null.as_ptr())
+                    .read();
                 let size = size_of_val(&value);
                 let align = align_of_val(&value);
                 GlobalAlloc.free_raw(
                     non_null.cast(),
                     size,
-                    align
+                    align,
                 );
                 let _ = MaybeUninit::new(self);
                 Some(value)
@@ -95,58 +228,208 @@ impl<T: ?Sized> Owned<T> {
     }
 }
 
+pub type Owned<T> = OwnedBase<T, Init>;
+
+impl<T: ?Sized> Owned<T> { 
+
+    /// If the vtable of [`Source`] matches the vtable of [`T`], this function takes a reference
+    /// of the value and returns [`&Source`], otherwise it returns [`None`].
+    pub fn as_source_ref<Source>(&self) -> Option<&Source>
+        where
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        self.as_source_ref_internal()
+    }
+
+
+    /// If the vtable of [`Source`] matches the vtable of [`T`], this function takes a mutable
+    /// reference of the value
+    /// and returns [`&mut Source`], otherwise it returns [`None`].
+    pub fn as_mut<Source>(&mut self) -> Option<&mut Source>
+        where
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        self.as_source_mut_internal()
+    }
+
+    /// If the vtable of [`Source`] matches the vtable of [`T`], this function moves the value,
+    /// deallocates memory and returns [`Source`], otherwise it returns [`None`].
+    pub fn take_source<Source>(self) -> Option<Source>
+        where
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        self.take_source_internal()
+    }
+}
+
+pub type OwnedMaybeUninit<T> = OwnedBase<T, Uninit>;
+
+impl<T: ?Sized> OwnedMaybeUninit<T> {
+
+    pub fn uninit<Source>() -> Self
+        where 
+            Source: Dyn<Target = T>
+    {
+        unsafe {
+            let vtable = Source::raw_parts_uninit().vtable;
+            let size = size_of::<Source>();
+            if size == 0 {
+                return Self {
+                    data: Data::just_vtable(vtable),
+                    kind: InitKind::new(0, 0),
+                }
+            }
+            let data = GlobalAlloc
+                .allocate_uninit(1)
+                .expect("global alloc failed");
+            Self {
+                data: Data::non_null(NonNull::new(Source::from_raw_parts(
+                    DynRawParts { data: data.as_ptr(), vtable, }
+                ).cast_mut()).unwrap()),
+                kind: InitKind::new(size, align_of::<Source>()),
+            }
+        }
+    }
+
+    pub fn write<Source>(
+        &mut self,
+        value: Source,
+    ) -> Option<&mut Source>
+        where 
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        unsafe {
+            let ptr = self
+                .as_source_ptr_internal::<Source>()?
+                .cast_mut();
+            ptr.write(value);
+            ptr.as_mut()
+        }
+    }
+
+    pub unsafe fn assume_init_drop(
+        &mut self,
+    ) {
+        unsafe {
+            self.as_ptr_internal()
+                .cast_mut()
+                .drop_in_place();
+        }
+    }
+
+    pub unsafe fn assume_init_ref(
+        &mut self,
+    ) -> &T
+    {
+        self.as_ref_internal()
+    }
+
+    pub unsafe fn assume_init_mut(
+        &mut self
+    ) -> &mut T
+    {
+        self.as_mut_internal()
+    }
+
+    pub unsafe fn assume_init_source<Source>(self) -> Option<Source>
+        where
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        self.take_source_internal()
+    }
+
+    pub unsafe fn assume_init_source_ref<Source>(&self) -> Option<&Source>
+        where 
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        self.as_source_ref_internal()
+    }
+
+    pub unsafe fn assume_init_source_mut<Source>(&mut self) -> Option<&mut Source>
+        where 
+            T: 'static,
+            Source: Dyn<Target = T>,
+    {
+        self.as_source_mut_internal()
+    }
+}
+
+unsafe impl<T, Kind> Send for OwnedBase<T, Kind>
+    where 
+        T: ?Sized + Send,
+        Kind: InitKind,
+{}
+
+unsafe impl<T, Kind> Sync for OwnedBase<T, Kind>
+    where 
+        T: ?Sized + Sync,
+        Kind: InitKind,
+{}
+
 impl<T: ?Sized> Deref for Owned<T> {
 
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe {
-            if self.data.raw_parts.0.is_null() {
-                let addr = &self.data;
-                let data = Data {
-                    raw_parts: (addr as *const _ as *const (), self.data.raw_parts.1),
-                };
-                data.non_null.as_ref()
-            } else {
-                self.data.non_null.as_ref()
-            }
-        }
+        self.as_ref_internal()
     }
 }
 
 impl<T: ?Sized> DerefMut for Owned<T> {
 
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe {
-            if self.data.raw_parts.0.is_null() {
-                let addr = &self.data;
-                let mut data = Data {
-                    raw_parts: (addr as *const _ as *const (), self.data.raw_parts.1),
-                };
-                data.non_null.as_mut()
-            } else {
-                self.data.non_null.as_mut()
-            }
-        }
+        self.as_mut_internal()
     }
 }
 
-impl<T: ?Sized> Drop for Owned<T> {
+impl<T: ?Sized> AsRef<T> for Owned<T> {
+
+    fn as_ref(&self) -> &T {
+        self.as_ref_internal()
+    }
+}
+
+impl<T: ?Sized> AsMut<T> for Owned<T> {
+
+    fn as_mut(&mut self) -> &mut T {
+        self.as_mut_internal()
+    }
+}
+
+impl<T, Kind> Drop for OwnedBase<T, Kind>
+    where 
+        T: ?Sized,
+        Kind: InitKind,
+{
 
     fn drop(&mut self) {
         unsafe {
             if self.data.raw_parts.0.is_null() {
-                let addr = &self.data;
-                let data = Data::<T> {
-                    raw_parts: (addr as *const _ as *const (), self.data.raw_parts.1),
-                };
-                data.non_null.drop_in_place();
+                if self.kind.uninit_size_align().is_none() {
+                    let addr = &self.data;
+                    let data = Data::<T> {
+                        raw_parts: (addr as *const _ as *const (), self.data.raw_parts.1),
+                    };
+                    data.non_null.drop_in_place();
+                }
             } else {
-                let data_mut = self.deref_mut();
-                let size = size_of_val(data_mut);
-                let align = align_of_val(data_mut);
+                let (size, align) =
+                if let Some((size, align)) = self.kind.uninit_size_align() {
+                    (size, align)
+                } else {
+                    let data_mut = self.as_mut_internal();
+                    let size = size_of_val(data_mut);
+                    let align = align_of_val(data_mut);
+                    self.data.non_null.drop_in_place();
+                    (size, align)
+                };
                 let ptr = self.data.non_null.cast();
-                self.data.non_null.drop_in_place();
                 GlobalAlloc.free_raw(
                     ptr,
                     size,
@@ -156,6 +439,3 @@ impl<T: ?Sized> Drop for Owned<T> {
         }
     }
 }
-
-unsafe impl<T: ?Sized + Send> Send for Owned<T> {}
-unsafe impl<T: ?Sized + Sync> Sync for Owned<T> {}

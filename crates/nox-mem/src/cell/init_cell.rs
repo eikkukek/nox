@@ -29,11 +29,11 @@ impl<T, Token: CellToken> InitCell<T, Token>
     }
 
     #[inline(always)]
-    pub fn borrow_or_init(
+    pub fn borrow_or_init<'a>(
         &self,
-        token: &mut Token,
+        token: &'a mut Token,
         f: impl FnOnce() -> T,
-    ) -> &mut T
+    ) -> &'a mut T
     {
         token.validate(&self.identifier);
         unsafe {
@@ -46,11 +46,11 @@ impl<T, Token: CellToken> InitCell<T, Token>
     }
    
     #[inline(always)]
-    pub fn borrow_or_try_init<E>(
+    pub fn borrow_or_try_init<'a, E>(
         &self,
-        token: &mut Token,
+        token: &'a mut Token,
         f: impl FnOnce() -> Result<T, E>,
-    ) -> Result<&mut T, E>
+    ) -> Result<&'a mut T, E>
     {
         token.validate(&self.identifier);
         unsafe {
@@ -63,22 +63,16 @@ impl<T, Token: CellToken> InitCell<T, Token>
     }
 
     #[inline(always)]
-    pub fn borrow(&self, token: &Token) -> Option<&T> {
+    pub fn borrow<'a>(&self, token: &'a Token) -> Option<&'a T> {
         token.validate(&self.identifier);
         let cell = unsafe { &*self.cell.get() };
         cell.data.as_ref()
     }
 
     #[inline(always)]
-    pub fn borrow_mut(&self, token: &mut Token) -> Option<&mut T> {
+    pub fn borrow_mut<'a>(&self, token: &'a mut Token) -> Option<&'a mut T> {
         token.validate(&self.identifier);
         let cell = unsafe { &mut *self.cell.get() };
-        cell.data.as_mut()
-    }
-
-    #[inline(always)]
-    pub fn get_mut(&mut self) -> Option<&mut T> {
-        let cell = self.cell.get_mut();
         cell.data.as_mut()
     }
 }

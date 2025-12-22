@@ -14,7 +14,7 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 
 /// Derive macro for [Dyn]
-#[proc_macro_derive(Dyn, attributes(wrapped, bounds))]
+#[proc_macro_derive(Dyn, attributes(bounds))]
 pub fn r#dyn(item: TokenStream) -> TokenStream {
     r#dyn::r#dyn(item)
 }

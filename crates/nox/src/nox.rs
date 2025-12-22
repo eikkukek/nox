@@ -140,7 +140,12 @@ impl<'a, I: Interface> Drop for Nox<'a, I> {
 
 impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent
+    ) {
         if self.error_set() {
             return
         }

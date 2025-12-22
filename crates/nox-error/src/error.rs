@@ -3,7 +3,7 @@ use core::{
     fmt::{self, Display, Debug, Formatter},
 };
 
-use nox_proc::Error;
+use nox_proc::{Error, Display};
 
 use nox_mem::dynamic::{Dyn, Pair};
 
@@ -47,11 +47,22 @@ pub struct Error {
     loc: Option<Location>,
 }
 
-#[derive(Dyn)] #[wrapped(&self.0)] #[bounds(Display + Send + Sync)]
+#[derive(Dyn, Display)]
+#[display("{0}")]
+#[bounds(Display + Send + Sync)]
 struct WrapCtx<T: Display + Send + Sync + 'static>(T);
 
-#[derive(Dyn)] #[wrapped(&self.0)] #[bounds(error::Error + Send + Sync)]
+#[derive(Dyn, Error)]
+#[display("{0}")]
+#[bounds(error::Error + Send + Sync)]
 struct WrapErr<T: error::Error + Send + Sync + 'static>(T);
+
+impl<T: error::Error + Send + Sync + 'static> Debug for WrapErr<T> {
+
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        <T as Debug>::fmt(&self.0, f)
+    }
+}
 
 impl Error { 
 

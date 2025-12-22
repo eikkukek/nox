@@ -38,22 +38,6 @@
         let generics = &input.generics;
         let generic_idents: GenericIdents = generics.into();
         let where_clause = &generics.where_clause;
-        let wrap =
-        if let Some(attr) = input.attrs
-            .iter()
-            .find(|attr| {
-                if let Some(ident) = attr.path().get_ident() {
-                    ident == "wrapped"
-                } else {
-                    false
-                }
-            })
-        {
-            let bounds = attr.parse_args::<syn::Expr>()?;
-            quote! { #bounds }
-        } else {
-            quote! { self }
-        };
         if let Some(attr) = input.attrs
             .iter()
             .find(|attr| {
@@ -79,8 +63,8 @@
 
                         type Target = dyn #bounds;
                         
-                        unsafe fn raw_parts(&self) -> #pkg_path::dynamic::DynRawParts<Self> {
-                            let s: &Self::Target = #wrap;
+                        unsafe fn raw_parts(ptr: *const Self) -> #pkg_path::dynamic::DynRawParts<Self> {
+                            let s: *const Self::Target = ptr;
                             let (data, vtable) = unsafe { core::mem::transmute::<*const Self::Target, (*const Self, *const ())>(s) };
                             #pkg_path::dynamic::DynRawParts {
                                 data,
@@ -88,18 +72,15 @@
                             }
                         }
 
-                        unsafe fn from_raw_parts_mut<'a>(raw_parts: #pkg_path::dynamic::DynRawParts<Self>) -> &'a mut Self::Target {
+                        unsafe fn from_raw_parts(raw_parts: #pkg_path::dynamic::DynRawParts<Self>) -> *const Self::Target {
                             unsafe { core::mem
                                 ::transmute::<(*const Self, *const ()), *mut Self::Target>((raw_parts.data, raw_parts.vtable))
-                                .as_mut()
-                                .unwrap()
                             }
                         }
 
-                        unsafe fn read_self(target: *mut Self::Target) -> Self {
+                        unsafe fn get_self(target: *const Self::Target) -> *const Self {
                             unsafe { core::mem
-                                ::transmute::<*mut Self::Target, (*const Self, *const ())>(target)
-                                .0.read()
+                                ::transmute::<*const Self::Target, (*const Self, *const ())>(target).0
                             }
                         }
                     }
