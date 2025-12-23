@@ -16,6 +16,8 @@ use crate::dev::{
     has_not_bits,
 };
 
+use crate::misc::ToRef;
+
 use crate::gpu::*;
 use crate::gpu::frame_context::ImageSource;
 
@@ -74,8 +76,8 @@ impl<'a> FrameGraph<'a> {
     }
 
     #[track_caller]
-    pub fn swapchain_image(&mut self, window_id: win::WindowId) -> Result<ResourceId> {
-        self.frame_context.swapchain_image(window_id, caller!())
+    pub fn swapchain_image(&mut self, window_id: impl ToRef<win::WindowId>) -> Result<ResourceId> {
+        self.frame_context.swapchain_image(*window_id.to_ref(), caller!())
     }
 
     #[track_caller]

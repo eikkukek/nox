@@ -34,11 +34,6 @@ use ash::vk;
 
 pub use vk::Format as VkFormat;
 
-use winit::{
-    window::Window,
-    event_loop::ActiveEventLoop,
-};
-
 use compact_str::format_compact;
 
 use nox_mem::{
@@ -116,7 +111,7 @@ pub(crate) struct Gpu {
 impl Gpu {
 
     pub fn new(
-        event_loop: &ActiveEventLoop,
+        event_loop: &event_loop::WinitActiveEventLoop,
         app_name: &str,
         app_version: Version,
         enable_validation: bool,
@@ -656,7 +651,7 @@ impl Gpu {
 
     pub(crate) fn render<'a>(
         &mut self,
-        win: &mut win::WindowContext<'_, 'a>,
+        event_loop: &mut event_loop::ActiveEventLoop<'_, 'a>,
         interface: &mut impl Interface,
         host_allocators: &'a HostAllocators,
         tmp_alloc: ArenaGuard,
@@ -787,10 +782,10 @@ impl Gpu {
                 .context("failed to reset graphics submit fence")?;
         }
         let mut surfaces = FixedVec::with_capacity(
-            win.active_ids().len(),
+            event_loop.active_window_ids().len(),
             &tmp_alloc,
         ).context(ErrorContext::VecError(location!()))?;
-        for (id, win) in win.window_iter_mut() {
+        for (id, win) in event_loop.window_iter_mut() {
             let id = *id;
             let surface = win.surface();
             let (swapchain, recreated) = surface

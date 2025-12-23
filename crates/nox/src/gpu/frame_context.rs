@@ -99,7 +99,9 @@ impl<'a> FrameContext<'a> {
     {
         let frame_data = self.resource_pool.pool
             .swapchain_frame_data.get(&win_id)
-            .ok_or_else(|| Error::just_context(format_compact!("invalid window id {win_id:?}")))?;
+            .ok_or_else(|| {
+                Error::just_context(format_compact!("invalid window id {win_id:?}"))
+            })?;
         Ok(ResourceId {
             format: frame_data.format,
             samples: MSAA::X1,

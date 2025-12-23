@@ -3,7 +3,7 @@ mod r#ref;
 
 use core::cell::UnsafeCell;
 
-use crate::{win, gpu};
+use crate::{event_loop, gpu};
 
 use crate::error as pub_error;
 use crate::dev::error as dev_error;
@@ -29,7 +29,7 @@ impl<'a> OnInit<'a> {
 
     pub fn add<T: 'a>(
         &self,
-        f: impl FnOnce(&mut win::WindowContext, &mut gpu::GpuContext) -> pub_error::Result<T> + 'a,
+        f: impl FnOnce(&mut event_loop::ActiveEventLoop, &mut gpu::GpuContext) -> pub_error::Result<T> + 'a,
     ) -> Ref<'_, T> {
         unsafe {
             assert!(!*self.initialized.get(), "OnInit can't be reused");
@@ -51,7 +51,7 @@ impl<'a> OnInit<'a> {
 
     pub(crate) fn init(
         &self,
-        win: &mut win::WindowContext,
+        win: &mut event_loop::ActiveEventLoop,
         gpu: &mut gpu::GpuContext,
     ) -> dev_error::Result<()> {
         unsafe {

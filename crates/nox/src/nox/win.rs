@@ -2,10 +2,9 @@ use std::time;
 
 use core::ops::{Deref, DerefMut};
 
-use winit::{
-    keyboard::{PhysicalKey, Key},
-    event_loop::ActiveEventLoop,
-};
+use winit::keyboard::{PhysicalKey, Key};
+
+pub(crate) use winit::window::Window as WinitWindow;
 
 use rustc_hash::FxHashMap;
 
@@ -32,7 +31,7 @@ use winit::dpi::LogicalSize;
 use crate::dev::error::Result;
 
 #[derive(Clone)]
-pub struct NoxWindowAttributes {
+pub struct WindowAttributes {
     title: String,
     size: [u32; 2],
     enabled_buttons: win::WindowButtons,
@@ -40,7 +39,7 @@ pub struct NoxWindowAttributes {
     attr: u32,
 }
 
-impl NoxWindowAttributes {
+impl WindowAttributes {
 
     const RESIZABLE: u32 = 0x1;
     const MAXIMIZED: u32 = 0x2;
@@ -50,7 +49,7 @@ impl NoxWindowAttributes {
 
     /// Creates [`WindowAttributes`] with default values.
     #[inline(always)]
-    fn new() -> Self
+    pub(super) fn new() -> Self
     {
         Self {
             title: String::new(),
@@ -189,7 +188,7 @@ impl NoxWindowAttributes {
 
     #[inline(always)]
     pub(crate) fn to_winit_attr(self) -> winit::window::WindowAttributes {
-        Window::default_attributes()
+        WinitWindow::default_attributes()
             .with_resizable(self.resizable())
             .with_maximized(self.maximized())
             .with_transparent(self.transparent())
@@ -237,16 +236,16 @@ impl InputState {
     }
 }
 
-pub struct NoxWindow<'a> {
-    pub(super) handle: Window,
+pub struct Window<'a> {
+    clipboard: Clipboard,
+    surface: gpu::Surface<'a>,
+    pub(super) handle: WinitWindow,
     host_allocators: &'a gpu::HostAllocators,
     buffered_frames: u32,
-    surface: gpu::Surface<'a>,
     physical_keys: FxHashMap<PhysicalKey, InputState>,
     logical_keys: FxHashMap<Key, InputState>,
     mouse_buttons: FxHashMap<MouseButton, InputState>,
     pub(super) input_text: GlobalVec<(KeyCode, CompactString)>,
-    clipboard: Clipboard,
     size: (u32, u32),
     cursor_position: (f64, f64),
     mouse_scroll_pixel_delta: (f64, f64),
@@ -256,7 +255,7 @@ pub struct NoxWindow<'a> {
     pub(super) flags: u32,
 }
 
-impl<'a> NoxWindow<'a> {
+impl<'a> Window<'a> {
 
     pub(super) const CURSOR_MOVED: u32 = 0x1;
     pub(super) const CURSOR_SET: u32 = 0x2;
@@ -264,13 +263,13 @@ impl<'a> NoxWindow<'a> {
     pub(super) const TRANSPARENT_SET: u32 = 0x8;
     pub(super) const SHOULD_CLOSE: u32 = 0x10;
 
-    pub fn default_attributes() -> NoxWindowAttributes {
-        NoxWindowAttributes::new()
+    pub fn default_attributes() -> WindowAttributes {
+        WindowAttributes::new()
     }
 
-    fn new(
+    pub(super) fn new(
         gpu: &mut gpu::GpuContext,
-        window: Window,
+        window: WinitWindow,
         is_transparent: bool,
         host_allocators: &'a gpu::HostAllocators,
     ) -> Result<Self>
@@ -303,7 +302,7 @@ impl<'a> NoxWindow<'a> {
     }
 
     #[inline(always)]
-    fn should_close(&self) -> bool {
+    pub(super) fn should_close(&self) -> bool {
         self.flags & Self::SHOULD_CLOSE == Self::SHOULD_CLOSE
     }
 
@@ -461,7 +460,7 @@ impl<'a> NoxWindow<'a> {
             .held as u32 as f32
     }
 
-    pub fn process_event(&mut self, event: WindowEvent) {
+    pub(super) fn process_event(&mut self, event: WindowEvent) {
         match event {
             WindowEvent::CursorMoved { device_id: _, position } => {
                 self.cursor_position = (position.x, position.y);
@@ -524,7 +523,7 @@ impl<'a> NoxWindow<'a> {
         }
     }
 
-    fn reset_input(&mut self) {
+    pub(super) fn reset_input(&mut self) {
         self.mouse_scroll_pixel_delta = (0.0, 0.0); 
         self.mouse_scroll_line_delta = (0.0, 0.0);
         self.physical_keys.retain(|_, v| {
@@ -545,102 +544,24 @@ impl<'a> NoxWindow<'a> {
     }
 }
 
-impl<'a> Drop for NoxWindow<'a> {
+impl<'a> Drop for Window<'a> {
 
     fn drop(&mut self) {
         self.surface.clean_up(self.host_allocators);
     }
 }
 
-pub struct NoxWindowRef<'a, 'b> {
-    window: &'a NoxWindow<'b>,
-    delta_time: time::Duration,
-}
-
-pub struct NoxWindowRefMut<'a, 'b> {
-    window: &'a mut NoxWindow<'b>,
-    delta_time: time::Duration,
-}
-
-pub struct WindowStorage<'a> {
-    windows: FxHashMap<WindowId, NoxWindow<'a>>,
-    active_ids: GlobalVec<WindowId>,
-    pub(super) monitors: GlobalVec<MonitorHandle>,
-    pub(super) delta_counter: time::Instant,
+pub struct WindowRef<'a, 'b> {
+    pub(super) window: &'a Window<'b>,
     pub(super) delta_time: time::Duration,
 }
 
-impl<'a> WindowStorage<'a> {
-
-    #[inline(always)]
-    pub(crate) fn new() -> Self {
-        Self {
-            windows: FxHashMap::default(),
-            active_ids: Default::default(),
-            monitors: Default::default(),
-            delta_counter: time::Instant::now(),
-            delta_time: Default::default(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn monitors(&self) -> &[MonitorHandle] {
-        &self.monitors
-    }
-
-    #[inline(always)]
-    pub(crate) fn window_iter_mut(&mut self) -> impl Iterator<Item = (&WindowId, &mut NoxWindow<'a>)> {
-        self.windows
-            .iter_mut()
-    }
-
-    #[inline(always)]
-    pub fn window(&self, id: WindowId) -> Option<NoxWindowRef<'_, 'a>> {
-        Some(NoxWindowRef {
-            window: self.windows.get(&id)?,
-            delta_time: self.delta_time,
-        })
-    }
-
-    #[inline(always)]
-    pub fn window_mut(&mut self, id: WindowId) -> Option<NoxWindowRefMut<'_, 'a>> {
-        Some(NoxWindowRefMut {
-            window: self.windows.get_mut(&id)?,
-            delta_time: self.delta_time,
-        })
-    } 
-
-    #[inline(always)]
-    pub fn delta_time(&self) -> time::Duration {
-        self.delta_time
-    }
-
-    #[inline(always)]
-    pub fn delta_time_secs_f32(&self) -> f32 {
-        self.delta_time.as_secs_f32()
-    }
-
-    pub fn active_ids(&self) -> &[WindowId] {
-        &self.active_ids
-    }
-
-    #[inline(always)]
-    pub(super) fn update(&mut self) {
-        let count = self.windows.len();
-        self.windows.retain(|_, win| {
-            win.reset_input();
-            !win.should_close()
-        });
-        if count != self.windows.len() {
-            self.active_ids.clear();
-            for (id, _) in &self.windows {
-                self.active_ids.push(*id);
-            }
-        }
-    }
+pub struct WindowRefMut<'a, 'b> {
+    pub(super) window: &'a mut Window<'b>,
+    pub(super) delta_time: time::Duration,
 }
 
-impl<'a, 'b> NoxWindowRef<'a, 'b> {
+impl<'a, 'b> WindowRef<'a, 'b> {
 
     #[inline(always)]
     pub fn delta_time(&self) -> time::Duration {
@@ -653,16 +574,16 @@ impl<'a, 'b> NoxWindowRef<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Deref for NoxWindowRef<'a, 'b> {
+impl<'a, 'b> Deref for WindowRef<'a, 'b> {
 
-    type Target = NoxWindow<'b>;
+    type Target = Window<'b>;
 
     fn deref(&self) -> &Self::Target {
         self.window
     }
 }
 
-impl<'a, 'b> NoxWindowRefMut<'a, 'b> {
+impl<'a, 'b> WindowRefMut<'a, 'b> {
 
     #[inline(always)]
     pub fn delta_time(&self) -> time::Duration {
@@ -675,82 +596,18 @@ impl<'a, 'b> NoxWindowRefMut<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Deref for NoxWindowRefMut<'a, 'b> {
+impl<'a, 'b> Deref for WindowRefMut<'a, 'b> {
 
-    type Target = NoxWindow<'b>;
+    type Target = Window<'b>;
 
     fn deref(&self) -> &Self::Target {
         self.window
     }
 }
 
-impl<'a, 'b> DerefMut for NoxWindowRefMut<'a, 'b> {
+impl<'a, 'b> DerefMut for WindowRefMut<'a, 'b> {
 
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.window
-    }
-}
-
-pub struct WindowContext<'a, 'b> {
-    storage: &'a mut WindowStorage<'b>,
-    event_loop: &'a ActiveEventLoop,
-    memory: &'b Memory,
-}
-
-impl<'a, 'b> WindowContext<'a, 'b> {
-
-    pub(super) fn new(
-        storage: &'a mut WindowStorage<'b>,
-        event_loop: &'a ActiveEventLoop,
-        memory: &'b Memory,
-    ) -> Self {
-        Self {
-            storage,
-            event_loop,
-            memory,
-        }
-    }
-
-    pub fn create_window(
-        &mut self,
-        gpu: &mut gpu::GpuContext,
-        attributes: NoxWindowAttributes,
-    ) -> Result<WindowId>
-    {
-        let is_transparent = attributes.transparent();
-        let attr = attributes.to_winit_attr();
-        let window = self.event_loop
-            .create_window(attr)
-            .context("failed to create window")?;
-        let id = window.id();
-        let window = NoxWindow::new(
-            gpu, window,
-            is_transparent,
-            self.memory.gpu().host_allocators()
-        )?;
-        self.windows
-            .entry(id)
-            .or_insert(window);
-        self.active_ids.clear();
-        for (id, _) in &self.storage.windows {
-            self.storage.active_ids.push(*id);
-        }
-        Ok(id)
-    }
-}
-
-impl<'a, 'b> Deref for WindowContext<'a, 'b> {
-
-    type Target = WindowStorage<'b>;
-
-    fn deref(&self) -> &Self::Target {
-        self.storage
-    }
-}
-
-impl<'a, 'b> DerefMut for WindowContext<'a, 'b> {
-
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.storage
     }
 }

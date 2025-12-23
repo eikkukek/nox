@@ -11,7 +11,7 @@ use nox_mem::{
 
 use nox_error::{Context, Tracked};
 
-use crate::{win, gpu};
+use crate::{event_loop, gpu};
 
 use super::pub_error;
 use super::dev_error;
@@ -25,7 +25,7 @@ pub(super) struct Data<'a> {
     size: usize,
     align: usize,
     init: NonNull<dyn FnMut(
-        &mut win::WindowContext,
+        &mut event_loop::ActiveEventLoop,
         &mut gpu::GpuContext,
         *mut (dyn DynAny + 'a),
     ) -> dev_error::Result<()>>,
@@ -36,11 +36,11 @@ impl<'a> Data<'a> {
 
     fn make_f<T>(
         f: impl FnOnce(
-            &mut win::WindowContext,
+            &mut event_loop::ActiveEventLoop,
             &mut gpu::GpuContext,
         ) -> pub_error::Result<T>
     ) -> impl FnMut(
-            &mut win::WindowContext,
+            &mut event_loop::ActiveEventLoop,
             &mut gpu::GpuContext,
             *mut (dyn DynAny + 'a)
         ) -> dev_error::Result<()>
@@ -72,7 +72,7 @@ impl<'a> Data<'a> {
         where 
             T: 'a,
             F: FnOnce(
-                &mut win::WindowContext,
+                &mut event_loop::ActiveEventLoop,
                 &mut gpu::GpuContext,
             ) -> pub_error::Result<T>,
     {
@@ -100,7 +100,7 @@ impl<'a> Data<'a> {
         };
         let init = unsafe {
             let s: *const dyn FnMut(
-                &mut win::WindowContext,
+                &mut event_loop::ActiveEventLoop,
                 &mut gpu::GpuContext,
                 *mut (dyn DynAny + 'a)
             ) -> dev_error::Result<()> = &f;
@@ -111,7 +111,7 @@ impl<'a> Data<'a> {
             mem::transmute::<
                 _,
                 NonNull<dyn FnMut(
-                    &mut win::WindowContext,
+                    &mut event_loop::ActiveEventLoop,
                     &mut gpu::GpuContext,
                     *mut (dyn DynAny + 'a),
                 ) -> dev_error::Result<()>>
@@ -144,7 +144,7 @@ impl<'a> Data<'a> {
 
     pub fn init(
         &mut self,
-        win: &mut win::WindowContext,
+        win: &mut event_loop::ActiveEventLoop,
         gpu: &mut gpu::GpuContext,
     ) -> dev_error::Result<()> {
         let init = unsafe {

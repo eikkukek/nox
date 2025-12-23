@@ -1,4 +1,6 @@
 pub mod win;
+pub mod event_loop;
+mod event;
 mod expand_error;
 
 pub mod error_util {
@@ -10,10 +12,10 @@ use std::{
 };
 
 use winit::{
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    event_loop::ControlFlow,
     application::ApplicationHandler,
     event::*,
-    window::{WindowId, Window},
+    window::WindowId,
 };
 
 use rustc_hash::FxHashSet;
@@ -23,6 +25,9 @@ use nox_alloc::arena_alloc::ArenaGuard;
 
 use nox_error::Context;
 
+pub use event::Event;
+use event_loop::{EventLoop, ActiveEventLoop, WinitEventLoop, WinitActiveEventLoop};
+
 use crate::{
     dev::{
         error::{ErrorContext, Tracked},
@@ -30,7 +35,6 @@ use crate::{
     },
     log,
     Attributes,
-    Event,
     gpu,
     expand_error,
     OnInit,
@@ -100,7 +104,7 @@ impl Nox {
         NoxRun {
             interface,
             attributes,
-            window_storage: win::WindowStorage::new(),
+            event_loop: EventLoop::new(),
             redraws_requested: FxHashSet::default(),
             on_init,
             memory,
@@ -116,7 +120,7 @@ pub struct NoxRun<'a, 'b, I>
 {
     interface: I,
     attributes: Attributes,
-    window_storage: win::WindowStorage<'a>,
+    event_loop: EventLoop<'a>,
     redraws_requested: FxHashSet<WindowId>,
     on_init: &'a OnInit<'b>,
     memory: &'a Memory,
@@ -129,18 +133,12 @@ impl<'a, 'b, I> NoxRun<'a, 'b, I>
         I: Interface,
 {
 
-    const ERROR: u32 = 0x1; 
-    const CLOSE_ON_NO_WINDOWS: u32 = 0x2;
+    const CLOSE_ON_NO_WINDOWS: u32 = 0x1;
 
     pub fn run(mut self) {
-        let event_loop = EventLoop::new().unwrap();
+        let event_loop = WinitEventLoop::new().unwrap();
         event_loop.set_control_flow(ControlFlow::Poll);
         event_loop.run_app(&mut self).expect("failed to run event loop");
-    }
-
-    #[inline(always)]
-    fn error_set(&self) -> bool {
-        self.flags & Self::ERROR == Self::ERROR
     }
 
     #[inline(always)]
@@ -157,6 +155,7 @@ impl<'a, 'b, I: Interface> Drop for NoxRun<'a, 'b, I> {
             (self.interface)(Event::CleanUp {
                 gpu: &mut gpu.context()
             }).ok();
+            self.event_loop.clean_up();
             gpu.clean_up();
         }
     }
@@ -166,14 +165,14 @@ impl<'a, 'b, I: Interface> ApplicationHandler for NoxRun<'a, 'b, I> {
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &WinitActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent
     ) {
-        if self.error_set() {
+        if event_loop.exiting() {
             return
         }
-        if let Some(mut window) = self.window_storage.window_mut(window_id) {
+        if let Some(mut window) = self.event_loop.window_mut(window_id) {
             match event {
                 WindowEvent::RedrawRequested => {
                     self.redraws_requested.insert(window_id);
@@ -182,7 +181,7 @@ impl<'a, 'b, I: Interface> ApplicationHandler for NoxRun<'a, 'b, I> {
             }
         }
         let mut redraw = true;
-        for window in self.window_storage.active_ids() {
+        for window in self.event_loop.active_window_ids() {
             if !self.redraws_requested.contains(window) {
                 redraw = false;
             }
@@ -191,64 +190,60 @@ impl<'a, 'b, I: Interface> ApplicationHandler for NoxRun<'a, 'b, I> {
             self.redraws_requested.clear();
             let host_allocators = self.memory.gpu().host_allocators();
             if let Some(gpu) = &mut self.gpu {
-                self.window_storage.delta_time = self.window_storage.delta_counter.elapsed();
-                self.window_storage.delta_counter = time::Instant::now();
+                self.event_loop.delta_time = self.event_loop.delta_counter.elapsed();
+                self.event_loop.delta_counter = time::Instant::now();
                 if let Err(err) = (self.interface)(Event::Update {
-                    win: &mut win::WindowContext::new(
-                        &mut self.window_storage, event_loop,
+                    event_loop: &mut ActiveEventLoop::new(
+                        &mut self.event_loop, event_loop,
                         self.memory,
                     ),
                     gpu: &mut gpu.context(),
                 }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
                 {
                     event_loop.exit();
-                    self.flags |= Self::ERROR;
                     expand_error!(err);
                     return
                 }
-                for (_, win) in self.window_storage.window_iter_mut() {
-                    if win.cursor_set() {
-                        win.handle.set_cursor(win.current_cursor);
+                if !event_loop.exiting() {
+                    for (_, win) in self.event_loop.window_iter_mut() {
+                        if win.cursor_set() {
+                            win.handle.set_cursor(win.current_cursor);
+                        }
+                        win.flags &= !(
+                            win::Window::CURSOR_SET | win::Window::CURSOR_MOVED
+                        );
+                        win.input_text.clear();
+                        win.handle.request_redraw();
+                        if win.transparent_set() {
+                            let is = win.is_transparent();
+                            win.handle.set_transparent(is);
+                            win.flags &= !win::Window::TRANSPARENT_SET;
+                        }
                     }
-                    win.flags &= !(
-                        win::NoxWindow::CURSOR_SET | win::NoxWindow::CURSOR_MOVED
+                    let mut win = ActiveEventLoop::new(
+                        &mut self.event_loop,
+                        event_loop,
+                        self.memory,
                     );
-                    win.input_text.clear();
-                    win.handle.request_redraw();
-                    if win.transparent_set() {
-                        let is = win.is_transparent();
-                        win.handle.set_transparent(is);
-                        win.flags &= !win::NoxWindow::TRANSPARENT_SET;
+                    let tmp_alloc = ArenaGuard::new(self.memory.tmp_alloc());
+                    if let Err(err) = gpu 
+                        .render(&mut win, &mut self.interface, host_allocators, tmp_alloc)
+                        .context("failed to render")
+                    {
+                        event_loop.exit();
+                        expand_error!(err);
+                        return
                     }
-                }
-                let mut win = win::WindowContext::new(
-                    &mut self.window_storage,
-                    event_loop,
-                    self.memory,
-                );
-                let tmp_alloc = ArenaGuard::new(self.memory.tmp_alloc());
-                if let Err(err) = gpu 
-                    .render(&mut win, &mut self.interface, host_allocators, tmp_alloc)
-                    .context("failed to render")
-                {
-                    event_loop.exit();
-                    self.flags |= Self::ERROR;
-                    expand_error!(err);
-                    return
-                }
+                } 
             }
-            self.window_storage.update();
-            if self.close_on_no_windows() && self.window_storage.active_ids().is_empty() {
+            self.event_loop.update();
+            if self.close_on_no_windows() && self.event_loop.active_window_ids().is_empty() {
                 event_loop.exit();
             }
         }
     }
 
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.window_storage.monitors.clear();
-        for monitor in event_loop.available_monitors() {
-            self.window_storage.monitors.push(monitor);
-        }
+    fn resumed(&mut self, event_loop: &WinitActiveEventLoop) {
         if self.gpu.is_none() {
             or_flag!(self.flags, Self::CLOSE_ON_NO_WINDOWS, self.attributes.close_on_no_windows);
             self.gpu = match gpu::Gpu::new(
@@ -262,17 +257,16 @@ impl<'a, 'b, I: Interface> ApplicationHandler for NoxRun<'a, 'b, I> {
             ).context("failed to init gpu") {
                 Ok(mut gpu) => {
                     if let Err(err) = self.on_init.init(
-                        &mut win::WindowContext::new(&mut self.window_storage, event_loop, self.memory),
+                        &mut ActiveEventLoop::new(&mut self.event_loop, event_loop, self.memory),
                         &mut gpu.context()
                     ) {
                         event_loop.exit();
-                        self.flags |= Self::ERROR;
                         expand_error!(err);
                         return
                     }
                     if let Err(err) = (self.interface)(Event::Initialized {
-                        win: &mut win::WindowContext::new(
-                            &mut self.window_storage,
+                        event_loop: &mut ActiveEventLoop::new(
+                            &mut self.event_loop,
                             event_loop,
                             self.memory,
                         ),
@@ -280,7 +274,6 @@ impl<'a, 'b, I: Interface> ApplicationHandler for NoxRun<'a, 'b, I> {
                     }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
                     {
                         event_loop.exit();
-                        self.flags |= Self::ERROR;
                         expand_error!(err);
                         return
                     }
@@ -288,12 +281,11 @@ impl<'a, 'b, I: Interface> ApplicationHandler for NoxRun<'a, 'b, I> {
                 },
                 Err(err) => {
                     event_loop.exit();
-                    self.flags |= Self::ERROR;
                     expand_error!(err);
                     return
                 },
             };
-            if self.close_on_no_windows() && self.window_storage.active_ids().is_empty() {
+            if self.close_on_no_windows() && self.event_loop.active_window_ids().is_empty() {
                 event_loop.exit();
             }
         }

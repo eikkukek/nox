@@ -49,7 +49,7 @@ impl<'a> GpuContext<'a>
     #[inline(always)]
     pub(crate) fn create_surface<'mem>(
         &self,
-        window: &Window,
+        window: &win::WinitWindow,
         host_allocators: &'mem HostAllocators,
     ) -> Result<Surface<'mem>>
     {

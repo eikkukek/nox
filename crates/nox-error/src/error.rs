@@ -55,7 +55,7 @@ struct WrapCtx<T: Display + Send + Sync + 'static>(T);
 #[derive(Dyn, Error)]
 #[display("{0}")]
 #[bounds(error::Error + Send + Sync)]
-struct WrapErr<T: error::Error + Send + Sync + 'static>(T);
+struct WrapErr<T: error::Error + Send + Sync + 'static>(#[source(self.0.source())] T);
 
 impl<T: error::Error + Send + Sync + 'static> Debug for WrapErr<T> {
 

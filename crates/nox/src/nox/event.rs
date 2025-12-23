@@ -1,4 +1,5 @@
 use crate::{
+    event_loop,
     win,
     gpu,
 };
@@ -8,14 +9,14 @@ pub enum Event<'a, 'b, 'c> {
     ///
     /// Gets called once at the beginning before any other events.
     Initialized {
-        win: &'a mut win::WindowContext<'b, 'c>,
+        event_loop: &'a mut event_loop::ActiveEventLoop<'b, 'c>,
         gpu: &'a mut gpu::GpuContext<'b>,
     },
     /// Nox is updating.
     ///
-    /// Happens once per frame.
+    /// Happens once per frame before any GPU work.
     Update {
-        win: &'a mut win::WindowContext<'b, 'c>,
+        event_loop: &'a mut event_loop::ActiveEventLoop<'b, 'c>,
         gpu: &'a mut gpu::GpuContext<'b>,
     },
     /// Nox is recording compute commands.

@@ -6,7 +6,6 @@ mod memory;
 
 pub mod error;
 mod nox;
-mod event;
 pub mod gpu;
 mod interface;
 mod utility;
@@ -17,6 +16,8 @@ pub mod dev;
 
 mod on_init;
 pub use on_init::OnInit;
+
+pub mod misc;
 
 mod export {
 
@@ -29,7 +30,6 @@ mod export {
     pub use version::Version;
     pub use attributes::*;
     pub use memory::Memory;
-    pub use event::Event;
     pub use nox::*;
     pub use interface::Interface;
     pub use mem::array_string;

@@ -181,13 +181,13 @@ impl<'a> Surface<'a> {
                 self.vk.swapchain_device(),
                 self.present_queue,
             );
-            host_allocators
-                .destroy_swapchain_alloc(self.alloc)
-                .unwrap();
-            unsafe {
-                self.vk.surface_instance()
-                    .destroy_surface(self.handle, None);
-            }
+        }
+        host_allocators
+            .destroy_swapchain_alloc(self.alloc)
+            .unwrap();
+        unsafe {
+            self.vk.surface_instance()
+                .destroy_surface(self.handle, None);
         }
     }
 }
