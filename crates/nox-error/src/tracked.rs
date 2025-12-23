@@ -1,4 +1,4 @@
-use crate::{Location, caller};
+use crate::Location;
 
 pub trait ImplTry {}
 

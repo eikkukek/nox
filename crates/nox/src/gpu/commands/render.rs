@@ -61,19 +61,19 @@ pub(crate) struct RenderCommandsStorage {
 impl RenderCommandsStorage {
 
     pub fn new(
-        device: Arc<ash::Device>,
+        vk: &Arc<Vulkan>,
         queue_family_indices: QueueFamilyIndices,
     ) -> Result<Self>
     {
         Ok(Self {
             transfer_command_pool: Arc::new(
                 TransientCommandPool
-                    ::new(device.clone(), queue_family_indices.transfer_index())
+                    ::new(vk.clone(), queue_family_indices.transfer_index())
                     .context("failed to create transient transfer command pool")?
             ),
             graphics_command_pool: Arc::new(
                 TransientCommandPool    
-                    ::new(device.clone(), queue_family_indices.graphics_index())
+                    ::new(vk.clone(), queue_family_indices.graphics_index())
                     .context("failed to create transient graphics command pool")?
             ),
             transfer_commands: Default::default(),
@@ -108,7 +108,7 @@ impl<'a, 'b> RenderCommands<'a, 'b> {
     {
         Ok(Self {
             command_buffer,
-            storage: RenderCommandsStorage::new(frame_graph.gpu().device(), queue_family_indices)?,
+            storage: RenderCommandsStorage::new(frame_graph.gpu().vk(), queue_family_indices)?,
             frame_graph,
             current_pipeline: None,
             current_sample_count: MSAA::X1,
@@ -198,11 +198,6 @@ impl<'a, 'b> RenderCommands<'a, 'b> {
     #[inline(always)]
     pub fn buffered_frames(&self) -> u32 {
         self.buffered_frames
-    }
-
-    #[inline(always)]
-    pub fn frame_buffer_size(&self) -> Dimensions {
-        self.gpu().frame_buffer_size
     }
 
     /// Waits for previous frame until `timeout` where `timeout` is in nanoseconds.

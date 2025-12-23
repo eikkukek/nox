@@ -15,30 +15,32 @@ use MemoryBinderError::*;
 
 #[derive(Clone)]
 pub struct DefaultBinder {
-    device: Arc<ash::Device>,
+    vulkan: Arc<Vulkan>,
     memory_type_bits: u32,
     mappable: bool,
 }
 
 impl DefaultBinder {
 
-    pub fn new(
-        device: Arc<ash::Device>,
+    pub(crate) fn new(
+        vulkan: Arc<Vulkan>,
         required_properties: vk::MemoryPropertyFlags,
         forbidden_properties: vk::MemoryPropertyFlags,
-        physical_device_info: &PhysicalDeviceInfo,
     ) -> Self
     {
-        let memory_properties = physical_device_info.memory_properties();
+        let memory_properties = vulkan.physical_device_info().memory_properties();
         let mut memory_type_bits = 0;
-        for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize].iter().enumerate() {
+        for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize]
+            .iter()
+            .enumerate()
+        {
             let property_flags = memory_type.property_flags;
             if has_bits!(property_flags, required_properties) && !property_flags.intersects(forbidden_properties) {
                 memory_type_bits |= 1 << i;
             }
         }
         Self {
-            device,
+            vulkan,
             memory_type_bits,
             mappable: has_bits!(required_properties, vk::MemoryPropertyFlags::HOST_VISIBLE),
         }
@@ -46,7 +48,7 @@ impl DefaultBinder {
 }
 
 pub struct Memory {
-    device: Arc<ash::Device>,
+    vulkan: Arc<Vulkan>,
     memory: vk::DeviceMemory,
     size: vk::DeviceSize,
     map: Option<NonNull<u8>>,
@@ -72,7 +74,7 @@ impl DeviceMemory for Memory {
 
     unsafe fn free_memory(&self) {
         unsafe {
-            self.device.free_memory(self.memory, None);
+            self.vulkan.device().free_memory(self.memory, None);
         }
     }
 
@@ -84,7 +86,7 @@ impl DeviceMemory for Memory {
             return Ok(map)
         }
         let ptr = unsafe {
-            self.device.map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::from_raw(0))?
+            self.vulkan.device().map_memory(self.memory, 0, self.size, vk::MemoryMapFlags::from_raw(0))?
         };
         Ok(*self.map.insert(NonNull::new(ptr as *mut u8).unwrap()))
     }
@@ -98,7 +100,7 @@ impl MemoryBinder for DefaultBinder {
         _: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>>>
     ) -> Result<Box<dyn DeviceMemory>>
     {
-        let device = &self.device;
+        let device = self.vulkan.device();
         let memory_requirements = unsafe { device.get_image_memory_requirements(image) };
         let memory_type_bits = self.memory_type_bits & memory_requirements.memory_type_bits;
         if memory_type_bits == 0 {
@@ -112,13 +114,13 @@ impl MemoryBinder for DefaultBinder {
             ..Default::default()
         };
         let memory = unsafe {
-            self.device.allocate_memory(&allocate_info, None)?
+            device.allocate_memory(&allocate_info, None)?
         };
         unsafe {
             device.bind_image_memory(image, memory, 0)?;
         }
         Ok(Box::new(Memory {
-            device: self.device.clone(),
+            vulkan: self.vulkan.clone(),
             memory,
             size: memory_requirements.size,
             map: None,
@@ -131,7 +133,7 @@ impl MemoryBinder for DefaultBinder {
         buffer: vk::Buffer,
         _: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>>>
     ) -> Result<Box<dyn DeviceMemory>> {
-        let device = &self.device;
+        let device = self.vulkan.device();
         let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
         let memory_type_bits = self.memory_type_bits & memory_requirements.memory_type_bits;
         if memory_type_bits == 0 {
@@ -145,13 +147,13 @@ impl MemoryBinder for DefaultBinder {
             ..Default::default()
         };
         let memory = unsafe {
-            self.device.allocate_memory(&allocate_info, None)?
+            self.vulkan.device().allocate_memory(&allocate_info, None)?
         };
         unsafe {
             device.bind_buffer_memory(buffer, memory, 0)?;
         }
         Ok(Box::new(Memory {
-            device: self.device.clone(),
+            vulkan: self.vulkan.clone(),
             memory,
             size: memory_requirements.size,
             map: None,

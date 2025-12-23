@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ash::vk;
 
 use nox_alloc::arena_alloc::*;
@@ -11,7 +9,6 @@ use crate::dev::error::{Result, Context};
 pub struct ComputeCommands<'a> {
     command_buffer: vk::CommandBuffer,
     context: GpuContext<'a>,
-    device: Arc<ash::Device>,
     current_pipeline: Option<ComputePipelineId>,
     wait_semaphores: GlobalVec<(TimelineSemaphoreId, u64, PipelineStage)>,
     signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
@@ -36,7 +33,6 @@ impl<'a> ComputeCommands<'a> {
     {
         Self {
             command_buffer,
-            device: context.device(),
             context,
             current_pipeline: None,
             wait_semaphores: Default::default(),
@@ -74,7 +70,7 @@ impl<'a> ComputeCommands<'a> {
     pub fn bind_pipeline(&mut self, id: ComputePipelineId) -> Result<()> {
         let pipeline = self.context.get_compute_pipeline(id)?;
         unsafe {
-            self.device.cmd_bind_pipeline(
+            self.context.vk().device().cmd_bind_pipeline(
                 self.command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
                 pipeline.handle,
@@ -105,7 +101,7 @@ impl<'a> ComputeCommands<'a> {
             f,
         )?;
         unsafe {
-            self.device.cmd_bind_descriptor_sets(
+            self.context.vk().device().cmd_bind_descriptor_sets(
                 self.command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
                 layout,
@@ -137,7 +133,7 @@ impl<'a> ComputeCommands<'a> {
         )?;
         for (pc, bytes) in &push_constants {
             unsafe {
-                self.device.cmd_push_constants(
+                self.context.vk().device().cmd_push_constants(
                     self.command_buffer, 
                     layout,
                     pc.stage.into(),
@@ -161,7 +157,7 @@ impl<'a> ComputeCommands<'a> {
             return Err(Error::just_context("attempting to dispatch with no pipeline binded"))
         }
         unsafe {
-            self.device.cmd_dispatch(
+            self.context.vk().device().cmd_dispatch(
                 self.command_buffer,
                 group_count_x,
                 group_count_y,

@@ -29,7 +29,7 @@ pub struct FrameGraph<'a> {
     wait_semaphore_count: u32,
     queue_family_indices: QueueFamilyIndices,
     alloc: &'a ArenaAlloc,
-    frame_index: u32,
+    frame_index: usize,
 }
 
 impl<'a> FrameGraph<'a> {
@@ -38,7 +38,7 @@ impl<'a> FrameGraph<'a> {
         frame_context: FrameContext<'a>,
         command_buffer: vk::CommandBuffer,
         alloc: &'a ArenaAlloc,
-        frame_index: u32,
+        frame_index: usize,
         queue_family_indices: QueueFamilyIndices,
     ) -> Self
     {
@@ -69,13 +69,18 @@ impl<'a> FrameGraph<'a> {
 
     /// Currently active frame index synchronized with buffered image count.
     #[inline(always)]
-    pub fn frame_index(&self) -> u32 {
+    pub fn frame_index(&self) -> usize {
         self.frame_index
     }
 
     #[track_caller]
-    pub fn swapchain_image(&self) -> ResourceId {
-        self.frame_context.swapchain_image(caller!())
+    pub fn swapchain_image(&mut self, window_id: win::WindowId) -> Result<ResourceId> {
+        self.frame_context.swapchain_image(window_id, caller!())
+    }
+
+    #[track_caller]
+    pub fn swapchain_count(&self) -> usize {
+        self.frame_context.swapchain_count()
     }
 
     #[track_caller]
@@ -115,9 +120,6 @@ impl<'a> FrameGraph<'a> {
         }
         Ok(pass.id)
     }
-}
-
-impl<'a> FrameGraph<'a> {
 
     pub(crate) fn render(
         mut self,
@@ -128,10 +130,11 @@ impl<'a> FrameGraph<'a> {
     ) -> Result<FrameGraphResult<'a>>
     {
         let alloc = self.alloc;
-        let device = self.frame_context.device();
         let command_buffer = self.command_buffer;
         let queue_family_indices = self.queue_family_indices;
         let graphics_queue_index = queue_family_indices.graphics_index();
+
+        let vk = self.gpu().vk().clone();
 
         let mut passes = FixedVec
             ::with_capacity(self.passes.len(), alloc)
@@ -173,7 +176,7 @@ impl<'a> FrameGraph<'a> {
                 let resource_id = read.id;
                 let image = match render_commands.frame_graph.frame_context.get_image(resource_id)? {
                     ImageSource::Owned(image) => image,
-                    ImageSource::Swapchain(_, _, _,) => return Err(Error::just_context(
+                    ImageSource::Swapchain(_, _, _, _) => return Err(Error::just_context(
                         "swapchain images are write only"
                     )).context(ErrorContext::EventError(read.location_or_this()))
                         .context(format_compact!("error while processing pass at {}",
@@ -364,10 +367,8 @@ impl<'a> FrameGraph<'a> {
                                     resolve_image_view = image_view;
                                     resolve_image_layout = image_layout;
                                 },
-                                ImageSource::Swapchain(image, view, state) => {
-                                    let dimensions = render_commands.frame_graph.frame_context
-                                        .gpu()
-                                        .frame_buffer_size();
+                                ImageSource::Swapchain(win_id, image, view, extent) => {
+                                    let dimensions = extent.into();
                                     if properties.dimensions != dimensions {
                                         return Err(Error::just_context(format_compact!(
                                             "resolve (swapchain) image dimensions {} must match main image dimensions {}",
@@ -381,13 +382,18 @@ impl<'a> FrameGraph<'a> {
                                                 pass.location_or_this())
                                             )
                                     }
-                                    if state != dst_state {
+                                    let Some(state) = render_commands.frame_graph.frame_context
+                                        .swapchain_image_state(win_id)
+                                    else {
+                                        return Err(Error::just_context("swapchain image not found"))
+                                    };
+                                    if state != &dst_state {
                                         let memory_barrier = state.to_memory_barrier(
                                             image, dst_state,
                                             SwapchainContext::subresource_range_info(),
                                         );
                                         unsafe {
-                                            device.cmd_pipeline_barrier(
+                                            vk.device().cmd_pipeline_barrier(
                                                 command_buffer,
                                                 state.pipeline_stage,
                                                 dst_state.pipeline_stage,
@@ -396,7 +402,7 @@ impl<'a> FrameGraph<'a> {
                                                 Default::default(),
                                                 &[memory_barrier]);
                                         }
-                                        render_commands.frame_graph.frame_context.set_swapchain_image_state(dst_state);
+                                        *state = dst_state;
                                     }
                                     resolve_image_view = view;
                                     resolve_image_layout = dst_state.layout;
@@ -424,7 +430,7 @@ impl<'a> FrameGraph<'a> {
                             ..Default::default()
                         })
                     },
-                    ImageSource::Swapchain(image, view, state) => {
+                    ImageSource::Swapchain(win_id, image, view, extent) => {
                         let (access, layout, stage) = match ty {
                             AttachmentType::Color => {
                                 (
@@ -437,6 +443,11 @@ impl<'a> FrameGraph<'a> {
                             )).context(ErrorContext::EventError(resource_id.location_or_this()))
                             .context(format_compact!("error while processing pass at {}", pass.location_or_this())),
                         };
+                        let Some(state) = render_commands.frame_graph.frame_context
+                            .swapchain_image_state(win_id)
+                        else {
+                            return Err(Error::just_context("swapchain image not found"))
+                        };
                         let dst_state = ImageState::new(
                             access,
                             layout,
@@ -448,13 +459,13 @@ impl<'a> FrameGraph<'a> {
                             )).context(ErrorContext::EventError(resource_id.location_or_this()))
                             .context(format_compact!("error while processing pass at {}", pass.location_or_this()))
                         }
-                        if state != dst_state {
+                        if state != &dst_state {
                             let memory_barrier = state.to_memory_barrier(
                                 image, dst_state,
                                 SwapchainContext::subresource_range_info(),
                             );
                             unsafe {
-                                device.cmd_pipeline_barrier(
+                                vk.device().cmd_pipeline_barrier(
                                     command_buffer,
                                     state.pipeline_stage,
                                     dst_state.pipeline_stage,
@@ -463,13 +474,10 @@ impl<'a> FrameGraph<'a> {
                                     Default::default(),
                                     &[memory_barrier]);
                             }
-                            render_commands.frame_graph.frame_context.set_swapchain_image_state(dst_state);
+                            *state = dst_state;
                         }
-                        let dimensions = render_commands.frame_graph.frame_context
-                            .gpu()
-                            .frame_buffer_size();
-                        render_extent.width = render_extent.width.min(dimensions.width);
-                        render_extent.height = render_extent.height.min(dimensions.height);
+                        render_extent.width = render_extent.width.min(extent.width);
+                        render_extent.height = render_extent.height.min(extent.height);
                         Ok(vk::RenderingAttachmentInfo {
                             s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
                             image_view: view,
@@ -538,7 +546,7 @@ impl<'a> FrameGraph<'a> {
                 ..Default::default()
             };
             unsafe {
-                device.cmd_begin_rendering(command_buffer, &rendering_info);
+                vk.device().cmd_begin_rendering(command_buffer, &rendering_info);
             }
             let view_port = vk::Viewport {
                 x: 0.0,
@@ -550,15 +558,15 @@ impl<'a> FrameGraph<'a> {
             };
             let scissor = rendering_info.render_area;
             unsafe {
-                device.cmd_set_viewport(command_buffer, 0, &[view_port]);
-                device.cmd_set_scissor(command_buffer, 0, &[scissor]);
+                vk.device().cmd_set_viewport(command_buffer, 0, &[view_port]);
+                vk.device().cmd_set_scissor(command_buffer, 0, &[scissor]);
             }
             render_commands.set_current_sample_count(pass.msaa_samples);
             (interface)(Event::RenderWork {
                 pass_id: pass.id,
                 commands: &mut render_commands,
             }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
-            unsafe { device.cmd_end_rendering(command_buffer); }
+            unsafe { vk.device().cmd_end_rendering(command_buffer); }
         }
         Ok(FrameGraphResult {
             render_commands: render_commands.finish(),
@@ -603,8 +611,8 @@ pub(crate) struct FrameGraphResult<'a> {
 
 impl<'a> FrameGraphResult<'a> {
 
-    pub fn device(&self) -> Arc<ash::Device> {
-        self.frame_graph.frame_context.device()
+    pub(crate) fn vk(&self) -> &Arc<Vulkan> {
+        self.frame_graph.frame_context.vk()
     }
 }
 

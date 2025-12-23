@@ -32,10 +32,7 @@ pub use structs::*;
 use descriptor_pool::*;
 
 pub struct GlobalResources {
-    device: Arc<ash::Device>,
-    instance: Arc<ash::Instance>,
-    physical_device: vk::PhysicalDevice,
-    physical_device_info: Arc<PhysicalDeviceInfo>,
+    vk: Arc<Vulkan>,
     shaders: GlobalSlotMap<Shader>,
     pipeline_layouts: GlobalSlotMap<pipeline::PipelineLayout>,
     pipeline_caches: GlobalSlotMap<PipelineCache>,
@@ -60,29 +57,25 @@ impl GlobalResources {
 
     #[inline(always)]
     pub(crate) fn new(
-        device: Arc<ash::Device>,
-        instance: Arc<ash::Instance>,
-        physical_device: vk::PhysicalDevice,
-        physical_device_info: PhysicalDeviceInfo,
+        vk: Arc<Vulkan>,
         memory_layout: MemoryLayout,
     ) -> Result<Self>
     {
         let default_binder = DefaultBinder::new(
-            device.clone(),
+            vk.clone(),
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             vk::MemoryPropertyFlags::from_raw(0),
-            &physical_device_info,
         );
         let default_binder_mappable = DefaultBinder::new(
-            device.clone(),
+            vk.clone(),
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             vk::MemoryPropertyFlags::from_raw(0),
-            &physical_device_info,
         );
         let dummy_layout_info = vk::DescriptorSetLayoutCreateInfo {
             s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             ..Default::default()
         };
+        let device = vk.device();
         let dummy_layout = unsafe { RaiiHandle::new(
             device
                 .create_descriptor_set_layout(&dummy_layout_info, None)
@@ -109,20 +102,18 @@ impl GlobalResources {
         };
         let mut dummy_descriptor_set = Default::default();
         let res = unsafe {
-            (device.fp_v1_0().allocate_descriptor_sets)(device.handle(), &dummy_alloc_info, &mut dummy_descriptor_set)
+            (device.fp_v1_0().allocate_descriptor_sets)(device.handle(),
+            &dummy_alloc_info, &mut dummy_descriptor_set)
         };
         if res != vk::Result::SUCCESS {
             return Err(Error::just_context(format_compact!("unexpected vulkan error at {}", location!())))
         }
         Ok(Self {
-            api_version: physical_device_info.api_version(),
+            api_version: vk.physical_device_info().api_version(),
             dummy_descriptor_set_layout: dummy_layout.into_inner(),
             dummy_descriptor_pool: dummy_descriptor_pool.into_inner(),
-            descriptor_pool: DescriptorPool::new(device.clone(), memory_layout)?,
-            device,
-            physical_device,
-            physical_device_info: Arc::new(physical_device_info),
-            instance,
+            descriptor_pool: DescriptorPool::new(vk.clone(), memory_layout)?,
+            vk,
             shaders: GlobalSlotMap::with_capacity(16),
             pipeline_layouts: GlobalSlotMap::with_capacity(16),
             pipeline_caches: GlobalSlotMap::with_capacity(4),
@@ -140,12 +131,12 @@ impl GlobalResources {
         })
     }
 
-    pub(crate) fn device(&self) -> Arc<ash::Device> {
-        self.device.clone()
+    pub(crate) fn vk(&self) -> &Arc<Vulkan> {
+        &self.vk
     }
 
     pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
-        &self.physical_device_info
+        self.vk.physical_device_info()
     }
 
     #[inline(always)]
@@ -172,9 +163,9 @@ impl GlobalResources {
             .count();
         for format in formats {
             let properties = unsafe {
-                self.instance
+                self.vk.instance()
                     .get_physical_device_format_properties(
-                        self.physical_device, format.as_vk_format())
+                        self.vk.physical_device(), format.as_vk_format())
             };
             if has_bits!(
                 properties.optimal_tiling_features,
@@ -199,10 +190,12 @@ impl GlobalResources {
                 source.name(), source.location_or_this(),
             ))?;
         let shader = Shader::new(
-            self.device.clone(),
+            self.vk.clone(),
             compiled.spirv(),
             source.stage(),
-        ).context_with(|| format_compact!("failed to create shader {} at {}", source.name(), source.location_or_this()))?;
+        ).context_with(||
+            format_compact!("failed to create shader {} at {}", source.name(), source.location_or_this())
+        )?;
         Ok(ShaderId(self.shaders.insert(shader)))
     }
 
@@ -231,7 +224,7 @@ impl GlobalResources {
             ).ok();
         }
         let pipeline_layout = PipelineLayout::new(
-            self.device.clone(),
+            self.vk.clone(),
             shaders,
             &self,
         )?;
@@ -495,7 +488,7 @@ impl GlobalResources {
             vk_copies.push(vk_copy).unwrap();
         }
         unsafe {
-            self.device.update_descriptor_sets(&writes, &vk_copies);
+            self.vk.device().update_descriptor_sets(&writes, &vk_copies);
         }
         Ok(())
     }
@@ -513,13 +506,13 @@ impl GlobalResources {
             p_initial_data: initial_data.as_ptr() as _,
             ..Default::default()
         };
+        let device = self.vk.device();
         let handle = unsafe {
-            self.device
-                .create_pipeline_cache(&info, None)
+            device.create_pipeline_cache(&info, None)
                 .context("failed to create pipeline cache")?
         };
         let index =  self.pipeline_caches.insert(PipelineCache {
-            device: self.device.clone(),
+            vk: self.vk.clone(),
             handle: handle,
         });
         Ok(PipelineCacheId(index))
@@ -531,7 +524,7 @@ impl GlobalResources {
         id: PipelineCacheId,
     ) -> Result<GlobalVec<u8>>
     {
-        let device = &*self.device;
+        let device = self.vk.device();
         let handle = self.pipeline_caches
             .get(id.0)
             .context("couldn't find pipeline cache")?
@@ -623,7 +616,7 @@ impl GlobalResources {
             ::with_capacity(create_infos.len(), alloc)
             .context("vec error")?;
         unsafe {
-            let device = &*self.device;
+            let device = self.vk.device();
             let pipeline_cache = cache_id
                 .map(|v| self.pipeline_caches.get(v.0).map(|v| v.handle))
                 .unwrap_or(Ok(Default::default()))
@@ -644,7 +637,7 @@ impl GlobalResources {
         for (i, handle) in pipelines.iter().enumerate() {
             let info = &infos[i];
             let index = self.graphics_pipelines.insert(GraphicsPipeline {
-                device: self.device.clone(),
+                vk: self.vk.clone(),
                 handle: *handle,
                 _color_formats: info.color_output_formats.clone(),
                 _dynamic_states: info.dynamic_states.clone(),
@@ -684,12 +677,12 @@ impl GlobalResources {
             ::with_capacity(vk_infos.len(), alloc)
             .context("vec error")?;
         unsafe {
-            let device = &*self.device;
+            let device = self.vk.device();
             let pipeline_cache = cache_id 
                 .map(|v| self.pipeline_caches.get(v.0).map(|v| v.handle))
                 .unwrap_or(Ok(Default::default()))
                 .context("couldn't find pipeline cache")?;
-            let result = (self.device.fp_v1_0().create_compute_pipelines)(
+            let result = (device.fp_v1_0().create_compute_pipelines)(
                 device.handle(),
                 pipeline_cache,
                 vk_infos.len() as u32,
@@ -706,7 +699,7 @@ impl GlobalResources {
         for (i, handle) in pipelines.iter().enumerate() {
             let info = &infos[i];
             let index = self.compute_pipelines.insert(ComputePipeline {
-                device: self.device.clone(),
+                vk: self.vk.clone(),
                 handle: *handle,
                 layout_id: info.layout_id,
             });
@@ -808,7 +801,7 @@ impl GlobalResources {
             create_flags: Default::default(),
         };
         let mut buffer = Buffer
-            ::new(self.device.clone(), properties)
+            ::new(self.vk.clone(), properties)
             .context("failed to create buffer")?;
         unsafe {
             match binder {
@@ -831,7 +824,9 @@ impl GlobalResources {
                         .write().unwrap();
                     let mut default_callback = |buffer| self.default_binder.bind_buffer_memory(buffer, None);
                     let mut mappable_callback = |buffer| self.default_binder_mappable.bind_buffer_memory(buffer, None);
-                    let fallback: &mut dyn FnMut(vk::Buffer) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> =
+                    let fallback: &mut dyn FnMut(
+                        vk::Buffer
+                    ) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> =
                         if alloc.alloc.mappable() {
                             &mut default_callback
                         } else {
@@ -906,9 +901,9 @@ impl GlobalResources {
         let mut builder = SamplerBuilder::new();
         f(&mut builder);
         let handle = builder
-            .build(&self.device)
+            .build(self.vk.device())
             .context("failed to create sampler")?;
-        let index = self.samplers.insert(Sampler { device: self.device.clone(), handle, _builder: builder, });
+        let index = self.samplers.insert(Sampler { vk: self.vk.clone(), handle, _builder: builder, });
         Ok(SamplerId(index))
     }
 
@@ -926,7 +921,7 @@ impl GlobalResources {
         where
             F: FnMut(&mut ImageBuilder)
     {
-        let mut builder = ImageBuilder::new(self.device.clone());
+        let mut builder = ImageBuilder::new(self.vk.clone());
         f(&mut builder);
         let mut image = builder
             .build()
@@ -951,7 +946,9 @@ impl GlobalResources {
                         .write().unwrap();
                     let mut default_callback = |image| self.default_binder.bind_image_memory(image, None);
                     let mut mappable_callback = |image| self.default_binder_mappable.bind_image_memory(image, None);
-                    let fallback: &mut dyn FnMut(vk::Image) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> =
+                    let fallback: &mut dyn FnMut(
+                        vk::Image,
+                    ) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> =
                         if alloc.alloc.mappable() {
                             &mut default_callback
                         } else {
@@ -1010,11 +1007,10 @@ impl GlobalResources {
     pub fn create_default_linear_device_alloc(&mut self, block_size: u64) -> Result<LinearDeviceAllocId> {
         Ok(LinearDeviceAllocId(self.linear_device_allocs.insert(Arc::new(RwLock::new(LinearDeviceAllocResource {
             alloc: LinearDeviceAlloc::new(
-                    self.device.clone(),
+                    self.vk.clone(),
                     block_size,
                     vk::MemoryPropertyFlags::DEVICE_LOCAL,
                     vk::MemoryPropertyFlags::HOST_VISIBLE,
-                    &self.physical_device_info,
                     false,
                 ).context("failed to create linear device alloc")?,
             semaphore_count: 0,
@@ -1026,11 +1022,10 @@ impl GlobalResources {
     pub fn create_default_linear_device_alloc_mappable(&mut self, block_size: u64) -> Result<LinearDeviceAllocId> {
         Ok(LinearDeviceAllocId(self.linear_device_allocs.insert(Arc::new(RwLock::new(LinearDeviceAllocResource {
             alloc: LinearDeviceAlloc::new(
-                    self.device.clone(),
+                    self.vk.clone(),
                     block_size,
                     vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
                     vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                    &self.physical_device_info,
                     true,
                 ).context("failed to create mappable linear device alloc")?,
             semaphore_count: 0,
@@ -1079,7 +1074,7 @@ impl GlobalResources {
             ..Default::default()
         }.push_next(&mut type_info);
         let handle = unsafe {
-            self.device
+            self.vk.device()
                 .create_semaphore(&semaphore_info, None)
                 .context("failed to create timeline semaphore")?
         };
@@ -1096,7 +1091,7 @@ impl GlobalResources {
             .context("couldn't find timeline semaphore")?
             .handle;
         unsafe {
-            Ok(self.device
+            Ok(self.vk.device()
                 .get_semaphore_counter_value(handle)
                 .context("failed to get timeline semaphore value")?
             )
@@ -1147,7 +1142,7 @@ impl GlobalResources {
             ..Default::default()
         };
         let res = unsafe {
-            self.device.wait_semaphores(
+            self.vk.device().wait_semaphores(
                 &wait_info,
                 timeout,
             )
@@ -1176,7 +1171,7 @@ impl GlobalResources {
     pub fn destroy_timeline_semaphore(&mut self, id: TimelineSemaphoreId) {
         if let Ok(semaphore) = self.timeline_semaphores.remove(id.0) {
             unsafe {
-                self.device.destroy_semaphore(semaphore.handle, None);
+                self.vk.device().destroy_semaphore(semaphore.handle, None);
             }
         }
     }
@@ -1193,7 +1188,7 @@ impl GlobalResources {
         for (_, semaphore) in &mut self.timeline_semaphores {
             let handle = semaphore.handle;
             let value = unsafe {
-                self.device
+                self.vk.device()
                     .get_semaphore_counter_value(handle)
                     .context("failed to get semaphore counter value")?
             };
@@ -1218,8 +1213,9 @@ impl GlobalResources {
 
     pub(crate) fn clean_up(&mut self) {
         unsafe {
-            self.device.destroy_descriptor_set_layout(self.dummy_descriptor_set_layout, None);
-            self.device.destroy_descriptor_pool(self.dummy_descriptor_pool, None);
+            let device = self.vk.device();
+            device.destroy_descriptor_set_layout(self.dummy_descriptor_set_layout, None);
+            device.destroy_descriptor_pool(self.dummy_descriptor_pool, None);
             self.samplers.clear();
             self.buffers.clear();
             self.images.clear();
@@ -1229,7 +1225,7 @@ impl GlobalResources {
             self.linear_device_allocs.clear();
             self.descriptor_pool.clean_up();
             for (_, semaphore) in &self.timeline_semaphores {
-                self.device.destroy_semaphore(semaphore.handle, None);
+                device.destroy_semaphore(semaphore.handle, None);
             }
             self.timeline_semaphores.clear();
         }

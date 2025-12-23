@@ -7,7 +7,7 @@ use nox_proc::{Error, Display};
 
 use nox_mem::dynamic::{Dyn, Pair};
 
-use super::{Location, Tracked, caller};
+use super::{Location, Tracked};
 
 enum Internal {
     JustContext(Box<dyn Display + Send + Sync>),

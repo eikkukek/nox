@@ -4,26 +4,29 @@ use core::ops::{Deref, DerefMut};
 
 use std::sync::RwLockWriteGuard;
 
-pub struct GpuContext<'a> {
-    pub(super) global_resources: RwLockWriteGuard<'a, GlobalResources>,
-    pub(super) transfer_requests: &'a mut TransferRequests,
-    pub(super) frame_buffer_size: Dimensions,
-    pub(super) buffered_frames: u32,
+pub struct GpuContext<'a>
+{
+    vk: &'a Arc<Vulkan>,
+    global_resources: RwLockWriteGuard<'a, GlobalResources>,
+    transfer_requests: &'a mut TransferRequests,
+    buffered_frames: u32,
 }
 
-impl<'a> GpuContext<'a> {
+impl<'a> GpuContext<'a> 
+{
 
     #[inline(always)]
     pub(super) fn new(
+        vk: &'a Arc<Vulkan>,
         global_resources: RwLockWriteGuard<'a, GlobalResources>,
         transfer_requests: &'a mut TransferRequests,
-        frame_buffer_size: Dimensions,
         buffered_frames: u32,
-    ) -> Self {
+    ) -> Self
+    {
         Self {
             global_resources,
+            vk,
             transfer_requests,
-            frame_buffer_size,
             buffered_frames,
         }
     }
@@ -36,16 +39,26 @@ impl<'a> GpuContext<'a> {
     ) -> CommandRequestId
     {
         self.transfer_requests.add_async_request(staging_alloc, signal_semaphores)
-    }
-
-    #[inline(always)]
-    pub fn frame_buffer_size(&self) -> image::Dimensions {
-        self.frame_buffer_size
-    }
+    } 
 
     #[inline(always)]
     pub fn buffered_frames(&self) -> u32 {
         self.buffered_frames
+    }
+
+    #[inline(always)]
+    pub(crate) fn create_surface<'mem>(
+        &self,
+        window: &Window,
+        host_allocators: &'mem HostAllocators,
+    ) -> Result<Surface<'mem>>
+    {
+        Surface::new(
+            window,
+            self.vk.clone(),
+            self.buffered_frames,
+            host_allocators,
+        )
     }
 }
 

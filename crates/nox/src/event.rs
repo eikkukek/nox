@@ -8,15 +8,15 @@ pub enum Event<'a, 'b, 'c> {
     ///
     /// Gets called once at the beginning before any other events.
     Initialized {
-        win: &'a mut win::WindowContext,
-        gpu: gpu::GpuContext<'a>,
+        win: &'a mut win::WindowContext<'b, 'c>,
+        gpu: &'a mut gpu::GpuContext<'b>,
     },
     /// Nox is updating.
     ///
     /// Happens once per frame.
     Update {
-        win: &'a mut win::WindowContext,
-        gpu: gpu::GpuContext<'a>,
+        win: &'a mut win::WindowContext<'b, 'c>,
+        gpu: &'a mut gpu::GpuContext<'b>,
     },
     /// Nox is recording compute commands.
     ///
@@ -37,8 +37,9 @@ pub enum Event<'a, 'b, 'c> {
         request_id: gpu::CommandRequestId,
         commands: &'a mut gpu::TransferCommands<'b, 'c>,
     },
-    /// The frame buffer has been (re)created.
+    /// The frame buffer for window with `window_id` has been (re)created.
     FrameBufferCreated {
+        window_id: win::WindowId,
         gpu: &'a mut gpu::GpuContext<'b>,
         new_size: gpu::Dimensions,
         new_format: gpu::ImageFormat,

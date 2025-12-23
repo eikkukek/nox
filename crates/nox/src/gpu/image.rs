@@ -18,7 +18,7 @@ use ash::vk;
 
 use crate::dev::{has_bits, has_not_bits};
 
-use super::MSAA;
+use super::{MSAA, Vulkan};
 
 pub use format::*;
 pub use enums::*;

@@ -10,7 +10,7 @@ pub(crate) struct Image {
     pub handle: vk::Image,
     pub memory: Option<Box<dyn DeviceMemory>>,
     pub view: RwLock<Option<NonZeroU64>>,
-    pub device: Arc<ash::Device>,
+    pub vk: Arc<Vulkan>,
     pub subviews: RwLock<GlobalSlotMap<vk::ImageView>>,
     pub state: RwLock<ImageState>,
     pub properties: ImageProperties,
@@ -124,7 +124,7 @@ impl Image {
     pub fn get_view(&self) -> Result<vk::ImageView, ImageError> {
         let mut write = self.view.write().unwrap();
         if write.is_none() {
-            let device = &self.device;
+            let device = self.vk.device();
             let create_info = vk::ImageViewCreateInfo {
                 s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
                 image: self.handle(),
@@ -157,7 +157,7 @@ impl Image {
             } else {
                 self.component_info()
             };
-        let device = &self.device;
+        let device = self.vk.device();
         let create_info = vk::ImageViewCreateInfo {
             s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
             image: self.handle(),
@@ -183,7 +183,7 @@ impl Image {
         let mut write = self.subviews.write().unwrap();
         let view = write.remove(index)?;
         unsafe {
-            self.device.destroy_image_view(view, None);
+            self.vk.device().destroy_image_view(view, None);
         }
         Ok(())
     }
@@ -198,7 +198,7 @@ impl Image {
     ) -> Result<(), ImageError>
     {
         let mut write = self.state.write().unwrap();
-        let device = &self.device;
+        let device = self.vk.device();
         let subresource =
             if let Some(info) = subresource_info {
                 if let Some(err) = self.validate_range(ImageRangeInfo::new(info, None)) {
@@ -243,7 +243,7 @@ impl Image {
 impl Drop for Image {
 
     fn drop(&mut self) {
-        let device = &self.device;
+        let device = self.vk.device();
         unsafe {
             for (_, &subview) in self.subviews.read().unwrap().iter() {
                 device.destroy_image_view(subview, None);

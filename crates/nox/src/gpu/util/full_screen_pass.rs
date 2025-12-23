@@ -132,6 +132,7 @@ impl FullScreenPass {
     pub fn render(
         &mut self,
         frame_graph: &mut FrameGraph,
+        window_id: win::WindowId,
         image: ResourceId,
         range: Option<ImageRangeInfo>,
         sampler: SamplerId,
@@ -140,7 +141,9 @@ impl FullScreenPass {
         signal_semaphores: &[(TimelineSemaphoreId, u64)],
         alloc: &impl Allocator,
     ) -> Result<PassId> {
-        let image_id = image.image_id();
+        let image_id = image
+            .image_id()
+            .ok_or_else(|| Error::just_context("swapchain images are read-only"))?;
         let prev_image = &mut self.prev_images[frame_graph.frame_index() as usize];
         if prev_image.0 != image_id || prev_image.1 != range {
             frame_graph.gpu_mut().update_shader_resources(
@@ -158,7 +161,7 @@ impl FullScreenPass {
             ).context("failed to update shader resources")?;
             *prev_image = (image_id, range);
         }
-        let swapchain_image = frame_graph.swapchain_image();
+        let swapchain_image = frame_graph.swapchain_image(window_id)?;
         self.pass_id = frame_graph.add_pass(PassInfo {
             max_reads: 1, max_color_writes: 1,
             max_wait_semaphores: wait_semaphores.len() as u32,

@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use ash::vk;
 
+use rustc_hash::FxHashMap;
+
 use nox_mem::{
     slot_map::{GlobalSlotMap, SlotIndex},
     vec_types::GlobalVec,
@@ -17,6 +19,7 @@ use crate::gpu::{*, memory_binder::MemoryBinder};
 use super::{
     LinearDeviceAlloc,
     ResourceFlags,
+    ImageSourceId,
 };
 
 pub(crate) struct ResourcePool
@@ -24,6 +27,7 @@ pub(crate) struct ResourcePool
     transient_images: GlobalSlotMap<ImageId>,
     subviews: GlobalVec<(ImageId, SlotIndex<vk::ImageView>)>,
     device_alloc: LinearDeviceAlloc,
+    pub(super) swapchain_frame_data: FxHashMap<win::WindowId, FrameData>,
     frame: u64,
 }
 
@@ -37,6 +41,7 @@ impl ResourcePool {
             transient_images: GlobalSlotMap::new(),
             subviews: GlobalVec::new(),
             device_alloc,
+            swapchain_frame_data: FxHashMap::default(),
             frame: 0,
         }
     }
@@ -61,6 +66,7 @@ impl<'a> ResourcePoolContext<'a>
     pub fn new(
         mut context: GpuContext<'a>,
         resource_pool: &'a mut ResourcePool,
+        swapchains: impl Iterator<Item = (win::WindowId, FrameData)>,
     ) -> Self
     {
         for (_, resource) in &resource_pool.transient_images {
@@ -73,6 +79,12 @@ impl<'a> ResourcePoolContext<'a>
             }
         }
         resource_pool.subviews.clear();
+        resource_pool.swapchain_frame_data.clear();
+        for (id, frame_data) in swapchains {
+            resource_pool.swapchain_frame_data
+                .entry(id)
+                .or_insert(frame_data);
+        }
         unsafe {
             resource_pool.device_alloc.reset();
         }
@@ -103,7 +115,7 @@ impl<'a> ResourcePoolContext<'a>
         }
         Ok(ResourceId {
             index: Default::default(),
-            image_id: id,
+            source: ImageSourceId::Owned(id),
             format: properties.format,
             samples: properties.samples,
             flags,
@@ -136,7 +148,7 @@ impl<'a> ResourcePoolContext<'a>
         }
         Ok(ResourceId {
             index,
-            image_id,
+            source: ImageSourceId::Owned(image_id),
             format: properties.format,
             samples: properties.samples,
             flags,
@@ -145,9 +157,9 @@ impl<'a> ResourcePoolContext<'a>
     } 
 
     #[inline(always)]
-    pub fn get_image(&self, resource_id: ResourceId) -> Result<Arc<Image>> {
+    pub fn get_image(&self, id: ImageId) -> Result<Arc<Image>> {
         self.context
-            .get_image(resource_id.image_id)
+            .get_image(id)
             .context("couldn't find image")
     }
 
@@ -160,20 +172,43 @@ impl<'a> ResourcePoolContext<'a>
         subresource_info: Option<ImageSubresourceRangeInfo>
     ) -> Result<()>
     {
-        let image = self.context
-            .get_image(id.image_id)
-            .context(ErrorContext::EventError(id.location_or_this()))?;
-        image
-            .cmd_memory_barrier(state, command_buffer, subresource_info, false)
-            .context("image memory barrier failed")
-            .context(ErrorContext::EventError(id.location_or_this()))?;
-        Ok(())
+        match id.source {
+            ImageSourceId::Owned(image_id) => {
+                let image = self.context
+                    .get_image(image_id)
+                    .context(ErrorContext::EventError(id.location_or_this()))?;
+                image
+                    .cmd_memory_barrier(state, command_buffer, subresource_info, false)
+                    .context("image memory barrier failed")
+                    .context(ErrorContext::EventError(id.location_or_this()))?;
+                Ok(())
+            },
+            ImageSourceId::SwapchainImage(_) => {
+                Err(Error::just_context("swapchain image used where owned image expected"))
+                .context(ErrorContext::EventError(id.location_or_this()))
+            },
+        }
     }
 
     #[inline(always)]
     pub fn get_image_view(&self, id: ResourceId) -> Result<(vk::ImageView, vk::ImageLayout)> {
-        let src = self.context.get_image(id.image_id)?;
-        Ok((src.get_view().context("failed to get image view")?, src.layout()))
+        match id.source {
+            ImageSourceId::Owned(image_id) => {
+                let src = self.context
+                    .get_image(image_id)
+                    .context(ErrorContext::EventError(id.location_or_this()))?;
+                Ok((
+                    src.get_view()
+                    .context("failed to get image view")
+                    .context(ErrorContext::EventError(id.location_or_this()))?,
+                    src.layout()
+                ))
+            },
+            ImageSourceId::SwapchainImage(_) => {
+                Err(Error::just_context("swapchain image used where owned image expected"))
+                .context(ErrorContext::EventError(id.location_or_this()))
+            },
+        }
     }
 
     #[inline(always)]
@@ -183,11 +218,22 @@ impl<'a> ResourcePoolContext<'a>
         range_info: ImageRangeInfo,
     ) -> Result<(vk::ImageView, vk::ImageLayout)>
     {
-        let image = self.context.get_image(id.image_id)?;
-        let (index, view) = image
-            .create_subview(range_info)
-            .context("failed to create image subview")?;
-        self.pool.subviews.push((id.image_id, index));
-        Ok((view, image.layout()))
+        match id.source {
+            ImageSourceId::Owned(image_id) => {
+                let image = self.context
+                    .get_image(image_id)
+                    .context(ErrorContext::EventError(id.location_or_this()))?;
+                let (index, view) = image
+                    .create_subview(range_info)
+                    .context("failed to create image subview")
+                    .context(ErrorContext::EventError(id.location_or_this()))?;
+                self.pool.subviews.push((image_id, index));
+                Ok((view, image.layout()))
+            },
+            ImageSourceId::SwapchainImage(_) => {
+                Err(Error::just_context("swapchain image used where owned image expected"))
+                .context(ErrorContext::EventError(id.location_or_this()))
+            },
+        }
     }
 }

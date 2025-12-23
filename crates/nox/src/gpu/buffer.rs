@@ -10,7 +10,10 @@ use ash::vk::{self, Handle};
 
 use nox_mem::{AsRaw, impl_as_raw_bit_op};
 
-use crate::gpu::memory_binder::DeviceMemory;
+use crate::gpu::{
+    memory_binder::DeviceMemory,
+    Vulkan,
+};
 use crate::dev::has_not_bits;
 
 pub use error::BufferError;
@@ -33,7 +36,7 @@ impl_as_raw_bit_op!(BufferUsage);
 pub(crate) struct Buffer {
     handle: NonZeroU64,
     memory: Option<Box<dyn DeviceMemory>>,
-    device: Arc<ash::Device>,
+    vk: Arc<Vulkan>,
     properties: BufferProperties,
     state: BufferState,
 }
@@ -42,7 +45,7 @@ impl Buffer {
 
     #[inline(always)]
     pub fn new(
-        device: Arc<ash::Device>,
+        vk: Arc<Vulkan>,
         properties: BufferProperties,
     ) -> Result<Self, vk::Result>
     {
@@ -55,12 +58,12 @@ impl Buffer {
             ..Default::default()
         };
         let buffer = unsafe {
-            device.create_buffer(&create_info, None)?
+            vk.device().create_buffer(&create_info, None)?
         };
         Ok(Self {
             handle: NonZeroU64::new(buffer.as_raw()).unwrap(),
             memory: None,
-            device,
+            vk,
             properties,
             state: BufferState::new(
                 vk::AccessFlags::NONE,
@@ -125,7 +128,7 @@ impl Buffer {
         if self.state == state {
             return
         }
-        let device = &self.device;
+        let device = self.vk.device();
         let memory_barrier = self.state.to_memory_barrier(
             self.handle(),
             state,
@@ -160,7 +163,7 @@ impl Buffer {
 impl Drop for Buffer {
 
     fn drop(&mut self) {
-        let device = &self.device;
+        let device = self.vk.device();
         unsafe {
             device.destroy_buffer(self.handle(), None);
             if let Some(memory) = self.memory.take() {

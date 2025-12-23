@@ -367,6 +367,15 @@ impl<T> GlobalVec<T> {
     {
         <Self as Vector<T>>::move_from_vec(self, from).unwrap();
     }
+
+    #[inline(always)]
+    pub fn move_from_vec_map<U, V, F>(&mut self, from: &mut V, f: F)
+        where 
+            V: Vector<U>,
+            F: FnMut(U) -> T
+    {
+        <Self as Vector<T>>::move_from_vec_map(self, from, f).unwrap();
+    }
 }
 
 impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityPol, IsGlobal>
@@ -702,6 +711,27 @@ impl<T, Alloc, CapacityPol, IsGlobal> Vector<T> for AllocVec<T, Alloc, CapacityP
         Ok(())
     }
 
+    fn move_from_vec_map<U, V, F>(&mut self, from: &mut V, mut f: F) -> Result<()>
+        where 
+            V: Vector<U>,
+            F: FnMut(U) -> T
+    {
+        self.clear();
+        self.reserve(from.len())?;
+        let len = from.len();
+        let src = from.as_ptr();
+        let dst = self.as_mut_ptr();
+        unsafe {
+            for i in 0..len {
+                dst.add(i)
+                .write(f(src.add(i).read()))
+            }
+        }
+        self.len = len;
+        unsafe { from.set_len(0); }
+        Ok(())
+    }
+
     #[inline(always)]
     fn iter(&self) -> Self::Iter<'_> {
         self.as_slice().iter()
@@ -904,6 +934,15 @@ impl_traits!{
             vec
         }
     ,
+}
+
+impl<A> FromIterator<A> for GlobalVec<A> {
+
+    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+        let mut vec = Self::new();
+        vec.extend(iter.into_iter());
+        vec
+    }
 }
 
 unsafe impl<

@@ -6,21 +6,22 @@ pub mod error_util {
 }
 
 use std::{
-    sync::{Arc, OnceLock}, time
+    sync::OnceLock, time
 };
-
-use compact_str::CompactString;
 
 use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     application::ApplicationHandler,
     event::*,
     window::{WindowId, Window},
-    keyboard::*,
 };
 
-use nox_error::Context;
+use rustc_hash::FxHashSet;
+
 use nox_mem::vec_types::Vector;
+use nox_alloc::arena_alloc::ArenaGuard;
+
+use nox_error::Context;
 
 use crate::{
     dev::{
@@ -29,45 +30,37 @@ use crate::{
     },
     log,
     Attributes,
-    AttributesInternal,
     Event,
     gpu,
     expand_error,
+    OnInit,
 };
 
 use super::{
     interface::Interface,
     memory::Memory,
-    clipboard::Clipboard,
 };
 
 pub static ERROR_CAUSE_FMT: OnceLock<log::CustomFmt> = OnceLock::new();
 
-pub struct Nox<'a, I>
-    where
-        I: Interface,
-{
-    interface: I,
-    attributes: AttributesInternal,
-    window_context: win::WindowContext,
-    window: Option<Arc<Window>>,
-    memory: &'a Memory,
-    gpu: Option<gpu::Gpu<'a>>,
-    flags: u32,
-}
+pub struct Nox;
 
-impl<'a, I> Nox<'a, I>
-    where
-        I: Interface,
-{
+impl Nox {
 
-    const ERROR: u32 = 0x1;
+    pub fn default_attributes() -> Attributes {
+        Attributes::new()
+    }
 
-    pub fn new(
+    pub fn on_init<'a>() -> OnInit<'a> {
+        OnInit::new()
+    }
+
+    pub fn new<'a, 'b, I: Interface>(
         attributes: Attributes,
+        on_init: &'a OnInit<'b>,
         memory: &'a mut Memory,
         interface: I,
-    ) -> Self
+    ) -> NoxRun<'a, 'b, I>
         where 
     {
         log::init();
@@ -104,16 +97,40 @@ impl<'a, I> Nox<'a, I>
                 })).message(|spec| spec);
             ERROR_CAUSE_FMT.set(log::custom_fmt(error_cause_fmt)).ok();
         }
-        Nox {
+        NoxRun {
             interface,
-            attributes: AttributesInternal::new(attributes),
-            window: None,
+            attributes,
+            window_storage: win::WindowStorage::new(),
+            redraws_requested: FxHashSet::default(),
+            on_init,
             memory,
             gpu: None,
-            window_context: win::WindowContext::new(),
             flags: 0,
         }
     }
+}
+
+pub struct NoxRun<'a, 'b, I>
+    where
+        I: Interface,
+{
+    interface: I,
+    attributes: Attributes,
+    window_storage: win::WindowStorage<'a>,
+    redraws_requested: FxHashSet<WindowId>,
+    on_init: &'a OnInit<'b>,
+    memory: &'a Memory,
+    gpu: Option<gpu::Gpu>,
+    flags: u32,
+}
+
+impl<'a, 'b, I> NoxRun<'a, 'b, I>
+    where
+        I: Interface,
+{
+
+    const ERROR: u32 = 0x1; 
+    const CLOSE_ON_NO_WINDOWS: u32 = 0x2;
 
     pub fn run(mut self) {
         let event_loop = EventLoop::new().unwrap();
@@ -125,207 +142,159 @@ impl<'a, I> Nox<'a, I>
     fn error_set(&self) -> bool {
         self.flags & Self::ERROR == Self::ERROR
     }
+
+    #[inline(always)]
+    fn close_on_no_windows(&self) -> bool {
+        self.flags & Self::CLOSE_ON_NO_WINDOWS == Self::CLOSE_ON_NO_WINDOWS
+    }
 }
 
-impl<'a, I: Interface> Drop for Nox<'a, I> {
+impl<'a, 'b, I: Interface> Drop for NoxRun<'a, 'b, I> {
 
     fn drop(&mut self) {
         if let Some(mut gpu) = self.gpu.take() {
             gpu.wait_idle();
-            (self.interface)(Event::CleanUp { gpu: &mut gpu.context() }).ok();
-            gpu.clean_up(self.memory.gpu().host_allocators());
+            (self.interface)(Event::CleanUp {
+                gpu: &mut gpu.context()
+            }).ok();
+            gpu.clean_up();
         }
     }
 }
 
-impl<'a, I: Interface> ApplicationHandler for Nox<'a, I> {
+impl<'a, 'b, I: Interface> ApplicationHandler for NoxRun<'a, 'b, I> {
 
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent
     ) {
         if self.error_set() {
             return
         }
-        match event {
-            WindowEvent::CursorMoved { device_id: _, position } => {
-                self.window_context.cursor_position = (position.x, position.y);
-                self.window_context.flags |= win::WindowContext::CURSOR_MOVED;
-            },
-            WindowEvent::MouseWheel { device_id: _, delta, phase: _ } => {
-                match delta {
-                    MouseScrollDelta::LineDelta(x, y) => {
-                        self.window_context.mouse_scroll_line_delta = (x, y);
-                    },
-                    MouseScrollDelta::PixelDelta(d) => {
-                        self.window_context.mouse_scroll_pixel_delta = (d.x, d.y);
+        if let Some(mut window) = self.window_storage.window_mut(window_id) {
+            match event {
+                WindowEvent::RedrawRequested => {
+                    self.redraws_requested.insert(window_id);
+                },
+                event => window.process_event(event),
+            }
+        }
+        let mut redraw = true;
+        for window in self.window_storage.active_ids() {
+            if !self.redraws_requested.contains(window) {
+                redraw = false;
+            }
+        }
+        if redraw {
+            self.redraws_requested.clear();
+            let host_allocators = self.memory.gpu().host_allocators();
+            if let Some(gpu) = &mut self.gpu {
+                self.window_storage.delta_time = self.window_storage.delta_counter.elapsed();
+                self.window_storage.delta_counter = time::Instant::now();
+                if let Err(err) = (self.interface)(Event::Update {
+                    win: &mut win::WindowContext::new(
+                        &mut self.window_storage, event_loop,
+                        self.memory,
+                    ),
+                    gpu: &mut gpu.context(),
+                }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
+                {
+                    event_loop.exit();
+                    self.flags |= Self::ERROR;
+                    expand_error!(err);
+                    return
+                }
+                for (_, win) in self.window_storage.window_iter_mut() {
+                    if win.cursor_set() {
+                        win.handle.set_cursor(win.current_cursor);
                     }
-                };
-            },
-            WindowEvent::KeyboardInput { device_id: _, event, is_synthetic: _ } => {
-                match event {
-                    KeyEvent { physical_key, logical_key, text, location: _, state, repeat, .. } => {
-                        let phys = self.window_context.physical_keys
-                            .entry(physical_key)
-                            .or_default();
-                        phys.pressed = state == ElementState::Pressed;
-                        phys.released = state == ElementState::Released;
-                        phys.held = state != ElementState::Released;
-                        phys.repeat = repeat;
-                        if let Some(text) = text && (phys.pressed || repeat) {
-                            self.window_context.input_text.push((
-                                match physical_key {
-                                    PhysicalKey::Code(c) => c,
-                                    PhysicalKey::Unidentified(_) => KeyCode::Backspace,
-                                },
-                                CompactString::new(&text))
-                            );
-                        }
-                        let logic = self.window_context.logical_keys.entry(logical_key).or_default();
-                        logic.pressed = state == ElementState::Pressed;
-                        logic.released = state == ElementState::Released;
-                        logic.held = state != ElementState::Released;
-                        logic.repeat = repeat;
-                    },
-                };
-            },
-            WindowEvent::MouseInput { device_id: _, state, button } => {
-                let button = self.window_context.mouse_buttons.entry(button).or_default();
-                button.pressed = state == ElementState::Pressed;
-                button.released = state == ElementState::Released;
-                button.held = state != ElementState::Released;
-            },
-            WindowEvent::CloseRequested => event_loop.exit(), // terminate app,
-            WindowEvent::Resized(size) => {
-                self.window_context.window_size = (size.width, size.height);
-                if let Some(gpu) = &mut self.gpu {
-                    gpu.request_resize(size);
+                    win.flags &= !(
+                        win::NoxWindow::CURSOR_SET | win::NoxWindow::CURSOR_MOVED
+                    );
+                    win.input_text.clear();
+                    win.handle.request_redraw();
+                    if win.transparent_set() {
+                        let is = win.is_transparent();
+                        win.handle.set_transparent(is);
+                        win.flags &= !win::NoxWindow::TRANSPARENT_SET;
+                    }
                 }
-            },
-            WindowEvent::RedrawRequested => {
-                let host_allocators = self.memory.gpu().host_allocators();
-                if let Some(window) = &self.window {
-                    if let Some(gpu) = &mut self.gpu {
-                        self.window_context.delta_time = self.window_context.delta_counter.elapsed();
-                        self.window_context.delta_counter = time::Instant::now();
-                        if let Err(err) = (self.interface)(Event::Update {
-                            win: &mut self.window_context,
-                            gpu: gpu.context(),
-                        }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
-                        {
-                            event_loop.exit();
-                            self.flags |= Self::ERROR;
-                            expand_error!(err);
-                            return
-                        }
-
-                        if self.window_context.cursor_set() {
-                            window.set_cursor(self.window_context.current_cursor);
-                        }
-                        self.window_context.flags &= !(
-                            win::WindowContext::CURSOR_SET | win::WindowContext::CURSOR_MOVED
-                        );
-                        self.window_context.input_text.clear();
-                        window.request_redraw();
-                        if self.window_context.transparent_set() {
-                            let is = self.window_context.is_transparent();
-                            window.set_transparent(is);
-                            self.window_context.flags &= !win::WindowContext::TRANSPARENT_SET;
-                        }
-                        if let Err(err) = gpu 
-                            .render(&window, &mut self.interface, host_allocators)
-                            .context("failed to render")
-                        {
-                            event_loop.exit();
-                            self.flags |= Self::ERROR;
-                            expand_error!(err);
-                            return
-                        }
+                let mut win = win::WindowContext::new(
+                    &mut self.window_storage,
+                    event_loop,
+                    self.memory,
+                );
+                let tmp_alloc = ArenaGuard::new(self.memory.tmp_alloc());
+                if let Err(err) = gpu 
+                    .render(&mut win, &mut self.interface, host_allocators, tmp_alloc)
+                    .context("failed to render")
+                {
+                    event_loop.exit();
+                    self.flags |= Self::ERROR;
+                    expand_error!(err);
+                    return
                 }
-                }
-                self.window_context.reset_input();
-            },
-            _ => {},
+            }
+            self.window_storage.update();
+            if self.close_on_no_windows() && self.window_storage.active_ids().is_empty() {
+                event_loop.exit();
+            }
         }
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.window_context.monitors.clear();
+        self.window_storage.monitors.clear();
         for monitor in event_loop.available_monitors() {
-            self.window_context.monitors.push(monitor);
+            self.window_storage.monitors.push(monitor);
         }
-        let (nox_attr, window_attr) = self.attributes.separate();
-        if self.window.is_none() {
-            or_flag!(
-                self.window_context.flags,
-                win::WindowContext::TRANSPARENT,
-                window_attr.transparent
-            );
-            let window = match event_loop
-                .create_window(window_attr)
-                .context("failed to create window")
-            {
-                Ok(window) => window,
+        if self.gpu.is_none() {
+            or_flag!(self.flags, Self::CLOSE_ON_NO_WINDOWS, self.attributes.close_on_no_windows);
+            self.gpu = match gpu::Gpu::new(
+                event_loop,
+                &self.attributes.app_name,
+                self.attributes.app_version,
+                self.attributes.vulkan_validation,
+                *self.memory.gpu().layout(),
+                3,
+                self.memory.gpu().host_allocators(),
+            ).context("failed to init gpu") {
+                Ok(mut gpu) => {
+                    if let Err(err) = self.on_init.init(
+                        &mut win::WindowContext::new(&mut self.window_storage, event_loop, self.memory),
+                        &mut gpu.context()
+                    ) {
+                        event_loop.exit();
+                        self.flags |= Self::ERROR;
+                        expand_error!(err);
+                        return
+                    }
+                    if let Err(err) = (self.interface)(Event::Initialized {
+                        win: &mut win::WindowContext::new(
+                            &mut self.window_storage,
+                            event_loop,
+                            self.memory,
+                        ),
+                        gpu: &mut gpu.context(),
+                    }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
+                    {
+                        event_loop.exit();
+                        self.flags |= Self::ERROR;
+                        expand_error!(err);
+                        return
+                    }
+                    Some(gpu)
+                },
                 Err(err) => {
                     event_loop.exit();
-                    expand_error!(err);
                     self.flags |= Self::ERROR;
+                    expand_error!(err);
                     return
                 },
             };
-            let inner_size = window.inner_size();
-            self.window_context.window_size = (inner_size.width, inner_size.height);
-            log::info!("created window");
-            event_loop.set_control_flow(ControlFlow::Poll);
-            let host_allocators = self.memory.gpu().host_allocators();
-            window.request_redraw();
-            self.gpu = match gpu::Gpu
-                ::new(
-                    &window,
-                    &nox_attr.app_name,
-                    nox_attr.app_version,
-                    nox_attr.vulkan_validation,
-                    *self.memory.gpu().layout(),
-                    3,
-                    host_allocators,
-                ).context("failed to init gpu")
-            {
-                Ok(r) => Some(r),
-                Err(err) => {
-                    event_loop.exit();
-                    self.flags |= Self::ERROR;
-                    expand_error!(err);
-                    return
-                }
-            };
-            self.window_context.clipboard = match Clipboard
-                ::new(&window)
-                .context("failed to create clipboard")
-            {
-                Ok(cb) => cb,
-                Err(err) => {
-                    event_loop.exit();
-                    self.flags |= Self::ERROR;
-                    expand_error!(err);
-                    Clipboard::None
-                }
-            };
-            self.window = Some(Arc::new(window));
-            self.window_context.window = self.window.clone();
-            if let Err(err) = (self.interface)(Event::Initialized {
-                win: &mut self.window_context,
-                gpu: self.gpu
-                    .as_mut()
-                    .unwrap()
-                    .context(),
-            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
-            {
+            if self.close_on_no_windows() && self.window_storage.active_ids().is_empty() {
                 event_loop.exit();
-                self.flags |= Self::ERROR;
-                expand_error!(err);
-                return
             }
         }
     }

@@ -17,7 +17,7 @@ use crate::dev::format_location;
 use crate::gpu::{memory_binder::MemoryBinder, *};
 
 pub(crate) struct TransientCommandPool {
-    device: Arc<ash::Device>,
+    vk: Arc<Vulkan>,
     handle: vk::CommandPool,
     queue_family_index: u32,
 }
@@ -26,16 +26,16 @@ impl TransientCommandPool {
 
     #[inline(always)]
     pub fn new(
-        device: Arc<ash::Device>,
+        vk: Arc<Vulkan>,
         queue_family_index: u32,
     ) -> Result<Self> {
         let handle = helpers::create_command_pool(
-            &device,
+            vk.device(),
             vk::CommandPoolCreateFlags::TRANSIENT,
             queue_family_index,
         ).context("failed to create command pool")?;
         Ok(Self {
-            device,
+            vk,
             handle,
             queue_family_index,
         })
@@ -43,7 +43,7 @@ impl TransientCommandPool {
 
     #[inline(always)]
     pub fn device(&self) -> &ash::Device {
-        &self.device
+        self.vk.device()
     }
 
     #[inline(always)]
@@ -61,7 +61,7 @@ impl Drop for TransientCommandPool {
 
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_command_pool(
+            self.vk.device().destroy_command_pool(
                 self.handle,
                 None
             );
@@ -154,7 +154,8 @@ impl<'a, 'b> DerefMut for TransferCommands<'a, 'b> {
     }
 }
 
-impl<'a, 'b> TransferCommands<'a, 'b> {
+impl<'a, 'b> TransferCommands<'a, 'b>
+{
 
     #[inline(always)]
     pub(crate) fn new(
@@ -186,7 +187,7 @@ impl<'a, 'b> TransferCommands<'a, 'b> {
     #[inline(always)]
     pub(crate) fn get_sync_objects(
         &mut self
-    ) -> Result<(bool, SyncObjects, &[(TimelineSemaphoreId, u64)], &GpuContext<'b>)>
+    ) -> Result<(bool, SyncObjects, &[(TimelineSemaphoreId, u64)], &GpuContext<'a>)>
     {
         let mut new = false;
         if self.sync_objects.is_none() {
@@ -221,7 +222,7 @@ impl<'a, 'b> TransferCommands<'a, 'b> {
             new = true;
         }
         Ok((new, self.sync_objects.unwrap(), &self.signal_semaphores, unsafe {
-            &mut *self.context.get()
+            &*self.context.get()
         }))
     }
 
@@ -378,7 +379,8 @@ impl<'a, 'b> TransferCommands<'a, 'b> {
         }
         if (data.len() as u64) < size {
             return Err(Error::just_context(format_compact!(
-                "host copy out of range of host buffer, buffer size was {} while requested size was {size}", data.len()
+                "host copy out of range of host buffer, buffer size was {} while requested size was {size}",
+                data.len()
             )))
         }
         let command_buffer = self.transfer_command_buffer;
@@ -558,7 +560,10 @@ impl<'a, 'b> TransferCommands<'a, 'b> {
     {
         let filter = filter.into();
         let image = self.context.get_mut().get_image(image)?;
-        if let Some(err) = image.validate_usage(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST) {
+        if let Some(err) = image.validate_usage(
+            vk::ImageUsageFlags::TRANSFER_SRC |
+            vk::ImageUsageFlags::TRANSFER_DST)
+        {
             return Err(Error::new("image has incompatible usage", err))
         }
         let handle = image.handle();

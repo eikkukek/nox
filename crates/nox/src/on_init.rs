@@ -1,88 +1,84 @@
-use core::mem::MaybeUninit;
+mod data;
+mod r#ref;
 
-use nox_error::Context;
+use core::cell::UnsafeCell;
 
 use crate::{win, gpu};
 
 use crate::error as pub_error;
 use crate::dev::error as dev_error;
 
-pub struct OnInit<T, F>
-    where
-        F: FnOnce(
-            &mut win::WindowContext,
-            &mut gpu::GpuContext
-        ) -> pub_error::Result<T>
-{
-    value: MaybeUninit<T>,
-    f: Option<F>,
+use nox_mem::vec_types::GlobalVec;
+
+use data::Data;
+pub use r#ref::Ref;
+
+pub struct OnInit<'a> {
+    data: UnsafeCell<GlobalVec<Data<'a>>>,
+    initialized: UnsafeCell<bool>,
 }
 
-impl<T, F> OnInit<T, F>
-    where
-        F: FnOnce(
-            &mut win::WindowContext,
-            &mut gpu::GpuContext
-        ) -> pub_error::Result<T>
-{
-    #[inline(always)]
-    pub fn new(f: F) -> Self {
+impl<'a> OnInit<'a> {
+
+    pub(crate) fn new() -> Self {
         Self {
-            value: MaybeUninit::uninit(),
-            f: Some(f),
+            data: Default::default(),
+            initialized: UnsafeCell::new(false),
         }
     }
 
-    #[inline(always)]
-    pub fn init(
-        &mut self,
+    pub fn add<T: 'a>(
+        &self,
+        f: impl FnOnce(&mut win::WindowContext, &mut gpu::GpuContext) -> pub_error::Result<T> + 'a,
+    ) -> Ref<'_, T> {
+        unsafe {
+            assert!(!*self.initialized.get(), "OnInit can't be reused");
+        }
+        let data = unsafe {
+            &mut *self.data.get()
+        };
+        let data = data.push(Data::new(f));
+        let t = unsafe {
+            data.get_t()
+        };
+        Ref {
+            initialized: unsafe {
+                &*self.initialized.get()
+            },
+            t,
+        }
+    }
+
+    pub(crate) fn init(
+        &self,
         win: &mut win::WindowContext,
         gpu: &mut gpu::GpuContext,
-    ) -> dev_error::Result<&mut T>
-    {
-        let Some(f) = self.f.take() else {
-            return Err(
-                dev_error::Error::just_context("already initialized")
-            )
-        };
-        Ok(self.value.write(f(win, gpu)
-            .context("on init failed")?
-        ))
-    }
-
-    #[inline(always)]
-    pub fn get(&self) -> &T {
-        if self.f.is_some() {
-            panic!("value uninitialized")
+    ) -> dev_error::Result<()> {
+        unsafe {
+            if *self.initialized.get() {
+                return Err(dev_error::Error
+                    ::just_context("OnInit can't be reused")
+                )
+            }
+        }
+        for data in unsafe { &mut *self.data.get() } {
+            data.init(win, gpu)?;
         }
         unsafe {
-            self.value.assume_init_ref()
+            *self.initialized.get() = true;
         }
-    }
-
-    #[inline(always)]
-    pub fn get_mut(&mut self) -> &mut T {
-        if self.f.is_some() {
-            panic!("value uninitialized")
-        }
-        unsafe {
-            self.value.assume_init_mut()
-        }
+        Ok(())
     }
 }
 
-impl<T, F> Drop for OnInit<T, F>
-    where
-        F: FnOnce(
-            &mut win::WindowContext,
-            &mut gpu::GpuContext
-        ) -> pub_error::Result<T>
-{
+impl<'a> Drop for OnInit<'a> {
 
     fn drop(&mut self) {
-        if self.f.is_none() {
-            unsafe {
-                self.value.assume_init_drop();
+        unsafe {
+            if *self.initialized.get() {
+                for data in &mut *self.data.get() {
+                    data.drop_t();
+                }
             }
         }
     }

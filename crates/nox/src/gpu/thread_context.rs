@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{
-    physical_device,
+    Vulkan,
     helpers::{self},
     RaiiHandle,
 };
@@ -9,7 +9,7 @@ use super::{
 use ash::vk;
 
 pub struct ThreadContext {
-    device: Arc<ash::Device>,
+    vk: Arc<Vulkan>,
     graphics_pool: vk::CommandPool,
     transfer_pool: vk::CommandPool,
     compute_pool: vk::CommandPool,
@@ -18,23 +18,28 @@ pub struct ThreadContext {
 impl ThreadContext {
 
     pub fn new(
-        device: Arc<ash::Device>,
-        queue_families: physical_device::QueueFamilyIndices,
+        vk: Arc<Vulkan>,
     ) -> Result<Self, vk::Result> {
         let flags = vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER;
+        let device = vk.device();
+        let queue_family_indices = vk.queue_family_indices();
         let graphics_pool = RaiiHandle::new(
-            helpers::create_command_pool(&device, flags, queue_families.graphics_index())?,
-            |v| unsafe { device.destroy_command_pool(v, None); }
+            helpers::create_command_pool(device,
+                flags, queue_family_indices.graphics_index()
+            )?,
+            |v| unsafe { vk.device().destroy_command_pool(v, None); }
         );
         let transfer_pool = RaiiHandle::new(
-            helpers::create_command_pool(&device, flags, queue_families.transfer_index())?,
+            helpers::create_command_pool(device,
+                flags, queue_family_indices.transfer_index()
+            )?,
             |v| unsafe { device.destroy_command_pool(v, None); }
         );
         let compute_pool =
-            helpers::create_command_pool(&device, flags, queue_families.compute_index())?;
+            helpers::create_command_pool(&device, flags, vk.queue_family_indices().compute_index())?;
         Ok(
             Self {
-                device: device.clone(),
+                vk: vk.clone(),
                 graphics_pool: graphics_pool.into_inner(),
                 transfer_pool: transfer_pool.into_inner(),
                 compute_pool,
@@ -59,7 +64,7 @@ impl Drop for ThreadContext {
 
     fn drop(&mut self) {
         unsafe {
-            let device = &*self.device;
+            let device = self.vk.device();
             device.destroy_command_pool(self.graphics_pool, None);
             device.destroy_command_pool(self.transfer_pool, None);
             device.destroy_command_pool(self.compute_pool, None);

@@ -18,6 +18,7 @@ use crate::{error::{Location, Tracked, caller}, gpu::shader_fn::glsl_to_spirv, V
 
 use super::{
     Handle,
+    Vulkan,
     pipeline::create_shader_module,
 };
 
@@ -224,7 +225,7 @@ impl From<vk::PushConstantRange> for PushConstant {
 
 #[derive(Clone)]
 pub(crate) struct Shader {
-    device: Arc<ash::Device>,
+    vk: Arc<Vulkan>,
     module: vk::ShaderModule,
     uniforms: GlobalVec<Uniform>,
     push_constants: GlobalVec<PushConstant>,
@@ -234,7 +235,7 @@ pub(crate) struct Shader {
 impl Shader {
 
     pub fn new(
-        device: Arc<ash::Device>,
+        vk: Arc<Vulkan>,
         spirv: &[u32],
         stage: ShaderStage,
     ) -> Result<Self, ShaderError>
@@ -246,11 +247,15 @@ impl Shader {
         let mut parse_uniform = |mut ty: vk::DescriptorType, resource_ty: ResourceType| -> Result<(), ShaderError> {
             for resource in resources.resources_for_type(resource_ty)? {
                 let mut set = 0;
-                if let Some(DecorationValue::Literal(dec)) = compiler.decoration(resource.id, spirv::Decoration::DescriptorSet)? {
+                if let Some(DecorationValue::Literal(dec)) =
+                    compiler.decoration(resource.id, spirv::Decoration::DescriptorSet)?
+                {
                     set = dec;
                 }
                 let mut binding = 0;
-                if let Some(DecorationValue::Literal(dec)) = compiler.decoration(resource.id, spirv::Decoration::Binding)? {
+                if let Some(DecorationValue::Literal(dec)) =
+                    compiler.decoration(resource.id, spirv::Decoration::Binding)?
+                {
                     binding = dec;
                 }
                 let mut count = 1;
@@ -321,9 +326,9 @@ impl Shader {
                 offset,
             });
         }
-        let module = create_shader_module(&device, spirv)?;
+        let module = create_shader_module(vk.device(), spirv)?;
         Ok(Self {
-            device,
+            vk,
             module,
             uniforms,
             push_constants,
@@ -356,7 +361,7 @@ impl Drop for Shader {
     
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_shader_module(self.module, None);
+            self.vk.device().destroy_shader_module(self.module, None);
         }
     }
 }

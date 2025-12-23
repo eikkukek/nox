@@ -1,4 +1,4 @@
-use ash::{khr::{self, surface}, vk};
+use ash::{khr, vk};
 
 use nox_mem::{
     vec_types::{Vector, ArrayVec},
@@ -70,8 +70,6 @@ impl PhysicalDeviceInfo {
     fn new(
         physical_device: vk::PhysicalDevice,
         instance: &ash::Instance,
-        surface_loader: &surface::Instance,
-        surface_khr: vk::SurfaceKHR,
     ) -> Result<Option<Self>>
     {
         let properties = unsafe { instance.get_physical_device_properties(physical_device) };
@@ -80,7 +78,7 @@ impl PhysicalDeviceInfo {
             .context_with(|| ErrorContext::StringConversionError(location!()))?;
         let api_version = Version::from(properties.api_version);
         let queue_family_indices =
-            match QueueFamilyIndices::new(physical_device, instance, surface_loader, surface_khr) {
+            match QueueFamilyIndices::new(physical_device, instance) {
                 Ok(queue_family_indices) => {
                     match queue_family_indices {
                         Some(queue_family_indices) => queue_family_indices,
@@ -135,8 +133,6 @@ impl QueueFamilyIndices {
     pub fn new(
         physical_device: vk::PhysicalDevice,
         instance: &ash::Instance,
-        surface_loader: &surface::Instance,
-        surface_khr: vk::SurfaceKHR
     ) -> Result<Option<Self>>
     {
         let properties = unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
@@ -155,15 +151,7 @@ impl QueueFamilyIndices {
             if !graphics.1 &&
                 has_bits!(property.queue_flags, vk::QueueFlags::GRAPHICS)
             {
-                let present_supported = unsafe {
-                    surface_loader
-                        .get_physical_device_surface_support(physical_device, i as u32, surface_khr)
-                        .context("failed to query vulkan surface support")?
-                };
-                if present_supported {
-                    graphics = (i as u32, true);
-                    continue;
-                }
+                graphics = (i as u32, true); 
             }
             if !transfer.1 &&
                 has_bits!(property.queue_flags, vk::QueueFlags::TRANSFER) 
@@ -342,8 +330,6 @@ pub fn rate_physical_device(
 
 pub fn find_suitable_physical_device(
     instance: &ash::Instance,
-    surface_loader: &surface::Instance,
-    surface_khr: vk::SurfaceKHR,
 ) -> Result<(vk::PhysicalDevice, PhysicalDeviceInfo)>
 {
     let physical_devices = unsafe {
@@ -356,7 +342,7 @@ pub fn find_suitable_physical_device(
     for physical_device in physical_devices {
         let physical_device_info =
             match PhysicalDeviceInfo
-                ::new(physical_device, instance, surface_loader, surface_khr)
+                ::new(physical_device, instance)
                 .context("failed to get vulkan physical device info")
             {
                 Ok(device_info) => {

@@ -100,6 +100,11 @@ pub trait Vector<T>:
         where
             V: Vector<T>;
 
+    fn move_from_vec_map<U, V, F>(&mut self, from: &mut V, f: F) -> Result<()>
+        where 
+            V: Vector<U>,
+            F: FnMut(U) -> T;
+
     #[inline(always)]
     fn is_empty(&self) -> bool {
         self.len() == 0

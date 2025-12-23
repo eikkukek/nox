@@ -5,7 +5,7 @@ use crate::dev::error::location;
 use super::*;
 
 pub struct DescriptorPool {
-    device: Arc<ash::Device>,
+    vk: Arc<Vulkan>,
     handle: vk::DescriptorPool,
     allocated_sets: u32,
     max_sets: u32,
@@ -15,7 +15,7 @@ pub struct DescriptorPool {
 impl DescriptorPool {
 
     pub fn new(
-        device: Arc<ash::Device>,
+        vk: Arc<Vulkan>,
         memory_layout: MemoryLayout,
     ) -> Result<Self>
     {
@@ -47,12 +47,12 @@ impl DescriptorPool {
             ..Default::default()
         };
         let handle = unsafe {
-            device
+            vk.device()
                 .create_descriptor_pool(&info, None)
                 .context_with(|| format_compact!("failed to create descriptor pool at {}", location!()))?
         };
         Ok(Self {
-            device,
+            vk,
             handle,
             allocated_sets: 0,
             max_sets: info.max_sets,
@@ -82,7 +82,7 @@ impl DescriptorPool {
         let mut sets = FixedVec
             ::with_capacity(count as usize, alloc)
             .context("vec error")?;
-        let device = &self.device;
+        let device = self.vk.device();
         let res = unsafe {
             (device.fp_v1_0().allocate_descriptor_sets)(device.handle(), &info, sets.as_mut_ptr())
         };
@@ -102,7 +102,7 @@ impl DescriptorPool {
     ) -> Result<()>
     {
         unsafe {
-            self.device.free_descriptor_sets(
+            self.vk.device().free_descriptor_sets(
                 self.handle,
                 descriptor_sets
             ).context("failed to free descriptor sets")?;
@@ -113,7 +113,7 @@ impl DescriptorPool {
 
     pub(super) fn clean_up(&mut self) {
         unsafe {
-            self.device.destroy_descriptor_pool(
+            self.vk.device().destroy_descriptor_pool(
                 self.handle, None,
             );
         }

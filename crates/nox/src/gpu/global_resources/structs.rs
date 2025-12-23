@@ -92,7 +92,7 @@ pub struct ShaderResourceCopy {
 
 #[derive(Clone)]
 pub(crate) struct GraphicsPipeline {
-    pub device: Arc<ash::Device>,
+    pub vk: Arc<Vulkan>,
     pub handle: vk::Pipeline,
     pub _color_formats: GlobalVec<vk::Format>,
     pub _dynamic_states: GlobalVec<vk::DynamicState>,
@@ -106,7 +106,7 @@ impl Drop for GraphicsPipeline {
 
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_pipeline(self.handle, None);
+            self.vk.device().destroy_pipeline(self.handle, None);
         }
     }
 }
@@ -115,7 +115,7 @@ impl Drop for GraphicsPipeline {
 pub struct GraphicsPipelineId(pub(super) SlotIndex<GraphicsPipeline>);
 
 pub(crate) struct ComputePipeline {
-    pub device: Arc<ash::Device>,
+    pub vk: Arc<Vulkan>,
     pub handle: vk::Pipeline,
     pub layout_id: PipelineLayoutId,
 }
@@ -124,7 +124,7 @@ impl Drop for ComputePipeline {
 
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_pipeline(self.handle, None);
+            self.vk.device().destroy_pipeline(self.handle, None);
         }
     }
 }
@@ -133,7 +133,7 @@ impl Drop for ComputePipeline {
 pub struct ComputePipelineId(pub(super) SlotIndex<ComputePipeline>);
 
 pub(crate) struct PipelineCache {
-    pub device: Arc<ash::Device>,
+    pub vk: Arc<Vulkan>,
     pub handle: vk::PipelineCache,
 }
 
@@ -141,7 +141,7 @@ impl Drop for PipelineCache {
     
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_pipeline_cache(self.handle, None);
+            self.vk.device().destroy_pipeline_cache(self.handle, None);
         }
     }
 }
@@ -156,7 +156,7 @@ pub struct ImageId(pub(super) SlotIndex<Arc<Image>>);
 
 #[derive(Clone)]
 pub(super) struct Sampler {
-    pub device: Arc<ash::Device>,
+    pub vk: Arc<Vulkan>,
     pub handle: vk::Sampler,
     pub _builder: SamplerBuilder,
 }
@@ -165,7 +165,7 @@ impl Drop for Sampler {
 
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_sampler(self.handle, None);
+            self.vk.device().destroy_sampler(self.handle, None);
         }
     }
 }
@@ -238,12 +238,18 @@ pub enum ResourceBinderImage<'a> {
     DefaultBinder,
     DefaultBinderMappable,
     LinearDeviceAlloc(LinearDeviceAllocId),
-    Owned(&'a mut dyn MemoryBinder, Option<&'a mut dyn FnMut(vk::Image) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>)
+    Owned(
+        &'a mut dyn MemoryBinder,
+        Option<&'a mut dyn FnMut(vk::Image) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
+    )
 }
 
 pub enum ResourceBinderBuffer<'a> {
     DefaultBinder,
     DefaultBinderMappable,
     LinearDeviceAlloc(LinearDeviceAllocId),
-    Owned(&'a mut dyn MemoryBinder, Option<&'a mut dyn FnMut(vk::Buffer) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>)
+    Owned(
+        &'a mut dyn MemoryBinder,
+        Option<&'a mut dyn FnMut(vk::Buffer) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
+    )
 }

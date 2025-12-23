@@ -33,6 +33,6 @@ macro_rules! location {
 #[macro_export]
 macro_rules! caller {
     () => {
-        $crate::location::new(core::panic::Location::caller()).into()
+        $crate::location::new(core::panic::Location::caller())
     };
 }

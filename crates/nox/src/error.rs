@@ -18,14 +18,14 @@ impl Error {
     pub fn new<C>(ctx: C, err: impl error::Error + Send + Sync + 'static) -> Self
         where C: Display + Send + Sync + 'static
     {
-        Self(nox_error::Error::new_internal(ctx, err, caller!()))
+        Self(nox_error::Error::new_internal(ctx, err, Some(caller!())))
     }
 
     #[track_caller]
     pub fn just_context<C>(ctx: C) -> Self
         where C: Display + Send + Sync + 'static,
     {
-        Self(nox_error::Error::just_context_internal(ctx, caller!()))
+        Self(nox_error::Error::just_context_internal(ctx, Some(caller!())))
     }
 }
 

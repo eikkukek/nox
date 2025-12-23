@@ -16,17 +16,13 @@ use super::LinearDeviceAlloc;
 
 pub(crate) enum ImageSource {
     Owned(Arc<Image>),
-    Swapchain(vk::Image, vk::ImageView, ImageState),
+    Swapchain(win::WindowId, vk::Image, vk::ImageView, vk::Extent2D),
 }
 
 pub(crate) struct FrameContext<'a> {
     command_buffer: vk::CommandBuffer,
-    device: Arc<ash::Device>,
+    vk: Arc<Vulkan>,
     resource_pool: ResourcePoolContext<'a>,
-    swapchain_image: vk::Image,
-    swapchain_image_view: vk::ImageView,
-    swapchain_format: vk::Format,
-    swapchain_image_state: ImageState,
 }
 
 impl<'a> FrameContext<'a> {
@@ -34,25 +30,19 @@ impl<'a> FrameContext<'a> {
     #[inline(always)]
     pub fn new(
         command_buffer: vk::CommandBuffer,
-        context: GpuContext<'a>,
+        gpu: GpuContext<'a>,
         resource_pool: &'a mut ResourcePool,
-        swapchain_image: vk::Image,
-        swapchain_image_view: vk::ImageView,
-        swapchain_format: vk::Format,
-        swapchain_image_state: ImageState,
+        swapchains: impl Iterator<Item = (win::WindowId, FrameData)>,
     ) -> Self
     {
         Self {
-            device: context.device(),
+            vk: gpu.vk().clone(),
             resource_pool: ResourcePoolContext::new(
-                context,
-                resource_pool
+                gpu,
+                resource_pool,
+                swapchains,
             ),
             command_buffer,
-            swapchain_image,
-            swapchain_image_view,
-            swapchain_format,
-            swapchain_image_state,
         }
     }
 
@@ -67,8 +57,13 @@ impl<'a> FrameContext<'a> {
     }
 
     #[inline(always)]
-    pub fn device(&self) -> Arc<ash::Device> {
-        self.device.clone()
+    pub fn swapchain_count(&self) -> usize {
+        self.resource_pool.pool.swapchain_frame_data.len()
+    }
+
+    #[inline(always)]
+    pub fn vk(&self) -> &Arc<Vulkan> {
+        &self.vk
     }
 
     #[inline(always)]
@@ -96,38 +91,52 @@ impl<'a> FrameContext<'a> {
     }
 
     #[inline(always)]
-    pub fn swapchain_image(&self, loc: Location) -> ResourceId {
-        ResourceId {
-            format: self.swapchain_format,
+    pub fn swapchain_image(
+        &mut self,
+        win_id: win::WindowId,
+        loc: Location,
+    ) -> Result<ResourceId>
+    {
+        let frame_data = self.resource_pool.pool
+            .swapchain_frame_data.get(&win_id)
+            .ok_or_else(|| Error::just_context(format_compact!("invalid window id {win_id:?}")))?;
+        Ok(ResourceId {
+            format: frame_data.format,
             samples: MSAA::X1,
-            flags: ResourceFlags::SwapchainImage as u32,
+            source: ImageSourceId::SwapchainImage(win_id),
             loc: Some(loc),
             ..Default::default()
-        }
+        })
     }
 
     #[inline(always)]
     pub fn get_image(&self, resource_id: ResourceId) -> Result<ImageSource> {
-        if !resource_id.is_swapchain_image() {
-            Ok(ImageSource::Owned(self.resource_pool.get_image(resource_id)?))
-        } else {
-            Ok(ImageSource::Swapchain(
-                self.swapchain_image,
-                self.swapchain_image_view,
-                self.swapchain_image_state,
-            ))
+        match resource_id.source {
+            ImageSourceId::Owned(id) => {
+                Ok(ImageSource::Owned(self.resource_pool
+                    .get_image(id)
+                    .context(ErrorContext::EventError(resource_id.location_or_this()))?
+                ))
+            },
+            ImageSourceId::SwapchainImage(id) => {
+                let frame_data = self.resource_pool.pool
+                    .swapchain_frame_data.get(&id)
+                    .ok_or_else(|| Error::just_context(format_compact!("invalid window id {id:?}")))?;
+                Ok(ImageSource::Swapchain(
+                    id, frame_data.image,
+                    frame_data.image_view,
+                    frame_data.extent.into(),
+                ))
+            },
         }
     }
 
     #[inline(always)]
-    pub fn get_swapchain_image_state(&self) -> ImageState {
-        self.swapchain_image_state
-    }
-
-    #[inline(always)]
-    pub fn set_swapchain_image_state(&mut self, state: ImageState) {
-        self.swapchain_image_state = state;
-    }
+    pub fn swapchain_image_state(&mut self, win_id: win::WindowId) -> Option<&mut ImageState> {
+        self.resource_pool.pool.swapchain_frame_data
+            .get_mut(&win_id)
+            .map(|frame_data| &mut frame_data.image_state)
+    } 
 
     #[inline(always)]
     pub fn cmd_memory_barrier(

@@ -161,7 +161,7 @@ impl ReadInfo {
         Self {
             id,
             range,
-            loc: caller!(),
+            loc: Some(caller!()),
         }
     }
 }
@@ -216,7 +216,7 @@ impl WriteInfo {
     {
         Self {
             id,
-            loc: caller!(),
+            loc: Some(caller!()),
             range: None,
             resolve: None,
             load_op: Default::default(),

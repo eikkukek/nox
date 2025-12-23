@@ -1,3 +1,5 @@
+use nox_alloc::arena_alloc::ArenaAlloc;
+
 use super::gpu;
 
 pub struct GpuMemory {
@@ -30,12 +32,17 @@ impl Default for GpuMemory {
 
 pub struct Memory {
     gpu: GpuMemory,
+    tmp_alloc: ArenaAlloc,
 }
 
 impl Memory {
 
     pub fn gpu(&self) -> &GpuMemory {
         &self.gpu
+    }
+
+    pub fn tmp_alloc(&self) -> &ArenaAlloc {
+        &self.tmp_alloc
     }
 }
 
@@ -44,6 +51,9 @@ impl Default for Memory {
     fn default() -> Self {
         Self {
             gpu: Default::default(),
+            tmp_alloc: ArenaAlloc
+                ::new(1 << 16)
+                .unwrap(),
         }
     }
 }

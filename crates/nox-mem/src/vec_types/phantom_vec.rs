@@ -139,6 +139,14 @@ impl<T> Vector<T> for PhantomVec<T> {
     {
         Err(CapacityError::FixedCapacity { capacity: 0 }.into())
     }
+
+    fn move_from_vec_map<U, V, F>(&mut self, _from: &mut V, _f: F) -> Result<()>
+        where 
+            V: Vector<U>,
+            F: FnMut(U) -> T
+    {
+        Err(CapacityError::FixedCapacity { capacity: 0 }.into())
+    }
     
     fn iter(&self) -> Self::Iter<'_> {
         Default::default()

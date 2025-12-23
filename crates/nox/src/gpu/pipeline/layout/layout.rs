@@ -8,7 +8,7 @@ use crate::gpu::*;
 
 #[derive(Clone)]
 pub(crate) struct PipelineLayout {
-    device: Arc<ash::Device>,
+    vk: Arc<Vulkan>,
     handle: vk::PipelineLayout,
     pipeline_descriptor_sets: GlobalVec<(GlobalVec<Option<vk::DescriptorType>>, vk::DescriptorSetLayout)>,
     push_constant_ranges: GlobalVec<vk::PushConstantRange>,
@@ -18,11 +18,12 @@ pub(crate) struct PipelineLayout {
 impl PipelineLayout {
 
     pub fn new<const SHADER_COUNT: usize>(
-        device: Arc<ash::Device>,
+        vk: Arc<Vulkan>,
         shader_ids: [ShaderId; SHADER_COUNT],
         global_resources: &GlobalResources,
     ) -> Result<Self>
     {
+        let device = vk.device();
         let mut set_infos = GlobalVec::<GlobalVec<vk::DescriptorSetLayoutBinding>>::new();
         let mut push_constants = GlobalVec::new();
         let mut shaders = ArrayVec::<&Shader, SHADER_COUNT>::new();
@@ -127,7 +128,7 @@ impl PipelineLayout {
         }
         Ok(Self {
             pipeline_descriptor_sets,
-            device,
+            vk,
             handle,
             push_constant_ranges: push_constants,
             shader_ids: GlobalVec::from(shader_ids.as_slice()),
@@ -158,9 +159,10 @@ impl Drop for PipelineLayout {
 
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_pipeline_layout(self.handle(), None);
+            let device = self.vk.device();
+            device.destroy_pipeline_layout(self.handle(), None);
             for (_, set) in &self.pipeline_descriptor_sets {
-                self.device.destroy_descriptor_set_layout(*set, None);
+                device.destroy_descriptor_set_layout(*set, None);
             }
             self.pipeline_descriptor_sets.clear();
         }

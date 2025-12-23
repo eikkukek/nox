@@ -1,17 +1,11 @@
-use std::{
-    sync::Arc,
-    rc::Rc,
-    cell::RefCell,
-};
 use std::ffi::CString;
-use winit::{dpi::PhysicalSize, window::Window};
+use winit::event_loop::ActiveEventLoop;
 use ash::{
     khr::{surface, swapchain, wayland_surface, win32_surface, xcb_surface, xlib_surface},
     vk,
     Entry
 };
-use ash_window;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle,};
+use raw_window_handle::{HasDisplayHandle};
 use compact_str::{format_compact, CompactString};
 
 use nox_mem::{
@@ -25,54 +19,35 @@ use nox_alloc::{
 
 use nox_log::{warn, info};
 
-use super::{
-    HostAllocators,
-    physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo},
-    swapchain_context::SwapchainContext,
-};
+use super::physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo};
 
 use crate::dev::{
     export::Version,
     error::{Result, Error, Context, ErrorContext, location},
 };
 
-
-#[derive(Clone, Copy)]
-enum SwapchainState {
-    Valid,
-    OutOfDate {
-        buffered_frames: u32,
-        size: PhysicalSize<u32>,
-    },
-}
-
-pub(crate) struct VulkanContext<'a> {
-    #[allow(unused)]
+pub(crate) struct Vulkan {
     entry: ash::Entry,
-    instance: ash::Instance,
-    surface_loader: surface::Instance,
-    swapchain_loader: swapchain::Device,
-    surface_handle: vk::SurfaceKHR,
     physical_device: vk::PhysicalDevice,
-    physical_device_info: Arc<PhysicalDeviceInfo>,
+    physical_device_info: PhysicalDeviceInfo,
+    instance: ash::Instance,
     device: ash::Device,
+    surface_instance: surface::Instance,
+    swapchain_device: swapchain::Device,
     graphics_queue: vk::Queue,
     transfer_queue: vk::Queue,
     compute_queue: vk::Queue,
-    swapchain_context: Option<Rc<RefCell<SwapchainContext<'a>>>>,
-    swapchain_state: SwapchainState,
 }
 
-impl<'a> VulkanContext<'a> {
+impl Vulkan {
 
     pub fn new(
-        window: &Window,
+        event_loop: &ActiveEventLoop,
         app_name: &str,
         app_version: Version,
-        buffered_frame_count: u32,
         enable_validation: bool,
         tmp_alloc: &ArenaAlloc,
-    ) -> Result<VulkanContext<'a>> {
+    ) -> Result<Vulkan> {
         let tmp_alloc = &ArenaGuard::new(tmp_alloc);
         let entry = unsafe { Entry::load().unwrap() };
         match unsafe { entry.try_enumerate_instance_version() } {
@@ -118,7 +93,7 @@ impl<'a> VulkanContext<'a> {
         let mut found_layers = FixedVec::<*const i8, ArenaGuard>
             ::with_capacity(8, &tmp_alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
-        get_required_instance_extensions(window, &mut instance_extensions)?;
+        get_required_instance_extensions(event_loop, &mut instance_extensions)?;
         let validation_layer_name = CString::new("VK_LAYER_KHRONOS_validation").unwrap();
         let ext_debug_utils = CString::new("VK_EXT_debug_utils").unwrap();
         if enable_validation {
@@ -145,26 +120,11 @@ impl<'a> VulkanContext<'a> {
                 .create_instance(&instance_create_info, None)
                 .context("failed to create vulkan instance")?
         };
-        let surface_loader = surface::Instance::new(&entry, &instance);
-        let surface_handle = unsafe {
-            ash_window
-            ::create_surface(
-                &entry,
-                &instance,
-                window.display_handle().unwrap().as_raw(),
-                window.window_handle().unwrap().as_raw(),
-                None
-            )
-            .context_with(|| {
-                instance.destroy_instance(None);
-                "failed to create vulkan surface"
-            })?
-        };
+        let surface_instance = surface::Instance::new(&entry, &instance);
         let (physical_device, physical_device_info) =
-            find_suitable_physical_device(&instance, &surface_loader, surface_handle)
+            find_suitable_physical_device(&instance)
             .map_err(|err| {
                 unsafe {
-                    surface_loader.destroy_surface(surface_handle, None);
                     instance.destroy_instance(None);
                 }
                 err
@@ -230,7 +190,6 @@ impl<'a> VulkanContext<'a> {
             instance
                 .create_device(physical_device, &device_create_info, None)
                 .context_with(|| {
-                    surface_loader.destroy_surface(surface_handle, None);
                     instance.destroy_instance(None);
                     "failed to create vulkan device"
                 })?
@@ -238,88 +197,91 @@ impl<'a> VulkanContext<'a> {
         let graphics_queue = unsafe { device.get_device_queue(queue_family_indices.graphics_index(), 0) };
         let transfer_queue = unsafe { device.get_device_queue(queue_family_indices.transfer_index(), 0) };
         let compute_queue = unsafe { device.get_device_queue(queue_family_indices.compute_index(), 0) };
-        let swapchain_loader = ash::khr::swapchain::Device::new(&instance, &device);
+        let swapchain_device = ash::khr::swapchain::Device::new(&instance, &device);
         Ok(
             Self {
                 entry,
-                instance,
-                surface_loader,
-                swapchain_loader,
-                surface_handle,
+                instance: instance,
+                surface_instance: surface_instance,
+                swapchain_device: swapchain_device,
                 physical_device,
-                physical_device_info: Arc::new(physical_device_info),
-                device,
+                physical_device_info: physical_device_info,
+                device: device,
                 graphics_queue,
                 transfer_queue: transfer_queue,
                 compute_queue: compute_queue,
-                swapchain_context: None,
-                swapchain_state: SwapchainState::OutOfDate {
-                    buffered_frames: buffered_frame_count,
-                    size: window.inner_size(),
-                },
             },
         )
     }
 
-    pub fn device(&self) -> &ash::Device {
-        &self.device
+    #[inline(always)]
+    pub fn entry(&self) -> &ash::Entry {
+        &self.entry
     }
 
+    #[inline(always)]
     pub fn physical_device(&self) -> vk::PhysicalDevice {
         self.physical_device
     }
 
-    pub fn instance(&self) -> &ash::Instance {
-        &self.instance
-    }
-
-    pub fn swapchain_loader(&self) -> &swapchain::Device {
-        &self.swapchain_loader
-    }
-
-    pub fn queue_family_indices(&self) -> physical_device::QueueFamilyIndices {
-        self.physical_device_info.queue_family_indices()
-    }
-
-    pub fn graphics_queue(&self) -> vk::Queue {
-        self.graphics_queue
-    }
-
-    pub fn transfer_queue(&self) -> vk::Queue {
-        self.transfer_queue
-    }
-
-    pub fn compute_queue(&self) -> vk::Queue {
-        self.compute_queue
-    }
-
+    #[inline(always)]
     pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
         &self.physical_device_info
     }
 
-    pub fn request_swapchain_update(
-        &mut self,
-        buffered_frame_count: u32,
-        size: PhysicalSize<u32>,
-    ) {
-        self.swapchain_state = SwapchainState::OutOfDate {
-            buffered_frames: buffered_frame_count,
-            size,
-        };
+    #[inline(always)]
+    pub fn instance(&self) -> &ash::Instance {
+        &self.instance
     }
 
+    #[inline(always)]
+    pub fn device(&self) -> &ash::Device {
+        &self.device
+    }
+
+    #[inline(always)]
+    pub fn surface_instance(&self) -> &surface::Instance {
+        &self.surface_instance
+    }
+
+    #[inline(always)]
+    pub fn swapchain_device(&self) -> &swapchain::Device {
+        &self.swapchain_device
+    }
+
+    #[inline(always)]
+    pub fn queue_family_indices(&self) -> physical_device::QueueFamilyIndices {
+        self.physical_device_info.queue_family_indices()
+    }
+
+    #[inline(always)]
+    pub fn graphics_queue(&self) -> vk::Queue {
+        self.graphics_queue
+    }
+
+    #[inline(always)]
+    pub fn transfer_queue(&self) -> vk::Queue {
+        self.transfer_queue
+    }
+
+    #[inline(always)]
+    pub fn compute_queue(&self) -> vk::Queue {
+        self.compute_queue
+    }
+
+/*
     pub fn update_swapchain(
         &mut self,
         framebuffer_size: PhysicalSize<u32>,
         graphics_command_pool: vk::CommandPool,
-        buffered_frame_count: u32,
+        buffered_frames: u32,
         tmp_alloc: &ArenaAlloc,
         host_allocators: &'a HostAllocators,
     ) -> Result<()> {
         if let Some(context) = self.swapchain_context.take() {
             context.borrow_mut().destroy(
                 &self.device,
-                &self.swapchain_loader,
+                &self.swapchain_device,
                 self.graphics_queue,
                 Some(graphics_command_pool),
             );
@@ -329,12 +291,12 @@ impl<'a> VulkanContext<'a> {
         }
         self.swapchain_context = SwapchainContext::new(
             &self.device,
-            &self.surface_loader,
-            &self.swapchain_loader,
+            &self.surface_instance,
+            &self.swapchain_device,
             self.physical_device,
             self.surface_handle,
             vk::Extent2D { width: framebuffer_size.width, height: framebuffer_size.height },
-            buffered_frame_count,
+            buffered_frames,
             graphics_command_pool,
             self.queue_family_indices().graphics_index(),
             &host_allocators.swapchain,
@@ -375,7 +337,7 @@ impl<'a> VulkanContext<'a> {
         if let Some(context) = self.swapchain_context.take() {
             context.borrow_mut().destroy(
                 &self.device,
-                &self.swapchain_loader,
+                &self.swapchain_device,
                 self.graphics_queue,
                 Some(graphics_command_pool),
             );
@@ -384,15 +346,14 @@ impl<'a> VulkanContext<'a> {
             }
         }
     }
+    */
 }
 
-impl<'a> Drop for VulkanContext<'a> {
+impl Drop for Vulkan {
 
     fn drop(&mut self) {
         unsafe {
             self.device.destroy_device(None);
-            self.surface_loader.destroy_surface(self.surface_handle, None);
-            self.surface_handle = vk::SurfaceKHR::null();
             self.instance.destroy_instance(None);
         }
     }
@@ -403,7 +364,7 @@ fn get_required_instance_extensions<W>(
     out: &mut FixedVec::<*const i8, ArenaGuard>
 ) -> Result<()>
     where
-        W: HasWindowHandle + HasDisplayHandle
+        W: HasDisplayHandle
 {
     out.push(surface::NAME.as_ptr()).context_with(|| ErrorContext::VecError(location!()))?;
     let ext = match window.display_handle().unwrap().as_raw() {

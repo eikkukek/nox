@@ -353,6 +353,29 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         Ok(())
     }
 
+    fn move_from_vec_map<U, V, F>(&mut self, from: &mut V, mut f: F) -> Result<()>
+        where 
+            V: Vector<U>,
+            F: FnMut(U) -> T
+    {
+        let len = from.len();
+        if N > len {
+            return Err(CapacityError::FixedCapacity { capacity: N }.into())
+        }
+        self.clear();
+        let src = from.as_ptr();
+        let dst = self.as_mut_ptr();
+        unsafe {
+            for i in 0..len {
+                dst.add(i)
+                .write(f(src.add(i).read()))
+            }
+        }
+        self.len = len;
+        unsafe { from.set_len(0); }
+        Ok(())
+    }
+
     #[inline(always)]
     fn iter(&self) -> Self::Iter<'_> {
         self.as_slice().iter()

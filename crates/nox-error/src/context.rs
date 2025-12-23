@@ -9,7 +9,7 @@ use core::{
     fmt::Display,
 };
 
-use super::{Error, Tracked, BuildInternal, Result, Location, caller};
+use super::{Error, Tracked, BuildInternal, Result, Location};
 
 pub trait Context<T, E>
     where

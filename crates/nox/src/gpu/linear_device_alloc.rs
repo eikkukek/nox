@@ -9,7 +9,7 @@ use nox_mem::{vec_types::{GlobalVec, Vector}};
 use crate::dev::has_bits;
 
 use super::{
-    PhysicalDeviceInfo,
+    Vulkan,
     memory_binder::{
         DeviceMemory,
         MemoryBinder,
@@ -141,7 +141,7 @@ impl Block {
 }
 
 pub struct LinearDeviceAlloc {
-    device: Arc<ash::Device>,
+    vk: Arc<Vulkan>,
     blocks: GlobalVec<(GlobalVec<Block>, u32, usize)>,
     block_size: vk::DeviceSize,
     granularity: vk::DeviceSize,
@@ -151,27 +151,30 @@ pub struct LinearDeviceAlloc {
 impl LinearDeviceAlloc {
 
     pub(crate) fn new(
-        device: Arc<ash::Device>,
+        vk: Arc<Vulkan>,
         block_size: vk::DeviceSize,
         required_properties: vk::MemoryPropertyFlags,
         forbidden_properties: vk::MemoryPropertyFlags,
-        physical_device_info: &PhysicalDeviceInfo,
         map_memory: bool,
     ) -> Result<Self>
     {
+        let physical_device_info = vk.physical_device_info();
         let memory_properties = physical_device_info.memory_properties();
         let mut blocks = GlobalVec::with_capacity(4);
-        for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize].iter().enumerate() {
+        for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize]
+            .iter()
+            .enumerate()
+        {
             let property_flags = memory_type.property_flags;
             if has_bits!(property_flags, required_properties) && !property_flags.intersects(forbidden_properties) {
                 blocks.push((GlobalVec::with_len(1, Block::new()), i as u32, 0));
             }
         }
         Ok(Self {
-            device,
+            granularity: physical_device_info.properties().limits.buffer_image_granularity,
+            vk,
             blocks,
             block_size,
-            granularity: physical_device_info.properties().limits.buffer_image_granularity,
             map_memory,
         })
     }
@@ -181,11 +184,10 @@ impl LinearDeviceAlloc {
             return Err(ZeroSizeAlloc)
         }
         Self::new(
-            context.device(),
+            context.vk().clone(),
             block_size,
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
             vk::MemoryPropertyFlags::HOST_VISIBLE,
-            context.physical_device_info(),
             false,
         )
     }
@@ -195,11 +197,10 @@ impl LinearDeviceAlloc {
             return Err(ZeroSizeAlloc)
         }
         Self::new(
-            context.device(),
+            context.vk().clone(),
             block_size,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             vk::MemoryPropertyFlags::empty(),
-            context.physical_device_info(),
             true,
         )
     }
@@ -230,7 +231,7 @@ impl LinearDeviceAlloc {
             for (blocks, _, i) in self.blocks.iter_mut() {
                 *i = 0;
                 for block in blocks.iter_mut() {
-                    block.free_memory(&self.device);
+                    block.free_memory(&self.vk.device());
                 }
             }
             self.blocks.clear();
@@ -305,7 +306,7 @@ impl MemoryBinder for LinearDeviceAlloc {
         fall_back: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>>>,
     ) -> Result<Box<dyn DeviceMemory>>
     {
-        let device = &self.device;
+        let device = self.vk.device();
         let memory_requirements = unsafe { device.get_image_memory_requirements(image) };
         let block_size = self.block_size;
         for (blocks, type_index, free_index) in self.blocks.iter_mut() {
@@ -321,7 +322,10 @@ impl MemoryBinder for LinearDeviceAlloc {
                     }
                 }
                 let mut res = blocks[*free_index]
-                    .bind_image_memory(device, image, memory_requirements, self.block_size, *type_index, self.granularity,);
+                    .bind_image_memory(
+                        device, image, memory_requirements,
+                        self.block_size, *type_index, self.granularity,
+                    );
                 if let Err(err) = &res {
                     if let OutOfDeviceMemory { size: _, align: _, } = err {
                         *free_index += 1;
@@ -345,7 +349,7 @@ impl MemoryBinder for LinearDeviceAlloc {
         fall_back: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>>>,
     ) -> Result<Box<dyn DeviceMemory>>
     {
-        let device = &self.device;
+        let device = self.vk.device();
         let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
         let block_size = self.block_size();
         for (blocks, type_index, free_index) in self.blocks.iter_mut() {
@@ -362,7 +366,8 @@ impl MemoryBinder for LinearDeviceAlloc {
                 }
                 let mut res = blocks[*free_index]
                     .bind_buffer_memory(
-                        device, buffer, memory_requirements, block_size, *type_index, self.granularity, self.map_memory
+                        device, buffer, memory_requirements,
+                        block_size, *type_index, self.granularity, self.map_memory,
                     );
                 if let Err(err) = res {
                     if let OutOfDeviceMemory { size: _, align: _, } = err {
@@ -371,7 +376,8 @@ impl MemoryBinder for LinearDeviceAlloc {
                             blocks.push(Block::new());
                         }
                         res = blocks[*free_index].bind_buffer_memory(
-                            device, buffer, memory_requirements, self.block_size, *type_index, self.granularity, self.map_memory
+                            device, buffer, memory_requirements, self.block_size,
+                            *type_index, self.granularity, self.map_memory,
                         );
                     } else {
                         return Err(err)
@@ -388,7 +394,7 @@ impl Drop for LinearDeviceAlloc {
 
     fn drop(&mut self) {
         unsafe {
-            let device = &*self.device;
+            let device = self.vk.device();
             for (blocks, _, _) in self.blocks.iter_mut() {
                 for block in blocks.iter_mut() {
                     block.free_memory(device);

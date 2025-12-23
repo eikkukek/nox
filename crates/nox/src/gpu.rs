@@ -7,6 +7,7 @@ mod context;
 
 pub mod util;
 
+mod host;
 mod memory_layout;
 mod handle;
 mod helpers;
@@ -14,7 +15,8 @@ mod shader;
 mod enums;
 mod structs;
 mod physical_device;
-mod vulkan_context;
+mod surface;
+mod vulkan;
 mod swapchain_context;
 mod thread_context;
 mod frame_context;
@@ -26,10 +28,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use core::{
-    cell::{UnsafeCell},
-};
-
 pub use ash;
 
 use ash::vk;
@@ -37,7 +35,8 @@ use ash::vk;
 pub use vk::Format as VkFormat;
 
 use winit::{
-    dpi::PhysicalSize, window::Window
+    window::Window,
+    event_loop::ActiveEventLoop,
 };
 
 use compact_str::format_compact;
@@ -56,6 +55,9 @@ use crate::dev::{
     format_location,
 };
 
+use crate::win;
+
+pub use host::*;
 pub use context::GpuContext;
 pub use enums::*;
 pub use structs::*;
@@ -73,8 +75,9 @@ pub use pipeline::vertex_input::*;
 pub use frame_graph::*;
 use linear_device_alloc::LinearDeviceAlloc;
 
-use vulkan_context::VulkanContext;
-use swapchain_context::SwapchainContext;
+pub(crate) use surface::Surface;
+pub(crate) use swapchain_context::{SwapchainContext, FrameData};
+use vulkan::Vulkan;
 use frame_context::{FrameContext, ResourcePool};
 use swapchain_context::PresentResult;
 use thread_context::ThreadContext;
@@ -84,40 +87,6 @@ pub type DeviceName = ArrayString<{ash::vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 pub const MIN_BUFFERED_FRAMES: u32 = 2;
 pub const MAX_BUFFERED_FRAMES: u32 = 8;
 
-pub struct HostAllocators {
-    swapchain: ArenaAlloc,
-    frame_graphs: UnsafeCell<ArrayVec<ArenaAlloc, {MAX_BUFFERED_FRAMES as usize}>>,
-    _memory_layout: MemoryLayout,
-}
-
-impl HostAllocators {
-
-    pub fn new(memory_layout: MemoryLayout) -> Result<Self> {
-        Ok(Self {
-            swapchain: ArenaAlloc
-                ::new(memory_layout.swapchain_size())
-                .context_with(|| format_location!("failed to create arena alloc at {loc}"))?,
-            frame_graphs: UnsafeCell::new(Default::default()),
-            _memory_layout: memory_layout,
-        })
-    }
-
-    fn realloc_frame_graphs(&self, buffered_frames: u32) -> Result<()> {
-        assert!(buffered_frames <= MAX_BUFFERED_FRAMES);
-        unsafe { &mut *self.frame_graphs.get() }.try_resize_with(
-            buffered_frames as usize,
-            || ArenaAlloc
-                ::new(self._memory_layout.frame_graph_arena_size())
-                .context_with(|| format_location!("failed to create arena alloc at {loc}")),
-            |err| Error::new(ErrorContext::VecError(location!()), err)
-        )
-    }
-
-    fn frame_graphs(&self) -> &ArrayVec<ArenaAlloc, {MAX_BUFFERED_FRAMES as usize}> {
-        unsafe { &*self.frame_graphs.get() }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct ComputeState {
     command_buffer: vk::CommandBuffer,
@@ -125,7 +94,7 @@ pub struct ComputeState {
     timeline_value: u64,
 }
 
-pub(crate) struct Gpu<'a> {
+pub(crate) struct Gpu {
     transfer_commands: GlobalVec<TransferCommandsStorage>,
     transfer_requests: TransferRequests,
     sync_transfer_semaphore: vk::Semaphore,
@@ -134,25 +103,26 @@ pub(crate) struct Gpu<'a> {
     main_thread_context: ThreadContext,
     frame_resource_pools: ArrayVec<ResourcePool, {MAX_BUFFERED_FRAMES as usize}>,
     compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
+    graphics_command_buffers: ArrayVec<vk::CommandBuffer, {MAX_BUFFERED_FRAMES as usize}>,
+    graphics_submit_fences: ArrayVec<vk::Fence, {MAX_BUFFERED_FRAMES as usize}>,
     global_resources: Arc<RwLock<GlobalResources>>,
-    device: Arc<ash::Device>,
-    vulkan_context: VulkanContext<'a>,
+    vk: Arc<Vulkan>,
     _memory_layout: MemoryLayout,
     buffered_frames: u32,
+    current_frame_index: u32,
     tmp_alloc: Arc<ArenaAlloc>,
-    frame_buffer_size: image::Dimensions,
 }
 
-impl<'a> Gpu<'a> {
+impl Gpu {
 
     pub fn new(
-        window: &Window,
+        event_loop: &ActiveEventLoop,
         app_name: &str,
         app_version: Version,
         enable_validation: bool,
         memory_layout: MemoryLayout,
         mut buffered_frames: u32,
-        host_allocators: &'a HostAllocators,
+        host_allocators: &HostAllocators,
     ) -> Result<Self>
     {
         buffered_frames = clamp(buffered_frames, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
@@ -165,60 +135,49 @@ impl<'a> Gpu<'a> {
                 ::new(memory_layout.tmp_arena_size())
                 .context_with(|| format_location!("failed to create arena alloc at {loc}"))?
         );
-        let vulkan_context = VulkanContext
+        let vk = Arc::new(Vulkan
             ::new(
-                window,
+                event_loop,
                 &app_name,
                 app_version,
-                buffered_frames,
                 enable_validation,
                 &tmp_alloc
-            ).context("failed to create vulkan backend")?;
-        let device = Arc::new(vulkan_context.device().clone());
+            ).context("failed to create vulkan backend")?);
         let main_thread_context = ThreadContext
-            ::new(
-                device.clone(),
-                vulkan_context.queue_family_indices())
+            ::new(vk.clone())
             .context("failed to create main thread context")?;
-        let physical_device_info = vulkan_context.physical_device_info().clone();
         let global_resources = Arc::new(RwLock::new(
             GlobalResources
-                ::new(
-                    device.clone(),
-                    Arc::new(vulkan_context.instance().clone()),
-                    vulkan_context.physical_device(),
-                    physical_device_info.clone(),
-                    memory_layout
-                ).context("failed to initialize global resources")?
+                ::new(vk.clone(), memory_layout)
+                .context("failed to initialize global resources")?
         ));
         let mut s = Self {
             main_thread_context,
-            vulkan_context,
+            vk: vk.clone(),
             frame_resource_pools: Default::default(),
             compute_states: Default::default(),
+            graphics_command_buffers: Default::default(),
+            graphics_submit_fences: Default::default(),
             global_resources: global_resources.clone(),
-            device: device.clone(),
             _memory_layout: memory_layout,
             buffered_frames,
+            current_frame_index: 0,
             transfer_commands: Default::default(),
             sync_transfer_semaphore: Default::default(),
             sync_transfer_timeline_value: 0,
             sync_transfer_commands: Default::default(),
             tmp_alloc,
-            frame_buffer_size: image::Dimensions::new(1, 1, 1),
             transfer_requests: Default::default(),
         };
-        let mut frame_resource_pools = ArrayVec::new();
         let mut i = 0;
-        frame_resource_pools.try_resize_with(
+        s.frame_resource_pools.try_resize_with(
             buffered_frames as usize,
             || {
                 let device_alloc = LinearDeviceAlloc::new(
-                    device.clone(),
+                    vk.clone(),
                     memory_layout.frame_graph_device_block_size(),
                     vk::MemoryPropertyFlags::DEVICE_LOCAL,
                     vk::MemoryPropertyFlags::LAZILY_ALLOCATED | vk::MemoryPropertyFlags::PROTECTED,
-                    &physical_device_info,
                     false,
                 ).context_with(|| format_location!(
                     "failed to create linear device alloc at {loc}"
@@ -229,8 +188,10 @@ impl<'a> Gpu<'a> {
             },
             |err| Error::new(ErrorContext::VecError(location!()),  err),
         )?;
-        let mut compute_command_buffers = ArrayVec::<vk::CommandBuffer, {MAX_BUFFERED_FRAMES as usize}>::new();
-        let mut compute_semaphores = ArrayVec::<vk::Semaphore, {MAX_BUFFERED_FRAMES as usize}>::new(); 
+        let mut compute_command_buffers
+            = ArrayVec::<vk::CommandBuffer, {MAX_BUFFERED_FRAMES as usize}>::new();
+        let mut compute_semaphores
+            = ArrayVec::<vk::Semaphore, {MAX_BUFFERED_FRAMES as usize}>::new(); 
         unsafe {
             let mut timeline_info = vk::SemaphoreTypeCreateInfo {
                 s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
@@ -249,8 +210,8 @@ impl<'a> Gpu<'a> {
                 command_buffer_count: buffered_frames,
                 ..Default::default()
             };
-            let result = (device.fp_v1_0().allocate_command_buffers)(
-                device.handle(),
+            let result = (vk.device().fp_v1_0().allocate_command_buffers)(
+                vk.device().handle(),
                 &alloc_info,
                 compute_command_buffers.as_mut_ptr(),
             );
@@ -259,45 +220,71 @@ impl<'a> Gpu<'a> {
             }
             compute_command_buffers.set_len(buffered_frames as usize);
             for _ in 0..buffered_frames {
-                let fence = device.create_semaphore(&semaphore_info, None).unwrap();
+                let fence = vk.device().create_semaphore(&semaphore_info, None).unwrap();
                 compute_semaphores.push(fence).unwrap();
             }
-            s.sync_transfer_semaphore = device.create_semaphore(&semaphore_info, None).unwrap();
+            s.sync_transfer_semaphore = vk.device().create_semaphore(&semaphore_info, None).unwrap();
         }
-        for (i, buffer) in compute_command_buffers.iter().enumerate() {
+        for (i, &buffer) in compute_command_buffers.iter().enumerate() {
             s.compute_states.push(ComputeState {
-                command_buffer: *buffer,
+                command_buffer: buffer,
                 semaphore: compute_semaphores[i],
                 timeline_value: 0,
             }).unwrap();
         }
-        s.frame_resource_pools = frame_resource_pools;
+        unsafe {
+            let alloc_info = vk::CommandBufferAllocateInfo {
+                s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                command_pool: s.main_thread_context.graphics_pool(),
+                level: vk::CommandBufferLevel::PRIMARY,
+                command_buffer_count: buffered_frames,
+                ..Default::default()
+            };
+            let result = (vk.device().fp_v1_0().allocate_command_buffers)(
+                vk.device().handle(),
+                &alloc_info,
+                s.graphics_command_buffers.as_mut_ptr(),
+            );
+            if result != vk::Result::SUCCESS {
+                return Err(Error::new("failed to allocate graphics command buffers", result))
+            }
+            s.graphics_command_buffers.set_len(buffered_frames as usize);
+        }
+        let fence_create_info = vk::FenceCreateInfo {
+            s_type: vk::StructureType::FENCE_CREATE_INFO,
+            flags: vk::FenceCreateFlags::SIGNALED,
+            ..Default::default()
+        };
+        s.graphics_submit_fences.try_resize_with(
+            buffered_frames as usize,
+            || unsafe {
+                vk.device()
+                .create_fence(&fence_create_info, None)
+                .context("failed to create fence")
+            },
+            |err| Error::new("failed to create fences", err)
+        )?;
         Ok(s)
     }
 
     #[inline(always)]
     pub fn context(&mut self) -> GpuContext<'_> {
-        GpuContext {
-            global_resources: self.global_resources.write().unwrap(),
-            transfer_requests: &mut self.transfer_requests,
-            frame_buffer_size: self.frame_buffer_size,
-            buffered_frames: self.buffered_frames,
-        }
+        GpuContext::new(
+            &self.vk,
+            self.global_resources.write().unwrap(),
+            &mut self.transfer_requests,
+            self.buffered_frames
+        )
     }
 
     #[inline(always)]
     pub fn wait_idle(&self) {
         unsafe {
-            self.device.device_wait_idle().ok();
+            self.vk.device().device_wait_idle().ok();
         }
     }
 
-    #[inline(always)]
-    pub fn request_resize(&mut self, size: PhysicalSize<u32>) {
-        self.vulkan_context.request_swapchain_update(self.buffered_frames, size);
-    }
-
-    fn async_transfer_requests(
+    fn async_transfer_requests<'a>(
         &mut self,
         interface: &mut impl Interface,
     ) -> error::Result<()>
@@ -308,23 +295,23 @@ impl<'a> Gpu<'a> {
             return Ok(())
         }
 
-        let device = self.device.clone();
-        let queue_families = self.vulkan_context.queue_family_indices();
+        let device = self.vk.device();
+        let queue_families = self.vk.queue_family_indices();
         let global_resources = self.global_resources.clone();
 
         let transfer_command_pool = Arc::new(TransientCommandPool
-            ::new(device.clone(), queue_families.transfer_index())
+            ::new(self.vk.clone(), queue_families.transfer_index())
             .context("failed to create transient transfer command pool")?
         );
         let graphics_command_pool = Arc::new(TransientCommandPool
-            ::new(device.clone(), queue_families.graphics_index())
+            ::new(self.vk.clone(), queue_families.graphics_index())
             .context("failed to create transient graphics command pool")?
         );
 
-        let arena_guard = ArenaGuard::new(&self.tmp_alloc);
+        let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
 
         let mut transfer_command_buffers = FixedVec
-            ::with_len(count as usize, Default::default(), &arena_guard)
+            ::with_len(count as usize, Default::default(), &tmp_alloc)
             .context(ErrorContext::VecError(location!()))?;
 
         let mut alloc_info = vk::CommandBufferAllocateInfo {
@@ -340,7 +327,7 @@ impl<'a> Gpu<'a> {
             .context("failed to allocate command buffers")?;
 
         let mut graphics_command_buffers = FixedVec
-            ::with_len(count as usize, Default::default(), &arena_guard)
+            ::with_len(count as usize, Default::default(), &tmp_alloc)
             .context(ErrorContext::VecError(location!()))?;
 
         alloc_info.command_pool = graphics_command_pool.handle();
@@ -376,14 +363,14 @@ impl<'a> Gpu<'a> {
                 id
             ).context("failed to initialize transfer commands")?;
 
-            let mut context = GpuContext::new(
+            let mut gpu = GpuContext::new(
+                &self.vk,
                 global_resources.write().unwrap(),
                 &mut new_requests,
-                self.frame_buffer_size,
                 self.buffered_frames,
             );
 
-            let mut commands = TransferCommands::new(&mut storage, &mut context);
+            let mut commands = TransferCommands::new(&mut storage, &mut gpu);
 
             (interface)(Event::TransferWork {
                 request_id: id,
@@ -402,7 +389,7 @@ impl<'a> Gpu<'a> {
         Ok(())
     }
 
-    fn process_transfer_requests(
+    fn process_transfer_requests<'a>(
         &mut self,
         transfer_queue: vk::Queue,
         graphics_queue: vk::Queue,
@@ -413,15 +400,15 @@ impl<'a> Gpu<'a> {
             let mut ready_transfers = GlobalVec::with_capacity(self.transfer_commands.len());
             pending_transfers.reserve(pending_transfers.len() + self.transfer_commands.len());
             let mut dummy_requests = TransferRequests::default();
-            let mut context = GpuContext::new(
-                self.global_resources.write().unwrap(),
-                &mut dummy_requests,
-                Default::default(),
-                self.buffered_frames,
-            );
             for i in 0..self.transfer_commands.len()
             {
-                let mut commands = TransferCommands::new(&mut self.transfer_commands[i], &mut context);
+                let mut gpu = GpuContext::new(
+                    &self.vk,
+                    self.global_resources.write().unwrap(),
+                    &mut dummy_requests,
+                    self.buffered_frames,
+                );
+                let mut commands = TransferCommands::new(&mut self.transfer_commands[i], &mut gpu);
                 let transfer_command_buffer = commands.transfer_command_buffer();
                 let graphics_command_buffer = commands.graphics_command_buffer();
                 let (new, sync_objects, signal_semaphores, context) = commands
@@ -443,7 +430,7 @@ impl<'a> Gpu<'a> {
                         signal_values.push(value).ok();
                     }
                     unsafe {
-                        commands.gpu().device()
+                        self.vk.device()
                             .end_command_buffer(transfer_command_buffer)
                             .context("failed to end command buffer")?;
                     }
@@ -456,14 +443,14 @@ impl<'a> Gpu<'a> {
                         ..Default::default()
                     };
                     unsafe {
-                        commands.gpu().device().queue_submit(
+                        self.vk.device().queue_submit(
                             transfer_queue,
                             &[submit_info],
                             sync_objects.transfer_fence,
                         ).context(ErrorContext::TransferQueueSubmitError(location!()))?;
                     };
                     unsafe {
-                        commands.gpu().device()
+                        self.vk.device()
                             .end_command_buffer(graphics_command_buffer)
                             .context("failed to end command buffer")?;
                     }
@@ -489,7 +476,7 @@ impl<'a> Gpu<'a> {
                         ..Default::default()
                     }.push_next(&mut timeline_info);
                     unsafe {
-                        commands.gpu().device().queue_submit(
+                        self.vk.device().queue_submit(
                             graphics_queue,
                             &[submit_info],
                             sync_objects.graphics_fence,
@@ -498,7 +485,7 @@ impl<'a> Gpu<'a> {
                 }
                 unsafe {
                     let mut ready = false;
-                    match commands.gpu().device().wait_for_fences(
+                    match self.vk.device().wait_for_fences(
                         &[sync_objects.transfer_fence, sync_objects.graphics_fence], true, 0
                     ) {
                         Ok(()) => {
@@ -523,28 +510,29 @@ impl<'a> Gpu<'a> {
         Ok(())
     }
 
-    fn process_frame_graph<'b>(
-        alloc: &'b ArenaAlloc,
-        mut frame_graph: FrameGraphResult<'b>,
+    fn process_frame_graph<'a>(
+        alloc: &'a ArenaAlloc,
+        mut frame_graph: FrameGraphResult<'a>,
         graphics_queue: vk::Queue,
         transfer_queue: vk::Queue,
         sync_transfer_semaphore: vk::Semaphore,
         sync_transfer_timeline_value: &mut u64,
         sync_transfer_commands: &mut GlobalVec<TransferCommandsStorage>,
-    ) -> Result<RenderResult<'b>>
+    ) -> Result<RenderResult<'a>>
     {
-        let device = frame_graph.device();
+        let device = frame_graph.vk().device();
         let mut result = RenderResult::default();
+        let swapchain_count = frame_graph.swapchain_count();
         if frame_graph.render_commands.transfer_commands.is_empty() {
             let count = frame_graph.wait_semaphore_count() as usize;
             result.wait_semaphores = FixedVec
-                ::with_capacity(count + 2, alloc)
+                ::with_capacity(count + 1 + swapchain_count, alloc)
                 .context_with(|| ErrorContext::VecError(location!()))?;
             result.wait_values = FixedVec
-                ::with_capacity(count + 2, alloc)
+                ::with_capacity(count + 1 + swapchain_count, alloc)
                 .context_with(|| ErrorContext::VecError(location!()))?;
             result.wait_stages = FixedVec
-                ::with_capacity(count + 2, alloc)
+                ::with_capacity(count + 1 + swapchain_count, alloc)
                 .context_with(|| ErrorContext::VecError(location!()))?;
         } else {
             let count = frame_graph.wait_semaphore_count() as usize;
@@ -627,25 +615,25 @@ impl<'a> Gpu<'a> {
                 ).context(ErrorContext::GraphicsQueueSubmitError(location!()))?;
             }
             result.wait_semaphores = FixedVec
-                ::with_capacity(count + 3, alloc)
+                ::with_capacity(count + 2 + swapchain_count, alloc)
                 .context_with(|| ErrorContext::VecError(location!()))?;
             result.wait_semaphores.push(sync_transfer_semaphore).ok();
             result.wait_values = FixedVec
-                ::with_capacity(count + 3, alloc)
+                ::with_capacity(count + 2 + swapchain_count, alloc)
                 .context_with(|| ErrorContext::VecError(location!()))?;
             result.wait_values.push(*sync_transfer_timeline_value).ok();
             result.wait_stages = FixedVec
-                ::with_capacity(count + 3, alloc)
+                ::with_capacity(count + 2 + swapchain_count, alloc)
                 .context_with(|| ErrorContext::VecError(location!()))?;
             result.wait_stages.push(vk::PipelineStageFlags::TRANSFER).ok();
         };
         sync_transfer_commands.move_from_vec(&mut frame_graph.render_commands.transfer_commands);
         let signal_count = frame_graph.signal_semaphore_count() as usize;
         result.signal_semaphores = FixedVec
-            ::with_capacity(signal_count + 2, alloc)
+            ::with_capacity(signal_count + 1 + swapchain_count, alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
         result.signal_values = FixedVec
-            ::with_capacity(signal_count + 2, alloc)
+            ::with_capacity(signal_count + 1 + swapchain_count, alloc)
             .context_with(|| ErrorContext::VecError(location!()))?;
         frame_graph.collect_semaphores(
             |frame_graph, id, value| {
@@ -666,76 +654,46 @@ impl<'a> Gpu<'a> {
         Ok(result)
     }
 
-    pub(crate) fn render(
+    pub(crate) fn render<'a>(
         &mut self,
-        window: &Window,
+        win: &mut win::WindowContext<'_, 'a>,
         interface: &mut impl Interface,
         host_allocators: &'a HostAllocators,
+        tmp_alloc: ArenaGuard,
     ) -> error::Result<()>
     {
-        let graphics_queue = self.vulkan_context.graphics_queue();
-        let transfer_queue = self.vulkan_context.transfer_queue();
-        let compute_queue = self.vulkan_context.compute_queue();
+        let graphics_queue = self.vk.graphics_queue();
+        let transfer_queue = self.vk.transfer_queue();
+        let compute_queue = self.vk.compute_queue();
         self.async_transfer_requests(interface)
             .context("async transfer requests failed")?;
         let mut pending_transfers = GlobalVec::new();
-        self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
-            .context("failed to process transfer requests")?;
-        let device = self.device.clone();
+        self.process_transfer_requests(
+            transfer_queue,
+            graphics_queue,
+            &mut pending_transfers,
+            ).context("failed to process transfer requests")?;
         self.global_resources
             .write()
             .unwrap()
             .update_semaphores()
             .context("failed to update semaphores")?;
-        let swapchain_loader = self.vulkan_context.swapchain_loader().clone();
-        let queue_family_indices = self.vulkan_context.queue_family_indices();
-        let (swapchain_context, recreated) = self.vulkan_context
-            .get_swapchain_context(
-                self.main_thread_context.graphics_pool(),
-                &self.tmp_alloc,
-                host_allocators,
-            )?;
-        let mut swapchain_context = swapchain_context.borrow_mut();
-        let frame_data = match swapchain_context.setup_image(&device, &swapchain_loader)?
-        {
-            Some(r) => r,
-            None => return Ok(())
-        };
-        if recreated {
-            let frame_buffer_size = frame_data.extent.into();
-            {
-                let mut context = GpuContext::new(
-                    self.global_resources.write().unwrap(),
-                    &mut self.transfer_requests,
-                    frame_buffer_size,
-                    self.buffered_frames,
-                );
-                (interface)(Event::FrameBufferCreated {
-                    gpu: &mut context,
-                    new_size: frame_buffer_size,
-                    new_format: ImageFormat(frame_data.format, vk::ImageAspectFlags::COLOR),
-                }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
-            }
-            self.async_transfer_requests(interface)
-                .context("async transfer requests failed")?;
-            self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
-                .context("failed to process transfer requests")?;
-            self.frame_buffer_size = frame_buffer_size;
-        } 
-        let compute_state = self.compute_states[frame_data.frame_index as usize];
+        let frame_index = self.current_frame_index as usize;
+        let queue_family_indices = self.vk.queue_family_indices();
+        let compute_state = self.compute_states[frame_index];
         unsafe {
-            device.reset_command_buffer(
+            self.vk.device().reset_command_buffer(
                 compute_state.command_buffer, vk::CommandBufferResetFlags::RELEASE_RESOURCES
             ).unwrap();
         } 
         {
-            helpers::begin_command_buffer(&device, compute_state.command_buffer).unwrap();
+            helpers::begin_command_buffer(self.vk.device(), compute_state.command_buffer).unwrap();
             let mut compute_commands = ComputeCommands::new(
                 compute_state.command_buffer,
                 GpuContext::new(
+                    &self.vk,
                     self.global_resources.write().unwrap(),
                     &mut self.transfer_requests,
-                    self.frame_buffer_size,
                     self.buffered_frames,
                 ),
                 &self.tmp_alloc,
@@ -746,11 +704,11 @@ impl<'a> Gpu<'a> {
             }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
             let compute_commands = compute_commands.finish();
             unsafe {
-                device.end_command_buffer(compute_state.command_buffer).unwrap();
+                self.vk.device().end_command_buffer(compute_state.command_buffer).unwrap();
             }
-            let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
             let wait_count = 1 + compute_commands.wait_semaphores.len();
             let signal_count = 1 + compute_commands.signal_semaphores.len();
+            let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
             let mut wait_handles = FixedVec
                 ::with_capacity(wait_count, &tmp_alloc)
                 .context(ErrorContext::VecError(location!()))?;
@@ -805,17 +763,76 @@ impl<'a> Gpu<'a> {
                 ..Default::default()
             }.push_next(&mut timeline_submit);
             unsafe {
-                device.queue_submit(
+                self.vk.device().queue_submit(
                     compute_queue,
                     &[compute_submit],
                     Default::default(),
                 ).context(ErrorContext::ComputeQueueSubmitError(location!()))?;
             }
         }
+        let graphics_command_buffer = self.graphics_command_buffers[frame_index];
         helpers
-            ::begin_command_buffer(&device, frame_data.command_buffer)
+            ::begin_command_buffer(self.vk.device(), graphics_command_buffer)
             .context_with(|| format_compact!("failed to begin command buffer at {}", location!()))?;
-        let alloc = &host_allocators.frame_graphs()[frame_data.frame_index as usize];
+        let graphics_submit_fence = self.graphics_submit_fences[frame_index];
+        unsafe {
+            self.vk.device().wait_for_fences(
+                &[graphics_submit_fence],
+                true,
+                SwapchainContext::frame_timeout(),
+            ).context("failed to wait for graphics submit fence")?;
+            self.vk
+                .device()
+                .reset_fences(&[graphics_submit_fence])
+                .context("failed to reset graphics submit fence")?;
+        }
+        let mut surfaces = FixedVec::with_capacity(
+            win.active_ids().len(),
+            &tmp_alloc,
+        ).context(ErrorContext::VecError(location!()))?;
+        for (id, win) in win.window_iter_mut() {
+            let id = *id;
+            let surface = win.surface();
+            let (swapchain, recreated) = surface
+                .get_or_init_swapchain_context(
+                    host_allocators,
+                )?;
+            let frame_data = match swapchain.setup_image(
+                self.vk.swapchain_device(),
+                frame_index,
+            )?
+            {
+                Some(r) => r,
+                None => continue,
+            };
+            if recreated {
+                let frame_buffer_size = frame_data.extent.into();
+                {
+                    let mut context = GpuContext::new(
+                        &self.vk,
+                        self.global_resources.write().unwrap(),
+                        &mut self.transfer_requests,
+                        self.buffered_frames,
+                    );
+                    (interface)(Event::FrameBufferCreated {
+                        window_id: id, 
+                        gpu: &mut context,
+                        new_size: frame_buffer_size,
+                        new_format: ImageFormat(frame_data.format, vk::ImageAspectFlags::COLOR),
+                    }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
+                }
+                self.async_transfer_requests(interface)
+                    .context("async transfer requests failed")?;
+                self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
+                    .context("failed to process transfer requests")?;
+            }
+            let present_queue = surface.present_queue();
+            win.update_frame_data(frame_data);
+            surfaces
+                .push((win, id, present_queue, frame_data.suboptimal))
+                .unwrap();
+        }
+        let alloc = &host_allocators.frame_graphs()[frame_index];
         unsafe {
             alloc.force_clear();
         }
@@ -829,24 +846,23 @@ impl<'a> Gpu<'a> {
         {
             let mut frame_graph = FrameGraph::new(
                 FrameContext::new(
-                    frame_data.command_buffer,
+                    graphics_command_buffer,
                     GpuContext::new(
+                        &self.vk,
                         self.global_resources
                             .write()
                             .unwrap(),
                         &mut self.transfer_requests,
-                        frame_data.extent.into(),
                         self.buffered_frames,
                     ),
-                    &mut self.frame_resource_pools[frame_data.frame_index as usize],
-                    frame_data.image,
-                    frame_data.image_view,
-                    frame_data.format,
-                    frame_data.image_state,
+                    &mut self.frame_resource_pools[frame_index],
+                    surfaces.iter().map(|(win, id, _, _)| {
+                        (*id, win.last_frame_data())
+                    }),
                 ),
-                frame_data.command_buffer,
+                graphics_command_buffer,
                 alloc,
-                frame_data.frame_index,
+                frame_index,
                 queue_family_indices,
             );
             (interface)(Event::Render {
@@ -869,22 +885,40 @@ impl<'a> Gpu<'a> {
                 &mut self.sync_transfer_commands,
             )?
         };
-        let frame_context = frame_context.take().unwrap();
-        let (semaphores, fence) = swapchain_context
-            .setup_submit(
-                &device,
-                frame_context.get_swapchain_image_state(),
-                queue_family_indices.graphics_index()
-            );
-        unsafe { device
-            .end_command_buffer(frame_data.command_buffer)
+        let mut frame_context = frame_context.take().unwrap();
+        wait_semaphores.push(compute_state.semaphore).unwrap();
+        wait_values.push(compute_state.timeline_value + 1).unwrap();
+        wait_stages.push(vk::PipelineStageFlags::COMPUTE_SHADER).unwrap();
+        signal_semaphores.push(compute_state.semaphore).unwrap();
+        signal_values.push(compute_state.timeline_value + 2).unwrap();
+        for (win, id, _, _) in &mut surfaces {
+            let id = *id;
+            let fallback_state = win
+                .last_frame_data().image_state;
+            let semaphores = win
+                .surface()
+                .get_swapchain_context()
+                .unwrap()
+                .setup_submit(
+                    self.vk.device(),
+                    graphics_command_buffer,
+                    frame_context
+                        .swapchain_image_state(id)
+                        .cloned()
+                        .unwrap_or(fallback_state),
+                    queue_family_indices.graphics_index(),
+                    frame_index,
+                );
+            wait_semaphores.push(semaphores.wait_semaphore).unwrap();
+            wait_values.push(0).unwrap();
+            wait_stages.push(semaphores.wait_stage).unwrap();
+            signal_semaphores.push(semaphores.signal_semaphore).unwrap();
+            signal_values.push(0).unwrap();
+        }
+        unsafe { self.vk.device()
+            .end_command_buffer(graphics_command_buffer)
             .context(ErrorContext::CommandBufferEndError(location!()))?;
         }
-        wait_semaphores.append(&[semaphores.wait_semaphore, compute_state.semaphore]).unwrap();
-        wait_values.append(&[0, compute_state.timeline_value + 1]).unwrap();
-        wait_stages.append(&[semaphores.wait_stage, vk::PipelineStageFlags::COMPUTE_SHADER]).unwrap();
-        signal_semaphores.append(&[semaphores.signal_semaphore, compute_state.semaphore]).unwrap();
-        signal_values.append(&[0, compute_state.timeline_value + 2]).unwrap();
         let wait_count = wait_semaphores.len() as u32;
         let signal_count = signal_semaphores.len() as u32;
         let mut timeline_submit = vk::TimelineSemaphoreSubmitInfo {
@@ -903,33 +937,58 @@ impl<'a> Gpu<'a> {
             signal_semaphore_count: signal_count,
             p_signal_semaphores: signal_semaphores.as_ptr(),
             command_buffer_count: 1,
-            p_command_buffers: &frame_data.command_buffer,
+            p_command_buffers: &graphics_command_buffer,
             ..Default::default()
         };
         submit_info = submit_info.push_next(&mut timeline_submit);
-        if let Err(err) = unsafe { device.queue_submit(graphics_queue, &[submit_info], fence) } {
+        if let Err(err) = unsafe { self.vk
+            .device()
+            .queue_submit(graphics_queue, &[submit_info], graphics_submit_fence)
+        } {
             return Err(Error::new(ErrorContext::GraphicsQueueSubmitError(location!()), err))
         }
         if !self.sync_transfer_commands.is_empty() {
             unsafe {
-                device
+                self.vk.device()
                     .wait_for_fences(&[transfer_fence], true, u64::MAX)
                     .context_with(|| format_compact!("failed to wait for fences at {}", location!()))?;
-                device.destroy_fence(transfer_fence, None);
+                self.vk.device()
+                    .destroy_fence(transfer_fence, None);
             }
         }
-        let present_result = swapchain_context.present_submit(&swapchain_loader, graphics_queue)?;
-        if present_result != PresentResult::Success || frame_data.suboptimal {
-            self.vulkan_context.request_swapchain_update(self.buffered_frames, window.inner_size());
+        let mut request_swapchain_update = FixedVec
+            ::with_capacity(surfaces.len(), &tmp_alloc)
+            .context(ErrorContext::VecError(location!()))?;
+        for (i, (win, id, present_queue, suboptimal)) in surfaces.iter_mut().enumerate() {
+            let present_result = win
+                .surface()
+                .get_swapchain_context()
+                .unwrap()
+                .present_submit(self.vk.swapchain_device(), *present_queue)
+                .context_with(|| format_compact!(
+                    "failed to present to window (id {id:?})",
+                ))?;
+            if present_result != PresentResult::Success || *suboptimal {
+                request_swapchain_update.push(i).unwrap();
+            }
         }
-        self.compute_states[frame_data.frame_index as usize].timeline_value += 2;
+        for &idx in &request_swapchain_update {
+            let (win, _, _, _) = &mut surfaces[idx];
+            let size = win.size().into();
+            win.surface().request_swapchain_update(
+                self.buffered_frames,
+                size,
+            );
+        }
+        self.compute_states[frame_index].timeline_value += 2;
+        self.current_frame_index = (self.current_frame_index + 1) % self.buffered_frames;
         Ok(())
     }
 
-    pub(crate) fn clean_up(&mut self, host_allocators: &'a HostAllocators) {
+    pub(crate) fn clean_up<'a>(&mut self) {
         log::info!("terminating renderer");
         unsafe {
-            self.device.device_wait_idle().ok();
+            self.vk.device().device_wait_idle().ok();
         }
         for pool in &mut self.frame_resource_pools {
             unsafe {
@@ -938,17 +997,20 @@ impl<'a> Gpu<'a> {
         }
         for state in &self.compute_states {
             unsafe {
-                self.device.destroy_semaphore(
+                self.vk.device().destroy_semaphore(
                     state.semaphore, None
                 );
             }
         }
+        for &fence in &self.graphics_submit_fences {
+            unsafe {
+                self.vk.device().destroy_fence(fence, None);
+            }
+        }
         unsafe {
-            self.device.destroy_semaphore(self.sync_transfer_semaphore, None);
+            self.vk.device().destroy_semaphore(self.sync_transfer_semaphore, None);
         }
         self.global_resources.write().unwrap().clean_up();
-        self.vulkan_context
-            .destroy_swapchain(self.main_thread_context.graphics_pool(), &host_allocators);
     }
 }
 

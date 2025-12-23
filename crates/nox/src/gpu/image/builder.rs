@@ -4,7 +4,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct ImageBuilder {
-    pub(super) device: Arc<ash::Device>,
+    pub(super) vk: Arc<Vulkan>,
     aspects: vk::ImageAspectFlags,
     dimensions: Dimensions,
     component_mapping: ComponentMapping,
@@ -21,9 +21,9 @@ pub struct ImageBuilder {
 impl ImageBuilder {
 
     #[inline(always)]
-    pub(crate) fn new(device: Arc<ash::Device>) -> Self {
+    pub(crate) fn new(vk: Arc<Vulkan>) -> Self {
         Self {
-            device,
+            vk,
             aspects: vk::ImageAspectFlags::empty(),
             dimensions: Dimensions::new(0, 0, 0),
             component_mapping: Default::default(),
@@ -136,13 +136,13 @@ impl ImageBuilder {
             ..Default::default()
         };
         let handle = unsafe {
-            (*self.device).create_image(&create_info, None)?
+            self.vk.device().create_image(&create_info, None)?
         };
         Ok(Image {
             handle: handle,
             memory: None,
             view: RwLock::new(None),
-            device: self.device.clone(),
+            vk: self.vk.clone(),
             subviews: Default::default(),
             state: RwLock::new(ImageState::new(
                 vk::AccessFlags::NONE,
