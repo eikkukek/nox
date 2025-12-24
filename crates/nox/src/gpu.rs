@@ -4,6 +4,7 @@ mod image;
 pub mod memory_binder;
 pub mod linear_device_alloc;
 mod context;
+mod attributes;
 
 pub mod util;
 
@@ -21,7 +22,7 @@ mod swapchain_context;
 mod thread_context;
 mod frame_context;
 mod buffer;
-mod global_resources;
+mod resources;
 mod commands;
 
 use std::{
@@ -43,15 +44,17 @@ use nox_mem::{
 
 use nox_alloc::arena_alloc::*;
 
+use crate::memory::GpuMemory;
+
 use crate::dev::{
     export::*,
-    utility::clamp,
     error::{self, Result, Error, Context, ErrorContext, Tracked, location},
     format_location,
 };
 
 use crate::win;
 
+pub use attributes::*;
 pub use host::*;
 pub use context::GpuContext;
 pub use enums::*;
@@ -61,7 +64,7 @@ pub use handle::{Handle, RaiiHandle};
 pub use image::*;
 pub use buffer::*;
 pub use physical_device::{PhysicalDeviceInfo, QueueFamilyIndices};
-pub use global_resources::*;
+pub use resources::*;
 pub use pipeline::*;
 pub use commands::*;
 pub use nox_proc::VertexInput;
@@ -100,9 +103,8 @@ pub(crate) struct Gpu {
     compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
     graphics_command_buffers: ArrayVec<vk::CommandBuffer, {MAX_BUFFERED_FRAMES as usize}>,
     graphics_submit_fences: ArrayVec<vk::Fence, {MAX_BUFFERED_FRAMES as usize}>,
-    global_resources: Arc<RwLock<GlobalResources>>,
+    resources: Arc<RwLock<Resources>>,
     vk: Arc<Vulkan>,
-    _memory_layout: MemoryLayout,
     buffered_frames: u32,
     current_frame_index: u32,
     tmp_alloc: Arc<ArenaAlloc>,
@@ -112,38 +114,30 @@ impl Gpu {
 
     pub fn new(
         event_loop: &event_loop::WinitActiveEventLoop,
-        app_name: &str,
-        app_version: Version,
-        enable_validation: bool,
-        memory_layout: MemoryLayout,
-        mut buffered_frames: u32,
-        host_allocators: &HostAllocators,
+        attributes: &GpuAttributes,
+        memory: &GpuMemory,
     ) -> Result<Self>
     {
-        buffered_frames = clamp(buffered_frames, MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
-        assert!(buffered_frames <= MAX_BUFFERED_FRAMES);
-        host_allocators
+        let buffered_frames = attributes.buffered_frames;
+        memory.host_allocators()
             .realloc_frame_graphs(buffered_frames)
             .context("failed to allocate frame graph host allocators")?;
         let tmp_alloc = Arc::new(
             ArenaAlloc
-                ::new(memory_layout.tmp_arena_size())
+                ::new(memory.layout().tmp_arena_size())
                 .context_with(|| format_location!("failed to create arena alloc at {loc}"))?
         );
         let vk = Arc::new(Vulkan
             ::new(
                 event_loop,
-                &app_name,
-                app_version,
-                enable_validation,
-                &tmp_alloc
+                attributes,
             ).context("failed to create vulkan backend")?);
         let main_thread_context = ThreadContext
             ::new(vk.clone())
             .context("failed to create main thread context")?;
-        let global_resources = Arc::new(RwLock::new(
-            GlobalResources
-                ::new(vk.clone(), memory_layout)
+        let resources = Arc::new(RwLock::new(
+            Resources
+                ::new(vk.clone(), *memory.layout())
                 .context("failed to initialize global resources")?
         ));
         let mut s = Self {
@@ -153,8 +147,7 @@ impl Gpu {
             compute_states: Default::default(),
             graphics_command_buffers: Default::default(),
             graphics_submit_fences: Default::default(),
-            global_resources: global_resources.clone(),
-            _memory_layout: memory_layout,
+            resources: resources.clone(),
             buffered_frames,
             current_frame_index: 0,
             transfer_commands: Default::default(),
@@ -170,7 +163,7 @@ impl Gpu {
             || {
                 let device_alloc = LinearDeviceAlloc::new(
                     vk.clone(),
-                    memory_layout.frame_graph_device_block_size(),
+                    memory.layout().frame_graph_device_block_size(),
                     vk::MemoryPropertyFlags::DEVICE_LOCAL,
                     vk::MemoryPropertyFlags::LAZILY_ALLOCATED | vk::MemoryPropertyFlags::PROTECTED,
                     false,
@@ -266,7 +259,7 @@ impl Gpu {
     pub fn context(&mut self) -> GpuContext<'_> {
         GpuContext::new(
             &self.vk,
-            self.global_resources.write().unwrap(),
+            self.resources.write().unwrap(),
             &mut self.transfer_requests,
             self.buffered_frames
         )
@@ -292,7 +285,7 @@ impl Gpu {
 
         let device = self.vk.device();
         let queue_families = self.vk.queue_family_indices();
-        let global_resources = self.global_resources.clone();
+        let resources = self.resources.clone();
 
         let transfer_command_pool = Arc::new(TransientCommandPool
             ::new(self.vk.clone(), queue_families.transfer_index())
@@ -335,7 +328,7 @@ impl Gpu {
 
         for (i, (id, (staging_alloc, semaphores))) in self.transfer_requests.iter().enumerate() {
 
-            let alloc = global_resources
+            let alloc = resources
                 .write()
                 .unwrap()
                 .lock_linear_device_alloc(staging_alloc, semaphores)
@@ -360,7 +353,7 @@ impl Gpu {
 
             let mut gpu = GpuContext::new(
                 &self.vk,
-                global_resources.write().unwrap(),
+                resources.write().unwrap(),
                 &mut new_requests,
                 self.buffered_frames,
             );
@@ -399,7 +392,7 @@ impl Gpu {
             {
                 let mut gpu = GpuContext::new(
                     &self.vk,
-                    self.global_resources.write().unwrap(),
+                    self.resources.write().unwrap(),
                     &mut dummy_requests,
                     self.buffered_frames,
                 );
@@ -668,7 +661,7 @@ impl Gpu {
             graphics_queue,
             &mut pending_transfers,
             ).context("failed to process transfer requests")?;
-        self.global_resources
+        self.resources
             .write()
             .unwrap()
             .update_semaphores()
@@ -676,6 +669,18 @@ impl Gpu {
         let frame_index = self.current_frame_index as usize;
         let queue_family_indices = self.vk.queue_family_indices();
         let compute_state = self.compute_states[frame_index];
+        let graphics_submit_fence = self.graphics_submit_fences[frame_index];
+        unsafe {
+            self.vk.device().wait_for_fences(
+                &[graphics_submit_fence],
+                true,
+                SwapchainContext::frame_timeout(),
+            ).context("failed to wait for graphics submit fence")?;
+            self.vk
+                .device()
+                .reset_fences(&[graphics_submit_fence])
+                .context("failed to reset graphics submit fence")?;
+        }
         unsafe {
             self.vk.device().reset_command_buffer(
                 compute_state.command_buffer, vk::CommandBufferResetFlags::RELEASE_RESOURCES
@@ -687,7 +692,7 @@ impl Gpu {
                 compute_state.command_buffer,
                 GpuContext::new(
                     &self.vk,
-                    self.global_resources.write().unwrap(),
+                    self.resources.write().unwrap(),
                     &mut self.transfer_requests,
                     self.buffered_frames,
                 ),
@@ -719,7 +724,7 @@ impl Gpu {
             let mut signal_values = FixedVec
                 ::with_capacity(signal_count, &tmp_alloc)
                 .context(ErrorContext::VecError(location!()))?;
-            let g = self.global_resources.read().unwrap();
+            let g = self.resources.read().unwrap();
             for &(id, value, stage) in &compute_commands.wait_semaphores {
                 let handle = g.get_timeline_semaphore(id)?;
                 wait_handles.push(handle).ok();
@@ -764,23 +769,19 @@ impl Gpu {
                     Default::default(),
                 ).context(ErrorContext::ComputeQueueSubmitError(location!()))?;
             }
-        }
+        } 
         let graphics_command_buffer = self.graphics_command_buffers[frame_index];
+        unsafe {
+            self.vk
+                .device()
+                .reset_command_buffer(
+                    graphics_command_buffer,
+                    vk::CommandBufferResetFlags::RELEASE_RESOURCES,
+                ).context_with(|| format_compact!("failed to reset command buffer at {}", location!()))?;
+        }
         helpers
             ::begin_command_buffer(self.vk.device(), graphics_command_buffer)
             .context_with(|| format_compact!("failed to begin command buffer at {}", location!()))?;
-        let graphics_submit_fence = self.graphics_submit_fences[frame_index];
-        unsafe {
-            self.vk.device().wait_for_fences(
-                &[graphics_submit_fence],
-                true,
-                SwapchainContext::frame_timeout(),
-            ).context("failed to wait for graphics submit fence")?;
-            self.vk
-                .device()
-                .reset_fences(&[graphics_submit_fence])
-                .context("failed to reset graphics submit fence")?;
-        }
         let mut surfaces = FixedVec::with_capacity(
             event_loop.active_window_ids().len(),
             &tmp_alloc,
@@ -805,7 +806,7 @@ impl Gpu {
                 {
                     let mut context = GpuContext::new(
                         &self.vk,
-                        self.global_resources.write().unwrap(),
+                        self.resources.write().unwrap(),
                         &mut self.transfer_requests,
                         self.buffered_frames,
                     );
@@ -844,7 +845,7 @@ impl Gpu {
                     graphics_command_buffer,
                     GpuContext::new(
                         &self.vk,
-                        self.global_resources
+                        self.resources
                             .write()
                             .unwrap(),
                         &mut self.transfer_requests,
@@ -924,7 +925,7 @@ impl Gpu {
             p_signal_semaphore_values: signal_values.as_ptr(),
             ..Default::default()
         };
-        let mut submit_info = vk::SubmitInfo {
+        let submit_info = vk::SubmitInfo {
             s_type: vk::StructureType::SUBMIT_INFO,
             wait_semaphore_count: wait_count,
             p_wait_semaphores: wait_semaphores.as_ptr(),
@@ -934,8 +935,7 @@ impl Gpu {
             command_buffer_count: 1,
             p_command_buffers: &graphics_command_buffer,
             ..Default::default()
-        };
-        submit_info = submit_info.push_next(&mut timeline_submit);
+        }.push_next(&mut timeline_submit);
         if let Err(err) = unsafe { self.vk
             .device()
             .queue_submit(graphics_queue, &[submit_info], graphics_submit_fence)
@@ -981,7 +981,7 @@ impl Gpu {
     }
 
     pub(crate) fn clean_up<'a>(&mut self) {
-        log::info!("terminating renderer");
+        log::info!("cleaning up gpu");
         unsafe {
             self.vk.device().device_wait_idle().ok();
         }
@@ -1005,7 +1005,7 @@ impl Gpu {
         unsafe {
             self.vk.device().destroy_semaphore(self.sync_transfer_semaphore, None);
         }
-        self.global_resources.write().unwrap().clean_up();
+        self.resources.write().unwrap().clean_up();
     }
 }
 

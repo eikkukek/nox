@@ -6,7 +6,8 @@ use std::sync::Arc;
 use ash::vk;
 
 use spirv_cross2::{
-    reflect::{self, DecorationValue, ResolveSize, ResourceType, TypeInner}, spirv::{self}, targets, Compiler, Module
+    reflect::{self, DecorationValue, ResolveSize, ResourceType, TypeInner},
+    spirv::{self}, targets, Compiler, Module,
 };
 
 use nox_mem::{

@@ -31,7 +31,7 @@ pub use enums::*;
 pub use structs::*;
 use descriptor_pool::*;
 
-pub struct GlobalResources {
+pub struct Resources {
     vk: Arc<Vulkan>,
     shaders: GlobalSlotMap<Shader>,
     pipeline_layouts: GlobalSlotMap<pipeline::PipelineLayout>,
@@ -53,7 +53,7 @@ pub struct GlobalResources {
     api_version: Version,
 }
 
-impl GlobalResources {
+impl Resources {
 
     #[inline(always)]
     pub(crate) fn new(
@@ -247,7 +247,7 @@ impl GlobalResources {
     #[inline(always)]
     pub fn allocate_shader_resources<F>(
         &mut self,
-        resources: &[ShaderResourceInfo],
+        descriptor_sets: &[DescriptorSetInfo],
         mut collect: F,
         alloc: &impl Allocator,
     ) -> Result<()>
@@ -255,9 +255,9 @@ impl GlobalResources {
             F: FnMut(usize, ShaderResourceId)
     {
         let mut set_layouts = FixedVec
-            ::with_capacity(resources.len(), alloc)
+            ::with_capacity(descriptor_sets.len(), alloc)
             .context("vec error")?;
-        for resource in resources {
+        for resource in descriptor_sets {
             let layout = self.pipeline_layouts
                 .get(resource.layout_id.0)
                 .context("couldn't find pipeline layout")?;
@@ -266,7 +266,7 @@ impl GlobalResources {
         }
         let sets = self.descriptor_pool.allocate(&set_layouts, alloc)?;
         for (i, set) in sets.iter().enumerate() {
-            let info = resources[i];
+            let info = descriptor_sets[i];
             let index = self.shader_resources.insert(ShaderResource {
                 descriptor_set: *set,
                 layout_id: info.layout_id,

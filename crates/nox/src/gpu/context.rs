@@ -7,7 +7,7 @@ use std::sync::RwLockWriteGuard;
 pub struct GpuContext<'a>
 {
     vk: &'a Arc<Vulkan>,
-    global_resources: RwLockWriteGuard<'a, GlobalResources>,
+    resources: RwLockWriteGuard<'a, Resources>,
     transfer_requests: &'a mut TransferRequests,
     buffered_frames: u32,
 }
@@ -18,17 +18,27 @@ impl<'a> GpuContext<'a>
     #[inline(always)]
     pub(super) fn new(
         vk: &'a Arc<Vulkan>,
-        global_resources: RwLockWriteGuard<'a, GlobalResources>,
+        resources: RwLockWriteGuard<'a, Resources>,
         transfer_requests: &'a mut TransferRequests,
         buffered_frames: u32,
     ) -> Self
     {
         Self {
-            global_resources,
+            resources,
             vk,
             transfer_requests,
             buffered_frames,
         }
+    }
+
+    #[inline(always)]
+    pub fn is_layer_enabled(&self, layer: Layer) -> bool {
+        self.vk.is_layer_enabled(layer)
+    }
+
+    #[inline(always)]
+    pub fn is_extension_enabled(&self, extension: Extension) -> bool {
+        self.vk.is_extension_enabled(extension)
     }
 
     #[inline(always)]
@@ -64,16 +74,16 @@ impl<'a> GpuContext<'a>
 
 impl<'a> Deref for GpuContext<'a> {
 
-    type Target = GlobalResources;
+    type Target = Resources;
 
     fn deref(&self) -> &Self::Target {
-        &self.global_resources
+        &self.resources
     }
 }
 
 impl<'a> DerefMut for GpuContext<'a> {
 
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.global_resources
+        &mut self.resources
     }
 }

@@ -83,7 +83,7 @@ impl FullScreenPass {
         ]).context("failed to create pipeline layout")?;
         let mut shader_resource = Default::default();
         gpu.allocate_shader_resources(
-            &[ShaderResourceInfo::new(
+            &[DescriptorSetInfo::new(
                 pipeline_layout,
                 0,
             )],

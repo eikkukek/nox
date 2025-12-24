@@ -1,12 +1,8 @@
-use compact_str::CompactString;
-
-use crate::version::Version;
+use crate::gpu;
 
 pub struct Attributes {
-    pub(crate) app_name: CompactString,
-    pub(crate) app_version: Version,
+    pub(crate) gpu_attributes: gpu::GpuAttributes,
     pub(crate) close_on_no_windows: bool,
-    pub(crate) vulkan_validation: bool,
 }
 
 impl Attributes {
@@ -15,23 +11,9 @@ impl Attributes {
     pub(crate) fn new() -> Self
     {
         Attributes {
-            app_name: Default::default(),
-            app_version: Default::default(),
             close_on_no_windows: true,
-            vulkan_validation: false,
+            gpu_attributes: gpu::default_attributes(),
         }
-    }
-
-    #[inline(always)]
-    pub fn with_app_name(mut self, name: impl AsRef<str>) -> Self {
-        self.app_name = CompactString::new(name);
-        self
-    }
-
-    #[inline(always)]
-    pub fn with_app_version(mut self, version: Version) -> Self {
-        self.app_version = version;
-        self
     }
 
     /// Sets whether nox terminates when there are no active windows.
@@ -44,8 +26,8 @@ impl Attributes {
     }
 
     #[inline(always)]
-    pub fn with_vulkan_validation(mut self, value: bool) -> Self {
-        self.vulkan_validation = value;
+    pub fn with_gpu_attributes(mut self, attributes: gpu::GpuAttributes) -> Self {
+        self.gpu_attributes = attributes;
         self
     }
 }

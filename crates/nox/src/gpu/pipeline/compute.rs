@@ -1,6 +1,6 @@
 use ash::vk;
 
-use crate::gpu::{global_resources::*, ShaderStage};
+use crate::gpu::{resources::*, ShaderStage};
 use crate::dev::error::{Error, Result};
 
 pub struct ComputePipelineInfo {
@@ -17,14 +17,14 @@ impl ComputePipelineInfo {
 
     pub(crate) fn as_create_info(
         &self,
-        global_resources: &GlobalResources,
+        resources: &Resources,
     ) -> Result<vk::ComputePipelineCreateInfo<'_>>
     {
-        let layout = global_resources.get_pipeline_layout(self.layout_id)?;
+        let layout = resources.get_pipeline_layout(self.layout_id)?;
         let shader = layout
             .shader_ids()
             .iter()
-            .map(|v| global_resources.get_shader(*v).unwrap())
+            .map(|v| resources.get_shader(*v).unwrap())
             .find(|v| v.stage() == ShaderStage::Compute)
             .ok_or(Error::just_context("couldn't find compute shader"))?;
         const NAME: &core::ffi::CStr = unsafe {

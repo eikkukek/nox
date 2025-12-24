@@ -242,7 +242,7 @@ impl QueueFamilyIndices {
 pub fn rate_physical_device(
     physical_device: vk::PhysicalDevice,
     physical_device_info: &PhysicalDeviceInfo,
-    instance: &ash::Instance
+    instance: &ash::Instance,
 ) -> Result<i32>
 {
     if physical_device_info.features.sample_rate_shading == vk::FALSE ||

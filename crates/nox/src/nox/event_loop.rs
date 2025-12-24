@@ -93,6 +93,7 @@ impl<'a> EventLoop<'a> {
 
     #[inline(always)]
     pub(super) fn clean_up(&mut self) {
+        log::info!("cleaning up event loop");
         self.active_ids.clear();
         self.windows.clear();
     }

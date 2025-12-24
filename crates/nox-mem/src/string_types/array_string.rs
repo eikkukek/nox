@@ -124,7 +124,7 @@ impl<const N: usize> Hash for ArrayString<N> {
 
 impl<const N: usize> core::fmt::Debug for ArrayString<N> {
 
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "ArrayString<{}>({:?})", N, self.as_str())
     }
 }
@@ -138,7 +138,7 @@ impl<const N: usize> core::fmt::Display for ArrayString<N> {
 
 impl<const N: usize> core::fmt::Write for ArrayString<N> {
 
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
         let available = N - self.len;
         let mut end = s.len().min(available);
         while !s.is_char_boundary(end) && end > 0 {

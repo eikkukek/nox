@@ -159,12 +159,12 @@ impl GraphicsPipelineInfo {
 
     pub(crate) fn as_create_info<'a, Alloc: Allocator>(
         &self,
-        global_resources: &GlobalResources,
+        resources: &Resources,
         alloc: &'a Alloc,
     ) -> Result<CreateInfos<'a, Alloc>>
     {
 
-        let layout = global_resources.get_pipeline_layout(self.layout_id)?;
+        let layout = resources.get_pipeline_layout(self.layout_id)?;
         let shader_ids = layout.shader_ids();
 
         let mut shader_stage_infos = FixedVec
@@ -175,7 +175,7 @@ impl GraphicsPipelineInfo {
         let mut fragment_shader_included = false;
 
         for id in shader_ids {
-            let shader = global_resources.get_shader(*id)?;
+            let shader = resources.get_shader(*id)?;
             const NAME: &core::ffi::CStr = unsafe {
                 core::ffi::CStr::from_bytes_with_nul_unchecked(b"main\0")
             };

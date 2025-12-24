@@ -21,12 +21,12 @@ pub struct BufferId(pub(super) SlotIndex<Buffer>);
 
 #[must_use]
 #[derive(Default, Clone, Copy)]
-pub struct ShaderResourceInfo {
+pub struct DescriptorSetInfo {
     pub layout_id: PipelineLayoutId,
     pub set: u32,
 }
 
-impl ShaderResourceInfo {
+impl DescriptorSetInfo {
     
     #[inline(always)]
     pub fn new(layout_id: PipelineLayoutId, set: u32) -> Self {

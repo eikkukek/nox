@@ -1,4 +1,5 @@
 use std::ffi::CString;
+use core::str::FromStr;
 use winit::event_loop::ActiveEventLoop;
 use ash::{
     khr::{surface, swapchain, wayland_surface, win32_surface, xcb_surface, xlib_surface},
@@ -7,23 +8,22 @@ use ash::{
 };
 use raw_window_handle::{HasDisplayHandle};
 use compact_str::{format_compact, CompactString};
+use rustc_hash::FxHashSet;
 
 use nox_mem::{
-    vec_types::{FixedVec, ArrayVec, Vector},
+    vec_types::{ArrayVec, GlobalVec, Vector},
     string_types::ArrayString,
-};
-
-use nox_alloc::{
-    arena_alloc::*,
 };
 
 use nox_log::{warn, info};
 
-use super::physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo};
+use super::{
+    physical_device::{self, find_suitable_physical_device, PhysicalDeviceInfo},
+    GpuAttributes, Layer, Extension,
+};
 
 use crate::dev::{
-    export::Version,
-    error::{Result, Error, Context, ErrorContext, location},
+    error::{Context, Error, ErrorContext, Result, location}, export::Version, has_bits
 };
 
 pub(crate) struct Vulkan {
@@ -37,18 +37,16 @@ pub(crate) struct Vulkan {
     graphics_queue: vk::Queue,
     transfer_queue: vk::Queue,
     compute_queue: vk::Queue,
+    enabled_extensions: u8,
+    enabled_layers: u8,
 }
 
 impl Vulkan {
 
     pub fn new(
         event_loop: &ActiveEventLoop,
-        app_name: &str,
-        app_version: Version,
-        enable_validation: bool,
-        tmp_alloc: &ArenaAlloc,
+        attributes: &GpuAttributes,
     ) -> Result<Vulkan> {
-        let tmp_alloc = &ArenaGuard::new(tmp_alloc);
         let entry = unsafe { Entry::load().unwrap() };
         match unsafe { entry.try_enumerate_instance_version() } {
             Ok(v) => {
@@ -70,7 +68,7 @@ impl Vulkan {
             },
         };
         let app_name = CString
-            ::new(app_name
+            ::new(attributes.app_name
                 .chars()
                 .filter(|&c| c != '\0').collect::<CompactString>()
             ).unwrap();
@@ -79,38 +77,50 @@ impl Vulkan {
             s_type: vk::StructureType::APPLICATION_INFO,
             api_version: vk::API_VERSION_1_3,
             p_application_name: app_name.as_ptr(),
-            application_version: app_version.as_u32(),
+            application_version: attributes.app_version.as_u32(),
             p_engine_name: engine_name.as_ptr(),
             engine_version: vk::make_api_version(0, 1, 0, 0),
             ..Default::default()
         };
-        let mut instance_extensions = FixedVec::<*const i8, ArenaGuard>
-            ::with_capacity(8, &tmp_alloc)
-            .context_with(|| ErrorContext::VecError(location!()))?;
-        let mut layers = FixedVec::<(*const i8, bool), ArenaGuard>
-            ::with_capacity(8, &tmp_alloc)
-            .context_with(|| ErrorContext::VecError(location!()))?;
-        let mut found_layers = FixedVec::<*const i8, ArenaGuard>
-            ::with_capacity(8, &tmp_alloc)
-            .context_with(|| ErrorContext::VecError(location!()))?;
+        let mut instance_extensions = GlobalVec::<(*const i8, bool)>
+            ::with_capacity(8);
+        let mut found_instance_extensions = GlobalVec::<*const i8>
+            ::with_capacity(8);
+        let mut found_instance_extensions_hashed = FxHashSet::default();
+        let mut layers = GlobalVec::<(*const i8, bool)>
+            ::with_capacity(8);
+        let mut found_layers = GlobalVec::<*const i8>
+            ::with_capacity(8);
+        let mut found_layers_hashed = FxHashSet::default();
         get_required_instance_extensions(event_loop, &mut instance_extensions)?;
         let validation_layer_name = CString::new("VK_LAYER_KHRONOS_validation").unwrap();
-        let ext_debug_utils = CString::new("VK_EXT_debug_utils").unwrap();
-        if enable_validation {
-            instance_extensions
-                .push(ext_debug_utils.as_ptr())
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            layers
-                .push((validation_layer_name.as_ptr(), true))
-                .context_with(|| ErrorContext::VecError(location!()))?;
+        if let Some(required) = attributes.contains_extension(Extension::DebugUtils) {
+            instance_extensions.push((ash::ext::debug_utils::NAME.as_ptr(), required));
         }
-        verify_instance_layers(&entry, &layers, &mut found_layers)?;
-        verify_instance_extensions(&entry, &instance_extensions)?;
+        if let Some(required) = attributes.contains_layer(Layer::KhronosValidation) {
+            layers.push((validation_layer_name.as_ptr(), required));
+        }
+        verify_instance_extensions(
+            &entry, &instance_extensions,
+            &mut found_instance_extensions, &mut found_instance_extensions_hashed
+        )?;
+        verify_instance_layers(
+            &entry, &layers,
+            &mut found_layers, &mut found_layers_hashed,
+        )?;
+        let mut enabled_extensions = 0;
+        let mut enabled_layers = 0;
+        if found_instance_extensions_hashed.contains(ash::ext::debug_utils::NAME) {
+            enabled_extensions |= Extension::DebugUtils;
+        }
+        if found_layers_hashed.contains(&validation_layer_name) {
+            enabled_layers |= Layer::KhronosValidation;
+        }
         let instance_create_info = vk::InstanceCreateInfo {
             s_type: vk::StructureType::INSTANCE_CREATE_INFO,
             p_application_info: &application_info,
-            enabled_extension_count: instance_extensions.len() as u32,
-            pp_enabled_extension_names: instance_extensions.as_ptr() as _,
+            enabled_extension_count: found_instance_extensions.len() as u32,
+            pp_enabled_extension_names: found_instance_extensions.as_ptr() as _,
             enabled_layer_count: found_layers.len() as u32,
             pp_enabled_layer_names: found_layers.as_ptr() as _,
             ..Default::default()
@@ -198,20 +208,23 @@ impl Vulkan {
         let transfer_queue = unsafe { device.get_device_queue(queue_family_indices.transfer_index(), 0) };
         let compute_queue = unsafe { device.get_device_queue(queue_family_indices.compute_index(), 0) };
         let swapchain_device = ash::khr::swapchain::Device::new(&instance, &device);
-        Ok(
-            Self {
-                entry,
-                instance: instance,
-                surface_instance: surface_instance,
-                swapchain_device: swapchain_device,
-                physical_device,
-                physical_device_info: physical_device_info,
-                device: device,
-                graphics_queue,
-                transfer_queue: transfer_queue,
-                compute_queue: compute_queue,
-            },
-        )
+        if has_bits!(enabled_layers, Layer::KhronosValidation) {
+            info!("Khronos validation enabled");
+        }
+        Ok(Self {
+            entry,
+            instance: instance,
+            surface_instance: surface_instance,
+            swapchain_device: swapchain_device,
+            physical_device,
+            physical_device_info: physical_device_info,
+            device: device,
+            graphics_queue,
+            transfer_queue: transfer_queue,
+            compute_queue: compute_queue,
+            enabled_extensions,
+            enabled_layers,
+        })
     }
 
     #[inline(always)]
@@ -227,6 +240,16 @@ impl Vulkan {
     #[inline(always)]
     pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
         &self.physical_device_info
+    }
+
+    #[inline(always)]
+    pub fn is_layer_enabled(&self, layer: Layer) -> bool {
+        self.enabled_layers & layer == layer
+    }
+
+    #[inline(always)]
+    pub fn is_extension_enabled(&self, extension: Extension) -> bool {
+        self.enabled_extensions & extension == extension
     }
 
     #[inline(always)]
@@ -268,85 +291,6 @@ impl Vulkan {
     pub fn compute_queue(&self) -> vk::Queue {
         self.compute_queue
     }
-
-/*
-    pub fn update_swapchain(
-        &mut self,
-        framebuffer_size: PhysicalSize<u32>,
-        graphics_command_pool: vk::CommandPool,
-        buffered_frames: u32,
-        tmp_alloc: &ArenaAlloc,
-        host_allocators: &'a HostAllocators,
-    ) -> Result<()> {
-        if let Some(context) = self.swapchain_context.take() {
-            context.borrow_mut().destroy(
-                &self.device,
-                &self.swapchain_device,
-                self.graphics_queue,
-                Some(graphics_command_pool),
-            );
-        }
-        unsafe {
-            host_allocators.swapchain.force_clear();
-        }
-        self.swapchain_context = SwapchainContext::new(
-            &self.device,
-            &self.surface_instance,
-            &self.swapchain_device,
-            self.physical_device,
-            self.surface_handle,
-            vk::Extent2D { width: framebuffer_size.width, height: framebuffer_size.height },
-            buffered_frames,
-            graphics_command_pool,
-            self.queue_family_indices().graphics_index(),
-            &host_allocators.swapchain,
-            tmp_alloc,
-        ).map(|v| v.map(|v| Rc::new(RefCell::new(v))))
-        .context("failed to create swapchain context")?;
-        self.swapchain_state = SwapchainState::Valid;
-        Ok(())
-    }
-
-    pub fn get_swapchain_context(
-        &mut self,
-        graphics_command_pool: vk::CommandPool,
-        tmp_alloc: &ArenaAlloc,
-        host_allocators: &'a HostAllocators,
-    ) -> Result<(Rc<RefCell<SwapchainContext<'a>>>, bool)> {
-        let mut recreated = false;
-        match self.swapchain_state {
-            SwapchainState::Valid => {},
-            SwapchainState::OutOfDate { buffered_frames, size, } => {
-                recreated = true;
-                self.update_swapchain(
-                    size,
-                    graphics_command_pool,
-                    buffered_frames,
-                    tmp_alloc, host_allocators
-                )?;
-            },
-        }
-        Ok((self.swapchain_context.clone().unwrap(), recreated))
-    }
-
-    pub fn destroy_swapchain(
-        &mut self,
-        graphics_command_pool: vk::CommandPool,
-        host_allocators: &'a HostAllocators,
-    ) {
-        if let Some(context) = self.swapchain_context.take() {
-            context.borrow_mut().destroy(
-                &self.device,
-                &self.swapchain_device,
-                self.graphics_queue,
-                Some(graphics_command_pool),
-            );
-            unsafe {
-                host_allocators.swapchain.force_clear();
-            }
-        }
-    }
-    */
 }
 
 impl Drop for Vulkan {
@@ -361,12 +305,12 @@ impl Drop for Vulkan {
 
 fn get_required_instance_extensions<W>(
     window: &W,
-    out: &mut FixedVec::<*const i8, ArenaGuard>
+    out: &mut GlobalVec::<(*const i8, bool)>,
 ) -> Result<()>
     where
         W: HasDisplayHandle
 {
-    out.push(surface::NAME.as_ptr()).context_with(|| ErrorContext::VecError(location!()))?;
+    out.push((surface::NAME.as_ptr(), true));
     let ext = match window.display_handle().unwrap().as_raw() {
         raw_window_handle::RawDisplayHandle::Wayland(_) => wayland_surface::NAME.as_ptr(),
         raw_window_handle::RawDisplayHandle::Windows(_) => win32_surface::NAME.as_ptr(),
@@ -376,21 +320,22 @@ fn get_required_instance_extensions<W>(
             return Err(Error::just_context("unsupported platform"));
         },
     };
-    out.push(ext).context_with(|| ErrorContext::VecError(location!()))?;
+    out.push((ext, true));
     Ok(())
 }
 
 fn verify_instance_layers(
     entry: &Entry,
-    layers: &FixedVec::<(*const i8, bool), ArenaGuard>,
-    found: &mut FixedVec<*const i8, ArenaGuard>,
+    layers: &[(*const i8, bool)],
+    found: &mut GlobalVec<*const i8>,
+    found_hash: &mut FxHashSet<CString>,
 ) -> Result<()>
 {
     let available = unsafe { entry
         .enumerate_instance_layer_properties()
         .context("failed to enumerate instance layers")?
     };
-    for &(layer, optional) in layers {
+    for &(layer, required) in layers {
         let string = unsafe {
             ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>
                 ::from_ascii_ptr(layer)
@@ -405,13 +350,14 @@ fn verify_instance_layers(
                 }
             }).is_none()
         {
-            if optional {
-                warn!("optional instance layer {string} not present");
-            } else {
+            if required {
                 return Err(Error::just_context(format_compact!("instance layer {string} not present")))
+            } else {
+                warn!("optional instance layer {string} not present");
             }
         } else {
-            found.push(layer).context(ErrorContext::VecError(location!()))?;
+            found.push(layer);
+            found_hash.insert(CString::new(string.as_str()).unwrap());
         }
     }
     Ok(())
@@ -419,7 +365,9 @@ fn verify_instance_layers(
 
 fn verify_instance_extensions(
     entry: &Entry,
-    extensions: &FixedVec::<*const i8, ArenaGuard>,
+    extensions: &[(*const i8, bool)],
+    found: &mut GlobalVec<*const i8>,
+    found_hash: &mut FxHashSet<CString>,
 ) -> Result<()>
 {
     let available = unsafe {
@@ -427,10 +375,10 @@ fn verify_instance_extensions(
             .enumerate_instance_extension_properties(None)
             .context("failed to enumerate instance extensions")?
     };
-    for extension in extensions {
+    for &(extension, required) in extensions {
         let string = unsafe {
             ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>
-                ::from_ascii_ptr(*extension)
+                ::from_ascii_ptr(extension)
                 .context_with(|| ErrorContext::StringConversionError(location!()))?
         };
         if available
@@ -442,7 +390,14 @@ fn verify_instance_extensions(
                 }
             }).is_none()
         {
-            return Err(Error::just_context(format_compact!("instance extension {string} not present")))
+            if required {
+                return Err(Error::just_context(format_compact!("instance extension {string} not present")))
+            } else {
+                warn!("optional instance extension {string} not present");
+            }
+        } else {
+            found.push(extension);
+            found_hash.insert(CString::from_str(string.as_str()).unwrap());
         }
     }
     Ok(())

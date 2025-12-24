@@ -248,12 +248,8 @@ impl<'a, 'b, I: Interface> ApplicationHandler for NoxRun<'a, 'b, I> {
             or_flag!(self.flags, Self::CLOSE_ON_NO_WINDOWS, self.attributes.close_on_no_windows);
             self.gpu = match gpu::Gpu::new(
                 event_loop,
-                &self.attributes.app_name,
-                self.attributes.app_version,
-                self.attributes.vulkan_validation,
-                *self.memory.gpu().layout(),
-                3,
-                self.memory.gpu().host_allocators(),
+                &self.attributes.gpu_attributes,
+                self.memory.gpu(),
             ).context("failed to init gpu") {
                 Ok(mut gpu) => {
                     if let Err(err) = self.on_init.init(

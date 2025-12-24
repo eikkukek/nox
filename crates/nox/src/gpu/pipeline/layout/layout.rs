@@ -20,7 +20,7 @@ impl PipelineLayout {
     pub fn new<const SHADER_COUNT: usize>(
         vk: Arc<Vulkan>,
         shader_ids: [ShaderId; SHADER_COUNT],
-        global_resources: &GlobalResources,
+        resources: &Resources,
     ) -> Result<Self>
     {
         let device = vk.device();
@@ -28,7 +28,7 @@ impl PipelineLayout {
         let mut push_constants = GlobalVec::new();
         let mut shaders = ArrayVec::<&Shader, SHADER_COUNT>::new();
         for id in shader_ids {
-            shaders.push(global_resources.get_shader(id)?).unwrap();
+            shaders.push(resources.get_shader(id)?).unwrap();
         }
         for shader in &shaders {
             for uniform in shader.uniforms() {
