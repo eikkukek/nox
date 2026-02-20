@@ -1,7 +1,6 @@
 /// A trait for `repr({integer})` enums with unit-only variants.
 ///
-/// This trait allows extracting the underlying integer representation of such enums
-/// using a consistent and safe interface.
+/// This trait allows extracting the underlying integer representation of enums.
 ///
 /// For bitflag-style enums, you can implement bitwise ops:
 ///
@@ -30,6 +29,7 @@ pub trait AsRaw {
 
     type Repr;
 
+    #[allow(clippy::wrong_self_convention)]
     fn as_raw(self) -> Self::Repr;
 }
 

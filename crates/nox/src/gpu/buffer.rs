@@ -2,26 +2,47 @@ mod properties;
 mod state;
 mod error;
 
-use std::{ptr::NonNull, sync::Arc};
+use crate::sync::Arc;
 
-use core::num::NonZeroU64;
+use nox_ash::vk;
 
-use ash::vk::{self, Handle};
-
-use nox_mem::{AsRaw, impl_as_raw_bit_op};
-
-use crate::gpu::{
-    memory_binder::DeviceMemory,
-    Vulkan,
+use parking_lot::{
+    RwLockWriteGuard, MappedRwLockWriteGuard,
+    RwLockReadGuard, MappedRwLockReadGuard,
 };
+
+use compact_str::format_compact;
+
+use nox_mem::{
+    AsRaw,
+    impl_as_raw_bit_op,
+    vec::{Vec32, Vector},
+    vec32,
+    slot_map::SlotMap,
+};
+
+use crate::gpu::prelude::{
+    memory_binder::{DeviceMemory, MemoryBinder},
+    Vulkan,
+    StateRange,
+    StateOverwrite,
+    COMMAND_REQUEST_IGNORED,
+    CommandOrdering,
+    BufferId,
+    ResourceId,
+};
+
 use crate::dev::has_not_bits;
+
+use crate::dev::error as dev_error;
+use dev_error::Context;
 
 pub use error::BufferError;
 pub(crate) use properties::BufferProperties;
-pub(crate) use state::BufferState;
+pub(crate) use state::*;
 
 #[repr(u32)]
-#[derive(Clone, Copy, AsRaw)]
+#[derive(Clone, Copy, AsRaw, PartialEq, Eq)]
 pub enum BufferUsage {
     TransferSrc = vk::BufferUsageFlags::TRANSFER_SRC.as_raw(),
     TransferDst = vk::BufferUsageFlags::TRANSFER_DST.as_raw(),
@@ -33,21 +54,23 @@ pub enum BufferUsage {
 
 impl_as_raw_bit_op!(BufferUsage);
 
-pub(crate) struct Buffer {
-    handle: NonZeroU64,
-    memory: Option<Box<dyn DeviceMemory>>,
+pub(crate) struct BufferMeta {
     vk: Arc<Vulkan>,
+    handle: vk::Buffer,
+    memory: Box<dyn DeviceMemory>,
     properties: BufferProperties,
-    state: BufferState,
+    state: Vec32<BufferRange>,
+    last_used_frame: u64,
 }
 
-impl Buffer {
+impl BufferMeta {
 
     #[inline(always)]
     pub fn new(
         vk: Arc<Vulkan>,
         properties: BufferProperties,
-    ) -> Result<Self, vk::Result>
+        alloc: &mut (impl MemoryBinder + ?Sized),
+    ) -> Result<Self, dev_error::Error>
     {
         let create_info = vk::BufferCreateInfo {
             s_type: vk::StructureType::BUFFER_CREATE_INFO,
@@ -57,25 +80,52 @@ impl Buffer {
             sharing_mode: vk::SharingMode::EXCLUSIVE,
             ..Default::default()
         };
-        let buffer = unsafe {
-            vk.device().create_buffer(&create_info, None)?
+        let device_mem_requirements = vk::DeviceBufferMemoryRequirements {
+            s_type: vk::StructureType::DEVICE_BUFFER_MEMORY_REQUIREMENTS,
+            p_create_info: &create_info,
+            ..Default::default()
         };
+        let mut mem_requirements = Default::default();
+        unsafe {
+            vk.maintenance4_device()
+            .get_device_buffer_memory_requirements(&device_mem_requirements, &mut mem_requirements);
+        }
+        let memory = unsafe { alloc.alloc(&mem_requirements)
+            .context("failed to allocate GPU memory for buffer")?
+        };
+        let handle = unsafe {
+            vk.device().create_buffer(&create_info, None)
+            .context("failed to create Vulkan buffer")?
+        };
+        unsafe {
+            vk.device().bind_buffer_memory(
+                handle, memory.device_memory(),
+                memory.offset(),
+            ).context("failed to bind buffer memory")?;
+        }
         Ok(Self {
-            handle: NonZeroU64::new(buffer.as_raw()).unwrap(),
-            memory: None,
+            handle,
+            memory,
             vk,
             properties,
-            state: BufferState::new(
-                vk::AccessFlags::NONE,
-                vk::QUEUE_FAMILY_IGNORED,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-            )
+            state: vec32![BufferRange {
+                state: BufferState::new(
+                    vk::AccessFlags2::NONE,
+                    vk::PipelineStageFlags2::NONE,
+                    vk::QUEUE_FAMILY_IGNORED,
+                    COMMAND_REQUEST_IGNORED,
+                    0
+                ),
+                offset: 0,
+                size: properties.size,
+            }],
+            last_used_frame: 0,
         })
     }
 
     #[inline(always)]
     pub fn handle(&self) -> vk::Buffer {
-        vk::Handle::from_raw(self.handle.get())
+        self.handle
     }
 
     #[inline(always)]
@@ -84,14 +134,13 @@ impl Buffer {
     }
 
     #[inline(always)]
-    pub fn state(&self) -> BufferState {
-        self.state
+    pub fn get_last_used_frame(&self) -> u64 {
+        self.last_used_frame
     }
 
     #[inline(always)]
-    pub unsafe fn set_memory(&mut self, memory: Box<dyn DeviceMemory>) {
-        debug_assert!(self.memory.is_none());
-        self.memory = Some(memory);
+    pub unsafe fn set_last_used_frame(&mut self, frame: u64) {
+        self.last_used_frame = frame;
     }
 
     #[inline(always)]
@@ -119,56 +168,215 @@ impl Buffer {
     }
 
     #[inline(always)]
-    pub fn cmd_memory_barrier(
+    pub fn memory_barrier<'a>(
         &mut self,
+        offset: vk::DeviceSize,
+        size: vk::DeviceSize,
         state: BufferState,
-        command_buffer: vk::CommandBuffer,
-    )
+        ordering: CommandOrdering,
+        cache: &'a mut BufferMemoryBarrierCache,
+    ) -> Result<&'a [BufferMemoryBarrier], BufferError>
     {
-        if self.state == state {
-            return
+        if size == 0 {
+            return Ok(&[])
         }
-        let device = self.vk.device();
-        let memory_barrier = self.state.to_memory_barrier(
-            self.handle(),
+        if offset + size > self.properties.size {
+            return Err(BufferError::OutOfRange {
+                buffer_size: self.properties.size,
+                requested_offset: offset,
+                requested_size: size,
+            })
+        }
+        let mut not_inserted = None;
+        let mut range = BufferRange {
             state,
-            0,
-            self.properties.size,
-        );
-        unsafe {
-            device.cmd_pipeline_barrier(
-                command_buffer,
-                self.state.pipeline_stage,
-                state.pipeline_stage,
-                Default::default(), Default::default(),
-                &[memory_barrier], Default::default()
-            );
+            offset,
+            size,
+        };
+        for i in (0..self.state.len()).rev() {
+            match unsafe { self.state.get_unchecked(i as usize) }.overwrite(&range) {
+                StateOverwrite::NoOverlap => continue,
+                StateOverwrite::Combine(new_range) => {
+                    self.state.remove(i);
+                    range = new_range;
+                    not_inserted = Some(i);
+                },
+                StateOverwrite::Consume(barrier) => {
+                    self.state.remove(i);
+                    match ordering {
+                        CommandOrdering::None => {
+                            if barrier.src_queue_family_index != barrier.dst_queue_family_index {
+                                cache.cache.push(barrier);
+                            }
+                        },
+                        CommandOrdering::Strict => {
+                            cache.cache.push(barrier);
+                        }
+                    }
+                    not_inserted = Some(i);
+                },
+                StateOverwrite::Cut(left, right, barrier) => {
+                    self.state.remove(i);
+                    match ordering {
+                        CommandOrdering::None => {
+                            if barrier.src_queue_family_index != barrier.dst_queue_family_index {
+                                cache.cache.push(barrier);
+                            }
+                        },
+                        CommandOrdering::Strict => {
+                            cache.cache.push(barrier);
+                        }
+                    }
+                    if left.size != 0 {
+                        self.state.insert(i, left);
+                    }
+                    self.state.insert(i + 1, range);
+                    if right.size != 0 {
+                        self.state.insert(i + 2, right);
+                    }
+                    not_inserted = None;
+                    break
+                },
+                StateOverwrite::Shrink(new_range, barrier) => {
+                    unsafe {
+                        *self.state.get_unchecked_mut(i as usize)
+                            = new_range;
+                    }
+                    match ordering {
+                        CommandOrdering::None => {
+                            if barrier.src_queue_family_index != barrier.dst_queue_family_index {
+                                cache.cache.push(barrier);
+                            }
+                        },
+                        CommandOrdering::Strict => {
+                            cache.cache.push(barrier);
+                        }
+                    }
+                    if new_range.offset < range.offset {
+                        self.state.insert(i + 1, range);
+                        not_inserted = None;
+                        break
+                    }
+                },
+            }
         }
-        self.state = state;
+        if let Some(i) = not_inserted {
+            self.state.insert(i, range);
+        }
+        Ok(&cache.cache)
     }
 
     #[inline(always)]
-    pub unsafe fn map_memory(&mut self) -> Result<NonNull<u8>, BufferError>
-    {
-        unsafe {
-            self.memory
-                .as_mut()
-                .ok_or(BufferError::UnbindedMemory)?
-                .map_memory()
-                .map_err(|e| e.into())
+    pub fn flush_state(&mut self) {
+        for range in &mut self.state {
+            range.state.stage_mask = vk::PipelineStageFlags2::ALL_COMMANDS;
+            range.state.access_mask = vk::AccessFlags2::MEMORY_WRITE;
         }
+    }
+
+    #[inline(always)]
+    pub fn map_memory(&mut self) -> Result<&mut [u8], BufferError>
+    {
+        self.memory
+            .map_memory()
+            .map_err(|e| e.into())
     }
 }
 
-impl Drop for Buffer {
+impl Drop for BufferMeta {
 
+    #[inline(always)]
     fn drop(&mut self) {
         let device = self.vk.device();
         unsafe {
             device.destroy_buffer(self.handle(), None);
-            if let Some(memory) = self.memory.take() {
-                memory.free_memory();
-            }
         }
+    }
+}
+
+pub struct BufferWriteGuard<'a> {
+    id: BufferId,
+    meta: MappedRwLockWriteGuard<'a, BufferMeta>,
+}
+
+impl<'a> BufferWriteGuard<'a> {
+
+    #[inline(always)]
+    pub(crate) fn new(
+        id: BufferId,
+        buffers: RwLockWriteGuard<'a, SlotMap<BufferMeta>>,
+    ) -> Option<Self>
+    {
+        Some(Self {
+            id,
+            meta: RwLockWriteGuard::try_map(buffers, |buffers| {
+                buffers.get_mut(id.slot_index()).ok()
+            }).ok()?,
+        })
+    }
+
+    #[inline(always)]
+    pub(crate) fn meta(&mut self) -> &mut BufferMeta {
+        &mut self.meta
+    }
+
+    #[inline(always)]
+    pub fn id(&self) -> BufferId {
+        self.id
+    }
+
+    #[inline(always)]
+    pub fn size(&self) -> u64 {
+        self.meta.properties.size
+    }
+
+    /// Tries to map buffer memory.
+    ///
+    /// # Safety
+    ///
+    #[inline(always)]
+    pub unsafe fn map_memory(&mut self) -> dev_error::Result<&mut [u8]> {
+        self.meta
+        .map_memory()
+        .context_with(|| format_compact!(
+            "failed to map buffer (id: {}) memory", self.id
+        ))
+    }
+}
+
+pub struct BufferReadGuard<'a> {
+    id: BufferId,
+    meta: MappedRwLockReadGuard<'a, BufferMeta>,
+}
+
+impl<'a> BufferReadGuard<'a> {
+
+    #[inline(always)]
+    pub(crate) fn new(
+        id: BufferId,
+        buffers: RwLockReadGuard<'a, SlotMap<BufferMeta>>,
+    ) -> Option<Self>
+    {
+        Some(Self {
+            id,
+            meta: RwLockReadGuard::try_map(buffers, |buffers| {
+                buffers.get(id.slot_index()).ok()
+            }).ok()?,
+        })
+    }
+
+    #[inline(always)]
+    pub(crate) fn meta(&self) -> &BufferMeta {
+        &self.meta
+    }
+
+    #[inline(always)]
+    pub fn id(&self) -> BufferId {
+        self.id
+    }
+
+    #[inline(always)]
+    pub fn size(&self) -> u64 {
+        self.meta.properties.size
     }
 }

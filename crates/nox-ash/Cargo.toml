@@ -1,0 +1,10 @@
+[package]
+name = "nox-ash"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ash = "0.38.0"
+paste = "1.0.15"
+
+nox-mem = { path = "../nox-mem" }

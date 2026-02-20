@@ -3,8 +3,7 @@ use core::{
 };
 
 use crate::{
-    global_alloc::GlobalAlloc,
-    Allocator,
+    alloc::{StdAlloc, LocalAlloc, Layout},
     const_fn::align_up,
 };
 
@@ -26,15 +25,15 @@ impl<T: ?Sized, U: ?Sized> Pair<T, U> {
 
     pub fn new<TSource, USource>(t: TSource, u: USource) -> Self
         where
-            TSource: Dyn<Target = T>,
-            USource: Dyn<Target = U>,
+            TSource: Dyn<T, Target = TSource>,
+            USource: Dyn<U, Target = USource>,
     {
-        let t_vtable = unsafe {
+        let t_meta = unsafe {
             TSource::raw_parts(&t)
-        }.vtable;
-        let u_vtable = unsafe {
+        }.meta;
+        let u_meta = unsafe {
             USource::raw_parts(&u)
-        }.vtable;
+        }.meta;
         let t_align = align_of_val(&t);
         let u_align = align_of_val(&u);
         let alloc_align = align_of::<Allocation>();
@@ -60,8 +59,8 @@ impl<T: ?Sized, U: ?Sized> Pair<T, U> {
         let alloc_off = size;
         size += size_of::<Allocation>();
         let ptr = unsafe {
-            GlobalAlloc
-                .allocate_raw(size, align)
+            StdAlloc
+                .allocate_raw(Layout::from_size_align(size, align).unwrap())
                 .expect("global alloc failed")
         };
         let t_ptr = unsafe {
@@ -77,13 +76,13 @@ impl<T: ?Sized, U: ?Sized> Pair<T, U> {
         let t = NonNull::new(unsafe {
             TSource::from_raw_parts(DynRawParts {
                 data: t_ptr.as_ptr(),
-                vtable: t_vtable,
+                meta: t_meta,
             }).cast_mut()
         }).unwrap();
         let u = NonNull::new(unsafe {
             USource::from_raw_parts(DynRawParts {
                 data: u_ptr.as_ptr(),
-                vtable: u_vtable,
+                meta: u_meta,
             }).cast_mut()
         }).unwrap();
         let a = unsafe {
@@ -130,10 +129,9 @@ impl<T: ?Sized, U: ?Sized> Drop for Pair<T, U> {
             self.t.drop_in_place();
             self.u.drop_in_place();
             let a = self.a.read();
-            GlobalAlloc.free_raw(
+            StdAlloc.free_raw(
                 a.ptr,
-                a.size,
-                a.align,
+                Layout::from_size_align(a.size, a.align).unwrap(),
             );
         }
     }

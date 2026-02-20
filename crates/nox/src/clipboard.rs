@@ -36,11 +36,7 @@ impl Clipboard {
                 None
             },
             Self::Wayland(cb) => {
-                if let Ok(contents) = cb.load() {
-                    Some(contents)
-                } else {
-                    None
-                }
+                cb.load().ok()
             },
             Self::X11 => {
                 None

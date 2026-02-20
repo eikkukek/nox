@@ -5,17 +5,12 @@ use proc_macro2::Span;
 use syn::{Data, DeriveInput, Ident, LitStr, Expr, parse_macro_input, spanned::Spanned};
 use quote::{quote};
 
-use crate::{
-    input::Input,
-    display,
-};
+use crate::display;
 
 #[inline(always)]
-fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<TokenStream> {
+fn handle_enum(input: &syn::DeriveInput, e: &syn::DataEnum) -> syn::Result<TokenStream> {
     let name = &input.ident;
-    let generics = &input.generics;
-    let generic_idents = &input.generic_idents;
-    let where_clause = &generics.where_clause;
+    let (impl_generics, ty_generics, where_clause) = &input.generics.split_for_impl();
     let impl_display = display::handle_enum(input, e)?; 
     let mut err: Option<(Span, &str)> = None;
     let mut from = Vec::new();
@@ -50,7 +45,7 @@ fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<TokenStream> {
                             if let Some(field_ty) = field_ty {
                                 if let Some(ident) = &field.ident {
                                     from.push(quote! {
-                                        impl #generics From<#field_ty> for #name #generic_idents #where_clause {
+                                        impl #impl_generics From<#field_ty> for #name #ty_generics #where_clause {
 
                                             fn from(value: #field_ty) -> Self {
                                                 Self::#var_name { #ident: value, }
@@ -59,7 +54,7 @@ fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<TokenStream> {
                                     });
                                 } else {
                                     from.push(quote! {
-                                        impl #generics From<#field_ty> for #name #generic_idents #where_clause {
+                                        impl #impl_generics From<#field_ty> for #name #ty_generics #where_clause {
 
                                             fn from(value: #field_ty) -> Self {
                                                 Self::#var_name(value)
@@ -83,12 +78,10 @@ fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<TokenStream> {
                         if let Some(ident) = &field.ident {
                             named = true;
                             ident.clone()
+                        } else if i == idx {
+                            Ident::new("err", field.span())
                         } else {
-                            if i == idx {
-                                Ident::new("err", field.span())
-                            } else {
-                                Ident::new("_", field.span())
-                            }
+                            Ident::new("_", field.span())
                         }
                     })
                     .collect();
@@ -123,7 +116,7 @@ fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<TokenStream> {
         return Err(syn::Error::new(span, err))
     }
     let impl_error = quote! {
-        impl #generics core::error::Error for #name #generic_idents #where_clause {
+        impl #impl_generics core::error::Error for #name #ty_generics #where_clause {
             #[allow(unused_variables)]
             fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
                 match self {
@@ -145,12 +138,10 @@ fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<TokenStream> {
 }
 
 #[inline(always)]
-fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<TokenStream> {
+fn handle_struct(input: &syn::DeriveInput, s: &syn::DataStruct) -> syn::Result<TokenStream> {
     let mut impl_display = Default::default();
     let name = &input.ident;
-    let generics = &input.generics;
-    let generic_idents = &input.generic_idents;
-    let where_clause = &generics.where_clause;
+    let (impl_generics, ty_generics, where_clause) = &input.generics.split_for_impl();
     let impl_error =
     if let Some(field) = s.fields.iter().next() {
         if field.ident.is_some() {
@@ -169,7 +160,7 @@ fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<TokenStream>
                         quote! { "{}", #expr }
                     };
                 impl_display = quote! {
-                    impl #generics core::fmt::Display for #name #generic_idents #where_clause
+                    impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
                     {
                         #[allow(unused_variables, unused_assignments)]
                         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -179,57 +170,55 @@ fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<TokenStream>
                     }
                 };
             }
-        } else {
-            if let Some(attr) = input.attrs
+        } else if let Some(attr) = input.attrs
+            .iter()
+            .find(|attr| attr.path().is_ident("display"))
+        {
+            let names: Vec<_> = s.fields
                 .iter()
-                .find(|attr| attr.path().is_ident("display"))
-            {
-                let names: Vec<_> = s.fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| {
-                        let mut name = String::new();
-                        write!(&mut name, "_{i}").ok();
-                        syn::Ident::new(&name, Span::call_site())
-                    })
-                    .collect();
-                let fmt =
-                    if let Ok(fmt) = attr.parse_args::<LitStr>() {
-                        let mut fmt = fmt.value();
-                        let mut indices = Vec::new();
-                        for (i, _) in names.iter().enumerate() {
-                            let mut search_for = String::new();
-                            write!(&mut search_for, "{{{i}").ok();
-                            let mut substr = &fmt[..];
-                            let len = search_for.len();
-                            let mut off = 0;
-                            while let Some(idx) = substr.find(&search_for) {
-                                substr = &substr[idx + len..];
-                                off += idx;
-                                indices.push(off + 1);
-                                off += len;
-                            }
-                        }
-                        indices.sort();
-                        for &idx in indices.iter().rev() {
-                            fmt.insert(idx, '_');
-                        }
-                        quote! { #fmt }
-                    } else {
-                        let expr = attr.parse_args::<Expr>()?;
-                        quote! { "{}", #expr }
-                    };
-                impl_display = quote! {
-                    impl #generics core::fmt::Display for #name #generic_idents #where_clause
-                    {
-                        #[allow(unused_variables, unused_assignments)]
-                        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                            let Self(#( #names ),*) = self;
-                            write!(f, #fmt)
+                .enumerate()
+                .map(|(i, _)| {
+                    let mut name = String::new();
+                    write!(&mut name, "_{i}").ok();
+                    syn::Ident::new(&name, Span::call_site())
+                })
+                .collect();
+            let fmt =
+                if let Ok(fmt) = attr.parse_args::<LitStr>() {
+                    let mut fmt = fmt.value();
+                    let mut indices = Vec::new();
+                    for (i, _) in names.iter().enumerate() {
+                        let mut search_for = String::new();
+                        write!(&mut search_for, "{{{i}").ok();
+                        let mut substr = &fmt[..];
+                        let len = search_for.len();
+                        let mut off = 0;
+                        while let Some(idx) = substr.find(&search_for) {
+                            substr = &substr[idx + len..];
+                            off += idx;
+                            indices.push(off + 1);
+                            off += len;
                         }
                     }
+                    indices.sort();
+                    for &idx in indices.iter().rev() {
+                        fmt.insert(idx, '_');
+                    }
+                    quote! { #fmt }
+                } else {
+                    let expr = attr.parse_args::<Expr>()?;
+                    quote! { "{}", #expr }
                 };
-            }
+            impl_display = quote! {
+                impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
+                {
+                    #[allow(unused_variables, unused_assignments)]
+                    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        let Self(#( #names ),*) = self;
+                        write!(f, #fmt)
+                    }
+                }
+            };
         }
         let mut source = None;
         for (i, field) in s.fields.iter().enumerate() {
@@ -252,7 +241,7 @@ fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<TokenStream>
         if let Some((idx, ident, expr)) = source {
             if let Some(expr) = expr {
                 quote! {
-                    impl #generics core::error::Error for #name #generic_idents #where_clause
+                    impl #impl_generics core::error::Error for #name #ty_generics #where_clause
                     {
                         #[allow(unused_variables)]
                         fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
@@ -260,32 +249,30 @@ fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<TokenStream>
                         }
                     }
                 }
-            } else {
-                if let Some(ident) = ident {
-                    quote! {
-                        impl #generics core::error::Error for #name #generic_idents #where_clause
-                        {
-                            #[allow(unused_variables)]
-                            fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-                                Some(&self.#ident)
-                            }
+            } else if let Some(ident) = ident {
+                quote! {
+                    impl #impl_generics core::error::Error for #name #ty_generics #where_clause
+                    {
+                        #[allow(unused_variables)]
+                        fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+                            Some(&self.#ident)
                         }
                     }
-                } else {
-                    let idx = syn::Index::from(idx);
-                    quote! {
-                        impl #generics core::error::Error for #name #generic_idents #where_clause
-                        {
-                            #[allow(unused_variables)]
-                            fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-                                Some(&self.#idx)
-                            }
+                }
+            } else {
+                let idx = syn::Index::from(idx);
+                quote! {
+                    impl #impl_generics core::error::Error for #name #ty_generics #where_clause
+                    {
+                        #[allow(unused_variables)]
+                        fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+                            Some(&self.#idx)
                         }
                     }
                 }
             }
         } else {
-            quote! { impl #generics core::error::Error for #name #generic_idents #where_clause {} }
+            quote! { impl #impl_generics core::error::Error for #name #ty_generics #where_clause {} }
         }
     } else {
         if let Some(attr) = input.attrs
@@ -294,7 +281,7 @@ fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<TokenStream>
         {
             let fmt = attr.parse_args::<LitStr>()?;
             impl_display = quote! {
-                impl #generics core::fmt::Display for #name #generic_idents #where_clause
+                impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
                 {
                     #[allow(unused_variables, unused_assignments)]
                     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -303,7 +290,7 @@ fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<TokenStream>
                 }
             };
         }
-        quote! { impl #generics core::error::Error for #name #generic_idents #where_clause {} }
+        quote! { impl #impl_generics core::error::Error for #name #ty_generics #where_clause {} }
     };
     let expanded = quote! {
         #impl_display
@@ -316,13 +303,13 @@ pub fn error(item: TokenStream) -> TokenStream {
     let input = &parse_macro_input!(item as DeriveInput);
     match &input.data {
         Data::Enum(e) => {
-            match handle_enum(&input.into(), e) {
+            match handle_enum(input, e) {
                 Ok(ts) => ts,
                 Err(err) => err.to_compile_error().into(),
             }
         },
         Data::Struct(s) => {
-            match handle_struct(&input.into(), s) {
+            match handle_struct(input, s) {
                 Ok(ts) => ts,
                 Err(err) => err.to_compile_error().into(),
             }

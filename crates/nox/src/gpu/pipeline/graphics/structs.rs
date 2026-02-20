@@ -1,8 +1,13 @@
 use core::hash::{Hash, Hasher};
 
-use ash::vk;
+use nox_ash::vk;
 
-use nox_mem::{Hashable, AsRaw, vec_types::{Vector, GlobalVec, FixedVec}, Allocator};
+use nox_mem::{
+    Hashable,
+    AsRaw,
+    vec::{Vector, Vec32, FixedVec32},
+    alloc::LocalAlloc,
+};
 
 use crate::gpu::*;
 
@@ -15,6 +20,22 @@ pub struct DepthBiasInfo {
     pub slope_factor: Hashable<f32>,
 }
 
+impl DepthBiasInfo {
+
+    #[inline(always)]
+    pub fn new(
+        constant_factor: f32,
+        clamp: f32,
+        slope_factor: f32,
+    ) -> Self {
+        Self {
+            constant_factor: constant_factor.into(),
+            clamp: clamp.into(),
+            slope_factor: slope_factor.into(),
+        }
+    }
+}
+
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SampleShadingInfo {
     pub samples: MSAA,
@@ -25,6 +46,7 @@ pub struct SampleShadingInfo {
 
 impl SampleShadingInfo {
 
+    #[inline(always)]
     pub fn new(
         samples: MSAA,
         min_shading: f32,
@@ -98,9 +120,9 @@ impl From<StencilOpState> for vk::StencilOpState {
             pass_op: value.pass_op.into(),
             depth_fail_op: value.depth_fail_op.into(),
             compare_op: value.compare_op.into(),
-            compare_mask: value.compare_mask.into(),
-            write_mask: value.write_mask.into(),
-            reference: value.reference.into(),
+            compare_mask: value.compare_mask,
+            write_mask: value.write_mask,
+            reference: value.reference,
         }
     }
 }
@@ -151,7 +173,7 @@ impl WriteMask {
     }
 
     pub fn with_r_bit(&mut self, bit: bool) -> &mut Self {
-        self.mask |= (bit as u32) << 0;
+        self.mask |= bit as u32;
         self
     }
 
@@ -278,7 +300,7 @@ impl From<BlendConstants> for [f32; 4] {
 
 #[derive(Default, Clone)]
 pub struct ColorBlendInfo {
-    color_blend_attachment_states: GlobalVec<vk::PipelineColorBlendAttachmentState>,
+    color_blend_attachment_states: Vec32<vk::PipelineColorBlendAttachmentState>,
     pub blend_constants: BlendConstants, // used in 'ConstColor' and 'ConstAlpha' BlendFactors
     pub logic_op: Option<vk::LogicOp>, // only for integer frame buffers, unused for now
 }
@@ -302,7 +324,7 @@ impl Hash for ColorBlendInfo {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.color_blend_attachment_states.len().hash(state);
         for output in self.color_blend_attachment_states.iter()
-            .map(|v| ColorOutputState::from(*v))
+            .map(|&v| ColorOutputState::from(v))
         {
             output.hash(state);
         }
@@ -320,7 +342,7 @@ impl PartialEq for ColorBlendInfo {
             return false
         }
         for (i, output) in self.color_blend_attachment_states.iter()
-            .map(|v| ColorOutputState::from(*v)).enumerate()
+            .map(|&v| ColorOutputState::from(v)).enumerate()
         {
             if output != other.color_blend_attachment_states[i].into() {
                 return false
@@ -333,10 +355,14 @@ impl PartialEq for ColorBlendInfo {
 
 impl Eq for ColorBlendInfo {}
 
-pub(crate) struct CreateInfos<'a, Alloc: Allocator> {
-    pub shader_stage_infos: FixedVec<'a, vk::PipelineShaderStageCreateInfo<'static>, Alloc>,
-    pub _vertex_input_bindings: FixedVec<'a, vk::VertexInputBindingDescription, Alloc>,
-    pub _vertex_input_attributes: FixedVec<'a, vk::VertexInputAttributeDescription, Alloc>,
+pub(crate) struct CreateInfos<'a, Alloc>
+    where 
+        Alloc: LocalAlloc,
+        &'a Alloc: AsRef<Alloc>,
+{
+    pub shader_stage_infos: FixedVec32<'a, vk::PipelineShaderStageCreateInfo<'static>, Alloc>,
+    pub _vertex_input_bindings: FixedVec32<'a, vk::VertexInputBindingDescription, Alloc>,
+    pub _vertex_input_attributes: FixedVec32<'a, vk::VertexInputAttributeDescription, Alloc>,
     pub vertex_input_state: vk::PipelineVertexInputStateCreateInfo<'static>,
     pub input_assembly_state: vk::PipelineInputAssemblyStateCreateInfo<'a>,
     pub tesellation_state: vk::PipelineTessellationStateCreateInfo<'a>,

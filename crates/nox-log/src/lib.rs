@@ -1,5 +1,4 @@
 #[macro_use]
-
 mod log;
 mod error;
 pub mod fmt;

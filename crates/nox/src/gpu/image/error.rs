@@ -1,6 +1,8 @@
-use ash::vk;
+use nox_ash::vk;
 
-use nox_mem::slot_map::SlotMapError;
+use compact_str::CompactString;
+
+use nox_mem::slot_map;
 
 use crate::gpu::Offset3D;
 
@@ -10,10 +12,8 @@ use super::*;
 
 #[derive(Error, Debug)]
 pub enum ImageError {
-    #[display("vulkan error")]
-    VulkanError(#[from] #[source] vk::Result),
-    #[display("aspect mismatch")]
-    AspectMismatch,
+    #[display("aspect mismatch, missing aspects {0:?}")]
+    AspectMismatch(vk::ImageAspectFlags),
     #[display("subresource (base level {base_level}, level count {level_count}, base layer {base_layer}, layer count {layer_count}) was out of range with image mip levels {image_mip_levels} and array layers {image_array_layers}")]
     SubresourceOutOfRange {
         image_mip_levels: u32, base_level: u32, level_count: u32,
@@ -38,6 +38,4 @@ pub enum ImageError {
     InvalidCubeMap {
         layer_count: u32,
     },
-    #[display("slot map error")]
-    SlotMapError(#[from] #[source] SlotMapError),
 }

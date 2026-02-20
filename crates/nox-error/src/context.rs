@@ -22,10 +22,10 @@ pub trait Context<T, E>
     fn context_tracked<C>(self, ctx: C) -> Result<T>
         where C: Display + Send + Sync + 'static;
 
-    fn context_with<C>(self, f: impl FnMut() -> C) -> Result<T>
+    fn context_with<C>(self, f: impl FnOnce() -> C) -> Result<T>
         where C: Display + Send + Sync + 'static;
 
-    fn context_tracked_with<C>(self, f: impl FnMut() -> C) -> Result<T>
+    fn context_tracked_with<C>(self, f: impl FnOnce() -> C) -> Result<T>
         where C: Display + Send + Sync + 'static;
 
     /// Add context from an error with possibly tracked location.
@@ -48,7 +48,7 @@ pub trait Context<T, E>
     ///     Ok(())
     /// }
     /// ```
-    fn context_from_tracked<C>(self, f: impl FnMut(Option<Location>) -> C) -> Result<T>
+    fn context_from_tracked<C>(self, f: impl FnOnce(Option<Location>) -> C) -> Result<T>
         where
             C: Display + Send + Sync + 'static,
             E: Tracked;
@@ -74,7 +74,7 @@ pub trait Context<T, E>
     ///     Ok(())
     /// }
     /// ```
-    fn context_tracked_from_tracked<C>(self, f: impl FnMut(Option<Location>) -> C) -> Result<T>
+    fn context_tracked_from_tracked<C>(self, f: impl FnOnce(Option<Location>) -> C) -> Result<T>
         where
             C: Display + Send + Sync + 'static,
             E: Tracked;
@@ -86,7 +86,7 @@ impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Resul
         where C: Display + Send + Sync + 'static,
     {
         self.map_err(|err| {
-            Error::new_internal(ctx, err, None)
+            Error::new_internal(err, ctx, None)
         })
     }
 
@@ -95,45 +95,47 @@ impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Resul
         where C: Display + Send + Sync + 'static,
     {
         self.map_err(|err| {
-            Error::new_internal(ctx, err, Some(caller!()))
+            Error::new_internal(err, ctx, Some(caller!()))
         })
     }
 
-    fn context_with<C>(self, mut f: impl FnMut() -> C) -> Result<T>
+    fn context_with<C>(self, f: impl FnOnce() -> C) -> Result<T>
         where C: Display + Send + Sync + 'static,
     {
         self.map_err(|err| {
-            Error::new_internal(f(), err, None)
+            Error::new_internal(err, f(), None)
         })
     }
 
     #[track_caller]
-    fn context_tracked_with<C>(self, mut f: impl FnMut() -> C) -> Result<T>
+    fn context_tracked_with<C>(self, f: impl FnOnce() -> C) -> Result<T>
         where C: Display + Send + Sync + 'static
     {
         self.map_err(|err| {
-            Error::new_internal(f(), err, Some(caller!()))
+            Error::new_internal(err, f(), Some(caller!()))
         })
     }
 
-    fn context_from_tracked<C>(self, mut f: impl FnMut(Option<Location>) -> C) -> Result<T>
+    fn context_from_tracked<C>(self, f: impl FnOnce(Option<Location>) -> C) -> Result<T>
         where
             C: Display + Send + Sync + 'static,
             E: Tracked, 
     {
         self.map_err(|err| {
-            Error::new_internal(f(err.location()), err, None)
+            let loc = err.location();
+            Error::new_internal(err, f(loc), None)
         })
     }
 
     #[track_caller]
-    fn context_tracked_from_tracked<C>(self, mut f: impl FnMut(Option<Location>) -> C) -> Result<T>
+    fn context_tracked_from_tracked<C>(self, f: impl FnOnce(Option<Location>) -> C) -> Result<T>
         where
             C: Display + Send + Sync + 'static,
             E: Tracked
     {
         self.map_err(|err| {
-            Error::new_internal(f(err.location()), err, Some(caller!()))
+            let loc = err.location();
+            Error::new_internal(err, f(loc), Some(caller!()))
         })
     }
 }

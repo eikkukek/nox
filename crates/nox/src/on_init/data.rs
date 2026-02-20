@@ -3,10 +3,9 @@ use core::{
     mem,
 };
 
-use nox_mem::Allocator;
 use nox_mem::{
     align_up,
-    GlobalAlloc,
+    alloc::{LocalAlloc, StdAlloc, Layout},
 };
 
 use nox_error::{Context, Tracked};
@@ -20,30 +19,35 @@ trait DynAny {}
 
 impl<T> DynAny for T {}
 
+type InitFnInternal<'a> = dyn FnMut(
+    &event_loop::ActiveEventLoop,
+    &mut gpu::GpuContext,
+    *mut (dyn DynAny + 'a)
+) -> dev_error::Result<()>;
+
 pub(super) struct Data<'a> {
     data: NonNull<u8>,
     size: usize,
     align: usize,
-    init: NonNull<dyn FnMut(
-        &mut event_loop::ActiveEventLoop,
-        &mut gpu::GpuContext,
-        *mut (dyn DynAny + 'a),
-    ) -> dev_error::Result<()>>,
+    init: NonNull<InitFnInternal<'a>>,
     t: NonNull<dyn DynAny + 'a>,
 }
 
 impl<'a> Data<'a> {
 
-    fn make_f<T>(
-        f: impl FnOnce(
-            &mut event_loop::ActiveEventLoop,
-            &mut gpu::GpuContext,
-        ) -> pub_error::Result<T>
+    #[inline(always)]
+    fn make_f<T, F>(
+        f: F,
     ) -> impl FnMut(
-            &mut event_loop::ActiveEventLoop,
-            &mut gpu::GpuContext,
-            *mut (dyn DynAny + 'a)
-        ) -> dev_error::Result<()>
+        &event_loop::ActiveEventLoop,
+        &mut gpu::GpuContext,
+        *mut (dyn DynAny + 'a)
+    ) -> dev_error::Result<()>
+        where 
+            F: FnOnce(
+                &event_loop::ActiveEventLoop,
+                &mut gpu::GpuContext,
+            ) -> pub_error::Result<T>
     {
         let mut f = Some(f);
         move |win, gpu, ptr| {
@@ -66,13 +70,32 @@ impl<'a> Data<'a> {
         }
     }
 
+    #[inline(always)]
+    unsafe fn transmute_f<F>(
+        f: *const F,
+        vtable: *const ()
+    ) -> NonNull<InitFnInternal<'a>>
+        where
+            F: FnMut(
+                &event_loop::ActiveEventLoop,
+                &mut gpu::GpuContext,
+                *mut (dyn DynAny + 'a)
+            ) -> dev_error::Result<()>
+    {
+        unsafe {
+            mem::transmute::<(*const F, *const ()),NonNull<InitFnInternal<'a>>>(
+                (f, vtable)
+            )
+        }
+    }
+
     pub fn new<T, F>(
         f: F
     ) -> Self
         where 
             T: 'a,
             F: FnOnce(
-                &mut event_loop::ActiveEventLoop,
+                &event_loop::ActiveEventLoop,
                 &mut gpu::GpuContext,
             ) -> pub_error::Result<T>,
     {
@@ -93,29 +116,28 @@ impl<'a> Data<'a> {
                 size += size_of_val(&f);
                 (size, t_align, f_off, 0)
             };
-        let data = unsafe { GlobalAlloc
-            .allocate_raw(size, align)
+        let data = unsafe { StdAlloc
+            .allocate_raw(Layout::from_size_align(size, align).unwrap())
             .unwrap()
             .cast()
         };
         let init = unsafe {
             let s: *const dyn FnMut(
-                &mut event_loop::ActiveEventLoop,
+                &event_loop::ActiveEventLoop,
                 &mut gpu::GpuContext,
-                *mut (dyn DynAny + 'a)
+                *mut (dyn DynAny + 'a),
             ) -> dev_error::Result<()> = &f;
-            let vtable = mem::transmute::<_, (*const(), *const())>(s).1;
-            let ptr = data.add(f_off).cast();
-            ptr.write(f);
-            let raw_parts = (ptr.as_ptr(), vtable);
-            mem::transmute::<
-                _,
-                NonNull<dyn FnMut(
-                    &mut event_loop::ActiveEventLoop,
+            let vtable = mem::transmute::<
+                *const dyn FnMut(
+                    &event_loop::ActiveEventLoop,
                     &mut gpu::GpuContext,
                     *mut (dyn DynAny + 'a),
-                ) -> dev_error::Result<()>>
-            >(raw_parts)
+                ) -> dev_error::Result<()>,
+                (*const(), *const())
+            >(s).1;
+            let ptr = data.add(f_off).cast();
+            ptr.write(f);
+            Self::transmute_f(ptr.as_ptr(), vtable)
         };
         let t = unsafe {
             let ptr: *mut (dyn DynAny + 'a) = data
@@ -144,7 +166,7 @@ impl<'a> Data<'a> {
 
     pub fn init(
         &mut self,
-        win: &mut event_loop::ActiveEventLoop,
+        win: &event_loop::ActiveEventLoop,
         gpu: &mut gpu::GpuContext,
     ) -> dev_error::Result<()> {
         let init = unsafe {
@@ -166,10 +188,9 @@ impl<'a> Drop for Data<'a> {
     fn drop(&mut self) {
         unsafe {
             self.init.drop_in_place();
-            GlobalAlloc.free_raw(
+            StdAlloc.free_raw(
                 self.data,
-                self.size,
-                self.align
+                Layout::from_size_align(self.size, self.align).unwrap()
             );
         }
     }

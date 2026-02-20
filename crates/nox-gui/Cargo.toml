@@ -8,6 +8,6 @@ nox = { path = "../nox" }
 nox-font = { path = "../nox-font" }
 nox-geom = { path = "../nox-geom" }
 token-cell = "2.0.0"
-rustc-hash = { version = "2.1", default-features = false }
+ahash = "0.8.12"
 compact_str = { version = "0.9.0" }
 image = { version = "0.25.8" }

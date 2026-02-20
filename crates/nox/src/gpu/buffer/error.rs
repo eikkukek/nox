@@ -1,7 +1,8 @@
-use ash::vk;
+use nox_ash::vk;
+
+use nox_mem::slot_map;
 
 use crate::dev::error::Error;
-
 use crate::gpu::memory_binder::MemoryBinderError;
 
 #[derive(Debug, Error)]
@@ -19,4 +20,6 @@ pub enum BufferError {
     UnbindedMemory,
     #[display("memory binder error")]
     MemoryBinderError(#[from] #[source] MemoryBinderError),
+    #[display("slot map index error")]
+    IndexError(#[from] #[source] slot_map::IndexError),
 }

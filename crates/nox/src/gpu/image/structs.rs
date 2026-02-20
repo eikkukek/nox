@@ -1,9 +1,10 @@
 use core::{
     num::NonZeroU32,
     hash::Hash,
+    fmt::{self, Display, Formatter},
 };
 
-use ash::vk;
+use nox_ash::vk;
 
 use super::*;
 
@@ -24,7 +25,7 @@ impl Dimensions {
         }
     }
 
-    pub fn zero(&self) -> bool {
+    pub fn is_zero(&self) -> bool {
         self.width == 0 ||
         self.height == 0 ||
         self.depth == 0
@@ -59,10 +60,10 @@ impl From<vk::Extent2D> for Dimensions {
     }
 }
 
-impl core::fmt::Display for Dimensions {
+impl Display for Dimensions {
 
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(width: {}, height: {})", self.width, self.height)
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "(width: {}, height: {}, depth: {})", self.width, self.height, self.depth)
     }
 }
 
@@ -87,7 +88,7 @@ impl From<ComponentMapping> for vk::ComponentMapping {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ImageSubresourceRangeInfo {
+pub struct ImageSubresourceRange {
     pub aspect_mask: u32,
     pub base_mip_level: u32,
     pub level_count: NonZeroU32,
@@ -95,7 +96,7 @@ pub struct ImageSubresourceRangeInfo {
     pub layer_count: NonZeroU32,
 }
 
-impl ImageSubresourceRangeInfo {
+impl ImageSubresourceRange {
 
     pub fn new(
         aspect_mask: u32,
@@ -115,18 +116,18 @@ impl ImageSubresourceRangeInfo {
     }
 
     pub fn overlaps(self, other: Self) -> bool {
-        if self.base_mip_level < other.base_mip_level + other.level_count.get() &&
+        if self.aspect_mask & other.aspect_mask != 0 {
+            self.base_mip_level < other.base_mip_level + other.level_count.get() &&
             other.base_mip_level < self.base_mip_level + self.level_count.get() &&
             self.base_array_layer < other.base_array_layer + other.layer_count.get() &&
             other.base_array_layer < self.base_array_layer + self.layer_count.get()
-        {
-            return self.aspect_mask & other.aspect_mask != 0
+        } else {
+            false
         }
-        false
     }
 }
 
-impl Default for ImageSubresourceRangeInfo {
+impl Default for ImageSubresourceRange {
 
     fn default() -> Self {
         Self {
@@ -139,9 +140,9 @@ impl Default for ImageSubresourceRangeInfo {
     }
 }
 
-impl From<ImageSubresourceRangeInfo> for vk::ImageSubresourceRange {
+impl From<ImageSubresourceRange> for vk::ImageSubresourceRange {
 
-    fn from(value: ImageSubresourceRangeInfo) -> Self {
+    fn from(value: ImageSubresourceRange) -> Self {
         Self {
             aspect_mask: vk::ImageAspectFlags::from_raw(value.aspect_mask),
             base_mip_level: value.base_mip_level,
@@ -209,103 +210,30 @@ impl ComponentInfo {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct ImageRangeInfo {
-    pub subresource_info: ImageSubresourceRangeInfo,
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+pub struct ImageRange {
+    pub subresource: ImageSubresourceRange,
     pub component_info: Option<ComponentInfo>,
+    pub cube_map: bool,
 }
 
-impl ImageRangeInfo {
+impl ImageRange {
 
+    #[inline(always)]
     pub fn new(
-        subresource_info: ImageSubresourceRangeInfo,
+        subresource: ImageSubresourceRange,
         component_info: Option<ComponentInfo>,
     ) -> Self
     {
         Self {
-            subresource_info,
+            subresource,
             component_info,
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ImageState {
-    pub access_flags: vk::AccessFlags,
-    pub layout: vk::ImageLayout,
-    pub queue_family_index: u32,
-    pub pipeline_stage: vk::PipelineStageFlags,
-}
-
-impl ImageState {
-
-    pub fn new(
-        access_flags: vk::AccessFlags,
-        layout: vk::ImageLayout,
-        queue_family_index: u32,
-        pipeline_stage: vk::PipelineStageFlags,
-    ) -> Self 
-    {
-        Self {
-            access_flags,
-            layout,
-            queue_family_index,
-            pipeline_stage,
+            cube_map: false,
         }
     }
 
-    pub fn access_flags(&mut self, access_flags: vk::AccessFlags) {
-        self.access_flags = access_flags
-    }
-
-    pub fn layout(&mut self, layout: vk::ImageLayout) {
-        self.layout = layout
-    }
-
-    pub fn queue_family_index(&mut self, queue_index: u32) {
-        self.queue_family_index = queue_index
-    }
-
-    pub fn pipeline_stage(&mut self, pipeline_stage: vk::PipelineStageFlags) {
-        self.pipeline_stage = pipeline_stage
-    }
-
-    pub fn to_memory_barrier(
-        mut self,
-        image: vk::Image,
-        mut to: Self,
-        subresource_range: ImageSubresourceRangeInfo,
-    ) -> vk::ImageMemoryBarrier<'static>
-    {
-        if self.queue_family_index == vk::QUEUE_FAMILY_IGNORED ||
-            to.queue_family_index == vk::QUEUE_FAMILY_IGNORED
-        {
-            self.queue_family_index = vk::QUEUE_FAMILY_IGNORED;
-            to.queue_family_index = vk::QUEUE_FAMILY_IGNORED;
-        }
-        vk::ImageMemoryBarrier {
-            s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
-            src_access_mask: self.access_flags,
-            dst_access_mask: to.access_flags,
-            old_layout: self.layout,
-            new_layout: to.layout,
-            src_queue_family_index: self.queue_family_index,
-            dst_queue_family_index: to.queue_family_index,
-            image: image,
-            subresource_range: subresource_range.into(),
-            ..Default::default()
-        }
-    }
-}
-
-impl Default for ImageState {
-
-    fn default() -> Self {
-        Self {
-            access_flags: vk::AccessFlags::NONE,
-            layout: vk::ImageLayout::UNDEFINED,
-            queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            pipeline_stage: vk::PipelineStageFlags::TOP_OF_PIPE,
-        }
+    pub fn with_cube_map(mut self, is: bool) -> Self {
+        self.cube_map = is;
+        self
     }
 }

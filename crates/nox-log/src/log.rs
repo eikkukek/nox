@@ -9,7 +9,7 @@ use termcolor::{WriteColor, StandardStream, ColorChoice};
 
 pub use termcolor::{ColorSpec, Color};
 
-use rustc_hash::FxHashMap;
+use ahash::AHashMap;
 
 use compact_str::CompactString;
 
@@ -69,8 +69,8 @@ struct Logger {
     error_fmt: LogFmt,
     debug_fmt: LogFmt,
     trace_fmt: LogFmt,
-    custom_fmt: GlobalSlotMap<LogFmt>,
-    target_levels: FxHashMap<CompactString, Level>,
+    custom_fmt: SlotMap<LogFmt>,
+    target_levels: AHashMap<CompactString, Level>,
     base_level: Level,
 }
 
@@ -78,7 +78,7 @@ impl Logger {
 
     #[inline(always)]
     fn new() -> Self {
-        let mut target_levels = FxHashMap::default();
+        let mut target_levels = AHashMap::default();
         let mut base_level = Level::Error;
         if let Ok(env) = std::env::var("RUST_LOG") {
             let parse_arg: for<'a> fn(&'a str) -> (Option<&'a str>, &'a str) = |arg: &str| -> (Option<&str>, &str) {
@@ -122,14 +122,14 @@ impl Logger {
             error_fmt: LogFmt::default(),
             debug_fmt: LogFmt::default(),
             trace_fmt: LogFmt::default(),
-            custom_fmt: GlobalSlotMap::default(),
+            custom_fmt: SlotMap::default(),
             target_levels,
             base_level,
         }
     }
 
     fn target_level(&self, target: &str) -> Level {
-        let mut substr = &target[..];
+        let mut substr = target;
         if let Some(&level) = self.target_levels.get(substr) {
             return level
         }
@@ -139,7 +139,7 @@ impl Logger {
                 return level
             }
         }
-        return self.base_level
+        self.base_level
     }
 
     fn log(&mut self, target: &str, level: LevelFmt, msg: core::fmt::Arguments) -> Result<bool> {
@@ -186,7 +186,7 @@ impl Logger {
             match segment {
                 SegmentSpec::Message(log_spec) => {
                     if let Some(color_spec) = &log_spec.color_spec {
-                        self.stderr.set_color(&color_spec)?;
+                        self.stderr.set_color(color_spec)?;
                         write!(self.stderr, "{}", msg)?;
                         self.stderr.reset()?;
                     } else {
@@ -195,16 +195,16 @@ impl Logger {
                 },
                 SegmentSpec::Text(text, log_spec) => {
                     if let Some(color_spec) = &log_spec.color_spec {
-                        self.stderr.set_color(&color_spec)?;
-                        self.stderr.write(text.as_bytes())?;
+                        self.stderr.set_color(color_spec)?;
+                        self.stderr.write_all(text.as_bytes())?;
                         self.stderr.reset()?;
                     } else {
-                        self.stderr.write(text.as_bytes())?;
+                        self.stderr.write_all(text.as_bytes())?;
                     }
                 },
             }
         }
-        self.stderr.write(b"\n")?;
+        self.stderr.write_all(b"\n")?;
         Ok(true)
     }
 }

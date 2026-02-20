@@ -1,24 +1,13 @@
 pub mod vertex_input;
-mod layout;
+mod handle;
 mod graphics;
 mod compute;
-
-pub(crate) use layout::*;
+mod batch;
+mod cache;
 
 pub use graphics::*;
 pub use compute::*;
+pub use batch::*;
+pub use cache::PipelineCache;
 
-use ash::vk;
-
-#[inline(always)]
-pub(crate) fn create_shader_module(device: &ash::Device, spirv: &[u32]) -> Result<vk::ShaderModule, vk::Result> {
-    let create_info = vk::ShaderModuleCreateInfo {
-        s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
-        code_size: spirv.len() * size_of::<u32>(),
-        p_code: spirv.as_ptr(),
-        ..Default::default()
-    };
-    unsafe {
-        Ok(device.create_shader_module(&create_info, None)?)
-    }
-}
+pub(crate) use handle::PipelineHandle;

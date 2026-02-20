@@ -6,13 +6,12 @@ pub fn vertex_input(item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let mut repr_c = false;
     for attr in &input.attrs {
-        if attr.path().is_ident("repr") {
-            if let Ok(ident) = attr.parse_args::<syn::Ident>() {
-                if ident == "C" {
-                    repr_c = true;
-                    break
-                }
-            }
+        if attr.path().is_ident("repr") &&
+            let Ok(ident) = attr.parse_args::<syn::Ident>() &&
+            ident == "C"
+        {
+            repr_c = true;
+            break
         }
     }
     if !repr_c {
@@ -64,7 +63,7 @@ pub fn vertex_input(item: TokenStream) -> TokenStream {
         })
         .collect();
     let expanded = quote! {
-        unsafe impl nox::gpu::VertexInput for #name {
+        impl nox::gpu::VertexInput for #name {
 
             fn get_attributes<const FIRST_LOCATION: u32>() -> &'static [nox::gpu::VertexInputAttribute] {
                 &[ #( #inputs ),*

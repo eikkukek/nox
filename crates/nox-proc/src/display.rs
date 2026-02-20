@@ -9,14 +9,11 @@ use syn::{
     spanned::Spanned, 
 };
 
-use crate::input::Input;
 use crate::util::find_attr;
 
-pub fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<Option<proc_macro2::TokenStream>> {
+pub fn handle_enum(input: &syn::DeriveInput, e: &syn::DataEnum) -> syn::Result<Option<proc_macro2::TokenStream>> {
     let name = &input.ident;
-    let generics = &input.generics;
-    let generic_idents = &input.generic_idents;
-    let where_clause = &generics.where_clause;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let mut display = Vec::new();
     for (i, var) in e.variants.iter().enumerate() {
         if let Some(attr) = var
@@ -40,50 +37,47 @@ pub fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<Option<proc_
                         let mut fmt = fmt.value();
                         if var.fields.is_empty() {
                             quote! { Self::#name => write!(f, #fmt) }
-                        } else {
-                            if var.fields
+                        } else if var.fields
+                            .iter()
+                            .any(|f| f.ident.is_some())
+                        {
+                            let names = var.fields
                                 .iter()
-                                .find(|f| f.ident.is_some())
-                                .is_some()
-                            {
-                                let names = var.fields
-                                    .iter()
-                                    .map(|f| {
-                                        &f.ident
-                                    });
-                                quote! {
-                                    Self::#name { #( #names ),* } => write!(f, #fmt)
-                                }
-                            } else {
-                                let names: Vec<_> = var.fields
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, _)| {
-                                        let mut name = String::new();
-                                        write!(&mut name, "_{i}").ok();
-                                        syn::Ident::new(&name, Span::call_site())
-                                    })
-                                    .collect();
-                                let mut indices = Vec::new();
-                                for (i, _) in names.iter().enumerate() {
-                                    let mut search_for = String::new();
-                                    write!(&mut search_for, "{{{i}}}").ok();
-                                    let mut substr = &fmt[..];
-                                    let len = search_for.len();
-                                    let mut off = 0;
-                                    while let Some(idx) = substr.find(&search_for) {
-                                        substr = &substr[idx + len..];
-                                        off += idx;
-                                        indices.push(off + 1);
-                                        off += len;
-                                    }
-                                }
-                                indices.sort();
-                                for &idx in indices.iter().rev() {
-                                    fmt.insert(idx, '_');
-                                }
-                                quote! { Self::#name(#( #names ),*) => write!(f, #fmt,) }
+                                .map(|f| {
+                                    &f.ident
+                                });
+                            quote! {
+                                Self::#name { #( #names ),* } => write!(f, #fmt)
                             }
+                        } else {
+                            let names: Vec<_> = var.fields
+                                .iter()
+                                .enumerate()
+                                .map(|(i, _)| {
+                                    let mut name = String::new();
+                                    write!(&mut name, "_{i}").ok();
+                                    syn::Ident::new(&name, Span::call_site())
+                                })
+                                .collect();
+                            let mut indices = Vec::new();
+                            for (i, _) in names.iter().enumerate() {
+                                let mut search_for = String::new();
+                                write!(&mut search_for, "{{{i}").ok();
+                                let mut substr = &fmt[..];
+                                let len = search_for.len();
+                                let mut off = 0;
+                                while let Some(idx) = substr.find(&search_for) {
+                                    substr = &substr[idx + len..];
+                                    off += idx;
+                                    indices.push(off + 1);
+                                    off += len;
+                                }
+                            }
+                            indices.sort();
+                            for &idx in indices.iter().rev() {
+                                fmt.insert(idx, '_');
+                            }
+                            quote! { Self::#name(#( #names ),*) => write!(f, #fmt,) }
                         }
                     },
                     Err(e) => {
@@ -93,8 +87,8 @@ pub fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<Option<proc_
                 }
             });
         let expanded = quote! {
-            impl #generics core::fmt::Display for #name #generic_idents #where_clause {
-                #[allow(unused_variables)]
+            impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause {
+                #[allow(unused_variables, unused_assignments)]
                 fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                     match self {
                         #( #fmts, )*
@@ -110,11 +104,9 @@ pub fn handle_enum(input: &Input, e: &syn::DataEnum) -> syn::Result<Option<proc_
     }
 }
 
-pub fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<Option<proc_macro2::TokenStream>> {
+pub fn handle_struct(input: &syn::DeriveInput, s: &syn::DataStruct) -> syn::Result<Option<proc_macro2::TokenStream>> {
     let name = &input.ident;
-    let generics = &input.generics;
-    let generic_idents = &input.generic_idents;
-    let where_clause = &generics.where_clause;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let impl_dislay =
     if let Some(field) = s.fields.iter().next() {
         if field.ident.is_some() {
@@ -133,9 +125,9 @@ pub fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<Option<p
                         quote! { "{}", #expr }
                     };
                 Some(quote! {
-                    impl #generics core::fmt::Display for #name #generic_idents #where_clause
+                    impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
                     {
-                        #[allow(unused_variables)]
+                        #[allow(unused_variables, unused_assignments)]
                         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                             let Self { #( #names ),* } = self;
                             write!(f, #fmt)
@@ -145,11 +137,12 @@ pub fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<Option<p
             } else {
                 None
             }
-        } else {
-            if let Some(attr) = input.attrs
-                .iter()
-                .find(|attr| attr.path().is_ident("display"))
-            {
+        } else if let Some(attr) = input.attrs
+            .iter()
+            .find(|attr| attr.path().is_ident("display"))
+        {
+            if let Ok(fmt) = attr.parse_args::<LitStr>() {
+                let mut fmt = fmt.value();
                 let names: Vec<_> = s.fields
                     .iter()
                     .enumerate()
@@ -159,8 +152,6 @@ pub fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<Option<p
                         syn::Ident::new(&name, Span::call_site())
                     })
                     .collect();
-                
-                let mut fmt = attr.parse_args::<LitStr>()?.value();
                 let mut indices = Vec::new();
                 for (i, _) in names.iter().enumerate() {
                     let mut search_for = String::new();
@@ -180,8 +171,9 @@ pub fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<Option<p
                     fmt.insert(idx, '_');
                 }
                 Some(quote! {
-                    impl #generics core::fmt::Display for #name #generic_idents #where_clause
+                    impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
                     {
+                        #[allow(unused_variables, unused_assignments)]
                         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                             let Self(#( #names ),*) = self;
                             write!(f, #fmt)
@@ -189,26 +181,27 @@ pub fn handle_struct(input: &Input, s: &syn::DataStruct) -> syn::Result<Option<p
                     }
                 })
             } else {
-                None
+                let expr = attr.parse_args::<Expr>()?;
+                Some(quote! { "{}", #expr })
             }
-        }
-    } else {
-        if let Some(attr) = input.attrs
-            .iter()
-            .find(|attr| attr.path().is_ident("display"))
-        {
-            let fmt = attr.parse_args::<LitStr>()?;
-            Some(quote! {
-                impl #generics core::fmt::Display for #name #generic_idents #where_clause
-                {
-                    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                        write!(f, #fmt)
-                    }
-                }
-            })
         } else {
             None
         }
+    } else if let Some(attr) = input.attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("display"))
+    {
+        let fmt = attr.parse_args::<LitStr>()?;
+        Some(quote! {
+            impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
+            {
+                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    write!(f, #fmt)
+                }
+            }
+        })
+    } else {
+        None
     };
     Ok(impl_dislay)
 }
@@ -217,7 +210,7 @@ pub fn display(item: TokenStream) -> TokenStream {
     let input = &parse_macro_input!(item as DeriveInput);
     match &input.data {
         Data::Enum(e) => {
-            match handle_enum(&input.into(), e) {
+            match handle_enum(input, e) {
                 Ok(ts) => ts
                     .unwrap_or_else(|| syn::Error::new(
                         find_attr(input, "Display").span(),
@@ -227,7 +220,7 @@ pub fn display(item: TokenStream) -> TokenStream {
             }
         },
         Data::Struct(s) => {
-            match handle_struct(&input.into(), s) {
+            match handle_struct(input, s) {
                 Ok(ts) => ts
                     .unwrap_or_else(|| syn::Error::new(
                         find_attr(input, "Display").span(),

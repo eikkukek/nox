@@ -1,4 +1,4 @@
-use ash::vk;
+use nox_ash::vk;
 use nox_mem::AsRaw;
 
 #[repr(i32)]
@@ -23,6 +23,8 @@ impl From<DynamicState> for vk::DynamicState {
         Self::from_raw(value.as_raw())
     }
 }
+
+pub type VkDynamicState = vk::DynamicState;
 
 #[repr(i32)]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
@@ -85,10 +87,9 @@ pub enum PrimitiveTopology {
 impl PrimitiveTopology {
 
     pub fn can_restart(self) -> bool {
-        match self {
-            Self::LineStrip | Self::TriangleStrip => true,
-            _ => false
-        }
+        matches!(self,
+            Self::LineStrip | Self::TriangleStrip
+        )
     }
 }
 

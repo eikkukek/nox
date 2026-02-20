@@ -1,72 +1,100 @@
+use core::fmt::{self, Display};
+
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub struct Version {
-    pub value: u32,
-}
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Version(pub u32);
 
 impl Version {
 
+    pub const MAX: Version = Version(!0);
+
+    #[inline(always)]
     pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
         let value =
             (major << 22) |
             ((minor & 0x3FF) << 12) |
             (patch & 0xFFF);
-        Self {
-            value,
-        }
+        Self(value)
     }
 
-    pub const fn as_u32(&self) -> u32 {
-        self.value
+    #[inline(always)]
+    pub const fn as_u32(self) -> u32 {
+        self.0
     }
 
+    #[inline(always)]
+    pub const fn from_u32(value: u32) -> Self {
+        Self(value)
+    }
+
+    #[inline(always)]
     pub const fn major(self) -> u32 {
-        self.value >> 22
+        self.0 >> 22
     }
 
+    #[inline(always)]
     pub const fn minor(self) -> u32 {
-        (self.value >> 12) & 0x3FF
+        (self.0 >> 12) & 0x3FF
     }
 
+    #[inline(always)]
     pub const fn patch(self) -> u32 {
-        self.value & 0xFFF
+        self.0 & 0xFFF
     }
 
+    #[inline(always)]
     pub const fn default() -> Self {
         Self::new(1, 0, 0)
     }
 }
 
-impl Into<u32> for Version {
+impl From<Version> for u32 {
 
-    fn into(self) -> u32 {
-        self.value
+    #[inline(always)]
+    fn from(value: Version) -> u32 {
+        value.0
     }
 }
 
 impl From<u32> for Version {
 
+    #[inline(always)]
     fn from(value: u32) -> Self {
-        Self {
-            value
-        }
+        Self(value)
     }
 }
 
 impl Default for Version {
 
+    #[inline(always)]
     fn default() -> Self {
         Self::new(1, 0, 0)
     }
 }
 
-impl core::fmt::Display for Version {
+impl PartialEq<u32> for Version {
 
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.major().fmt(f)?;
-        ".".fmt(f)?;
-        self.minor().fmt(f)?;
-        ".".fmt(f)?;
-        self.patch().fmt(f)
+    #[inline(always)]
+    fn eq(&self, other: &u32) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialOrd<u32> for Version {
+
+    fn partial_cmp(&self, other: &u32) -> Option<core::cmp::Ordering> {
+        Some(self.0.cmp(other))
+    }
+}
+
+impl Display for Version {
+
+    #[inline(always)]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}",
+            self.major(),
+            self.minor(),
+            self.patch(),
+        )
     }
 }

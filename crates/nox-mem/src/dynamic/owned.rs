@@ -5,14 +5,13 @@ use core::{
 };
 
 use crate::{
-    Allocator,
-    global_alloc::GlobalAlloc,
+    alloc::{Layout, LocalAlloc, LocalAllocExt, StdAlloc},
     const_assert,
 };
 
 use super::{Dyn, DynRawParts};
 
-pub unsafe trait InitKind {
+pub trait InitKind {
 
     fn new(size: usize, align: usize) -> Self;
 
@@ -21,7 +20,7 @@ pub unsafe trait InitKind {
 
 pub struct Init;
 
-unsafe impl InitKind for Init {
+impl InitKind for Init {
 
     fn new(_size: usize, _align: usize) -> Self {
         Self
@@ -34,7 +33,7 @@ unsafe impl InitKind for Init {
 
 pub struct Uninit(usize, usize);
 
-unsafe impl InitKind for Uninit {
+impl InitKind for Uninit {
 
     fn new(size: usize, align: usize) -> Self {
         Self(size, align)
@@ -58,9 +57,9 @@ impl<T: ?Sized> Data<T> {
         }
     }
 
-    pub fn just_vtable(vtable: *const ()) -> Self {
+    pub fn just_meta(meta: *const ()) -> Self {
         Self {
-            raw_parts: (ptr::null(), vtable),
+            raw_parts: (ptr::null(), meta),
         }
     }
 }
@@ -85,25 +84,25 @@ impl<T, Kind> OwnedBase<T, Kind>
 
     pub fn new<Source>(t: Source) -> Self
         where 
-            Source: Dyn<Target = T>,
+            Source: Dyn<T, Target = Source>,
     {
         unsafe {
-            let vtable = Source::raw_parts(&t).vtable;
+            let meta = Source::raw_parts(&t).meta;
             let size = size_of::<Source>();
             if size == 0 {
                 let _ = MaybeUninit::new(t);
                 return Self {
-                    data: Data::just_vtable(vtable),
+                    data: Data::just_meta(meta),
                     kind: InitKind::new(0, 0),
                 }
             }
-            let data = GlobalAlloc
+            let data = StdAlloc
                 .allocate_uninit(1)
                 .expect("global alloc failed");
             data.write(t);
             Self {
                 data: Data::non_null(NonNull::new(Source::from_raw_parts(
-                    DynRawParts { data: data.as_ptr(), vtable }
+                    DynRawParts { data: data.as_ptr(), meta }
                 ).cast_mut()).unwrap()),
                 kind: InitKind::new(size, align_of::<Source>()),
             }
@@ -148,11 +147,11 @@ impl<T, Kind> OwnedBase<T, Kind>
     fn as_source_ptr_internal<Source>(&self) -> Option<*const Source>
         where 
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         unsafe {
-            let vtable = Source::raw_parts_uninit().vtable;
-            if self.data.raw_parts.1 != vtable {
+            let meta = Source::meta();
+            if self.data.raw_parts.1 != meta {
                 return None
             }
             if self.data.raw_parts.0.is_null() {
@@ -171,7 +170,7 @@ impl<T, Kind> OwnedBase<T, Kind>
     fn as_source_ref_internal<Source>(&self) -> Option<&Source>
         where
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         unsafe {
             self.as_source_ptr_internal::<Source>()
@@ -183,7 +182,7 @@ impl<T, Kind> OwnedBase<T, Kind>
     fn as_source_mut_internal<Source>(&mut self) -> Option<&mut Source>
         where
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         unsafe {
             self.as_source_ptr_internal::<Source>()
@@ -195,11 +194,11 @@ impl<T, Kind> OwnedBase<T, Kind>
     pub fn take_source_internal<Source>(self) -> Option<Source>
         where
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         unsafe {
-            let vtable = Source::raw_parts_uninit().vtable;
-            if self.data.raw_parts.1 != vtable {
+            let meta = Source::meta();
+            if self.data.raw_parts.1 != meta {
                 return None
             }
             if self.data.raw_parts.0.is_null() {
@@ -216,10 +215,9 @@ impl<T, Kind> OwnedBase<T, Kind>
                     .read();
                 let size = size_of_val(&value);
                 let align = align_of_val(&value);
-                GlobalAlloc.free_raw(
+                StdAlloc.free_raw(
                     non_null.cast(),
-                    size,
-                    align,
+                    Layout::from_size_align(size, align).unwrap(),
                 );
                 let _ = MaybeUninit::new(self);
                 Some(value)
@@ -232,34 +230,34 @@ pub type Owned<T> = OwnedBase<T, Init>;
 
 impl<T: ?Sized> Owned<T> { 
 
-    /// If the vtable of [`Source`] matches the vtable of [`T`], this function takes a reference
+    /// If the meta of [`Source`] matches the meta of [`T`], this function takes a reference
     /// of the value and returns [`&Source`], otherwise it returns [`None`].
     pub fn as_source_ref<Source>(&self) -> Option<&Source>
         where
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         self.as_source_ref_internal()
     }
 
 
-    /// If the vtable of [`Source`] matches the vtable of [`T`], this function takes a mutable
+    /// If the meta of [`Source`] matches the meta of [`T`], this function takes a mutable
     /// reference of the value
     /// and returns [`&mut Source`], otherwise it returns [`None`].
     pub fn as_mut<Source>(&mut self) -> Option<&mut Source>
         where
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         self.as_source_mut_internal()
     }
 
-    /// If the vtable of [`Source`] matches the vtable of [`T`], this function moves the value,
+    /// If the meta of [`Source`] matches the meta of [`T`], this function moves the value,
     /// deallocates memory and returns [`Source`], otherwise it returns [`None`].
     pub fn take_source<Source>(self) -> Option<Source>
         where
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         self.take_source_internal()
     }
@@ -271,23 +269,23 @@ impl<T: ?Sized> OwnedMaybeUninit<T> {
 
     pub fn uninit<Source>() -> Self
         where 
-            Source: Dyn<Target = T>
+            Source: Dyn<T>
     {
         unsafe {
-            let vtable = Source::raw_parts_uninit().vtable;
+            let meta = Source::meta();
             let size = size_of::<Source>();
             if size == 0 {
                 return Self {
-                    data: Data::just_vtable(vtable),
+                    data: Data::just_meta(meta),
                     kind: InitKind::new(0, 0),
                 }
             }
-            let data = GlobalAlloc
+            let data = StdAlloc
                 .allocate_uninit(1)
                 .expect("global alloc failed");
             Self {
                 data: Data::non_null(NonNull::new(Source::from_raw_parts(
-                    DynRawParts { data: data.as_ptr(), vtable, }
+                    DynRawParts { data: data.as_ptr(), meta, }
                 ).cast_mut()).unwrap()),
                 kind: InitKind::new(size, align_of::<Source>()),
             }
@@ -300,7 +298,7 @@ impl<T: ?Sized> OwnedMaybeUninit<T> {
     ) -> Option<&mut Source>
         where 
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         unsafe {
             let ptr = self
@@ -338,7 +336,7 @@ impl<T: ?Sized> OwnedMaybeUninit<T> {
     pub unsafe fn assume_init_source<Source>(self) -> Option<Source>
         where
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         self.take_source_internal()
     }
@@ -346,7 +344,7 @@ impl<T: ?Sized> OwnedMaybeUninit<T> {
     pub unsafe fn assume_init_source_ref<Source>(&self) -> Option<&Source>
         where 
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         self.as_source_ref_internal()
     }
@@ -354,7 +352,7 @@ impl<T: ?Sized> OwnedMaybeUninit<T> {
     pub unsafe fn assume_init_source_mut<Source>(&mut self) -> Option<&mut Source>
         where 
             T: 'static,
-            Source: Dyn<Target = T>,
+            Source: Dyn<T>,
     {
         self.as_source_mut_internal()
     }
@@ -430,10 +428,9 @@ impl<T, Kind> Drop for OwnedBase<T, Kind>
                     (size, align)
                 };
                 let ptr = self.data.non_null.cast();
-                GlobalAlloc.free_raw(
+                StdAlloc.free_raw(
                     ptr,
-                    size,
-                    align,
+                    Layout::from_size_align(size, align).unwrap(),
                 );
             }
         }

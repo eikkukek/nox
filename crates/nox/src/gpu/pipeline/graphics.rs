@@ -1,7 +1,7 @@
 mod enums;
 mod structs;
-mod info;
+mod pipeline;
 
 pub use enums::*;
 pub use structs::*;
-pub use info::*;
+pub use pipeline::*;

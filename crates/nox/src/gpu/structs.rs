@@ -1,4 +1,4 @@
-use ash::vk;
+use nox_ash::vk;
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Offset2D {

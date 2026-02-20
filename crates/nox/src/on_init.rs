@@ -8,13 +8,13 @@ use crate::{event_loop, gpu};
 use crate::error as pub_error;
 use crate::dev::error as dev_error;
 
-use nox_mem::vec_types::GlobalVec;
+use nox_mem::vec::StdVec;
 
 use data::Data;
 pub use r#ref::Ref;
 
 pub struct OnInit<'a> {
-    data: UnsafeCell<GlobalVec<Data<'a>>>,
+    data: UnsafeCell<StdVec<Data<'a>>>,
     initialized: UnsafeCell<bool>,
 }
 
@@ -27,10 +27,14 @@ impl<'a> OnInit<'a> {
         }
     }
 
-    pub fn add<T: 'a>(
+    pub fn add<T, F>(
         &self,
-        f: impl FnOnce(&mut event_loop::ActiveEventLoop, &mut gpu::GpuContext) -> pub_error::Result<T> + 'a,
-    ) -> Ref<'_, T> {
+        f: F,
+    ) -> Ref<'_, T>
+        where 
+            T: 'a,
+            F: FnOnce(&event_loop::ActiveEventLoop, &mut gpu::GpuContext) -> pub_error::Result<T> + 'a,
+    {
         unsafe {
             assert!(!*self.initialized.get(), "OnInit can't be reused");
         }
@@ -51,7 +55,7 @@ impl<'a> OnInit<'a> {
 
     pub(crate) fn init(
         &self,
-        win: &mut event_loop::ActiveEventLoop,
+        win: &event_loop::ActiveEventLoop,
         gpu: &mut gpu::GpuContext,
     ) -> dev_error::Result<()> {
         unsafe {

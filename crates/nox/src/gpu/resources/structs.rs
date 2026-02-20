@@ -1,255 +1,301 @@
-use crate::{
-    gpu::{
-        memory_binder::*,
-        *
-    },
+use core::{
+    marker::PhantomData,
+    fmt::Display,
+    ops::DerefMut,
+};
+
+use parking_lot::RwLockReadGuard;
+
+use nox_proc::Display;
+
+use crate::gpu::prelude::{
+    memory_binder::MemoryBinder,
+    *,
 };
 
 use super::*;
 
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ShaderId(pub(super) SlotIndex<Shader>);
+pub trait ResourceId<Meta>: Display + Copy {
 
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct PipelineLayoutId(pub(super) SlotIndex<pipeline::PipelineLayout>);
+    fn slot_index(self) -> SlotIndex<Meta>;
 
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
-pub struct BufferId(pub(super) SlotIndex<Buffer>);
-
-#[must_use]
-#[derive(Default, Clone, Copy)]
-pub struct DescriptorSetInfo {
-    pub layout_id: PipelineLayoutId,
-    pub set: u32,
+    fn resource_name() -> &'static str;
 }
 
-impl DescriptorSetInfo {
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
+#[display("{0}")]
+pub struct BufferId(pub(super) SlotIndex<BufferMeta>);
+
+impl ResourceId<BufferMeta> for BufferId {
+
+    #[inline(always)]
+    fn slot_index(self) -> SlotIndex<BufferMeta> {
+        self.0
+    }
+
+    #[inline(always)]
+    fn resource_name() -> &'static str {
+        "buffer"
+    }
+}
+
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
+#[display("{0}")]
+pub struct ImageId(pub(super) SlotIndex<ImageMeta>);
+
+impl ResourceId<ImageMeta> for ImageId {
+
+    #[inline(always)]
+    fn slot_index(self) -> SlotIndex<ImageMeta> {
+        self.0
+    }
+
+    #[inline(always)]
+    fn resource_name() -> &'static str {
+        "image"
+    }
+}
+
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) struct PipelineBatchId(pub(super) u32);
+
+pub(crate) struct ResourceGuard<
+    Meta,
+    Id: ResourceId<Meta>,
+    Guard: Deref<Target = SlotMap<Meta>>,
+> {
+    guard: Guard,
+    _marker: PhantomData<Id>,
+}
+
+impl<Meta, Id, Guard> ResourceGuard<Meta, Id, Guard>
+    where
+        Id: ResourceId<Meta>,
+        Guard: Deref<Target = SlotMap<Meta>>
+{
+
+    #[inline(always)]
+    pub fn new(guard: Guard) -> Self {
+        Self {
+            guard,
+            _marker: PhantomData,
+        }
+    }
+
+    #[inline(always)]
+    pub fn get(&self, id: Id) -> Result<&Meta> {
+        self.guard
+            .get(id.slot_index())
+            .context_with(|| format_compact!(
+                "failed to find {} with id {id}",
+                Id::resource_name()
+            ))
+    }
+
+    #[inline(always)]
+    pub fn get_mut(&mut self, id: Id) -> Result<&mut Meta>
+        where Guard: DerefMut
+    {
+        self.guard
+            .get_mut(id.slot_index())
+            .context_with(|| format_compact!(
+                "failed to find {} with id {id}",
+                Id::resource_name()
+            ))
+    }
+}
+
+impl<Meta, Id, Guard> Deref for ResourceGuard<Meta, Id, Guard>
+    where
+        Id: ResourceId<Meta>,
+        Guard: Deref<Target = SlotMap<Meta>>
+{
+
+    type Target = SlotMap<Meta>;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        self.guard.deref()
+    }
+}
+
+impl<Meta, Id, Guard> DerefMut for ResourceGuard<Meta, Id, Guard>
+    where
+        Id: ResourceId<Meta>,
+        Guard: DerefMut<Target = SlotMap<Meta>>
+{
+
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.guard.deref_mut()
+    }
+}
+
+pub(crate) type ResourceReadGuard<'a, Meta, Id> =
+    ResourceGuard<Meta, Id, RwLockReadGuard<'a, SlotMap<Meta>>>;
+
+pub(crate) type ResourceWriteGuard<'a, Meta, Id> =
+    ResourceGuard<Meta, Id, RwLockWriteGuard<'a, SlotMap<Meta>>>;
+
+pub(crate) struct DynResourceReadGuard<
+    'a,
+    Meta,
+    Id: ResourceId<Meta>,
+> {
+    guard: &'a dyn Deref<Target = SlotMap<Meta>>,
+    _marker: PhantomData<Id>,
+}
+
+impl<'a, Meta, Id> DynResourceReadGuard<'a, Meta, Id>
+    where
+        Id: ResourceId<Meta>,
+{
+
+    #[inline(always)]
+    pub fn new(guard: &'a dyn Deref<Target = SlotMap<Meta>>) -> Self {
+        Self {
+            guard,
+            _marker: PhantomData,
+        }
+    }
+
+    #[inline(always)]
+    pub fn get(&self, id: Id) -> Result<&Meta> {
+        self.guard
+            .get(id.slot_index())
+            .context_with(|| format_compact!(
+                "failed to find {} with id {id}",
+                Id::resource_name()
+            ))
+    }
+}
+
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)] #[display("{0}")]
+pub struct TimelineSemaphoreId(pub(super) SlotIndex<vk::Semaphore>);
+
+#[repr(C)]
+struct MemoryBinderResourceInner<T: ?Sized> {
+    last_used_frame: u64,
+    binder: T,
+}
+
+impl<T> MemoryBinderResourceInner<T> {
+
+    fn new(t: T) -> Self {
+        Self {
+            last_used_frame: 0,
+            binder: t,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct MemoryBinderResource {
+    binder: Arc<RwLock<MemoryBinderResourceInner<dyn MemoryBinder>>>,
+}
+
+pub struct MemoryBinderResourceReadGuard<'a> {
+    guard: RwLockReadGuard<'a, MemoryBinderResourceInner<dyn MemoryBinder>>,
+}
+
+impl MemoryBinderResourceReadGuard<'_> {
+
+    #[inline(always)]
+    pub(crate) fn get_last_used_frame(&self) -> u64 {
+        self.guard.last_used_frame
+    }
+}
+
+impl Deref for MemoryBinderResourceReadGuard<'_> {
+
+    type Target = dyn MemoryBinder;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.guard.binder
+    }
+}
+
+pub struct MemoryBinderResourceWriteGuard<'a> {
+    guard: RwLockWriteGuard<'a, MemoryBinderResourceInner<dyn MemoryBinder>>,
+}
+
+impl MemoryBinderResourceWriteGuard<'_> {
+
+    #[inline(always)]
+    pub(crate) fn get_last_used_frame(&self) -> u64 {
+        self.guard.last_used_frame
+    }
+
+    #[inline(always)]
+    pub(crate) unsafe fn set_last_used_frame(&mut self, frame: u64)  {
+        self.guard.last_used_frame = frame;
+    }
+}
+
+impl Deref for MemoryBinderResourceWriteGuard<'_> {
+
+    type Target = dyn MemoryBinder;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.guard.binder
+    }
+}
+
+impl DerefMut for MemoryBinderResourceWriteGuard<'_> {
+
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard.binder
+    }
+}
+
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)] #[display("{0}")]
+pub struct MemoryBinderId(pub(super) SlotIndex<MemoryBinderResource>);
+
+pub(super) enum ResourceBinderInner {
+    Default,
+    DefaultMappable,
+    Id(MemoryBinderId),
+}
+
+impl Default for ResourceBinderInner {
+
+    #[inline(always)]
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+#[derive(Default)]
+pub struct ResourceBinder {
+    inner: ResourceBinderInner,
+}
+
+impl ResourceBinder {
+
+    #[inline(always)]
+    pub fn new(id: MemoryBinderId) -> Self {
+        Self {
+            inner: ResourceBinderInner::Id(id),
+        }
+    }
     
     #[inline(always)]
-    pub fn new(layout_id: PipelineLayoutId, set: u32) -> Self {
+    pub fn global() -> Self {
+        <Self as Default>::default()
+    }
+
+    #[inline(always)]
+    pub fn global_mappable() -> Self {
         Self {
-            layout_id,
-            set,
+            inner: ResourceBinderInner::DefaultMappable,
         }
     }
-}
-
-#[derive(Clone)]
-pub(super) struct ShaderResource {
-    pub descriptor_set: vk::DescriptorSet,
-    pub layout_id: PipelineLayoutId,
-    pub set: u32,
-    pub binding_count: u32,
-    pub image_views: GlobalVec<(ImageId, SlotIndex<vk::ImageView>)>,
-}
-
-#[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ShaderResourceId(pub(super) SlotIndex<ShaderResource>);
-
-#[derive(Default, Clone, Copy)]
-pub struct ShaderResourceBufferInfo {
-    pub buffer: BufferId,
-    pub offset: u64,
-    pub size: u64,
-}
-
-#[derive(Clone, Copy)]
-pub struct ShaderResourceImageInfo {
-    pub sampler: SamplerId,
-    pub image_source: (ImageId, Option<ImageRangeInfo>),
-    pub storage_image: bool,
-}
-
-#[derive(Clone, Copy)]
-pub struct ShaderResourceImageUpdate<'a> {
-    pub resource: ShaderResourceId,
-    pub binding: u32,
-    pub starting_index: u32,
-    pub infos: &'a [ShaderResourceImageInfo],
-}
-
-#[derive(Default, Clone, Copy)]
-pub struct ShaderResourceBufferUpdate<'a> {
-    pub resource: ShaderResourceId,
-    pub binding: u32,
-    pub starting_index: u32,
-    pub infos: &'a [ShaderResourceBufferInfo],
-}
-
-#[derive(Clone, Copy)]
-pub struct ShaderResourceCopy {
-    pub src_resource: ShaderResourceId,
-    pub src_binding: u32,
-    pub src_starting_index: u32,
-    pub dst_resource: ShaderResourceId,
-    pub dst_starting_index: u32,
-    pub dst_binding: u32,
-    pub array_count: u32,
-}
-
-#[derive(Clone)]
-pub(crate) struct GraphicsPipeline {
-    pub vk: Arc<Vulkan>,
-    pub handle: vk::Pipeline,
-    pub _color_formats: GlobalVec<vk::Format>,
-    pub _dynamic_states: GlobalVec<vk::DynamicState>,
-    pub layout_id: PipelineLayoutId,
-    pub _depth_format: vk::Format,
-    pub _stencil_format: vk::Format,
-    pub samples: MSAA,
-}
-
-impl Drop for GraphicsPipeline {
-
-    fn drop(&mut self) {
-        unsafe {
-            self.vk.device().destroy_pipeline(self.handle, None);
-        }
-    }
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct GraphicsPipelineId(pub(super) SlotIndex<GraphicsPipeline>);
-
-pub(crate) struct ComputePipeline {
-    pub vk: Arc<Vulkan>,
-    pub handle: vk::Pipeline,
-    pub layout_id: PipelineLayoutId,
-}
-
-impl Drop for ComputePipeline {
-
-    fn drop(&mut self) {
-        unsafe {
-            self.vk.device().destroy_pipeline(self.handle, None);
-        }
-    }
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ComputePipelineId(pub(super) SlotIndex<ComputePipeline>);
-
-pub(crate) struct PipelineCache {
-    pub vk: Arc<Vulkan>,
-    pub handle: vk::PipelineCache,
-}
-
-impl Drop for PipelineCache {
-    
-    fn drop(&mut self) {
-        unsafe {
-            self.vk.device().destroy_pipeline_cache(self.handle, None);
-        }
-    }
-}
-
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PipelineCacheId(pub(super) SlotIndex<PipelineCache>);
-
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ImageId(pub(super) SlotIndex<Arc<Image>>);
-
-#[derive(Clone)]
-pub(super) struct Sampler {
-    pub vk: Arc<Vulkan>,
-    pub handle: vk::Sampler,
-    pub _builder: SamplerBuilder,
-}
-
-impl Drop for Sampler {
-
-    fn drop(&mut self) {
-        unsafe {
-            self.vk.device().destroy_sampler(self.handle, None);
-        }
-    }
-}
-
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SamplerId(pub(super) SlotIndex<Sampler>);
-
-pub(super) struct LinearDeviceAllocResource {
-    pub alloc: LinearDeviceAlloc,
-    pub semaphore_count: u32,
-}
-
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct LinearDeviceAllocId(pub(super) SlotIndex<Arc<RwLock<LinearDeviceAllocResource>>>);
-
-pub struct LinearDeviceAllocLock {
-    pub(super) alloc: Arc<RwLock<LinearDeviceAllocResource>>,
-}
-
-impl LinearDeviceAllocLock {
-
-    pub unsafe fn reset(&mut self) {
-        unsafe {
-            self.alloc
-                .write()
-                .unwrap()
-                .alloc
-                .reset();
-        }
-    }
-}
-
-impl MemoryBinder for LinearDeviceAllocLock {
-
-    fn bind_image_memory(
-        &mut self,
-        image: vk::Image,
-        fall_back: Option<&mut dyn FnMut(vk::Image) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
-    ) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> {
-        self.alloc
-            .write()
-            .unwrap()
-            .alloc.bind_image_memory(image, fall_back)
-    }
-
-    fn bind_buffer_memory(
-        &mut self,
-        buffer: vk::Buffer,
-        fall_back: Option<&mut dyn FnMut(vk::Buffer) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
-    ) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError> {
-        self.alloc
-            .write()
-            .unwrap()
-            .alloc.bind_buffer_memory(buffer, fall_back)
-    }
-}
-
-pub(super) struct TimelineSemaphore {
-    pub handle: vk::Semaphore,
-    pub locked_resources: GlobalVec<(u64, LinearDeviceAllocId)>,
-}
-
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct TimelineSemaphoreId(pub(super) SlotIndex<TimelineSemaphore>);
-
-pub enum ResourceBinderImage<'a> {
-    DefaultBinder,
-    DefaultBinderMappable,
-    LinearDeviceAlloc(LinearDeviceAllocId),
-    Owned(
-        &'a mut dyn MemoryBinder,
-        Option<&'a mut dyn FnMut(vk::Image) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
-    )
-}
-
-pub enum ResourceBinderBuffer<'a> {
-    DefaultBinder,
-    DefaultBinderMappable,
-    LinearDeviceAlloc(LinearDeviceAllocId),
-    Owned(
-        &'a mut dyn MemoryBinder,
-        Option<&'a mut dyn FnMut(vk::Buffer) -> core::result::Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
-    )
 }

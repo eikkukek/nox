@@ -1,6 +1,6 @@
 mod init_cell;
 
-pub unsafe trait CellToken {
+pub trait CellToken {
 
     type Identifier;
 
@@ -36,7 +36,7 @@ macro_rules! singleton_cell_token {
                     }
                 }
 
-                unsafe impl $crate::cell::CellToken for $ident {
+                impl $crate::cell::CellToken for $ident {
 
                     type Identifier = ();
 

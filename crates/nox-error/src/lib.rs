@@ -1,5 +1,4 @@
 #[macro_use]
-
 pub mod location;
 mod tracked;
 mod error;

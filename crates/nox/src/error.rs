@@ -15,10 +15,10 @@ pub struct Error(#[source(self.0.source())] pub nox_error::Error);
 impl Error {
 
     #[track_caller]
-    pub fn new<C>(ctx: C, err: impl error::Error + Send + Sync + 'static) -> Self
+    pub fn new<C>(err: impl error::Error + Send + Sync + 'static, ctx: C) -> Self
         where C: Display + Send + Sync + 'static
     {
-        Self(nox_error::Error::new_internal(ctx, err, Some(caller!())))
+        Self(nox_error::Error::new_internal(err, ctx, Some(caller!())))
     }
 
     #[track_caller]

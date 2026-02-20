@@ -2,13 +2,12 @@ use super::*;
 
 use core::ops::{Deref, DerefMut};
 
-use std::sync::RwLockWriteGuard;
-
-pub struct GpuContext<'a>
+pub struct GpuContext
 {
-    vk: &'a Arc<Vulkan>,
-    resources: RwLockWriteGuard<'a, Resources>,
+    vk: Arc<Vulkan>,
+    resources: Arc<Resources>,
     transfer_requests: &'a mut TransferRequests,
+    memory_layout: &'a MemoryLayout,
     buffered_frames: u32,
 }
 
@@ -20,6 +19,7 @@ impl<'a> GpuContext<'a>
         vk: &'a Arc<Vulkan>,
         resources: RwLockWriteGuard<'a, Resources>,
         transfer_requests: &'a mut TransferRequests,
+        memory_layout: &'a MemoryLayout,
         buffered_frames: u32,
     ) -> Self
     {
@@ -27,6 +27,7 @@ impl<'a> GpuContext<'a>
             resources,
             vk,
             transfer_requests,
+            memory_layout,
             buffered_frames,
         }
     }
@@ -44,11 +45,11 @@ impl<'a> GpuContext<'a>
     #[inline(always)]
     pub fn add_async_transfer_request(
         &mut self,
-        staging_alloc: LinearDeviceAllocId,
+        staging_binder: LinearBinderId,
         signal_semaphores: &[(TimelineSemaphoreId, u64)]
     ) -> CommandRequestId
     {
-        self.transfer_requests.add_async_request(staging_alloc, signal_semaphores)
+        self.transfer_requests.add_async_request(staging_binder, signal_semaphores)
     } 
 
     #[inline(always)]
@@ -57,17 +58,16 @@ impl<'a> GpuContext<'a>
     }
 
     #[inline(always)]
-    pub(crate) fn create_surface<'mem>(
+    pub(crate) fn create_surface(
         &self,
         window: &win::WinitWindow,
-        host_allocators: &'mem HostAllocators,
-    ) -> Result<Surface<'mem>>
+    ) -> Result<Surface>
     {
         Surface::new(
             window,
             self.vk.clone(),
             self.buffered_frames,
-            host_allocators,
+            *self.memory_layout,
         )
     }
 }

@@ -21,7 +21,7 @@ macro_rules! align_of {
 
 #[macro_export]
 macro_rules! slice {
-    ($v:expr; $n:expr) =>(
+    [$v:expr; $n:expr] => (
         [$v; $n].as_slice()
     );
     [$($elem:expr),* $(,)?] => {
@@ -30,9 +30,19 @@ macro_rules! slice {
 }
 
 #[macro_export]
+macro_rules! slice_mut {
+    [$v:expr; $n:expr] => (
+        [$v; $n].as_mut_slice()
+    );
+    [$($elem:expr),* $(,)?] => {
+        [$($elem),*].as_mut_slice()
+    };
+}
+
+#[macro_export]
 macro_rules! impl_traits {
     (
-        for $type:ident $(<$($gen:tt $(: $bounds:tt)? $([$gen_q:ident])?),*>)?
+        for $type:ident $(<$($gen:tt $(: [$($bounds:tt)*])? $([$gen_q:ident])?),*>)?
         $trait_this:ident $(<$($trg_this:ty),+>)? $(for $(&$lifetime_this:lifetime)? $(mut &$lifetime_mut_this:lifetime)?)?
                 $(where $($trbl_this:ty: $trbr_this:tt$(<$trbg_this:ty>)?),+)? =>
             $(type $stype_this:ident = $sty_this:ty;)*
@@ -52,7 +62,7 @@ macro_rules! impl_traits {
         $(,)?
     ) =>
     {
-        impl<$($($lifetime_this,)? $($lifetime_mut_this,)?)? $($($($gen_q)? $gen $(: $bounds)?),*)?> $trait_this $(<$($trg_this),+>)?
+        impl<$($($lifetime_this,)? $($lifetime_mut_this,)?)? $($($($gen_q)? $gen $(: $($bounds)*)?),*)?> $trait_this $(<$($trg_this),+>)?
                 for $($(&$lifetime_this)? $(&$lifetime_mut_this mut)?)? $type<$($($gen),*)?>
             $(
                 where
@@ -70,7 +80,7 @@ macro_rules! impl_traits {
             )*
         }
         impl_traits! {
-            for $type $(<$($gen $(: $bounds)? $([$gen_q])?),*>)?
+            for $type $(<$($gen $(: [$($bounds)*])? $([$gen_q])?),*>)?
             $($trait $(<$($trg),+>)? $(for $(&$lifetime)? $(mut &$lifetime_mut)?)? $(where $($trbl: $trbr$(<$trbg>)?),+)? =>
                 $(type $stype = $sty;)*
                 $(
@@ -82,7 +92,7 @@ macro_rules! impl_traits {
         }
     };
     (
-        for $type:ident $(<$($gen:tt $(: $bounds:tt)? $([$gen_q:ident])?),*>)?
+        for $type:ident $(<$($gen:tt $(: [$($bounds:tt)*])? $([$gen_q:ident])?),*>)?
         ,
     ) =>
     {

@@ -3,7 +3,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Handle<'a, T> {
     handle: T,
     _marker: PhantomData<&'a T>,
@@ -11,11 +11,16 @@ pub struct Handle<'a, T> {
 
 impl<'a, T> Handle<'a, T> {
 
+    #[inline(always)]
     pub fn new(handle: T) -> Self {
         Self {
             handle,
             _marker: PhantomData,
         }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.handle
     }
 }
 
@@ -23,6 +28,7 @@ impl<'a, T> Deref for Handle<'a, T> {
 
     type Target = T;
 
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
         &self.handle
     }
@@ -30,6 +36,7 @@ impl<'a, T> Deref for Handle<'a, T> {
 
 impl<'a, T> DerefMut for Handle<'a, T> {
 
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.handle
     }

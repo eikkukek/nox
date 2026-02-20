@@ -1,8 +1,8 @@
-use ash::vk;
+use nox_ash::vk;
 
 use nox_mem::{AsRaw, impl_as_raw_bit_op};
 
-use super::Format;
+impl_as_raw_bit_op!(ImageAspect, ImageUsage);
 
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
@@ -36,156 +36,6 @@ impl From<ImageAspect> for vk::ImageAspectFlags {
         Self::from_raw(value.as_raw())
     }
 }
-
-impl_as_raw_bit_op!(ImageAspect, ImageUsage);
-
-#[repr(i32)]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
-pub enum ColorFormat {
-    #[default]
-    Undefined = vk::Format::UNDEFINED.as_raw(),
-    UnormR8 = vk::Format::R8_UNORM.as_raw(),
-    UnormRG8 = vk::Format::R8G8_UNORM.as_raw(),
-    UnormRGB8 = vk::Format::R8G8B8_UNORM.as_raw(),
-    UnormRGBA8 = vk::Format::R8G8B8A8_UNORM.as_raw(),
-    SrgbR8 = vk::Format::R8_SRGB.as_raw(),
-    SrgbRG8 = vk::Format::R8G8_SRGB.as_raw(),
-    SrgbRGB8 = vk::Format::R8G8B8_SRGB.as_raw(),
-    SrgbRGBA8 = vk::Format::R8G8B8A8_SRGB.as_raw(),
-}
-
-impl Format for ColorFormat {
-
-    #[inline(always)]
-    fn aspects(self) -> vk::ImageAspectFlags {
-        if self == Self::Undefined {
-            vk::ImageAspectFlags::empty()
-        }
-        else {
-            vk::ImageAspectFlags::COLOR
-        }
-    }
-}
-
-impl ColorFormat {
-
-    #[inline(always)]
-    pub fn is_srgb(self) -> bool {
-        match self {
-            Self::SrgbR8 | Self::SrgbRG8 | Self::SrgbRGB8 | Self::SrgbRGBA8 => true,
-            _ => false,
-        }
-    }
-}
-
-#[repr(i32)]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw, Debug)]
-pub enum DepthStencilFormat {
-    #[default]
-    Undefined = vk::Format::UNDEFINED.as_raw(),
-    D32 = vk::Format::D32_SFLOAT.as_raw(),
-    D16 = vk::Format::D16_UNORM.as_raw(),
-    S8 = vk::Format::S8_UINT.as_raw(),
-    D32S8 = vk::Format::D32_SFLOAT_S8_UINT.as_raw(),
-    D24S8 = vk::Format::D24_UNORM_S8_UINT.as_raw(),
-}
-
-impl DepthStencilFormat {
-
-    pub fn all_depth() -> &'static [DepthStencilFormat] {
-        &[
-            DepthStencilFormat::D32,
-            DepthStencilFormat::D16,
-            DepthStencilFormat::D32S8,
-            DepthStencilFormat::D24S8,
-        ]
-    }
-
-    pub fn all_stencil() -> &'static [DepthStencilFormat] {
-        &[
-            DepthStencilFormat::S8,
-            DepthStencilFormat::D32S8,
-            DepthStencilFormat::D24S8,
-        ]
-    }
-
-    pub fn all_depth_stencil() -> &'static [DepthStencilFormat] {
-        &[
-            DepthStencilFormat::D32S8,
-            DepthStencilFormat::D24S8,
-        ]
-    }
-}
-
-impl Format for DepthStencilFormat {
-
-    fn aspects(self) -> vk::ImageAspectFlags {
-        match self {
-            Self::Undefined => {
-                vk::ImageAspectFlags::empty()
-            }
-            Self::D32 | Self::D16 => {
-                vk::ImageAspectFlags::DEPTH
-            },
-            Self::S8 => {
-                vk::ImageAspectFlags::STENCIL
-            },
-            Self::D32S8 | Self::D24S8 => {
-                vk::ImageAspectFlags::DEPTH |
-                vk::ImageAspectFlags::STENCIL
-            }
-        }
-    }
-}
-
-#[repr(i32)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
-pub enum IntegerFormat {
-    UIntR8 = vk::Format::R8_UINT.as_raw(),
-    UIntRG8 = vk::Format::R8G8_UINT.as_raw(),
-    UIntRGB8 = vk::Format::R8G8B8_UINT.as_raw(),
-    UIntRGBA8 = vk::Format::R8G8B8A8_UINT.as_raw(),
-    IntR8 = vk::Format::R8_SINT.as_raw(),
-    IntRG8 = vk::Format::R8G8_SINT.as_raw(),
-    IntRGB8 = vk::Format::R8G8B8_SINT.as_raw(),
-    IntRGBA8 = vk::Format::R8G8B8A8_SINT.as_raw(),
-}
-
-impl Format for IntegerFormat {
-
-    fn aspects(self) -> vk::ImageAspectFlags {
-        vk::ImageAspectFlags::COLOR
-    }
-}
-
-#[repr(i32)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
-pub enum FloatFormat {
-    R32 = vk::Format::R32_SFLOAT.as_raw(),
-    RG32 = vk::Format::R32G32_SFLOAT.as_raw(),
-    RGB32 = vk::Format::R32G32B32_SFLOAT.as_raw(),
-    RGBA32 = vk::Format::R32G32B32A32_SFLOAT.as_raw(),
-}
-
-impl Format for FloatFormat {
-
-    fn aspects(self) -> vk::ImageAspectFlags {
-        vk::ImageAspectFlags::COLOR
-    }
-}
-
-#[repr(u32)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
-pub enum FormatFeature {
-    SampledImage = vk::FormatFeatureFlags::SAMPLED_IMAGE.as_raw(),
-    StorageImage = vk::FormatFeatureFlags::STORAGE_IMAGE.as_raw(),
-    ColorAttachment = vk::FormatFeatureFlags::COLOR_ATTACHMENT.as_raw(),
-    DepthStencilAttachment = vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT.as_raw(),
-    TransferSrc = vk::FormatFeatureFlags::TRANSFER_SRC.as_raw(),
-    TransferDst = vk::FormatFeatureFlags::TRANSFER_DST.as_raw(),
-}
-
-impl_as_raw_bit_op!(FormatFeature);
 
 #[repr(i32)]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
@@ -240,10 +90,10 @@ impl From<MipMode> for vk::SamplerMipmapMode {
 #[repr(i32)]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum AddressMode {
+    #[default]
     Repeat = vk::SamplerAddressMode::REPEAT.as_raw(),
     MirroredRepeat = vk::SamplerAddressMode::MIRRORED_REPEAT.as_raw(),
     ClampToEdge = vk::SamplerAddressMode::CLAMP_TO_EDGE.as_raw(),
-    #[default]
     ClampToBorder = vk::SamplerAddressMode::CLAMP_TO_BORDER.as_raw(),
 }
 

@@ -14,12 +14,7 @@ pub fn as_raw(item: TokenStream) -> TokenStream {
     let mut meta: Option<Ident> = None;
     for attr in &input.attrs {
         if attr.path().is_ident("repr") {
-            meta = match attr.parse_args::<syn::Ident>() {
-                Ok(r) => Some(r),
-                Err(_) => {
-                    None
-                },
-            };
+            meta = attr.parse_args::<syn::Ident>().ok();
         }
     }
     if let Some(meta) = meta.take() {

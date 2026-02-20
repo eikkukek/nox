@@ -5,9 +5,6 @@ use super::error::Location;
 #[derive(Display)]
 pub enum ErrorContext {
 
-    #[display("internal vec error at {0}")]
-    VecError(Location),
-
     #[display("internal string conversion error at {0}")]
     StringConversionError(Location),
 

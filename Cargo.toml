@@ -11,7 +11,9 @@ members = [
 	"crates/nox-log",
 	"crates/nox-error",
 	"crates/nox-proc",
+	"crates/nox-threads", "crates/nox-ash",
 ]
+
 exclude = [
 	"example",
 	"font-example",

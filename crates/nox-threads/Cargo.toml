@@ -1,0 +1,16 @@
+[package]
+name = "nox-threads"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nox-mem = { path = "../nox-mem" }
+nox-alloc = { path = "../nox-alloc" }
+nox-error = { path = "../nox-error" }
+
+futures = "0.3.0"
+crossbeam = "0.8.4"
+parking_lot = "0.12.5"
+arc-swap = "1.8.0"
+
+ahash = "0.8.12"

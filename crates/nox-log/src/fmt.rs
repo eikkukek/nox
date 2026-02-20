@@ -1,4 +1,4 @@
-use nox_mem::vec_types::{GlobalVec, Vector};
+use nox_mem::vec::{Vec32, Vector};
 
 use termcolor::ColorSpec;
 
@@ -6,7 +6,7 @@ use compact_str::CompactString;
 
 #[derive(Default)]
 pub struct LogFmt {
-    segments: GlobalVec<SegmentSpec>,
+    segments: Vec32<SegmentSpec>,
 }
 
 impl LogFmt {
@@ -22,7 +22,7 @@ impl<'a> IntoIterator for &'a LogFmt {
     type IntoIter = core::slice::Iter<'a, SegmentSpec>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.segments.into_iter()
+        self.segments.iter()
     }
 }
 

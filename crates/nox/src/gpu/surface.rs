@@ -1,53 +1,56 @@
 use std::sync::Arc;
 
+use core::num::NonZeroU32;
+
 use winit::{window::Window, dpi::PhysicalSize};
-use ash::vk;
 use raw_window_handle::{HasWindowHandle, HasDisplayHandle};
 
 use compact_str::format_compact;
 
-use nox_alloc::arena_alloc::ArenaAlloc;
+use nox_ash::vk;
+use nox_mem::conditional::True;
+
+use nox_alloc::arena::RwArena;
 
 use crate::dev::error::*;
 
 use super::{
-    HostAllocators, ArenaAllocId,
-    SwapchainContext,
+    Swapchain,
     Vulkan,
+    MemoryLayout,
 };
 
 #[derive(Clone, Copy)]
 enum SwapchainState {
     Valid,
     OutOfDate {
-        buffered_frames: u32,
+        buffered_frames: NonZeroU32,
         size: PhysicalSize<u32>,
     },
 }
 
-pub(crate) struct Surface<'a> {
+pub(crate) struct Surface {
     vk: Arc<Vulkan>,
     handle: vk::SurfaceKHR,
     swapchain_state: SwapchainState,
-    swapchain: Option<SwapchainContext<'a>>,
-    alloc: ArenaAllocId,
-    tmp_alloc: ArenaAlloc,
+    swapchain: Option<Swapchain>,
+    alloc: RwArena,
+    tmp_alloc: RwArena<True>,
     present_queue: vk::Queue,
+    destroyed: bool,
 }
 
-impl<'a> Surface<'a> {
+impl Surface {
 
     pub fn new(
         window: &Window,
         vk: Arc<Vulkan>,
         buffered_frames: u32,
-        host_allocators: &'a HostAllocators,
+        layout: MemoryLayout
     ) -> Result<Self>
     {
-        let tmp_alloc = host_allocators
-            .create_tmp_alloc()?;
-        let alloc = host_allocators
-            .create_swapchain_alloc()?;
+        let alloc = RwArena::new(layout.swapchain_size())?;
+        let tmp_alloc = RwArena::with_fallback(layout.tmp_arena_size())?;
         let handle = unsafe {
             ash_window
             ::create_surface(
@@ -90,12 +93,13 @@ impl<'a> Surface<'a> {
             handle,
             swapchain: None,
             swapchain_state: SwapchainState::OutOfDate {
-                buffered_frames: buffered_frames,
+                buffered_frames: NonZeroU32::new(buffered_frames).unwrap(),
                 size: window.inner_size(),
             },
             present_queue,
             alloc,
             tmp_alloc,
+            destroyed: false,
         })
     }
 
@@ -105,7 +109,7 @@ impl<'a> Surface<'a> {
         size: PhysicalSize<u32>,
     ) {
         self.swapchain_state = SwapchainState::OutOfDate {
-            buffered_frames: buffered_frames,
+            buffered_frames: NonZeroU32::new(buffered_frames).unwrap(),
             size,
         };
     }
@@ -114,38 +118,31 @@ impl<'a> Surface<'a> {
         &mut self,
         framebuffer_size: PhysicalSize<u32>,
         buffered_frames: u32,
-        host_allocators: &'a HostAllocators,
     ) -> Result<()> {
         if let Some(mut swapchain) = self.swapchain.take() {
             swapchain.destroy(
-                self.vk.device(),
-                self.vk.swapchain_device(),
+                &self.vk,
                 self.present_queue,
             );
         }
-        let alloc = host_allocators.get_swapchain_alloc(self.alloc)?;
         unsafe {
-            alloc.force_clear();
+            self.alloc.clear();
         }
-        self.swapchain = Some(SwapchainContext::new(
-            self.vk.device(),
-            self.vk.surface_instance(),
-            self.vk.swapchain_device(),
-            self.vk.physical_device(),
+        self.swapchain = Some(Swapchain::new(
+            &self.vk,
             self.handle,
             vk::Extent2D { width: framebuffer_size.width, height: framebuffer_size.height },
             buffered_frames,
-            &alloc,
+            &self.alloc,
             &self.tmp_alloc,
         ).context("failed to create swapchain")?);
         self.swapchain_state = SwapchainState::Valid;
         Ok(())
     }
 
-    pub fn get_or_init_swapchain_context(
+    pub fn get_or_init_swapchain(
         &mut self,
-        host_allocators: &'a HostAllocators,
-    ) -> Result<(&mut SwapchainContext<'a>, bool)> {
+    ) -> Result<(&mut Swapchain, bool)> {
         let mut recreated = false;
         match self.swapchain_state {
             SwapchainState::Valid => {},
@@ -153,8 +150,7 @@ impl<'a> Surface<'a> {
                 recreated = true;
                 self.update_swapchain(
                     size,
-                    buffered_frames,
-                    host_allocators,
+                    buffered_frames.get(),
                 )?;
             },
         }
@@ -163,7 +159,7 @@ impl<'a> Surface<'a> {
 
     pub fn get_swapchain_context(
         &mut self
-    ) -> Option<&mut SwapchainContext<'a>> {
+    ) -> Option<&mut Swapchain> {
         self.swapchain.as_mut()
     }
 
@@ -171,20 +167,13 @@ impl<'a> Surface<'a> {
         self.present_queue
     }
 
-    pub fn clean_up(
-        &mut self,
-        host_allocators: &'a HostAllocators,
-    ) {
+    pub fn clean_up(&mut self) {
         if let Some(mut swapchain) = self.swapchain.take() {
             swapchain.destroy(
-                self.vk.device(),
-                self.vk.swapchain_device(),
+                &self.vk,
                 self.present_queue,
             );
         }
-        host_allocators
-            .destroy_swapchain_alloc(self.alloc)
-            .unwrap();
         unsafe {
             self.vk.surface_instance()
                 .destroy_surface(self.handle, None);

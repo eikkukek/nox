@@ -9,5 +9,5 @@ nox-geom = { path = "../nox-geom" }
 ttf-parser = "0.25.1"
 harfbuzz_rs = "2.0.1"
 unicode-segmentation = "1.12.0"
-rustc-hash = "2.1.1"
+ahash = "0.8.12"
 compact_str = { version = "0.9.0" }

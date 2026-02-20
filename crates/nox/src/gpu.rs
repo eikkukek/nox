@@ -1,1021 +1,1126 @@
-pub mod frame_graph;
 mod pipeline;
 mod image;
 pub mod memory_binder;
-pub mod linear_device_alloc;
 mod context;
 mod attributes;
 
-pub mod util;
-
-mod host;
 mod memory_layout;
 mod handle;
-mod helpers;
 mod shader;
 mod enums;
 mod structs;
 mod physical_device;
 mod surface;
 mod vulkan;
-mod swapchain_context;
-mod thread_context;
-mod frame_context;
+mod swapchain;
 mod buffer;
 mod resources;
-mod commands;
-
-use std::{
-    sync::{Arc, RwLock},
-};
-
-pub use ash;
-
-use ash::vk;
-
-pub use vk::Format as VkFormat;
+pub(crate) mod commands;
 
 use compact_str::format_compact;
 
+use ahash::AHashMap;
+
 use nox_mem::{
-    string_types::*,
-    vec_types::{ArrayVec, FixedVec, GlobalVec, Vector},
+    string::*,
+    vec::{Vec32, FixedVec32, Vector},
+    slot_map::SlotMap,
+    conditional::True,
 };
 
-use nox_alloc::arena_alloc::*;
+use nox_alloc::arena::{RwArena, Arena, ImmutArena};
 
-use crate::memory::GpuMemory;
+use nox_threads::executor::ThreadPool;
+
+use crate::sync::{Arc, OnceLock, SwapLock, RwLock};
 
 use crate::dev::{
-    export::*,
-    error::{self, Result, Error, Context, ErrorContext, Tracked, location},
-    format_location,
+    error::{Error, Result, Context, location},
+    has_bits,
+    prelude::*,
 };
 
 use crate::win;
 
-pub use attributes::*;
-pub use host::*;
-pub use context::GpuContext;
-pub use enums::*;
-pub use structs::*;
-pub use memory_layout::MemoryLayout;
-pub use handle::{Handle, RaiiHandle};
-pub use image::*;
-pub use buffer::*;
-pub use physical_device::{PhysicalDeviceInfo, QueueFamilyIndices};
-pub use resources::*;
-pub use pipeline::*;
-pub use commands::*;
-pub use nox_proc::VertexInput;
-pub use shader::*;
-pub use pipeline::vertex_input::*;
-pub use frame_graph::*;
-use linear_device_alloc::LinearDeviceAlloc;
+pub(crate) mod prelude {
 
-pub(crate) use surface::Surface;
-pub(crate) use swapchain_context::{SwapchainContext, FrameData};
-use vulkan::Vulkan;
-use frame_context::{FrameContext, ResourcePool};
-use swapchain_context::PresentResult;
-use thread_context::ThreadContext;
+    use super::*;
 
-pub type DeviceName = ArrayString<{ash::vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
+    pub use super::Gpu;
+    pub use attributes::*;
+    pub use context::GpuContext;
+    pub use enums::*;
+    pub use structs::*;
+    pub use memory_layout::MemoryLayout;
+    pub use handle::{Handle, RaiiHandle};
+    pub use image::*;
+    pub use buffer::*;
+    pub use physical_device::*;
+    pub use resources::*;
+    pub use pipeline::*;
+    pub use commands::prelude::*;
+    pub use nox_proc::VertexInput;
+    pub use shader::*;
+    pub use pipeline::vertex_input::*;
+    pub use super::memory_binder;
+
+    pub(crate) use super::Vulkan;
+    pub(crate) use surface::Surface;
+    pub(crate) use swapchain::{Swapchain, FrameData};
+    pub(crate) use super::commands;
+
+    pub(crate) const COMMAND_REQUEST_IGNORED: u32 = u32::MAX;
+}
+pub(crate) use vulkan::Vulkan;
+use swapchain::PresentResult;
+use commands::scheduler::QueueScheduler;
+
+pub use prelude::*;
+
+use nox_ash::vk;
+
+pub type DeviceName = ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 
 pub const MIN_BUFFERED_FRAMES: u32 = 2;
 pub const MAX_BUFFERED_FRAMES: u32 = 8;
 
-#[derive(Clone, Copy)]
-pub struct ComputeState {
-    command_buffer: vk::CommandBuffer,
-    semaphore: vk::Semaphore,
-    timeline_value: u64,
+pub struct TmpAllocs {
+    fallback_alloc: Arc<RwArena<True>>,
+    tmp_allocs: AHashMap<std::thread::ThreadId, Arc<RwArena<True>>>,
 }
 
-pub(crate) struct Gpu {
-    transfer_commands: GlobalVec<TransferCommandsStorage>,
-    transfer_requests: TransferRequests,
-    sync_transfer_semaphore: vk::Semaphore,
-    sync_transfer_timeline_value: u64,
-    sync_transfer_commands: GlobalVec<TransferCommandsStorage>,
-    main_thread_context: ThreadContext,
-    frame_resource_pools: ArrayVec<ResourcePool, {MAX_BUFFERED_FRAMES as usize}>,
-    compute_states: ArrayVec<ComputeState, {MAX_BUFFERED_FRAMES as usize}>,
-    graphics_command_buffers: ArrayVec<vk::CommandBuffer, {MAX_BUFFERED_FRAMES as usize}>,
-    graphics_submit_fences: ArrayVec<vk::Fence, {MAX_BUFFERED_FRAMES as usize}>,
-    resources: Arc<RwLock<Resources>>,
+impl TmpAllocs {
+
+    #[inline(always)]
+    pub fn tmp_alloc(
+        &self
+    ) -> impl Arena<True> + ImmutArena + 'static
+    {
+        self.tmp_allocs
+            .get(&std::thread::current().id())
+            .cloned()
+            .unwrap_or(self.fallback_alloc.clone())
+    }
+}
+
+pub struct Gpu {
     vk: Arc<Vulkan>,
+    attributes: GpuAttributes,
+    thread_pool: ThreadPool,
+    queue_scheduler: OnceLock<QueueScheduler>,
+    shader_cache: ShaderCache,
+    pipeline_batches: SwapLock<Vec32<OnceLock<PipelineBatch>>>,
+    shader_resource_pools: SwapLock<SlotMap<ShaderResourcePool>>,
+    buffers: RwLock<SlotMap<BufferMeta>>,
+    images: RwLock<SlotMap<ImageMeta>>,
+    memory_binders: SwapLock<SlotMap<MemoryBinderResource>>,
+    timeline_semaphores: RwLock<SlotMap<vk::Semaphore>>,
+    default_binder: DefaultBinder,
+    default_binder_mappable: DefaultBinder,
+    tmp_allocs: Arc<TmpAllocs>,
     buffered_frames: u32,
     current_frame_index: u32,
-    tmp_alloc: Arc<ArenaAlloc>,
 }
 
 impl Gpu {
 
-    pub fn new(
-        event_loop: &event_loop::WinitActiveEventLoop,
-        attributes: &GpuAttributes,
-        memory: &GpuMemory,
-    ) -> Result<Self>
+    #[inline(always)]
+    pub(crate) fn new(
+        event_loop: &event_loop::ActiveEventLoop,
+        attributes: GpuAttributes,
+    ) -> Result<Arc<Self>>
     {
-        let buffered_frames = attributes.buffered_frames;
-        memory.host_allocators()
-            .realloc_frame_graphs(buffered_frames)
-            .context("failed to allocate frame graph host allocators")?;
-        let tmp_alloc = Arc::new(
-            ArenaAlloc
-                ::new(memory.layout().tmp_arena_size())
-                .context_with(|| format_location!("failed to create arena alloc at {loc}"))?
-        );
         let vk = Arc::new(Vulkan
             ::new(
-                event_loop,
-                attributes,
+                event_loop.winit(),
+                &attributes,
             ).context("failed to create vulkan backend")?);
-        let main_thread_context = ThreadContext
-            ::new(vk.clone())
-            .context("failed to create main thread context")?;
-        let resources = Arc::new(RwLock::new(
-            Resources
-                ::new(vk.clone(), *memory.layout())
-                .context("failed to initialize global resources")?
-        ));
-        let mut s = Self {
-            main_thread_context,
-            vk: vk.clone(),
-            frame_resource_pools: Default::default(),
-            compute_states: Default::default(),
-            graphics_command_buffers: Default::default(),
-            graphics_submit_fences: Default::default(),
-            resources: resources.clone(),
-            buffered_frames,
+        let default_binder = DefaultBinder::new(
+            vk.clone(),
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            vk::MemoryPropertyFlags::from_raw(0),
+        );
+        let default_binder_mappable = DefaultBinder::new(
+            vk.clone(),
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            vk::MemoryPropertyFlags::from_raw(0),
+        );
+        let main_tmp_alloc = RwArena
+            ::with_fallback(attributes.memory_layout.tmp_arena_size())
+            .context("failed to create arena alloc")?;
+        let mut tmp_allocs = AHashMap::default();
+        tmp_allocs.insert(
+            std::thread::current().id(),
+            Arc::new(RwArena::with_fallback(attributes.memory_layout.tmp_arena_size())
+                .context("failed to create arena alloc")?)
+        );
+        let thread_pool = event_loop.thread_pool();
+        for id in thread_pool.worker_threads() {
+            tmp_allocs
+                .entry(id)
+                .or_try_insert_with(|| Ok(Arc::new(RwArena::with_fallback(attributes.memory_layout.tmp_arena_size())
+                    .context("failed to create arena alloc")?
+                )))?;
+        }
+        let command_workers = attributes.command_workers;
+        let s = Arc::new(Self {
+            thread_pool,
+            attributes,
+            queue_scheduler: OnceLock::new(),
+            shader_cache: ShaderCache::new(vk.clone()),
+            vk,
+            pipeline_batches: SwapLock::default(),
+            shader_resource_pools: SwapLock::new(SlotMap::new()),
+            images: RwLock::new(SlotMap::new()),
+            buffers: RwLock::new(SlotMap::new()),
+            memory_binders: SwapLock::default(),
+            timeline_semaphores: RwLock::new(SlotMap::new()),
+            default_binder,
+            default_binder_mappable,
+            tmp_allocs: Arc::new(TmpAllocs {
+                fallback_alloc: Arc::new(main_tmp_alloc),
+                tmp_allocs,
+            }),
             current_frame_index: 0,
-            transfer_commands: Default::default(),
-            sync_transfer_semaphore: Default::default(),
-            sync_transfer_timeline_value: 0,
-            sync_transfer_commands: Default::default(),
-            tmp_alloc,
-            transfer_requests: Default::default(),
-        };
-        let mut i = 0;
-        s.frame_resource_pools.try_resize_with(
-            buffered_frames as usize,
-            || {
-                let device_alloc = LinearDeviceAlloc::new(
-                    vk.clone(),
-                    memory.layout().frame_graph_device_block_size(),
-                    vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                    vk::MemoryPropertyFlags::LAZILY_ALLOCATED | vk::MemoryPropertyFlags::PROTECTED,
-                    false,
-                ).context_with(|| format_location!(
-                    "failed to create linear device alloc at {loc}"
-                ))?;
-                let s = ResourcePool::new(device_alloc);
-                i += 1;
-                Ok(s)
-            },
-            |err| Error::new(ErrorContext::VecError(location!()),  err),
-        )?;
-        let mut compute_command_buffers
-            = ArrayVec::<vk::CommandBuffer, {MAX_BUFFERED_FRAMES as usize}>::new();
-        let mut compute_semaphores
-            = ArrayVec::<vk::Semaphore, {MAX_BUFFERED_FRAMES as usize}>::new(); 
+            buffered_frames: attributes.buffered_frames,
+        });
+        let queue_scheduler = QueueScheduler::new(s.clone(), command_workers)
+            .context_with(|| format_compact!("failed to create queue scheduler"))?;
+        s.queue_scheduler.get_or_init(|| {
+            queue_scheduler
+        });
+        Ok(s)
+    }
+
+    #[inline(always)]
+    pub(crate) fn memory_layout(&self) -> MemoryLayout {
+        self.memory_layout
+    }
+
+    #[inline(always)]
+    pub(crate) fn thread_pool(&self) -> ThreadPool {
+        self.thread_pool.clone()
+    }
+
+    #[inline(always)]
+    pub(crate) fn tmp_alloc(
+        &self,
+    ) -> impl Arena<True> + ImmutArena + 'static
+    {
+        self.tmp_allocs.tmp_alloc()
+    }
+
+    #[inline(always)]
+    pub(crate) fn vk(&self) -> &Arc<Vulkan> {
+        &self.vk
+    }
+
+    #[inline(always)]
+    pub(crate) fn queue_scheduler(&self) -> &QueueScheduler {
         unsafe {
-            let mut timeline_info = vk::SemaphoreTypeCreateInfo {
+            self.queue_scheduler.get().unwrap_unchecked()
+        }
+    }
+
+    #[inline(always)]
+    pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
+        self.vk.physical_device_info()
+    }
+
+    #[inline(always)]
+    pub(crate) fn shader_cache(&self) -> &ShaderCache {
+        &self.shader_cache
+    }
+
+    #[inline(always)]
+    pub fn default_memory_binder(&self) -> DefaultBinder {
+        self.default_binder.clone()
+    }
+
+    #[inline(always)]
+    pub fn default_memory_binder_mappable(&self) -> DefaultBinder {
+        self.default_binder_mappable.clone()
+    }
+
+    #[inline(always)]
+    pub fn supported_image_format<F: Format>(
+        &self,
+        formats: &[F],
+        required_features: &[FormatFeature],
+    ) -> Option<F>
+    {
+        let mut features = 0;
+        required_features
+            .iter()
+            .map(|&f| features |= f)
+            .count();
+        for format in formats {
+            let properties = unsafe {
+                self.vk.instance()
+                    .get_physical_device_format_properties(
+                        self.vk.physical_device(), format.as_vk_format())
+            };
+            if has_bits!(
+                properties.optimal_tiling_features,
+                vk::FormatFeatureFlags::from_raw(features)
+            ) {
+                return Some(*format)
+            }
+        } 
+        None
+    }
+
+    #[inline(always)]
+    pub fn api_version(&self) -> Version {
+        self.vk.physical_device_info().api_version()
+    }
+
+    #[inline(always)]
+    pub fn create_shader(
+        &mut self,
+        attributes: ShaderAttributes,
+    ) -> Result<Shader> {
+        Ok(Shader::Pending(self.thread_pool.spawn_with_handle(Shader::new(
+            attributes.to_owned(), self.api_version(),
+        )).context("spawn error")?))
+    }
+
+    pub fn create_shader_set<const N_SHADERS: usize>(
+        &mut self,
+        shaders: [Shader; N_SHADERS],
+        attributes: ShaderSetAttributes,
+    ) -> Result<ShaderSetId>
+    {
+        self.shader_cache.create_shader_set(
+            shaders,
+            attributes,
+            self.thread_pool.clone(),
+            self.tmp_allocs.clone(),
+        )
+    }
+
+    pub fn delete_shader_set(&mut self, id: ShaderSetId) -> Result<()> {
+        self.shader_cache.delete_shader_set(id)
+    }
+
+    #[inline(always)]
+    pub fn create_shader_resource_pool(
+        &self,
+        pool_sizes: impl IntoIterator<Item = (DescriptorType, u32)>,
+        max_sets:u32,
+    ) -> Result<ShaderResourcePoolId>
+    {
+        self.shader_resource_pools.modify(|pools| {
+            Ok(ShaderResourcePoolId::new(pools.insert(ShaderResourcePool::new(
+                self.vk.clone(),
+                pool_sizes, max_sets
+            ).context("failed to create shader resource pool")?)))
+        })
+    }
+
+    #[inline(always)]
+    pub fn destroy_shader_resource_pool(
+        &mut self,
+        id: ShaderResourcePoolId,
+    ) {
+        self.shader_resource_pools.modify(|pools| {
+            pools.remove(id.slot_index()).ok();
+        });
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_shader_resource_pools(
+        &self
+    ) -> impl Deref<Target = Arc<SlotMap<ShaderResourcePool>>>
+    {
+        self.shader_resource_pools.load()
+    }
+
+    #[inline(always)]
+    pub fn allocate_shader_resources<F>(
+        &self,
+        pool_id: ShaderResourcePoolId,
+        set_infos: &[ShaderDescriptorSetInfo],
+        collect: F,
+    ) -> Result<()>
+        where
+            F: FnMut(usize, ShaderResourceId)
+    {
+        let tmp_alloc = self.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let pools = self.shader_resource_pools.load();
+        let pool = pools
+            .get(pool_id.slot_index())
+            .context("failed find pool")?;
+        pool.allocate(set_infos, pool_id, &self.shader_cache, &tmp_alloc, collect)
+            .context("failed to allocate shader resources")
+    }
+
+    #[inline(always)]
+    pub fn free_shader_resources(
+        &self,
+        pool_id: ShaderResourcePoolId,
+        resource_ids: &[ShaderResourceId],
+    ) -> Result<()>
+    {
+        let queue_scheduler = self.queue_scheduler().read();
+        let tmp_alloc = self.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let pools = self.shader_resource_pools.load();
+        #[cfg(debug_assertions)]
+        if let Some(id) = resource_ids.iter().find(|id| id.pool_id() != pool_id) {
+            return Err(Error::just_context(format_compact!(
+                "attempting to free shader resource {id} that was allocated from a different pool, expected pool {pool_id}",
+            )))
+        }
+        let pool = pools
+            .get(pool_id.slot_index())
+            .context("failed to find pool")?;
+        unsafe {
+            pool.free(
+                self,
+                &queue_scheduler,
+                resource_ids,
+                &tmp_alloc,
+            )
+        }
+    }
+
+    #[inline(always)]
+    pub fn update_shader_resources(
+        &mut self,
+        pool_id: ShaderResourcePoolId,
+        image_updates: &[ShaderResourceImageUpdate],
+        buffer_updates: &[ShaderResourceBufferUpdate],
+        copies: &[ShaderResourceCopy],
+    ) -> Result<()>
+    {
+        let tmp_alloc = self.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let queue_scheduler = self.queue_scheduler().read();
+        let pools = self.shader_resource_pools.load();
+        let pool = pools
+            .get(pool_id.slot_index())
+            .context_with(|| format_compact!(
+                "invalid pool id {pool_id}"
+            ))?;
+        let mut pool = pool.write();
+        let mut writes = FixedVec32
+            ::with_capacity(image_updates.len() as u32 + buffer_updates.len() as u32, &tmp_alloc)
+            .context("vec error")?; 
+        let mut unpoison = FixedVec32::with_capacity(
+            writes.capacity() + copies.len() as u32,
+            &tmp_alloc,
+        ).context("vec error")?;
+        let mut buffer_infos = FixedVec32
+            ::with_capacity(buffer_updates.len() as u32, &tmp_alloc)
+            .context("vec error")?;
+        let finished_frame = self.get_semaphore_counter_value(
+            queue_scheduler.get_frame_semaphore_id()
+        )?;
+        for update in buffer_updates {
+            #[cfg(debug_assertions)]
+            if update.resource_id.pool_id() != pool_id {
+                return Err(Error::just_context(format_compact!(
+                    "buffer update shader resource {} was allocated from a different pool, expected pool {pool_id}",
+                    update.resource_id,
+                )))
+            }
+            let mut resource = pool
+                .get_shader_resource_for_update(
+                    update.resource_id,
+                    finished_frame,
+                )
+                .context_with(|| format_compact!(
+                    "failed to get shader resource {:?}",
+                    update.resource_id,
+                ))?;
+            let (ty, vk_infos) = resource
+                .update_buffer(self, update, &tmp_alloc)
+                .context_with(|| format_compact!(
+                    "failed to update buffer shader resource {}",
+                    update.resource_id,
+                ))?;
+            buffer_infos.push(vk_infos);
+            let vk_infos = buffer_infos.last().unwrap();
+            let write = vk::WriteDescriptorSet {
+                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                dst_set: resource.descriptor_set(),
+                dst_binding: update.binding,
+                dst_array_element: update.starting_index,
+                descriptor_count: vk_infos.len() as u32,
+                descriptor_type: ty,
+                p_buffer_info: vk_infos.as_ptr(),
+                ..Default::default()
+            };
+            unpoison.push(resource.into_inner());
+            writes.push(write);
+        }
+        let mut image_infos = FixedVec32
+            ::with_capacity(image_updates.len() as u32, &tmp_alloc)
+            .context("vec error")?;
+        for update in image_updates {
+            #[cfg(debug_assertions)]
+            if update.resource_id.pool_id() != pool_id {
+                return Err(Error::just_context(format_compact!(
+                    "image update shader resource {} was allocated from a different pool, expected pool {pool_id}",
+                    update.resource_id,
+                )))
+            }
+            let mut resource = pool
+                .get_shader_resource_for_update(
+                    update.resource_id,
+                    finished_frame,
+                ).context_with(|| format_compact!(
+                    "failed to get shader resource {}",
+                    update.resource_id,
+                ))?;
+            let (ty, vk_infos) = resource
+                .update_image(self, update, &tmp_alloc)
+                .context_with(|| format_compact!(
+                    "failed to update image shader resource {}",
+                    update.resource_id,
+                ))?;
+            image_infos.push(vk_infos);
+            let vk_infos = image_infos.last().unwrap();
+            let write = vk::WriteDescriptorSet {
+                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                dst_set: resource.descriptor_set(),
+                dst_binding: update.binding,
+                dst_array_element: update.starting_index,
+                descriptor_count: vk_infos.len() as u32,
+                descriptor_type: ty,
+                p_image_info: vk_infos.as_ptr(),
+                ..Default::default()
+            };
+            unpoison.push(resource.into_inner());
+            writes.push(write);
+        }
+        let mut vk_copies = FixedVec32
+            ::with_capacity(copies.len() as u32, &tmp_alloc)
+            .context("vec error")?;
+        for copy in copies {
+            #[cfg(debug_assertions)]
+            if copy.src_resource_id.pool_id() != pool_id {
+                return Err(Error::just_context(format_compact!(
+                    "shader resource copy source {} was allocated from a different pool, expected pool {pool_id}",
+                    copy.src_resource_id,
+                )))
+            }
+            #[cfg(debug_assertions)]
+            if copy.dst_resource_id.pool_id() != pool_id {
+                return Err(Error::just_context(format_compact!(
+                    "shader resource copy destination {} was allocated from a different pool, expected pool {pool_id}",
+                    copy.dst_resource_id,
+                )))
+            }
+            let src = pool 
+                .get_shader_resource_handle(copy.src_resource_id.inner_id())
+                .context_with(|| format_compact!(
+                    "failed to get source shader resource {} for copy",
+                    copy.src_resource_id,
+                ))?;
+            let mut dst = pool
+                .get_shader_resource_for_update(
+                    copy.dst_resource_id,
+                    finished_frame,
+                ).context_with(|| format_compact!(
+                    "failed to get destination shader resource {} for copy",
+                    copy.dst_resource_id,
+                ))?;
+            let vk_copy = unsafe { dst.copy_from(
+                src,
+                copy.src_binding,
+                copy.src_starting_index,
+                copy.dst_binding,
+                copy.dst_starting_index,
+                copy.array_count,
+            ) }.context_with(|| format_compact!(
+                "failed to copy source shader resource {} to destination shader resource {}",
+                copy.src_resource_id, copy.dst_resource_id,
+            ))?; 
+            unpoison.push(dst.into_inner());
+            vk_copies.push(vk_copy);
+        }
+        unsafe {
+            self.vk.device().update_descriptor_sets(&writes, &vk_copies);
+            for mut handle in unpoison {
+                handle.unpoison();
+            }
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn create_pipeline_cache(
+        &mut self,
+        initial_data: Option<&[u8]>,
+    ) -> Result<PipelineCache>
+    {
+        let initial_data = initial_data.unwrap_or(&[]);
+        let info = vk::PipelineCacheCreateInfo {
+            s_type: vk::StructureType::PIPELINE_CACHE_CREATE_INFO,
+            initial_data_size: initial_data.len(),
+            p_initial_data: initial_data.as_ptr() as _,
+            ..Default::default()
+        };
+        let device = self.vk.device();
+        let handle = unsafe {
+            device.create_pipeline_cache(&info, None)
+                .context("failed to create pipeline cache")?
+        };
+        unsafe {
+            Ok(PipelineCache::new(self.vk.clone(), handle))
+        }
+    } 
+
+    #[inline(always)]
+    pub(crate) fn reserve_pipeline_batch_slot(&self) -> PipelineBatchId {
+        PipelineBatchId(self.pipeline_batches.modify(|data| {
+            let idx = data.len();
+            data.push(OnceLock::new());
+            idx
+        }))
+    }
+
+    #[inline(always)]
+    pub(crate) fn init_pipeline_batch(
+        &self,
+        id: PipelineBatchId,
+        batch: PipelineBatch,
+    ) {
+        if let Some(b) = self.pipeline_batches.load().get(id.0 as usize) {
+            b.get_or_init(|| batch);
+        }
+    }
+
+    pub fn destroy_graphics_pipeline(&mut self, id: GraphicsPipelineId) -> Result<()> {
+        self.graphics_pipelines
+            .remove(id.0)
+            .context_with(|| format_compact!(
+                "invalid graphics pipeline id {id:?}"
+            ))?;
+        Ok(())
+    }
+
+    pub fn create_compute_pipelines(
+        &mut self,
+        attributes: &[ComputePipelineAttributes],
+        cache_id: Option<PipelineCacheId>,
+        mut collect: impl FnMut(usize, ComputePipelineId),
+    ) -> Result<()>
+    {
+ 
+    }
+
+    pub fn destroy_compute_pipeline(&mut self, id: ComputePipelineId) -> Result<()> {
+        self.compute_pipelines
+            .remove(id.0)
+            .context_with(|| format_compact!("invalid compute pipeline id {id:?}"))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_shader_set_resources<'a, F, Alloc>(
+        &self,
+        shader_set: &ShaderSetInner,
+        tmp_alloc: &'a Alloc,
+        mut f: F,
+    ) -> Result<FixedVec32<'a, vk::DescriptorSet, Alloc>>
+        where
+            Alloc: LocalAlloc,
+            F: FnMut(u32) -> Option<ShaderResourceId>,
+    {
+        let sets = shader_set.descriptor_set_layouts();
+        let mut res = FixedVec32
+            ::with_capacity(sets.len() as u32, tmp_alloc)
+            .context("alloc failure")?;
+        let pools = self.shader_resource_pools.load();
+        for (i, set) in sets.iter().enumerate() {
+            let id = f(i as u32);
+            if let Some(id) = id &&
+                !set.bindings.is_empty()
+            {
+                let pool = pools
+                    .get(id.pool_id().slot_index())
+                    .context("failed to find resource pool")?;
+                let descriptor_set = pool
+                    .get_descriptor_set(id.inner_id())
+                    .context_with(|| format_compact!(
+                        "failed to get shader resource from shader resource pool {:?}",
+                        id.pool_id(),
+                    ))?;
+                res.push(descriptor_set);
+            }
+            else {
+                res.push(vk::DescriptorSet::null());
+            }
+        }
+        Ok(res)
+    }
+
+    pub(crate) fn get_shader_set_push_constant_ranges<'a, 'b, Alloc, F>(
+        &self,
+        shader_set: &ShaderSetInner,
+        tmp_alloc: &'a Alloc,
+        mut f: F,
+    ) -> Result<FixedVec32<'a, (PushConstantRange, &'b [u8]), Alloc>>
+        where
+            Alloc: LocalAlloc,
+            F: FnMut(PushConstantRange) -> &'b [u8],
+    {
+        let push_constant_ranges = shader_set.push_constant_ranges();
+        let mut res = FixedVec32
+            ::with_capacity(push_constant_ranges.len() as u32, tmp_alloc)
+            .context("alloc failure")?;
+        for &pc in push_constant_ranges.iter() {
+            res.push((pc, f(pc)));
+        }
+        Ok(res)
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_graphics_pipeline(&self, id: GraphicsPipelineId) -> Result<&GraphicsPipeline> {
+        self.graphics_pipelines
+            .get(id.0)
+            .context("failed to find graphics pipeline")
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_compute_pipeline(&self, id: ComputePipelineId) -> Result<&ComputePipeline> {
+        self.compute_pipelines
+            .get(id.0)
+            .context("failed to find compute pipeline")
+    }
+
+    #[inline(always)]
+    pub fn create_buffer(
+        &mut self,
+        size: u64,
+        usage: &[BufferUsage],
+        binder: ResourceBinder,
+    ) -> Result<BufferWriteGuard<'_>>
+    {
+        if size == 0 {
+            return Err(Error::new(MemoryBinderError::ZeroSizeAlloc, "buffer size was zero"))
+        }
+        let mut buffers = self.buffers.write();
+        let mut vk_usage = vk::BufferUsageFlags::from_raw(0);
+        for usage in usage {
+            vk_usage |= vk::BufferUsageFlags::from_raw(usage.as_raw());
+        }
+        let properties = BufferProperties {
+            size,
+            usage: vk_usage,
+            create_flags: Default::default(),
+        };
+        let buffer =
+            match binder {
+                ResourceBinder::DefaultBinder => {
+                    BufferMeta
+                        ::new(self.vk.clone(), properties, &mut self.default_binder)
+                        .context("failed to create buffer")?
+                },
+                ResourceBinder::DefaultBinderMappable => {
+                    BufferMeta
+                        ::new(self.vk.clone(), properties, &mut self.default_binder_mappable)
+                        .context("failed to create buffer")?
+                },
+                ResourceBinder::LinearBinder(id) => {
+                    let binders = self.linear_binders.load();
+                    let binder = binders
+                        .get(id.0).context("failed to find linear binder")?;
+                    BufferMeta
+                        ::new(self.vk.clone(), properties, &mut *binder.write())
+                        .context("failed to create buffer")?
+                },
+                ResourceBinder::Owned(binder) => {
+                    BufferMeta
+                        ::new(self.vk.clone(), properties, binder)
+                        .context("failed to create buffer")?
+                },
+            };
+        let id = BufferId(buffers.insert(buffer));
+        Ok(BufferWriteGuard::new(id, self.buffers.write()).unwrap())
+    }
+
+    #[inline(always)]
+    pub fn is_buffer_valid(&self, id: BufferId) -> bool {
+        self.buffers.read().contains(id.0)
+    }
+
+    #[inline(always)]
+    pub(crate) fn read_buffer(&self, id: BufferId) -> Result<BufferReadGuard<'_>> {
+        BufferReadGuard::new(id, self.buffers.read())
+        .ok_or_else(|| Error::just_context(format_compact!(
+            "invalid buffer id {id}"
+        )))
+    }
+
+    #[inline(always)]
+    pub(crate) fn write_buffer(&self, id: BufferId) -> Result<BufferWriteGuard<'_>> {
+        BufferWriteGuard::new(id, self.buffers.write())
+        .ok_or_else(|| Error::just_context(format_compact!(
+            "invalid buffer id {id}"
+        )))
+    }
+
+    #[inline(always)]
+    pub fn destroy_resources(
+        &mut self,
+        buffers: &[BufferId],
+        images: &[ImageId]
+    ) -> Result<()>
+    {
+        let mut all_buffers = self.buffers.write();
+        let mut all_images = self.images.write();
+        let tmp_alloc = self.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let mut cached_buffers = FixedVec32::with_capacity(
+            buffers.len() as u32,
+            &tmp_alloc,
+        )?;
+        let mut cached_images = FixedVec32::with_capacity(
+            images.len() as u32,
+            &tmp_alloc,
+        )?;
+        let mut max_frame = 0;
+        let pools = self.shader_resource_pools.load();
+        for &id in buffers {
+            let buffer = all_buffers
+                .remove(id.0)
+                .context_with(|| format_compact!(
+                    "invalid buffer id {id}",
+                ))?;
+            max_frame = max_frame.max(buffer.get_last_used_frame());
+            cached_buffers.push(buffer);
+            for pool in pools.values() {
+                pool.buffer_delete(id);
+            }
+        }
+        for &id in images {
+            let image = all_images
+                .remove(id.0)
+                .context_with(|| format_compact!(
+                    "invalid image id {id}"
+                ))?;
+            max_frame = max_frame.max(image.get_last_used_frame());
+            cached_images.push(image);
+            for pool in pools.values() {
+                pool.image_delete(id);
+            }
+        }
+        let semaphore = self.get_timeline_semaphore(self
+            .queue_scheduler()
+            .read()
+            .get_frame_semaphore_id()
+        ).unwrap();
+        let wait_info = vk::SemaphoreWaitInfo {
+            s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
+            semaphore_count: 1,
+            p_semaphores: &semaphore,
+            p_values: &max_frame,
+            ..Default::default()
+        };
+        unsafe {
+            if let Err(res) = self.vk.timeline_semaphore_device().wait_semaphores(
+                &wait_info,
+                self.vk.frame_timeout(),
+            ) {
+                if res == vk::Result::TIMEOUT {
+                    return Err(Error::just_context(format_compact!(
+                        "frame timeout {} nanoseconds reached at {}", self.vk.frame_timeout(),
+                        location!(),
+                    )))
+                } else {
+                    return Err(Error::new(res, "unexpected vulkan error"))
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn create_sampler(
+        &mut self,
+        attributes: SamplerAttributes,
+    ) -> Result<Sampler>
+    {
+        Ok(attributes
+            .build(self.vk.device())
+            .context("failed to create sampler")?
+        )
+    }
+
+    #[inline(always)]
+    pub fn create_image(
+        &mut self,
+        attributes: ImageAttributes,
+        binder: ResourceBinder,
+    ) -> Result<ImageId>
+    {
+        let image =
+            match binder {
+                ResourceBinder::DefaultBinder => {
+                    attributes
+                        .build(self.vk.clone(), &mut self.default_binder)
+                        .context("failed to create image")?
+                },
+                ResourceBinder::DefaultBinderMappable => {
+                    attributes
+                        .build(self.vk.clone(), &mut self.default_binder_mappable)
+                        .context("failed to create image")?
+                }
+                ResourceBinder::LinearBinder(id) => {
+                    let binders = self.linear_binders.load();
+                    let binder = binders
+                        .get(id.0)
+                        .context_with(|| format_compact!("invalid linear binder id {id}"))?;
+                    attributes
+                        .build(self.vk.clone(), &mut *binder.write())
+                        .context("failed to create image")?
+                }
+                ResourceBinder::Owned(binder) => {
+                    attributes
+                        .build(self.vk.clone(), binder)
+                        .context("failed to create image")?
+                },
+            };
+        Ok(ImageId(
+            self.images.write().insert(image)
+        ))
+    }
+
+    #[inline(always)]
+    pub fn is_image_valid(&self, id: ImageId) -> bool {
+        self.images.read().contains(id.0)
+    }
+
+    #[inline(always)]
+    pub fn image_mip_levels(&self, id: ImageId) -> Option<(u32, Dimensions)> {
+        let properties = self.images.read().get(id.0).ok()?.properties();
+        Some((properties.mip_levels, properties.dimensions))
+    }
+
+    #[inline(always)]
+    pub(crate) fn read_buffers(&self) -> ResourceReadGuard<'_, BufferMeta, BufferId>
+    {
+        ResourceGuard::new(self.buffers.read())
+    }
+
+    #[inline(always)]
+    pub(crate) fn write_buffers(&self) -> ResourceWriteGuard<'_, BufferMeta, BufferId>
+    {
+        ResourceGuard::new(self.buffers.write())
+    }
+
+    #[inline(always)]
+    pub(crate) fn read_images(&self) -> ResourceReadGuard<'_, ImageMeta, ImageId>
+    {
+        ResourceGuard::new(self.images.read())
+    }
+
+    #[inline(always)]
+    pub(crate) fn write_images(&self) -> ResourceWriteGuard<'_, ImageMeta, ImageId>
+    {
+        ResourceGuard::new(self.images.write())
+    }
+
+    #[inline(always)]
+    pub fn create_memory_binder<Attr>(
+        &self,
+        attributes: Attr,
+    ) -> Result<MemoryBinderId>
+        where Attr: MemoryBinderAttributes,
+    {
+        self.memory_binders.modify(|binders| {
+            Ok(MemoryBinderId(binders.insert(MemoryBinderResource::new(
+                attributes
+                    .build(self.vk.clone())
+                    .context_with(|| format_compact!(
+                        "failed to create {}", Attr::NAME,
+                    ))?
+            ))))
+        })
+    }
+
+    #[inline(always)]
+    pub fn destroy_memory_binder(&self, id: MemoryBinderId) {
+        self.memory_binders.modify(|binders| {
+            binders.remove(id.0).ok()
+        });
+    }
+
+    #[inline(always)]
+    pub fn get_memory_binder(
+        &self,
+        id: MemoryBinderId
+    ) -> Result<MemoryBinderResource>
+    {
+        Ok(self.memory_binders
+            .load()
+            .get(id.0)
+            .context_with(|| format_compact!(
+                "invalid memory binder id {id}"
+            ))?.clone()
+        )
+    }
+
+    /// Creates timeline semaphores from an iterator over their initial values.
+    #[inline(always)]
+    pub fn create_timeline_semaphores<I, F>(
+        &self,
+        initial_values: I,
+        mut collect: F,
+    ) -> Result<()>
+        where
+            F: FnMut(u32, TimelineSemaphoreId),
+            I: ExactSizeIterator<Item = u64>,
+    {
+        if initial_values.len() == 0 {
+            return Ok(())
+        }
+        let tmp_alloc = self.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let mut indices = FixedVec32::with_capacity(
+            initial_values.len().try_into().unwrap(),
+            &tmp_alloc,
+        )?;
+        let mut err = None;
+        let mut semaphores = self.timeline_semaphores.write();
+        for initial_value in initial_values {
+            if err.is_some() {
+                break;
+            }
+            let mut type_info = vk::SemaphoreTypeCreateInfo {
                 s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
                 semaphore_type: vk::SemaphoreType::TIMELINE,
-                initial_value: 0,
+                initial_value,
                 ..Default::default()
             };
             let semaphore_info = vk::SemaphoreCreateInfo {
                 s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
                 ..Default::default()
-            }.push_next(&mut timeline_info);
-            let alloc_info = vk::CommandBufferAllocateInfo {
-                s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                command_pool: s.main_thread_context.compute_pool(),
-                level: vk::CommandBufferLevel::PRIMARY,
-                command_buffer_count: buffered_frames,
-                ..Default::default()
-            };
-            let result = (vk.device().fp_v1_0().allocate_command_buffers)(
-                vk.device().handle(),
-                &alloc_info,
-                compute_command_buffers.as_mut_ptr(),
-            );
-            if result != vk::Result::SUCCESS {
-                return Err(Error::new("failed to allocate compute command buffers", result))
+            }.push_next(&mut type_info);
+            match unsafe {
+                self.vk.device()
+                    .create_semaphore(&semaphore_info, None)
+            } {
+                Ok(handle) => {
+                    let index = semaphores.insert(handle);
+                    indices.push(index);
+                },
+                Err(e) => { err = Some(e); }
             }
-            compute_command_buffers.set_len(buffered_frames as usize);
-            for _ in 0..buffered_frames {
-                let fence = vk.device().create_semaphore(&semaphore_info, None).unwrap();
-                compute_semaphores.push(fence).unwrap();
-            }
-            s.sync_transfer_semaphore = vk.device().create_semaphore(&semaphore_info, None).unwrap();
         }
-        for (i, &buffer) in compute_command_buffers.iter().enumerate() {
-            s.compute_states.push(ComputeState {
-                command_buffer: buffer,
-                semaphore: compute_semaphores[i],
-                timeline_value: 0,
-            }).unwrap();
+        if let Some(err) = err {
+            return Err(err).context("failed to create timeline semaphore")
         }
+        for (i, index) in indices.into_iter().enumerate() {
+            collect(i as u32, TimelineSemaphoreId(index))
+        }
+        Ok(())
+    }
+
+    /// Gets the counter value of a timeline semaphore.
+    #[inline(always)]
+    pub fn get_semaphore_counter_value(&self, id: TimelineSemaphoreId) -> Result<u64> {
+        let &handle = self.timeline_semaphores
+            .read()
+            .get(id.0)
+            .context_with(|| format_compact!("failed to find timeline semaphore {id}"))?;
         unsafe {
-            let alloc_info = vk::CommandBufferAllocateInfo {
-                s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                command_pool: s.main_thread_context.graphics_pool(),
-                level: vk::CommandBufferLevel::PRIMARY,
-                command_buffer_count: buffered_frames,
-                ..Default::default()
-            };
-            let result = (vk.device().fp_v1_0().allocate_command_buffers)(
-                vk.device().handle(),
-                &alloc_info,
-                s.graphics_command_buffers.as_mut_ptr(),
-            );
-            if result != vk::Result::SUCCESS {
-                return Err(Error::new("failed to allocate graphics command buffers", result))
-            }
-            s.graphics_command_buffers.set_len(buffered_frames as usize);
+            self.vk.timeline_semaphore_device()
+                .get_semaphore_counter_value(handle)
+                .context("failed to get timeline semaphore value")
         }
-        let fence_create_info = vk::FenceCreateInfo {
-            s_type: vk::StructureType::FENCE_CREATE_INFO,
-            flags: vk::FenceCreateFlags::SIGNALED,
+    }
+
+    /// Waits for previous semaphores until `timeout` where `timeout` is in nanoseconds.
+    ///
+    /// Returns Ok(true) on success, Ok(false) on timeout and Err(err) if there's another error.
+    #[inline(always)]
+    pub fn wait_for_semaphores(
+        &self,
+        semaphores: &[(TimelineSemaphoreId, u64)],
+        timeout: u64,
+    ) -> Result<bool> {
+        let tmp_alloc = self.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let n_semaphores = semaphores.len() as u32;
+        let mut handles = FixedVec32
+            ::with_capacity(n_semaphores, &tmp_alloc)?;
+        let mut values = FixedVec32
+            ::with_capacity(n_semaphores, &tmp_alloc)?;
+        let read = self.timeline_semaphores.read();
+        for &(id, value) in semaphores {
+            let &semaphore = read
+                .get(id.0)
+                .context("failed to find timeline semaphore")?;
+            handles.push(semaphore);
+            values.push(value);
+        }
+        let wait_info = vk::SemaphoreWaitInfo {
+            s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
+            semaphore_count: semaphores.len() as u32,
+            p_semaphores: handles.as_ptr(),
+            p_values: values.as_ptr(),
             ..Default::default()
         };
-        s.graphics_submit_fences.try_resize_with(
-            buffered_frames as usize,
-            || unsafe {
-                vk.device()
-                .create_fence(&fence_create_info, None)
-                .context("failed to create fence")
-            },
-            |err| Error::new("failed to create fences", err)
-        )?;
-        Ok(s)
+        let res = unsafe {
+            self.vk.timeline_semaphore_device().wait_semaphores(
+                &wait_info,
+                timeout,
+            )
+        };
+        if let Err(err) = res {
+            if err == vk::Result::TIMEOUT {
+                return Ok(false)
+            }
+            return Err(Error::new(err, "unexpected vulkan error"))
+        }
+        Ok(true)
     }
 
     #[inline(always)]
-    pub fn context(&mut self) -> GpuContext<'_> {
-        GpuContext::new(
-            &self.vk,
-            self.resources.write().unwrap(),
-            &mut self.transfer_requests,
-            self.buffered_frames
-        )
+    pub fn destroy_timeline_semaphores(&self, ids: &[TimelineSemaphoreId]) {
+        let mut semaphores = self.timeline_semaphores.write();
+        for id in ids {
+            if let Ok(handle) = semaphores.remove(id.0) {
+                unsafe {
+                    self.vk.device().destroy_semaphore(handle, None);
+                }
+            }
+        }
     }
 
     #[inline(always)]
-    pub fn wait_idle(&self) {
-        unsafe {
-            self.vk.device().device_wait_idle().ok();
-        }
+    pub(crate) fn get_timeline_semaphore(&self, id: TimelineSemaphoreId) -> Result<vk::Semaphore> {
+        self.timeline_semaphores
+            .read()
+            .get(id.0).copied()
+            .context("failed to find timeline semaphore")
     }
 
-    fn async_transfer_requests<'a>(
-        &mut self,
-        interface: &mut impl Interface,
-    ) -> error::Result<()>
-    {
-        let count = self.transfer_requests.async_request_count();
-
-        if count == 0 {
-            return Ok(())
-        }
-
-        let device = self.vk.device();
-        let queue_families = self.vk.queue_family_indices();
-        let resources = self.resources.clone();
-
-        let transfer_command_pool = Arc::new(TransientCommandPool
-            ::new(self.vk.clone(), queue_families.transfer_index())
-            .context("failed to create transient transfer command pool")?
-        );
-        let graphics_command_pool = Arc::new(TransientCommandPool
-            ::new(self.vk.clone(), queue_families.graphics_index())
-            .context("failed to create transient graphics command pool")?
-        );
-
-        let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
-
-        let mut transfer_command_buffers = FixedVec
-            ::with_len(count as usize, Default::default(), &tmp_alloc)
-            .context(ErrorContext::VecError(location!()))?;
-
-        let mut alloc_info = vk::CommandBufferAllocateInfo {
-            s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-            command_pool: transfer_command_pool.handle(),
-            level: vk::CommandBufferLevel::PRIMARY,
-            command_buffer_count: count,
-            ..Default::default()
-        };
-
-        helpers
-            ::allocate_command_buffers(&device, &alloc_info, &mut transfer_command_buffers)
-            .context("failed to allocate command buffers")?;
-
-        let mut graphics_command_buffers = FixedVec
-            ::with_len(count as usize, Default::default(), &tmp_alloc)
-            .context(ErrorContext::VecError(location!()))?;
-
-        alloc_info.command_pool = graphics_command_pool.handle();
-
-        helpers
-            ::allocate_command_buffers(&device, &alloc_info, &mut graphics_command_buffers)
-            .context("failed to allocate command buffers")?;
-        
-        let mut new_requests = TransferRequests::default();
-
-        for (i, (id, (staging_alloc, semaphores))) in self.transfer_requests.iter().enumerate() {
-
-            let alloc = resources
-                .write()
-                .unwrap()
-                .lock_linear_device_alloc(staging_alloc, semaphores)
-                .context("failed to lock linear device alloc")?;
-
-            helpers
-                ::begin_command_buffer(&device, transfer_command_buffers[i])
-                .context(ErrorContext::CommandBufferBeginError(location!()))?;
-            helpers
-                ::begin_command_buffer(&device, graphics_command_buffers[i])
-                .context(ErrorContext::CommandBufferBeginError(location!()))?;
-
-            let mut storage = TransferCommandsStorage::new(
-                transfer_command_pool.clone(),
-                transfer_command_buffers[i],
-                graphics_command_pool.clone(),
-                graphics_command_buffers[i],
-                alloc,
-                semaphores,
-                id
-            ).context("failed to initialize transfer commands")?;
-
-            let mut gpu = GpuContext::new(
-                &self.vk,
-                resources.write().unwrap(),
-                &mut new_requests,
-                self.buffered_frames,
-            );
-
-            let mut commands = TransferCommands::new(&mut storage, &mut gpu);
-
-            (interface)(Event::TransferWork {
-                request_id: id,
-                commands: &mut commands,
-            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
-
-            self.transfer_commands.push(storage);
-        }
-
-        self.transfer_requests.clear();
-
-        if !new_requests.is_empty() {
-            self.transfer_requests = new_requests;
-        }
-
-        Ok(())
-    }
-
-    fn process_transfer_requests<'a>(
-        &mut self,
-        transfer_queue: vk::Queue,
-        graphics_queue: vk::Queue,
-        pending_transfers: &mut GlobalVec<CommandRequestId>,
-    ) -> error::Result<()>
-    {
-        if !self.transfer_commands.is_empty() {
-            let mut ready_transfers = GlobalVec::with_capacity(self.transfer_commands.len());
-            pending_transfers.reserve(pending_transfers.len() + self.transfer_commands.len());
-            let mut dummy_requests = TransferRequests::default();
-            for i in 0..self.transfer_commands.len()
-            {
-                let mut gpu = GpuContext::new(
-                    &self.vk,
-                    self.resources.write().unwrap(),
-                    &mut dummy_requests,
-                    self.buffered_frames,
-                );
-                let mut commands = TransferCommands::new(&mut self.transfer_commands[i], &mut gpu);
-                let transfer_command_buffer = commands.transfer_command_buffer();
-                let graphics_command_buffer = commands.graphics_command_buffer();
-                let (new, sync_objects, signal_semaphores, context) = commands
-                    .get_sync_objects()
-                    .context("failed to create sync objects")?;
-                if new {
-                    let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
-                    let mut signal_handles = FixedVec
-                        ::with_capacity(signal_semaphores.len(), &tmp_alloc)
-                        .context(ErrorContext::VecError(location!()))?;
-                    let mut signal_values = FixedVec
-                        ::with_capacity(signal_semaphores.len(), &tmp_alloc)
-                        .context(ErrorContext::VecError(location!()))?;
-                    for &(semaphore, value) in signal_semaphores {
-                        let handle = context
-                            .get_timeline_semaphore(semaphore)
-                            .context("failed to find timeline semaphore")?;
-                        signal_handles.push(handle).ok();
-                        signal_values.push(value).ok();
-                    }
-                    unsafe {
-                        self.vk.device()
-                            .end_command_buffer(transfer_command_buffer)
-                            .context("failed to end command buffer")?;
-                    }
-                    let submit_info = vk::SubmitInfo {
-                        s_type: vk::StructureType::SUBMIT_INFO,
-                        command_buffer_count: 1,
-                        p_command_buffers: &transfer_command_buffer,
-                        signal_semaphore_count: 1,
-                        p_signal_semaphores: &sync_objects.binary_semaphore,
-                        ..Default::default()
-                    };
-                    unsafe {
-                        self.vk.device().queue_submit(
-                            transfer_queue,
-                            &[submit_info],
-                            sync_objects.transfer_fence,
-                        ).context(ErrorContext::TransferQueueSubmitError(location!()))?;
-                    };
-                    unsafe {
-                        self.vk.device()
-                            .end_command_buffer(graphics_command_buffer)
-                            .context("failed to end command buffer")?;
-                    }
-                    let wait_stage = vk::PipelineStageFlags::TRANSFER;
-                    let wait_value = 0;
-                    let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
-                        s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                        wait_semaphore_value_count: 1,
-                        p_wait_semaphore_values: &wait_value,
-                        signal_semaphore_value_count: signal_values.len() as u32,
-                        p_signal_semaphore_values: signal_values.as_ptr(),
-                        ..Default::default()
-                    };
-                    let submit_info = vk::SubmitInfo {
-                        s_type: vk::StructureType::SUBMIT_INFO,
-                        command_buffer_count: 1,
-                        p_command_buffers: &graphics_command_buffer,
-                        wait_semaphore_count: 1,
-                        p_wait_semaphores: &sync_objects.binary_semaphore,
-                        p_wait_dst_stage_mask: &wait_stage,
-                        signal_semaphore_count: signal_handles.len() as u32,
-                        p_signal_semaphores: signal_handles.as_ptr(),
-                        ..Default::default()
-                    }.push_next(&mut timeline_info);
-                    unsafe {
-                        self.vk.device().queue_submit(
-                            graphics_queue,
-                            &[submit_info],
-                            sync_objects.graphics_fence,
-                        ).context(ErrorContext::GraphicsQueueSubmitError(location!()))?;
-                    }
-                }
-                unsafe {
-                    let mut ready = false;
-                    match self.vk.device().wait_for_fences(
-                        &[sync_objects.transfer_fence, sync_objects.graphics_fence], true, 0
-                    ) {
-                        Ok(()) => {
-                            ready = true;
-                        },
-                        Err(vk::Result::TIMEOUT) => {}
-                        Err(err) => {
-                            return Err(Error::new("failed to wait for fences", err))
-                        }
-                    }
-                    if ready {
-                        ready_transfers.push(i);
-                    } else {
-                        pending_transfers.push(commands.id());
-                    }
-                }
-            }
-            for i in ready_transfers.iter().rev() {
-                self.transfer_commands.remove(*i);
-            }
+    #[inline(always)]
+    pub(crate) fn update(&mut self) -> Result<()> {
+        let pools = self.shader_resource_pools.load();
+        for pool in pools.values_mut() {
+            pool.update(self);
         }
         Ok(())
-    }
-
-    fn process_frame_graph<'a>(
-        alloc: &'a ArenaAlloc,
-        mut frame_graph: FrameGraphResult<'a>,
-        graphics_queue: vk::Queue,
-        transfer_queue: vk::Queue,
-        sync_transfer_semaphore: vk::Semaphore,
-        sync_transfer_timeline_value: &mut u64,
-        sync_transfer_commands: &mut GlobalVec<TransferCommandsStorage>,
-    ) -> Result<RenderResult<'a>>
-    {
-        let device = frame_graph.vk().device();
-        let mut result = RenderResult::default();
-        let swapchain_count = frame_graph.swapchain_count();
-        if frame_graph.render_commands.transfer_commands.is_empty() {
-            let count = frame_graph.wait_semaphore_count() as usize;
-            result.wait_semaphores = FixedVec
-                ::with_capacity(count + 1 + swapchain_count, alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            result.wait_values = FixedVec
-                ::with_capacity(count + 1 + swapchain_count, alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            result.wait_stages = FixedVec
-                ::with_capacity(count + 1 + swapchain_count, alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-        } else {
-            let count = frame_graph.wait_semaphore_count() as usize;
-            let mut transfer_command_buffers = FixedVec
-                ::with_capacity(frame_graph.render_commands.transfer_commands.len(), alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            let mut graphics_command_buffers = FixedVec
-                ::with_capacity(frame_graph.render_commands.transfer_commands.len(), alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            for storage in &frame_graph.render_commands.transfer_commands {
-                let command_buffer = storage.transfer_command_buffer;
-                unsafe {
-                    device.end_command_buffer(command_buffer)
-                        .context(ErrorContext::CommandBufferEndError(location!()))?
-                }
-                transfer_command_buffers.push(command_buffer).ok();
-                let command_buffer = storage.graphics_command_buffer;
-                unsafe {
-                    device.end_command_buffer(command_buffer)
-                        .context(ErrorContext::CommandBufferEndError(location!()))?
-                }
-                graphics_command_buffers.push(command_buffer).ok();
-            }
-            let fence_info = vk::FenceCreateInfo {
-                s_type: vk::StructureType::FENCE_CREATE_INFO,
-                ..Default::default()
-            };
-            let transfer_fence = unsafe {
-                device.create_fence(&fence_info, None)
-            }.context_with(|| format_compact!("failed to create fence at {}", location!()))?;
-            *sync_transfer_timeline_value += 1;
-            let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
-                s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                signal_semaphore_value_count: 1,
-                p_signal_semaphore_values: sync_transfer_timeline_value as *const _,
-                ..Default::default()
-            };
-            let submit_info = vk::SubmitInfo {
-                s_type: vk::StructureType::SUBMIT_INFO,
-                command_buffer_count: transfer_command_buffers.len() as u32,
-                p_command_buffers: transfer_command_buffers.as_ptr(),
-                signal_semaphore_count: 1,
-                p_signal_semaphores: &sync_transfer_semaphore,
-                ..Default::default()
-            }.push_next(&mut timeline_info);
-            unsafe {
-                device.queue_submit(
-                    transfer_queue,
-                    &[submit_info],
-                    vk::Fence::null(),
-                ).context(ErrorContext::TransferQueueSubmitError(location!()))?;
-            };
-            let wait_value = *sync_transfer_timeline_value;
-            let wait_stage = vk::PipelineStageFlags::TRANSFER;
-            *sync_transfer_timeline_value += 1;
-            let mut timeline_info = vk::TimelineSemaphoreSubmitInfo {
-                s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                wait_semaphore_value_count: 1,
-                p_wait_semaphore_values: &wait_value,
-                signal_semaphore_value_count: 1,
-                p_signal_semaphore_values: sync_transfer_timeline_value,
-                ..Default::default()
-            };
-            let submit_info = vk::SubmitInfo {
-                s_type: vk::StructureType::SUBMIT_INFO,
-                command_buffer_count: graphics_command_buffers.len() as u32,
-                p_command_buffers: graphics_command_buffers.as_ptr(),
-                wait_semaphore_count: 1,
-                p_wait_semaphores: &sync_transfer_semaphore,
-                p_wait_dst_stage_mask: &wait_stage,
-                signal_semaphore_count: 1,
-                p_signal_semaphores: &sync_transfer_semaphore,
-                ..Default::default()
-            }.push_next(&mut timeline_info);
-            unsafe {
-                device.queue_submit(
-                    graphics_queue,
-                    &[submit_info],
-                    transfer_fence,
-                ).context(ErrorContext::GraphicsQueueSubmitError(location!()))?;
-            }
-            result.wait_semaphores = FixedVec
-                ::with_capacity(count + 2 + swapchain_count, alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            result.wait_semaphores.push(sync_transfer_semaphore).ok();
-            result.wait_values = FixedVec
-                ::with_capacity(count + 2 + swapchain_count, alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            result.wait_values.push(*sync_transfer_timeline_value).ok();
-            result.wait_stages = FixedVec
-                ::with_capacity(count + 2 + swapchain_count, alloc)
-                .context_with(|| ErrorContext::VecError(location!()))?;
-            result.wait_stages.push(vk::PipelineStageFlags::TRANSFER).ok();
-        };
-        sync_transfer_commands.move_from_vec(&mut frame_graph.render_commands.transfer_commands);
-        let signal_count = frame_graph.signal_semaphore_count() as usize;
-        result.signal_semaphores = FixedVec
-            ::with_capacity(signal_count + 1 + swapchain_count, alloc)
-            .context_with(|| ErrorContext::VecError(location!()))?;
-        result.signal_values = FixedVec
-            ::with_capacity(signal_count + 1 + swapchain_count, alloc)
-            .context_with(|| ErrorContext::VecError(location!()))?;
-        frame_graph.collect_semaphores(
-            |frame_graph, id, value| {
-                let handle = frame_graph.gpu().get_timeline_semaphore(id)?;
-                result.signal_semaphores.push(handle).unwrap();
-                result.signal_values.push(value).unwrap();
-                Ok(())
-            },
-            |frame_graph, id, value, stage| {
-                let handle = frame_graph.gpu().get_timeline_semaphore(id)?;
-                result.wait_semaphores.push(handle).unwrap();
-                result.wait_values.push(value).unwrap();
-                result.wait_stages.push(stage.into()).unwrap();
-                Ok(())
-            }
-        )?;
-        result.frame_context = Some(frame_graph.frame_graph.finalize());
-        Ok(result)
-    }
-
-    pub(crate) fn render<'a>(
-        &mut self,
-        event_loop: &mut event_loop::ActiveEventLoop<'_, 'a>,
-        interface: &mut impl Interface,
-        host_allocators: &'a HostAllocators,
-        tmp_alloc: ArenaGuard,
-    ) -> error::Result<()>
-    {
-        let graphics_queue = self.vk.graphics_queue();
-        let transfer_queue = self.vk.transfer_queue();
-        let compute_queue = self.vk.compute_queue();
-        self.async_transfer_requests(interface)
-            .context("async transfer requests failed")?;
-        let mut pending_transfers = GlobalVec::new();
-        self.process_transfer_requests(
-            transfer_queue,
-            graphics_queue,
-            &mut pending_transfers,
-            ).context("failed to process transfer requests")?;
-        self.resources
-            .write()
-            .unwrap()
-            .update_semaphores()
-            .context("failed to update semaphores")?;
-        let frame_index = self.current_frame_index as usize;
-        let queue_family_indices = self.vk.queue_family_indices();
-        let compute_state = self.compute_states[frame_index];
-        let graphics_submit_fence = self.graphics_submit_fences[frame_index];
-        unsafe {
-            self.vk.device().wait_for_fences(
-                &[graphics_submit_fence],
-                true,
-                SwapchainContext::frame_timeout(),
-            ).context("failed to wait for graphics submit fence")?;
-            self.vk
-                .device()
-                .reset_fences(&[graphics_submit_fence])
-                .context("failed to reset graphics submit fence")?;
-        }
-        unsafe {
-            self.vk.device().reset_command_buffer(
-                compute_state.command_buffer, vk::CommandBufferResetFlags::RELEASE_RESOURCES
-            ).unwrap();
-        } 
-        {
-            helpers::begin_command_buffer(self.vk.device(), compute_state.command_buffer).unwrap();
-            let mut compute_commands = ComputeCommands::new(
-                compute_state.command_buffer,
-                GpuContext::new(
-                    &self.vk,
-                    self.resources.write().unwrap(),
-                    &mut self.transfer_requests,
-                    self.buffered_frames,
-                ),
-                &self.tmp_alloc,
-                queue_family_indices.compute_index(),
-            );
-            (interface)(Event::ComputeWork {
-                commands: &mut compute_commands
-            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
-            let compute_commands = compute_commands.finish();
-            unsafe {
-                self.vk.device().end_command_buffer(compute_state.command_buffer).unwrap();
-            }
-            let wait_count = 1 + compute_commands.wait_semaphores.len();
-            let signal_count = 1 + compute_commands.signal_semaphores.len();
-            let tmp_alloc = ArenaGuard::new(&self.tmp_alloc);
-            let mut wait_handles = FixedVec
-                ::with_capacity(wait_count, &tmp_alloc)
-                .context(ErrorContext::VecError(location!()))?;
-            let mut wait_values = FixedVec
-                ::with_capacity(wait_count, &tmp_alloc)
-                .context(ErrorContext::VecError(location!()))?;
-            let mut wait_stages = FixedVec
-                ::with_capacity(wait_count, &tmp_alloc)
-                .context(ErrorContext::VecError(location!()))?;
-            let mut signal_handles = FixedVec
-                ::with_capacity(signal_count, &tmp_alloc)
-                .context(ErrorContext::VecError(location!()))?;
-            let mut signal_values = FixedVec
-                ::with_capacity(signal_count, &tmp_alloc)
-                .context(ErrorContext::VecError(location!()))?;
-            let g = self.resources.read().unwrap();
-            for &(id, value, stage) in &compute_commands.wait_semaphores {
-                let handle = g.get_timeline_semaphore(id)?;
-                wait_handles.push(handle).ok();
-                wait_values.push(value).ok();
-                wait_stages.push(stage.into()).ok();
-            }
-            for &(id, value) in &compute_commands.signal_semaphores {
-                let handle = g.get_timeline_semaphore(id)?;
-                signal_handles.push(handle).ok();
-                signal_values.push(value).ok();
-            }
-            wait_handles.push(compute_state.semaphore).ok();
-            wait_values.push(compute_state.timeline_value).ok();
-            wait_stages.push(vk::PipelineStageFlags::TOP_OF_PIPE).ok();
-            signal_handles.push(compute_state.semaphore).ok();
-            signal_values.push(compute_state.timeline_value + 1).ok();
-            let wait_count = wait_count as u32;
-            let signal_count = signal_count as u32;
-            let mut timeline_submit = vk::TimelineSemaphoreSubmitInfo {
-                s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
-                wait_semaphore_value_count: wait_count,
-                p_wait_semaphore_values: wait_values.as_ptr(),
-                signal_semaphore_value_count: signal_count,
-                p_signal_semaphore_values: signal_values.as_ptr(),
-                ..Default::default()
-            };
-            let compute_submit = vk::SubmitInfo {
-                s_type: vk::StructureType::SUBMIT_INFO,
-                command_buffer_count: 1,
-                p_command_buffers: &compute_state.command_buffer,
-                wait_semaphore_count: wait_count,
-                p_wait_semaphores: wait_handles.as_ptr(),
-                p_wait_dst_stage_mask: wait_stages.as_ptr(),
-                signal_semaphore_count: signal_count,
-                p_signal_semaphores: signal_handles.as_ptr(),
-                ..Default::default()
-            }.push_next(&mut timeline_submit);
-            unsafe {
-                self.vk.device().queue_submit(
-                    compute_queue,
-                    &[compute_submit],
-                    Default::default(),
-                ).context(ErrorContext::ComputeQueueSubmitError(location!()))?;
-            }
-        } 
-        let graphics_command_buffer = self.graphics_command_buffers[frame_index];
-        unsafe {
-            self.vk
-                .device()
-                .reset_command_buffer(
-                    graphics_command_buffer,
-                    vk::CommandBufferResetFlags::RELEASE_RESOURCES,
-                ).context_with(|| format_compact!("failed to reset command buffer at {}", location!()))?;
-        }
-        helpers
-            ::begin_command_buffer(self.vk.device(), graphics_command_buffer)
-            .context_with(|| format_compact!("failed to begin command buffer at {}", location!()))?;
-        let mut surfaces = FixedVec::with_capacity(
-            event_loop.active_window_ids().len(),
-            &tmp_alloc,
-        ).context(ErrorContext::VecError(location!()))?;
-        for (id, win) in event_loop.window_iter_mut() {
-            let id = *id;
-            let surface = win.surface();
-            let (swapchain, recreated) = surface
-                .get_or_init_swapchain_context(
-                    host_allocators,
-                )?;
-            let frame_data = match swapchain.setup_image(
-                self.vk.swapchain_device(),
-                frame_index,
-            )?
-            {
-                Some(r) => r,
-                None => continue,
-            };
-            if recreated {
-                let frame_buffer_size = frame_data.extent.into();
-                {
-                    let mut context = GpuContext::new(
-                        &self.vk,
-                        self.resources.write().unwrap(),
-                        &mut self.transfer_requests,
-                        self.buffered_frames,
-                    );
-                    (interface)(Event::FrameBufferCreated {
-                        window_id: id, 
-                        gpu: &mut context,
-                        new_size: frame_buffer_size,
-                        new_format: ImageFormat(frame_data.format, vk::ImageAspectFlags::COLOR),
-                    }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
-                }
-                self.async_transfer_requests(interface)
-                    .context("async transfer requests failed")?;
-                self.process_transfer_requests(transfer_queue, graphics_queue, &mut pending_transfers)
-                    .context("failed to process transfer requests")?;
-            }
-            let present_queue = surface.present_queue();
-            win.update_frame_data(frame_data);
-            surfaces
-                .push((win, id, present_queue, frame_data.suboptimal))
-                .unwrap();
-        }
-        let alloc = &host_allocators.frame_graphs()[frame_index];
-        unsafe {
-            alloc.force_clear();
-        }
-        self.sync_transfer_commands.clear();
-        let RenderResult {
-            mut frame_context,
-            mut wait_semaphores, mut wait_values, mut wait_stages,
-            mut signal_semaphores, mut signal_values,
-            transfer_fence
-        } =
-        {
-            let mut frame_graph = FrameGraph::new(
-                FrameContext::new(
-                    graphics_command_buffer,
-                    GpuContext::new(
-                        &self.vk,
-                        self.resources
-                            .write()
-                            .unwrap(),
-                        &mut self.transfer_requests,
-                        self.buffered_frames,
-                    ),
-                    &mut self.frame_resource_pools[frame_index],
-                    surfaces.iter().map(|(win, id, _, _)| {
-                        (*id, win.last_frame_data())
-                    }),
-                ),
-                graphics_command_buffer,
-                alloc,
-                frame_index,
-                queue_family_indices,
-            );
-            (interface)(Event::Render {
-                frame_graph: &mut frame_graph,
-                pending_transfers: &pending_transfers,
-            }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))?;
-            let frame_graph = frame_graph.render(
-                interface,
-                compute_state.semaphore,
-                compute_state.timeline_value,
-                self.buffered_frames,
-            )?;
-            Self::process_frame_graph(
-                alloc,
-                frame_graph,
-                graphics_queue,
-                transfer_queue,
-                self.sync_transfer_semaphore,
-                &mut self.sync_transfer_timeline_value,
-                &mut self.sync_transfer_commands,
-            )?
-        };
-        let mut frame_context = frame_context.take().unwrap();
-        wait_semaphores.push(compute_state.semaphore).unwrap();
-        wait_values.push(compute_state.timeline_value + 1).unwrap();
-        wait_stages.push(vk::PipelineStageFlags::COMPUTE_SHADER).unwrap();
-        signal_semaphores.push(compute_state.semaphore).unwrap();
-        signal_values.push(compute_state.timeline_value + 2).unwrap();
-        for (win, id, _, _) in &mut surfaces {
-            let id = *id;
-            let fallback_state = win
-                .last_frame_data().image_state;
-            let semaphores = win
-                .surface()
-                .get_swapchain_context()
-                .unwrap()
-                .setup_submit(
-                    self.vk.device(),
-                    graphics_command_buffer,
-                    frame_context
-                        .swapchain_image_state(id)
-                        .cloned()
-                        .unwrap_or(fallback_state),
-                    queue_family_indices.graphics_index(),
-                    frame_index,
-                );
-            wait_semaphores.push(semaphores.wait_semaphore).unwrap();
-            wait_values.push(0).unwrap();
-            wait_stages.push(semaphores.wait_stage).unwrap();
-            signal_semaphores.push(semaphores.signal_semaphore).unwrap();
-            signal_values.push(0).unwrap();
-        }
-        unsafe { self.vk.device()
-            .end_command_buffer(graphics_command_buffer)
-            .context(ErrorContext::CommandBufferEndError(location!()))?;
-        }
-        let wait_count = wait_semaphores.len() as u32;
-        let signal_count = signal_semaphores.len() as u32;
-        let mut timeline_submit = vk::TimelineSemaphoreSubmitInfo {
-            s_type: vk::StructureType::TIMELINE_SEMAPHORE_SUBMIT_INFO,
-            wait_semaphore_value_count: wait_count,
-            p_wait_semaphore_values: wait_values.as_ptr(),
-            signal_semaphore_value_count: signal_count,
-            p_signal_semaphore_values: signal_values.as_ptr(),
-            ..Default::default()
-        };
-        let submit_info = vk::SubmitInfo {
-            s_type: vk::StructureType::SUBMIT_INFO,
-            wait_semaphore_count: wait_count,
-            p_wait_semaphores: wait_semaphores.as_ptr(),
-            p_wait_dst_stage_mask: wait_stages.as_ptr(),
-            signal_semaphore_count: signal_count,
-            p_signal_semaphores: signal_semaphores.as_ptr(),
-            command_buffer_count: 1,
-            p_command_buffers: &graphics_command_buffer,
-            ..Default::default()
-        }.push_next(&mut timeline_submit);
-        if let Err(err) = unsafe { self.vk
-            .device()
-            .queue_submit(graphics_queue, &[submit_info], graphics_submit_fence)
-        } {
-            return Err(Error::new(ErrorContext::GraphicsQueueSubmitError(location!()), err))
-        }
-        if !self.sync_transfer_commands.is_empty() {
-            unsafe {
-                self.vk.device()
-                    .wait_for_fences(&[transfer_fence], true, u64::MAX)
-                    .context_with(|| format_compact!("failed to wait for fences at {}", location!()))?;
-                self.vk.device()
-                    .destroy_fence(transfer_fence, None);
-            }
-        }
-        let mut request_swapchain_update = FixedVec
-            ::with_capacity(surfaces.len(), &tmp_alloc)
-            .context(ErrorContext::VecError(location!()))?;
-        for (i, (win, id, present_queue, suboptimal)) in surfaces.iter_mut().enumerate() {
-            let present_result = win
-                .surface()
-                .get_swapchain_context()
-                .unwrap()
-                .present_submit(self.vk.swapchain_device(), *present_queue)
-                .context_with(|| format_compact!(
-                    "failed to present to window (id {id:?})",
-                ))?;
-            if present_result != PresentResult::Success || *suboptimal {
-                request_swapchain_update.push(i).unwrap();
-            }
-        }
-        for &idx in &request_swapchain_update {
-            let (win, _, _, _) = &mut surfaces[idx];
-            let size = win.size().into();
-            win.surface().request_swapchain_update(
-                self.buffered_frames,
-                size,
-            );
-        }
-        self.compute_states[frame_index].timeline_value += 2;
-        self.current_frame_index = (self.current_frame_index + 1) % self.buffered_frames;
-        Ok(())
-    }
-
-    pub(crate) fn clean_up<'a>(&mut self) {
-        log::info!("cleaning up gpu");
-        unsafe {
-            self.vk.device().device_wait_idle().ok();
-        }
-        for pool in &mut self.frame_resource_pools {
-            unsafe {
-                pool.force_clean_up();
-            }
-        }
-        for state in &self.compute_states {
-            unsafe {
-                self.vk.device().destroy_semaphore(
-                    state.semaphore, None
-                );
-            }
-        }
-        for &fence in &self.graphics_submit_fences {
-            unsafe {
-                self.vk.device().destroy_fence(fence, None);
-            }
-        }
-        unsafe {
-            self.vk.device().destroy_semaphore(self.sync_transfer_semaphore, None);
-        }
-        self.resources.write().unwrap().clean_up();
     }
 }
 
-#[derive(Default)]
-struct RenderResult<'a> {
-    frame_context: Option<FrameContext<'a>>,
-    wait_semaphores: FixedVec<'a, vk::Semaphore, ArenaAlloc>,
-    wait_values: FixedVec<'a, u64, ArenaAlloc>,
-    wait_stages: FixedVec<'a, vk::PipelineStageFlags, ArenaAlloc>,
-    signal_semaphores: FixedVec<'a, vk::Semaphore, ArenaAlloc>,
-    signal_values: FixedVec<'a, u64, ArenaAlloc>,
-    transfer_fence: vk::Fence,
+impl Drop for Gpu {
+
+    fn drop(&mut self) {
+        unsafe {
+            log::info!("cleaning up GPU");
+            let device = self.vk.device();
+            let semaphores = self.timeline_semaphores.write();
+            for &handle in self.timeline_semaphores.write().values() {
+                device.destroy_semaphore(handle, None);
+            }
+        }
+    }
 }

@@ -67,17 +67,21 @@ impl<T: error::Error + Send + Sync + 'static> Debug for WrapErr<T> {
 impl Error { 
 
     #[inline(always)]
-    pub fn new<C>(ctx: C, err: impl error::Error + Send + Sync + 'static) -> Self
-        where C: Display + Send + Sync + 'static,
+    pub fn new<E, C>(err: E, ctx: C) -> Self
+        where
+            E: error::Error + Send + Sync + 'static,
+            C: Display + Send + Sync + 'static,
     {
-        Self::new_internal(ctx, err, None)
+        Self::new_internal(err, ctx, None)
     }
 
     #[track_caller]
-    pub fn new_tracked<C>(ctx: C, err: impl error::Error + Send + Sync + 'static) -> Self
-        where C: Display + Send + Sync + 'static,
+    pub fn new_tracked<E, C>(err: E, ctx: C) -> Self
+        where
+            E: error::Error + Send + Sync + 'static,
+            C: Display + Send + Sync + 'static,
     {
-        Self::new_internal(ctx, err, Some(caller!()))
+        Self::new_internal(err, ctx, Some(caller!()))
     }
 
     #[inline(always)]
@@ -100,8 +104,8 @@ impl Error {
     }
 
     fn new_internal(
-        ctx: impl Display + Send + Sync + 'static,
         err: impl error::Error + Send + Sync + 'static,
+        ctx: impl Display + Send + Sync + 'static,
         loc: Option<Location>,
     ) -> Self
     {
@@ -140,34 +144,46 @@ impl Tracked for Error {
 
 pub trait BuildInternal {
 
-    fn new_internal(
-        ctx: impl Display + Send + Sync + 'static,
-        err: impl error::Error + Send + Sync + 'static,
+    fn new_internal<E, C>(
+        err: E,
+        ctx: C,
         loc: Option<Location>,
-    ) -> Self;
+    ) -> Self
+        where
+            E: error::Error + Send + Sync + 'static,
+            C: Display + Send + Sync + 'static;
 
-    fn just_context_internal(
-        ctx: impl Display + Send + Sync + 'static,
+    fn just_context_internal<C>(
+        ctx: C,
         loc: Option<Location>,
-    ) -> Self;
+    ) -> Self
+        where
+            C: Display + Send + Sync + 'static;
 
     fn with_location(self, loc: Location) -> Self;
 }
 
 impl BuildInternal for Error {
 
-    fn new_internal(
-        ctx: impl Display + Send + Sync + 'static,
-        err: impl error::Error + Send + Sync + 'static,
+    fn new_internal<E, C>(
+        err: E,
+        ctx: C,
         loc: Option<Location>,
-    ) -> Self {
-        Self::new_internal(ctx, err, loc)
+    ) -> Self
+        where
+            E: error::Error + Send + Sync + 'static,
+            C: Display + Send + Sync + 'static
+    {
+        Self::new_internal(err, ctx, loc)
     }
 
-    fn just_context_internal(
-        ctx: impl Display + Send + Sync + 'static,
+    fn just_context_internal<C>(
+        ctx: C,
         loc: Option<Location>,
-    ) -> Self {
+    ) -> Self
+        where
+            C: Display + Send + Sync + 'static
+    {
         Self::just_context_internal(ctx, loc)
     }
 

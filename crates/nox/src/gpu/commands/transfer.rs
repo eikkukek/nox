@@ -1,102 +1,55 @@
-use std::{
-    sync::Arc,
+use std::sync::Arc;
+
+use compact_str::format_compact;
+
+use nox_ash::vk;
+
+use nox_mem::{
+    vec::{FixedVec32, Vec32, Vector},
+    option::OptionExt,
 };
 
-use core::ops::{Deref, DerefMut};
-use core::ptr;
-use core::cell::UnsafeCell;
+use nox_alloc::arena::Arena;
 
-use ash::vk;
-
-use nox_mem::{Allocator, vec_types::{FixedVec, GlobalVec, Vector}};
-
-use super::*;
-
-use crate::dev::format_location;
-
-use crate::gpu::{memory_binder::MemoryBinder, *};
-
-pub(crate) struct TransientCommandPool {
-    vk: Arc<Vulkan>,
-    handle: vk::CommandPool,
-    queue_family_index: u32,
-}
-
-impl TransientCommandPool {
-
-    #[inline(always)]
-    pub fn new(
-        vk: Arc<Vulkan>,
-        queue_family_index: u32,
-    ) -> Result<Self> {
-        let handle = helpers::create_command_pool(
-            vk.device(),
-            vk::CommandPoolCreateFlags::TRANSIENT,
-            queue_family_index,
-        ).context("failed to create command pool")?;
-        Ok(Self {
-            vk,
-            handle,
-            queue_family_index,
-        })
-    }
-
-    #[inline(always)]
-    pub fn device(&self) -> &ash::Device {
-        self.vk.device()
-    }
-
-    #[inline(always)]
-    pub fn handle(&self) -> vk::CommandPool {
-        self.handle
-    }
-
-    #[inline(always)]
-    pub fn queue_family_index(&self) -> u32 {
-        self.queue_family_index
-    }
-}
-
-impl Drop for TransientCommandPool {
-
-    fn drop(&mut self) {
-        unsafe {
-            self.vk.device().destroy_command_pool(
-                self.handle,
-                None
-            );
-        }
-    }
-}
+use crate::dev::{
+    error::*,
+    format_location,
+};
 
 #[derive(Clone, Copy)]
-pub(crate) struct SyncObjects {
+pub(crate) struct BaseSyncObjects {
     pub transfer_fence: vk::Fence,
     pub graphics_fence: vk::Fence,
     pub binary_semaphore: vk::Semaphore,
 }
 
-pub struct TransferCommandsStorage {
-    transfer_command_pool: Arc<TransientCommandPool>,
-    pub(crate) transfer_command_buffer: vk::CommandBuffer,
-    graphics_command_pool: Arc<TransientCommandPool>,
-    pub(crate) graphics_command_buffer: vk::CommandBuffer,
-    staging_buffers: GlobalVec<vk::Buffer>,
-    linear_device_alloc: LinearDeviceAllocLock,
-    sync_objects: Option<SyncObjects>,
-    signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
-    id: CommandRequestId,
+pub(crate) struct SyncObjects<'a> {
+    pub new: bool,
+    pub base: BaseSyncObjects,
+    pub signal_semaphores: &'a Vec32<(TimelineSemaphoreId, u64)>,
+}
+
+pub(crate) struct TransferCommandsStorage {
+    pub transfer_command_pool: Arc<TransientCommandPool>,
+    pub transfer_command_buffer: vk::CommandBuffer,
+    pub graphics_command_pool: Arc<TransientCommandPool>,
+    pub graphics_command_buffer: vk::CommandBuffer,
+    pub staging_buffers: Vec32<vk::Buffer>,
+    pub linear_binder: LinearBinderLock,
+    pub base_sync_objects: Option<BaseSyncObjects>,
+    pub signal_semaphores: Vec32<(TimelineSemaphoreId, u64)>,
+    pub id: CommandRequestId,
 }
 
 impl TransferCommandsStorage {
 
     #[inline(always)]
-    pub(crate) fn new(
+    pub fn new(
         transfer_command_pool: Arc<TransientCommandPool>,
         transfer_command_buffer: vk::CommandBuffer,
         graphics_command_pool: Arc<TransientCommandPool>,
         graphics_command_buffer: vk::CommandBuffer,
-        linear_device_alloc: LinearDeviceAllocLock,
+        linear_binder: LinearBinderLock,
         signal_semaphores: &[(TimelineSemaphoreId, u64)],
         id: CommandRequestId,
     ) -> Result<Self>
@@ -106,11 +59,56 @@ impl TransferCommandsStorage {
             transfer_command_buffer,
             graphics_command_pool,
             graphics_command_buffer,
-            staging_buffers: GlobalVec::new(),
-            linear_device_alloc,
-            sync_objects: None,
+            staging_buffers: Vec32::new(),
+            linear_binder,
+            base_sync_objects: None,
             signal_semaphores: signal_semaphores.into(),
             id,
+        })
+    }
+
+    #[inline(always)]
+    pub fn get_sync_objects(
+        &mut self,
+    ) -> Result<SyncObjects<'_>>
+    {
+        let mut new = false;
+        let vk = self.transfer_command_pool.vk.clone();
+        let &mut base = self.base_sync_objects.get_or_try_insert_with(|| {
+            let fence_info = vk::FenceCreateInfo {
+                s_type: vk::StructureType::FENCE_CREATE_INFO,
+                ..Default::default()
+            };
+            let semaphore_info = vk::SemaphoreCreateInfo {
+                s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
+                ..Default::default()
+            };
+            let transfer_fence = unsafe {
+                vk.device()
+                    .create_fence(&fence_info, None)
+                    .context_with(|| format_location!("failed to create fence at {loc}"))?
+            };
+            let graphics_fence = unsafe {
+                vk.device()
+                    .create_fence(&fence_info, None)
+                    .context_with(|| format_location!("failed to create fence at {loc}"))?
+            };
+            let binary_semaphore = unsafe {
+                vk.device()
+                    .create_semaphore(&semaphore_info, None)
+                    .context_with(|| format_location!("failed to create semaphore at {loc}"))?
+            };
+            new = true;
+            Ok(BaseSyncObjects {
+                transfer_fence,
+                graphics_fence,
+                binary_semaphore,
+            })
+        })?;
+        Ok(SyncObjects {
+            new,
+            base,
+            signal_semaphores: &self.signal_semaphores
         })
     }
 }
@@ -124,7 +122,7 @@ impl Drop for TransferCommandsStorage {
                 device.destroy_buffer(*buffer, None);
             }
             self.staging_buffers.clear();
-            if let Some(objects) = self.sync_objects.take() {
+            if let Some(objects) = self.base_sync_objects.take() {
                 device.destroy_fence(objects.transfer_fence, None);
                 device.destroy_fence(objects.graphics_fence, None);
                 device.destroy_semaphore(objects.binary_semaphore, None);
@@ -133,111 +131,48 @@ impl Drop for TransferCommandsStorage {
     }
 }
 
-pub struct TransferCommands<'a, 'b> {
+pub struct TransferCommands<'a> {
     storage: &'a mut TransferCommandsStorage,
-    context: UnsafeCell<&'a mut GpuContext<'b>>,
+    resources: Arc<Resources>,
 }
 
-impl<'a, 'b> Deref for TransferCommands<'a, 'b> {
-
-    type Target = TransferCommandsStorage;
-
-    fn deref(&self) -> &Self::Target {
-        self.storage
-    }
-}
-
-impl<'a, 'b> DerefMut for TransferCommands<'a, 'b> {
-
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.storage
-    }
-}
-
-impl<'a, 'b> TransferCommands<'a, 'b>
+impl<'a> TransferCommands<'a>
 {
 
     #[inline(always)]
     pub(crate) fn new(
         storage: &'a mut TransferCommandsStorage,
-        context: &'a mut GpuContext<'b>,
+        resources: Arc<Resources>,
     ) -> Self
     {
         Self {
             storage,
-            context: UnsafeCell::new(context),
+            resources,
         }
     }
 
     #[inline(always)]
     pub(crate) fn transfer_command_buffer(&self) -> vk::CommandBuffer {
-        self.transfer_command_buffer
+        self.storage.transfer_command_buffer
     }
 
     #[inline(always)]
     pub(crate) fn graphics_command_buffer(&self) -> vk::CommandBuffer {
-        self.graphics_command_buffer
+        self.storage.graphics_command_buffer
     }
 
     #[inline(always)]
-    pub(crate) fn id(&self) -> CommandRequestId {
-        self.id
-    }
-
-    #[inline(always)]
-    pub(crate) fn get_sync_objects(
-        &mut self
-    ) -> Result<(bool, SyncObjects, &[(TimelineSemaphoreId, u64)], &GpuContext<'a>)>
-    {
-        let mut new = false;
-        if self.sync_objects.is_none() {
-            let fence_info = vk::FenceCreateInfo {
-                s_type: vk::StructureType::FENCE_CREATE_INFO,
-                ..Default::default()
-            };
-            let semaphore_info = vk::SemaphoreCreateInfo {
-                s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
-                ..Default::default()
-            };
-            let transfer_fence = unsafe {
-                self.device()
-                    .create_fence(&fence_info, None)
-                    .context_with(|| format_location!("failed to create fence at {loc}"))?
-            };
-            let graphics_fence = unsafe {
-                self.device()
-                    .create_fence(&fence_info, None)
-                    .context_with(|| format_location!("failed to create fence at {loc}"))?
-            };
-            let binary_semaphore = unsafe {
-                self.device()
-                    .create_semaphore(&semaphore_info, None)
-                    .context_with(|| format_location!("failed to create semaphore at {loc}"))?
-            };
-            self.sync_objects = Some(SyncObjects {
-                transfer_fence,
-                graphics_fence,
-                binary_semaphore,
-            });
-            new = true;
-        }
-        Ok((new, self.sync_objects.unwrap(), &self.signal_semaphores, unsafe {
-            &*self.context.get()
-        }))
-    }
+    pub fn id(&self) -> CommandRequestId {
+        self.storage.id
+    } 
 
     pub(crate) fn device(&self) -> &ash::Device {
-        self.transfer_command_pool.device()
-    }
-
-    pub fn gpu(&mut self) -> &mut GpuContext<'b>
-    {
-        self.context.get_mut()
+        self.storage.transfer_command_pool.device()
     }
 
     #[inline(always)]
-    pub fn reserve_staging_buffers(&mut self, capacity: usize) {
-        self.staging_buffers.reserve(capacity);
+    pub fn reserve_staging_buffers(&mut self, capacity: u32) {
+        self.storage.staging_buffers.reserve(capacity);
     }
 
     #[inline(always)]
@@ -246,47 +181,53 @@ impl<'a, 'b> TransferCommands<'a, 'b>
         image_id: ImageId,
         clear_value: ClearColorValue,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
-        alloc: &impl Allocator
     ) -> Result<()> {
-        let image = self.context.get_mut().get_image(image_id)?;
+        let mut resources = self.resources.write();
+        let tmp_alloc = resources.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let image = resources.get_image_mut(image_id)?;
         if let Some(err) = image.validate_usage(vk::ImageUsageFlags::TRANSFER_DST) {
-            return Err(Error::new("image has incompatible usage", err))
+            return Err(Error::new(err, "image has incompatible usage"))
         }
         let state = image.state();
-        let transfer_queue_index = self.transfer_command_pool.queue_family_index();
+        let transfer_queue_index = self.storage.transfer_command_pool.queue_family_index();
         let mut dst_state = ImageState::new(
             vk::AccessFlags::TRANSFER_WRITE,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             transfer_queue_index,
             vk::PipelineStageFlags::TRANSFER,
         );
-        let command_buffer = self.transfer_command_buffer;
+        let command_buffer = self.storage.transfer_command_buffer;
         image.cmd_memory_barrier(
             dst_state,
             command_buffer,
             None,
             false,
-        ).context("image memory barrier failed")?;
-        let mut ranges = FixedVec::with_capacity(
-            subresources.map(|v| v.len()).unwrap_or(1),
-            alloc
-        ).context("vec error")?;
+        ).context_with(|| format_compact!(
+            "image {:?} memory barrier failed",
+            image_id,
+        ))?;
+        let ranges =
         if let Some(infos) = subresources {
-            for info in infos.iter().map(|v| *v) {
-                if let Some(err) = image.validate_range(ImageRangeInfo::new(info, None)) {
-                    return Err(Error::new("given subresource range is incompatible with image", err))
+            let mut ranges = FixedVec32::with_capacity(infos.len() as u32, &tmp_alloc)?;
+            for &info in infos.iter() {
+                if let Err(err) = image.properties.validate_range(ImageRangeInfo::new(info, None)) {
+                    return Err(Error::new(err, "given subresource range is incompatible with image"))
                 }
-                ranges.push(info.into()).unwrap();
+                ranges.push(info.into());
             }
+            ranges
         }
         else {
-            ranges.push(image.properties.whole_subresource().into()).unwrap();
-        }
+            let mut ranges = FixedVec32::with_capacity(1, &tmp_alloc)?;
+            ranges.push(image.properties.whole_subresource().into());
+            ranges
+        };
         unsafe {
-            self.device().cmd_clear_color_image(
+            self.storage.transfer_command_pool.device().cmd_clear_color_image(
                 command_buffer,
                 image.handle(),
-                image.layout(),
+                image.state().layout,
                 &clear_value.into(),
                 &ranges,
             );
@@ -305,47 +246,53 @@ impl<'a, 'b> TransferCommands<'a, 'b>
         depth: f32,
         stencil: u32,
         subresources: Option<&[ImageSubresourceRangeInfo]>,
-        alloc: &impl Allocator,
     ) -> Result<()>
     {
-        let image = self.context.get_mut().get_image(image_id)?;
+        let mut resources = self.resources.write();
+        let tmp_alloc = resources.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let image = resources.get_image_mut(image_id)?;
         if let Some(err) = image.validate_usage(vk::ImageUsageFlags::TRANSFER_DST) {
-            return Err(Error::new("image has incompatible usage", err))
+            return Err(Error::new(err, "image has incompatible usage"))
         }
         let state = image.state();
         let mut dst_state = ImageState::new(
             vk::AccessFlags::TRANSFER_WRITE,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            self.transfer_command_pool.queue_family_index(),
+            self.storage.transfer_command_pool.queue_family_index(),
             vk::PipelineStageFlags::TRANSFER,
         );
-        let command_buffer = self.transfer_command_buffer;
+        let command_buffer = self.storage.transfer_command_buffer;
         image.cmd_memory_barrier(
             dst_state,
             command_buffer,
             None,
             true,
-        ).context("image memory barrier failed")?;
-        let mut ranges = FixedVec::with_capacity(
-            subresources.map(|v| v.len()).unwrap_or(1),
-            alloc,
-        ).context("vec error")?;
+        ).context_with(|| format_compact!(
+            "image {:?} memory barrier failed",
+            image_id,
+        ))?;
+        let ranges =
         if let Some(infos) = subresources {
-            for info in infos.iter().map(|v| *v) {
-                if let Some(err) = image.validate_range(ImageRangeInfo::new(info, None)) {
-                    return Err(Error::new("given subresource range is incompatible with image", err))
+            let mut ranges = FixedVec32::with_capacity(infos.len() as u32, &tmp_alloc)?;
+            for &info in infos.iter() {
+                if let Err(err) = image.properties.validate_range(ImageRangeInfo::new(info, None)) {
+                    return Err(Error::new(err, "given subresource range is incompatible with image"))
                 }
-                ranges.push(info.into()).unwrap();
+                ranges.push(info.into());
             }
+            ranges
         }
         else {
-            ranges.push(image.properties.whole_subresource().into()).unwrap();
-        }
+            let mut ranges = FixedVec32::with_capacity(1, &tmp_alloc)?;
+            ranges.push(image.properties.whole_subresource().into());
+            ranges
+        };
         unsafe {
-            self.device().cmd_clear_depth_stencil_image(
+            self.storage.transfer_command_pool.device().cmd_clear_depth_stencil_image(
                 command_buffer,
                 image.handle(),
-                image.layout(),
+                image.state().layout,
                 &vk::ClearDepthStencilValue { depth, stencil },
                 &ranges,
             );
@@ -366,16 +313,14 @@ impl<'a, 'b> TransferCommands<'a, 'b>
         size: u64,
     ) -> Result<()>
     {
-        let context = unsafe { &mut *self.context.get() };
-        let mut default_binder = context
-            .default_memory_binder_mappable()
-            .clone();
-        let buffer = context.get_buffer_mut(buffer_id)?;
+        let mut resources = self.resources.write();
+        let mut default_binder = resources.default_memory_binder_mappable();
+        let buffer = resources.get_buffer_mut(buffer_id)?;
         if let Some(err) = buffer.validate_usage(vk::BufferUsageFlags::TRANSFER_DST) {
-            return Err(Error::new("buffer has incompatible usage", err))
+            return Err(Error::new(err, "buffer has incompatible usage"))
         }
         if let Some(err) = buffer.validate_range(offset, size) {
-            return Err(Error::new("given buffer size and offset are out of range of the buffer", err))
+            return Err(Error::new(err, "given buffer size and offset are out of range of the buffer"))
         }
         if (data.len() as u64) < size {
             return Err(Error::just_context(format_compact!(
@@ -383,10 +328,10 @@ impl<'a, 'b> TransferCommands<'a, 'b>
                 data.len()
             )))
         }
-        let command_buffer = self.transfer_command_buffer;
+        let command_buffer = self.storage.transfer_command_buffer;
         let mut dst_state = BufferState::new(
             vk::AccessFlags::TRANSFER_WRITE,
-            self.transfer_command_pool.queue_family_index(),
+            self.storage.transfer_command_pool.queue_family_index(),
             vk::PipelineStageFlags::TRANSFER,
         );
         let state = buffer.state();
@@ -406,15 +351,16 @@ impl<'a, 'b> TransferCommands<'a, 'b>
                 .create_buffer(&buffer_info, None)
                 .context("failed to create staging buffer")?
         };
-        let mut memory = self.linear_device_alloc
+        let mut memory = self.storage.linear_binder
             .bind_buffer_memory(
                 staging_buffer,
-                Some(&mut |buffer| {
-                    default_binder.bind_buffer_memory(buffer, None)
-                })
+                Some(&mut default_binder),
             ).context("failed to bind staging buffer memory")?;
-        let ptr = unsafe { memory.map_memory() }
+        let map = memory
+            .map_memory()
             .context("failed to map staging buffer memory")?;
+
+        map.copy_from_slice(data);
 
         let region = vk::BufferCopy {
             src_offset: 0,
@@ -423,7 +369,6 @@ impl<'a, 'b> TransferCommands<'a, 'b>
         };
 
         unsafe {
-            ptr::copy_nonoverlapping(data.as_ptr(), ptr.as_ptr(), data.len());
             self.device().cmd_copy_buffer(
                 command_buffer,
                 staging_buffer,
@@ -432,7 +377,7 @@ impl<'a, 'b> TransferCommands<'a, 'b>
             );
         };
 
-        self.staging_buffers.push(staging_buffer);
+        self.storage.staging_buffers.push(staging_buffer);
 
         if dst_state.queue_family_index != state.queue_family_index {
             dst_state.queue_family_index = state.queue_family_index;
@@ -452,9 +397,11 @@ impl<'a, 'b> TransferCommands<'a, 'b>
         dimensions: Option<Dimensions>,
     ) -> Result<()>
     {
-        let image = self.context.get_mut().get_image(image_id)?;
+        let mut resources = self.resources.write();
+        let mut default_binder = resources.default_memory_binder_mappable();
+        let image = resources.get_image_mut(image_id)?;
         if let Some(err) = image.validate_usage(vk::ImageUsageFlags::TRANSFER_DST) {
-            return Err(Error::new("image has incompatible usage", err))
+            return Err(Error::new(err, "image has incompatible usage"))
         }
         let properties = image.properties;
         let mut dst_state = ImageState::new(
@@ -464,7 +411,7 @@ impl<'a, 'b> TransferCommands<'a, 'b>
             vk::PipelineStageFlags::TRANSFER
         );
         let state = image.state();
-        let command_buffer = self.transfer_command_buffer;
+        let command_buffer = self.storage.transfer_command_buffer;
         image.cmd_memory_barrier(
             dst_state,
             command_buffer,
@@ -474,7 +421,7 @@ impl<'a, 'b> TransferCommands<'a, 'b>
         let mut subresource_layers = properties.all_layers(0);
         if let Some(layers) = layers {
             if let Some(err) = image.validate_layers(layers) {
-                return Err(Error::new("given subresource range is incompatible with image", err))
+                return Err(Error::new(err, "given subresource range is incompatible with image"))
             }
             subresource_layers = layers;
         }
@@ -484,7 +431,7 @@ impl<'a, 'b> TransferCommands<'a, 'b>
             if let Some(offset) = offset {
                 image_offset = offset;
             }
-            if image_offset.x < 0 || image_offset.x < 0 || image_offset.z < 0 {
+            if image_offset.x < 0 || image_offset.y < 0 || image_offset.z < 0 {
                 return Err(Error::just_context(ImageError::InvalidCopy {
                     image_dimensions: properties.dimensions,
                     copy_offset: image_offset,
@@ -514,13 +461,13 @@ impl<'a, 'b> TransferCommands<'a, 'b>
             self.device().create_buffer(&buffer_info, None)
                 .context("failed to create staging buffer")?
         };
-        let mut default_binder = self.context.get_mut().default_memory_binder_mappable();
-        let mut memory = self.linear_device_alloc
-            .bind_buffer_memory(staging_buffer, Some(&mut |buffer| {
-                default_binder.bind_buffer_memory(buffer, None)
-            })).context("failed to bind staging buffer memory")?;
-        let ptr = unsafe { memory.map_memory() }
+        let mut memory = self.storage.linear_binder
+            .bind_buffer_memory(staging_buffer, Some(&mut default_binder))
+            .context("failed to bind staging buffer memory")?;
+        let map = memory
+            .map_memory()
             .context("failed to map staging buffer memory")?;
+        map.copy_from_slice(data);
         let region = vk::BufferImageCopy {
             buffer_offset: 0,
             buffer_row_length: 0,
@@ -531,17 +478,16 @@ impl<'a, 'b> TransferCommands<'a, 'b>
         };
 
         unsafe {
-            ptr::copy_nonoverlapping(data.as_ptr(), ptr.as_ptr(), data.len());
             self.device().cmd_copy_buffer_to_image(
                 command_buffer,
                 staging_buffer,
                 image.handle(),
-                image.layout(),
+                image.state().layout,
                 &[region],
             );
         };
 
-        self.staging_buffers.push(staging_buffer);
+        self.storage.staging_buffers.push(staging_buffer);
 
         if dst_state.queue_family_index != state.queue_family_index {
             dst_state.queue_family_index = state.queue_family_index;
@@ -554,23 +500,24 @@ impl<'a, 'b> TransferCommands<'a, 'b>
     #[inline(always)]
     pub fn gen_mip_maps(
         &mut self,
-        image: ImageId,
+        image_id: ImageId,
         filter: Filter,
     ) -> Result<()>
     {
         let filter = filter.into();
-        let image = self.context.get_mut().get_image(image)?;
+        let mut resoures = self.resources.write();
+        let image = resoures.get_image_mut(image_id)?;
         if let Some(err) = image.validate_usage(
             vk::ImageUsageFlags::TRANSFER_SRC |
             vk::ImageUsageFlags::TRANSFER_DST)
         {
-            return Err(Error::new("image has incompatible usage", err))
+            return Err(Error::new(err, "image has incompatible usage"))
         }
         let handle = image.handle();
         let properties = image.properties;
         let mip_levels = properties.mip_levels;
         let mut mip_dimensions = properties.dimensions;
-        let graphics_queue_index = self.graphics_command_pool.queue_family_index();
+        let graphics_queue_index = self.storage.graphics_command_pool.queue_family_index();
         let dst_state = ImageState::new(
             vk::AccessFlags::TRANSFER_WRITE,
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -583,14 +530,17 @@ impl<'a, 'b> TransferCommands<'a, 'b>
             graphics_queue_index,
             vk::PipelineStageFlags::TRANSFER,
         );
-        let command_buffer = self.graphics_command_buffer;
-        let device = self.graphics_command_pool.device().clone();
+        let command_buffer = self.storage.graphics_command_buffer;
+        let device = self.storage.graphics_command_pool.device().clone();
         image.cmd_memory_barrier(
             dst_state,
             command_buffer,
             None,
             false,
-        ).context("image memory barrier failed")?;
+        ).context_with(|| format_compact!(
+            "image {:?} memory barrier failed",
+            image_id,
+        ))?;
         for i in 1..mip_levels {
             let mip_width = mip_dimensions.width as i32;
             let mip_height = mip_dimensions.height as i32;
@@ -655,7 +605,10 @@ impl<'a, 'b> TransferCommands<'a, 'b>
                 command_buffer,
                 Some(subresource),
                 false
-            ).context("image subresource memory barrier failed")?;
+            ).context_with(|| format_compact!(
+                "image {:?} subresource memory barrier failed",
+                image_id,
+            ))?;
             if mip_width > 1 {
                 mip_dimensions.width /= 2;
             }
@@ -672,7 +625,10 @@ impl<'a, 'b> TransferCommands<'a, 'b>
                 0, properties.array_layers
             ),
             false,
-        ).context("image subresource memory barrier failed")?;
+        ).context_with(|| format_compact!(
+            "image {:?} subresource memory barrier failed",
+            image_id,
+        ))?;
         Ok(())
     }
 }

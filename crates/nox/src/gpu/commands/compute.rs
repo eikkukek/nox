@@ -1,33 +1,35 @@
-use ash::vk;
+use nox_ash::vk;
 
-use nox_alloc::arena_alloc::*;
+use nox_alloc::arena::ArenaGuard;
 
-use crate::gpu::*;
+use crate::gpu::prelude::*;
 
 use crate::dev::error::{Result, Context};
 
-pub struct ComputeCommands<'a> {
+use nox_mem::vec::{Vec32, Vector};
+
+pub struct ComputeCommands<'a, 'b> {
     command_buffer: vk::CommandBuffer,
     context: GpuContext<'a>,
     current_pipeline: Option<ComputePipelineId>,
-    wait_semaphores: GlobalVec<(TimelineSemaphoreId, u64, PipelineStage)>,
-    signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
-    tmp_alloc: &'a ArenaAlloc,
+    wait_semaphores: Vec32<(TimelineSemaphoreId, u64, PipelineStage)>,
+    signal_semaphores: Vec32<(TimelineSemaphoreId, u64)>,
+    tmp_alloc: &'a ArenaGuard<'b>,
     queue_index: u32,
 }
 
 pub(crate) struct ComputeCommandsStorage {
-    pub wait_semaphores: GlobalVec<(TimelineSemaphoreId, u64, PipelineStage)>,
-    pub signal_semaphores: GlobalVec<(TimelineSemaphoreId, u64)>,
+    pub wait_semaphores: Vec32<(TimelineSemaphoreId, u64, PipelineStage)>,
+    pub signal_semaphores: Vec32<(TimelineSemaphoreId, u64)>,
 }
 
-impl<'a> ComputeCommands<'a> {
+impl<'a, 'b> ComputeCommands<'a, 'b> {
 
     #[inline(always)]
     pub(crate) fn new(
         command_buffer: vk::CommandBuffer,
         context: GpuContext<'a>,
-        tmp_alloc: &'a ArenaAlloc,
+        tmp_alloc: &'a ArenaGuard<'b>,
         queue_index: u32,
     ) -> Self
     {
@@ -52,7 +54,7 @@ impl<'a> ComputeCommands<'a> {
         id: ImageId,
     ) -> Result<()>
     {
-        let image = self.context.get_image(id)?;
+        let image = self.context.get_image_mut(id)?;
         image.cmd_memory_barrier(
             ImageState {
                 access_flags: vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
@@ -63,7 +65,10 @@ impl<'a> ComputeCommands<'a> {
             self.command_buffer,
             None,
             false,
-        ).context("image memory barrier failed")?;
+        ).context_with(|| format_compact!(
+            "image {:?} memory barrier failed",
+            id,
+        ))?;
         Ok(())
     }
 
@@ -73,7 +78,7 @@ impl<'a> ComputeCommands<'a> {
             self.context.vk().device().cmd_bind_pipeline(
                 self.command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                pipeline.handle,
+                pipeline.handle(),
             );
         }
         self.current_pipeline = Some(id);
@@ -88,59 +93,63 @@ impl<'a> ComputeCommands<'a> {
         where
             F: FnMut(u32) -> ShaderResourceId,
     {
-        let guard = ArenaGuard::new(self.tmp_alloc);
         let Some(pipeline) = self.current_pipeline else {
             return Err(Error::just_context(
                 "attempting to bind shader resources with no pipeline binded",
             ))
         };
         let pipeline = self.context.get_compute_pipeline(pipeline)?;
-        let (layout, sets) = self.context.pipeline_get_shader_resource(
-            pipeline.layout_id,
-            &guard,
+        let sets = self.context.get_shader_set_resources(
+            pipeline.shader_set(),
+            self.tmp_alloc,
             f,
         )?;
         unsafe {
             self.context.vk().device().cmd_bind_descriptor_sets(
                 self.command_buffer,
                 vk::PipelineBindPoint::COMPUTE,
-                layout,
+                pipeline.shader_set().pipeline_layout(),
                 0, &sets, &[]
             );
+        }
+        unsafe {
+            self.tmp_alloc.clear();
         }
         Ok(())
     }
 
     #[inline(always)]
-    pub fn push_constants<'b, F>(
+    pub fn push_constants<'c, F>(
         &self,
         f: F,
     ) -> Result<()>
         where
-            F: FnMut(PushConstant) -> &'a [u8]
+            F: FnMut(PushConstantRange) -> &'c [u8]
     {
-        let guard = ArenaGuard::new(self.tmp_alloc);
         let Some(pipeline) = self.current_pipeline else {
             return Err(Error::just_context(
                 "attempting to push constants with no pipeline binded",
             ))
         };
         let pipeline = self.context.get_compute_pipeline(pipeline)?;
-        let (layout, push_constants) = self.context.pipeline_get_push_constants(
-            pipeline.layout_id,
-            &guard,
+        let push_constants = self.context.get_shader_set_push_constant_ranges(
+            pipeline.shader_set(),
+            self.tmp_alloc,
             f,
         )?;
         for (pc, bytes) in &push_constants {
             unsafe {
                 self.context.vk().device().cmd_push_constants(
                     self.command_buffer, 
-                    layout,
+                    pipeline.shader_set().pipeline_layout(),
                     pc.stage.into(),
                     pc.offset,
                     bytes
                 );
             }
+        }
+        unsafe {
+            self.tmp_alloc.clear();
         }
         Ok(())
     }

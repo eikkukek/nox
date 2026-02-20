@@ -1,22 +1,20 @@
-pub trait Conditional {
+pub trait Conditional: 'static {
 
-    fn value() -> bool;
+    const VALUE: bool;
 }
 
-pub struct True {}
+#[derive(Clone, Copy)]
+pub struct True;
 
 impl Conditional for True {
 
-    fn value() -> bool {
-        true
-    }
+    const VALUE: bool = true;
 }
 
-pub struct False {}
+#[derive(Clone, Copy)]
+pub struct False;
 
 impl Conditional for False {
 
-    fn value() -> bool {
-        false
-    }
+    const VALUE: bool = false;
 }

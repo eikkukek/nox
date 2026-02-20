@@ -1,33 +1,36 @@
-#[macro_use]
+#![no_std]
 
-pub mod capacity_policy;
+#[cfg(feature = "std")]
+extern crate std;
+
+#[macro_use]
 pub mod conditional;
-pub mod vec_types;
-pub mod string_types;
+pub mod collections;
+pub mod num;
+pub mod slice;
+pub mod vec;
+pub mod string;
 pub mod slot_map;
 pub mod dynamic;
 pub mod cell;
+pub mod option;
+#[cfg(feature = "std")]
+pub mod iter;
+#[cfg(feature = "std")]
+pub mod bit;
+pub mod alloc;
+pub mod borrow;
 
 mod macros;
 mod as_raw;
-mod capacity_error;
-mod allocator;
-mod option_alloc;
-mod global_alloc;
 mod hashable;
-mod mad_cell;
 mod const_fn;
-mod slice_cast;
+mod plain;
 
-pub use capacity_error::CapacityError;
-pub use allocator::Allocator;
-pub use global_alloc::GlobalAlloc;
-pub use option_alloc::OptionAlloc;
-pub use capacity_policy::CapacityPolicy;
 pub use as_raw::AsRaw;
 pub use hashable::Hashable;
-pub use mad_cell::MadCell;
-pub use slice_cast::*;
 pub use const_fn::*;
+pub use plain::Plain;
+pub use nox_proc::Display;
 
 pub use paste::paste;

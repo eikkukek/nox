@@ -1,8 +1,19 @@
-use core::ptr::NonNull;
+mod default;
+mod linear;
 
-use ash::vk;
+use nox_ash::vk;
 
-use crate::dev::error::Error;
+use crate::sync::Arc;
+
+use crate::{
+    dev::error::Error,
+    gpu::Vulkan,
+};
+
+pub use linear::LinearBinder;
+pub(crate) use default::*;
+
+pub type Result<T> = core::result::Result<T, MemoryBinderError>;
 
 #[derive(Debug, Error)]
 pub enum MemoryBinderError {
@@ -28,22 +39,28 @@ pub trait DeviceMemory: 'static + Send + Sync {
 
     fn size(&self) -> vk::DeviceSize;
 
-    unsafe fn free_memory(&self);
-
-    unsafe fn map_memory(&mut self) -> Result<NonNull<u8>, MemoryBinderError>;
+    fn map_memory(&mut self) -> Result<&mut [u8]>;
 }
 
-pub trait MemoryBinder {
+pub unsafe trait MemoryBinder: 'static + Send + Sync {
 
-    fn bind_image_memory(
-        &mut self,
-        image: vk::Image,
-        fall_back: Option<&mut dyn FnMut(vk::Image) -> Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
-    ) -> Result<Box<dyn DeviceMemory>, MemoryBinderError>;
+    fn max_alloc_size(&self) -> vk::DeviceSize;
 
-    fn bind_buffer_memory(
+    fn is_mappable(&self) -> bool;
+
+    unsafe fn alloc(
         &mut self,
-        buffer: vk::Buffer,
-        fall_back: Option<&mut dyn FnMut(vk::Buffer) -> Result<Box<dyn DeviceMemory>, MemoryBinderError>>,
-    ) -> Result<Box<dyn DeviceMemory>, MemoryBinderError>;
+        memory_requirements: &vk::MemoryRequirements2,
+    ) -> Result<Box<dyn DeviceMemory>>;
+
+    unsafe fn release_resources(&mut self);
+}
+
+pub trait MemoryBinderAttributes {
+
+    type Binder: MemoryBinder;
+
+    const NAME: &str;
+
+    fn build(self, vulkan: Arc<Vulkan>) -> Result<Self::Binder>;
 }

@@ -1,8 +1,8 @@
-use nox_mem::slot_map::SlotMapError;
+use nox_mem::slot_map;
 
 #[derive(Debug)]
 pub enum LogError {
-    SlotMapError(SlotMapError),
+    SlotMapError(slot_map::IndexError),
     IoError(std::io::Error),
 }
 
@@ -26,9 +26,9 @@ impl core::error::Error for LogError {
     }
 }
 
-impl From<SlotMapError> for LogError {
+impl From<slot_map::IndexError> for LogError {
 
-    fn from(value: SlotMapError) -> Self {
+    fn from(value: slot_map::IndexError) -> Self {
         Self::SlotMapError(value)
     }
 }

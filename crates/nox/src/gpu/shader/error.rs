@@ -1,12 +1,10 @@
-use ash::vk;
-
 use nox_error::Error;
 
 #[derive(Error, Debug)]
 pub enum ShaderError {
 
-    #[display("{0}")]
-    VulkanError(#[from] #[source] vk::Result),
+    #[display("Source was None")]
+    NoSource,
 
     #[display("{0}")]
     Shaderc(#[from] shaderc::Error),
@@ -17,3 +15,5 @@ pub enum ShaderError {
     #[display("invalid spirv, spirv binary size must be a multiple of 4")]
     InvalidSpirv,
 }
+
+pub(super) type Result<T> = core::result::Result<T, ShaderError>;

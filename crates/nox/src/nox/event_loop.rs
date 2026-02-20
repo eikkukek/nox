@@ -1,8 +1,14 @@
-use core::ops::{Deref, DerefMut};
+use core::{
+    ops::Deref,
+    cell::UnsafeCell,
+};
 
-use rustc_hash::FxHashMap;
+use ahash::AHashMap;
 
-use nox_mem::vec_types::GlobalVec;
+use winit::event_loop::EventLoopProxy;
+
+use nox_mem::vec::StdVec;
+use nox_threads::executor::ThreadPool;
 
 use crate::dev::error::*;
 use crate::misc::ToRef;
@@ -12,54 +18,82 @@ use super::{
     *,
 };
 
-pub(crate) use winit::event_loop::EventLoop as WinitEventLoop;
+pub(super) type WinitEventLoop = winit::event_loop::EventLoop<RunEvent>;
 pub(crate) use winit::event_loop::ActiveEventLoop as WinitActiveEventLoop;
 
-pub struct EventLoop<'a> {
-    pub(super) windows: FxHashMap<WindowId, win::Window<'a>>,
-    pub(super) active_ids: GlobalVec<WindowId>,
+pub struct EventLoop {
+    pub(super) thread_pool: ThreadPool,
+    pub(super) windows: UnsafeCell<AHashMap<WindowId, Box<win::Window>>>,
+    pub(super) active_ids: UnsafeCell<StdVec<WindowId>>,
     pub(super) delta_counter: time::Instant,
     pub(super) delta_time: time::Duration,
+    pub(super) proxy: OnceLock<EventLoopProxy<super::RunEvent>>,
 }
 
-impl<'a> EventLoop<'a> {
+crate::assert_sync!(EventLoopProxy<super::RunEvent>);
+
+impl EventLoop {
 
     #[inline(always)]
-    pub(crate) fn new() -> Self {
-        Self {
-            windows: FxHashMap::default(),
+    pub(super) fn new() -> Result<Self> {
+        Ok(Self {
+            thread_pool: ThreadPool
+                ::new()
+                .context("failed to create thread pool")?,
+            windows: UnsafeCell::new(AHashMap::default()),
             active_ids: Default::default(),
             delta_counter: time::Instant::now(),
             delta_time: Default::default(),
-        }
+            proxy: OnceLock::new(),
+        })
+    }
+
+    pub(super) fn init(&self) -> WinitEventLoop {
+        let event_loop = WinitEventLoop
+            ::with_user_event()
+            .build().expect("failed to create winit event loop");
+        event_loop.set_control_flow(ControlFlow::Poll);
+        self.proxy.get_or_init(|| event_loop.create_proxy());
+        event_loop
+    }
+
+    pub(super) fn tick(&self) {
+        self.proxy
+            .get()
+            .unwrap()
+            .send_event(RunEvent::Tick)
+            .ok();
     }
 
     #[inline(always)]
-    pub(crate) fn window_iter_mut(&mut self) -> impl Iterator<Item = (&WindowId, &mut win::Window<'a>)> {
-        self.windows
+    pub(crate) fn window_iter(&self) -> impl Iterator<Item = (WindowId, &mut win::Window)> {
+        unsafe { &mut *self.windows.get() }
             .iter_mut()
+            .map(|(k, v)| (*k, v.as_mut()))
     }
 
     #[inline(always)]
-    pub fn is_window_active(&self, id: impl ToRef<WindowId>) -> bool {
-        self.windows.contains_key(id.to_ref())
+    pub fn is_window_valid<T>(&self, id: T) -> bool
+        where 
+            T: ToRef<WindowId>,
+    {
+        unsafe { &*self.active_ids.get() }.contains(id.to_ref())
     }
 
     #[inline(always)]
-    pub fn window(&self, id: WindowId) -> Option<win::WindowRef<'_, 'a>> {
-        Some(win::WindowRef {
-            window: self.windows.get(&id)?,
+    pub fn get_window<T>(&self, id: T) -> Option<win::WindowContext<'_>>
+        where
+            T: ToRef<WindowId>,
+    {
+        Some(win::WindowContext {
+            window: unsafe {
+                (&mut *self.windows.get())
+                    .get_mut(id.to_ref())?
+                    .as_mut()
+            },
             delta_time: self.delta_time,
         })
     }
-
-    #[inline(always)]
-    pub fn window_mut(&mut self, id: WindowId) -> Option<win::WindowRefMut<'_, 'a>> {
-        Some(win::WindowRefMut {
-            window: self.windows.get_mut(&id)?,
-            delta_time: self.delta_time,
-        })
-    } 
 
     #[inline(always)]
     pub fn delta_time(&self) -> time::Duration {
@@ -72,21 +106,30 @@ impl<'a> EventLoop<'a> {
     }
 
     #[inline(always)]
-    pub fn active_window_ids(&self) -> &[WindowId] {
-        &self.active_ids
+    pub fn active_window_ids(&self) -> Box<[WindowId]> {
+        Box::from(unsafe {
+            &*self.active_ids.get()
+        }.as_slice())
+    }
+
+    #[inline(always)]
+    pub fn no_active_windows(&self) -> bool {
+        unsafe { &*self.active_ids.get() }.is_empty()
     }
 
     #[inline(always)]
     pub(super) fn update(&mut self) {
-        let count = self.windows.len();
-        self.windows.retain(|_, win| {
+        let windows = self.windows.get_mut();
+        let count = windows.len();
+        windows.retain(|_, win| {
             win.reset_input();
             !win.should_close()
         });
-        if count != self.windows.len() {
-            self.active_ids.clear();
-            for (id, _) in &self.windows {
-                self.active_ids.push(*id);
+        if count != windows.len() {
+            let active_ids = self.active_ids.get_mut();
+            active_ids.clear();
+            for id in windows.keys() {
+                active_ids.push(*id);
             }
         }
     }
@@ -94,39 +137,36 @@ impl<'a> EventLoop<'a> {
     #[inline(always)]
     pub(super) fn clean_up(&mut self) {
         log::info!("cleaning up event loop");
-        self.active_ids.clear();
-        self.windows.clear();
+        self.active_ids.get_mut().clear();
+        self.windows.get_mut().clear();
     }
 }
 
-pub struct ActiveEventLoop<'a, 'b> {
-    event_loop: &'a mut EventLoop<'b>,
+pub struct ActiveEventLoop<'a> {
+    event_loop: &'a EventLoop,
     winit_event_loop: &'a WinitActiveEventLoop,
-    memory: &'b Memory,
 }
 
-impl<'a, 'b> ActiveEventLoop<'a, 'b> {
+impl<'a> ActiveEventLoop<'a> {
 
     pub(super) fn new(
-        event_loop: &'a mut EventLoop<'b>,
+        event_loop: &'a EventLoop,
         winit_event_loop: &'a WinitActiveEventLoop,
-        memory: &'b Memory,
     ) -> Self {
         Self {
             event_loop,
             winit_event_loop,
-            memory,
         }
     }
 
     pub fn create_window(
-        &mut self,
+        &self,
         gpu: &mut gpu::GpuContext,
         attributes: win::WindowAttributes,
     ) -> Result<win::WindowId>
     {
         let is_transparent = attributes.transparent();
-        let attr = attributes.to_winit_attr();
+        let attr = attributes.into_winit_attr();
         let window = self.winit_event_loop
             .create_window(attr)
             .context("failed to create window")?;
@@ -134,16 +174,29 @@ impl<'a, 'b> ActiveEventLoop<'a, 'b> {
         let window = win::Window::new(
             gpu, window,
             is_transparent,
-            self.memory.gpu().host_allocators()
         )?;
-        self.windows
+        let windows = unsafe { &mut *self.windows.get() };
+        windows
             .entry(id)
-            .or_insert(window);
-        self.active_ids.clear();
-        for (id, _) in &self.event_loop.windows {
-            self.event_loop.active_ids.push(*id);
+            .or_insert(Box::new(window));
+        let active_ids = unsafe {
+            &mut *self.active_ids.get()
+        };
+        active_ids.clear();
+        for id in windows.keys() {
+            active_ids.push(*id);
         }
         Ok(id)
+    }
+
+    #[inline(always)]
+    pub fn thread_pool(&self) -> ThreadPool {
+        self.thread_pool.clone()
+    }
+
+    #[inline(always)]
+    pub(crate) fn winit(&self) -> &WinitActiveEventLoop {
+        self.winit_event_loop
     }
 
     #[inline(always)]
@@ -152,18 +205,11 @@ impl<'a, 'b> ActiveEventLoop<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Deref for ActiveEventLoop<'a, 'b> {
+impl<'a> Deref for ActiveEventLoop<'a> {
 
-    type Target = EventLoop<'b>;
+    type Target = EventLoop;
 
     fn deref(&self) -> &Self::Target {
-        self.event_loop
-    }
-}
-
-impl<'a, 'b> DerefMut for ActiveEventLoop<'a, 'b> {
-
-    fn deref_mut(&mut self) -> &mut Self::Target {
         self.event_loop
     }
 }

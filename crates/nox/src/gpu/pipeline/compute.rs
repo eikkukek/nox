@@ -1,46 +1,84 @@
-use ash::vk;
+use std::sync::Arc;
 
-use crate::gpu::{resources::*, ShaderStage};
-use crate::dev::error::{Error, Result};
+use nox_ash::vk;
 
-pub struct ComputePipelineInfo {
-    pub(crate) layout_id: PipelineLayoutId,
+use compact_str::format_compact;
+
+use crate::gpu::prelude::*;
+use crate::dev::error::{Error, Result, Context};
+
+#[derive(Clone)]
+pub struct ComputePipeline {
+    handle: PipelineHandle,
 }
 
-impl ComputePipelineInfo {
+impl ComputePipeline { 
 
-    pub fn new(layout_id: PipelineLayoutId) -> Self {
-        Self {
-            layout_id,
+    #[inline(always)]
+    pub fn default_attributes(shader_set_id: ShaderSetId) -> ComputePipelineAttributes {
+        ComputePipelineAttributes { shader_set_id }
+    }
+
+    #[inline(always)]
+    pub(crate) unsafe fn new(
+        vk: Arc<Vulkan>,
+        handle: vk::Pipeline,
+        shader_set: Arc<ShaderSetInner>,
+    ) -> Self {
+        unsafe {
+            Self {
+                handle: PipelineHandle::new(vk, handle, shader_set),
+            }
         }
     }
+
+    #[inline(always)]
+    pub(crate) fn handle(&self) -> &PipelineHandle {
+        &self.handle
+    }
+
+    #[inline(always)]
+    pub(crate) fn shader_set(&self) -> &Arc<ShaderSetInner> {
+        &self.handle.shader_set
+    }
+}
+
+pub struct ComputePipelineAttributes {
+    pub(crate) shader_set_id: ShaderSetId,
+}
+
+impl ComputePipelineAttributes {
 
     pub(crate) fn as_create_info(
         &self,
         resources: &Resources,
-    ) -> Result<vk::ComputePipelineCreateInfo<'_>>
+    ) -> Result<(vk::ComputePipelineCreateInfo<'_>, Arc<ShaderSetInner>)>
     {
-        let layout = resources.get_pipeline_layout(self.layout_id)?;
-        let shader = layout
-            .shader_ids()
+        let shader_set = resources
+            .shader_cache()
+            .get_shader_set(self.shader_set_id)
+            .context_with(|| format_compact!(
+                "failed to get shader set {:?}",
+                self.shader_set_id,
+            ))?;
+        let (_, entry, module) = shader_set.shaders()
             .iter()
-            .map(|v| resources.get_shader(*v).unwrap())
-            .find(|v| v.stage() == ShaderStage::Compute)
-            .ok_or(Error::just_context("couldn't find compute shader"))?;
-        const NAME: &core::ffi::CStr = unsafe {
-            core::ffi::CStr::from_bytes_with_nul_unchecked(b"main\0")
-        };
-        Ok(vk::ComputePipelineCreateInfo {
+            .find(|(s, _, _)| s.stage() == ShaderStage::Compute)
+            .ok_or_else(|| Error::just_context(format_compact!(
+                "couldn't find compute shader from shader set {:?}",
+                self.shader_set_id,
+            )))?;
+        Ok((vk::ComputePipelineCreateInfo {
             s_type: vk::StructureType::COMPUTE_PIPELINE_CREATE_INFO,
             stage: vk::PipelineShaderStageCreateInfo {
                 s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 stage: vk::ShaderStageFlags::COMPUTE,
-                module: *shader.shader_module(),
-                p_name: NAME.as_ptr(),
+                module: *module,
+                p_name: entry.as_ptr(),
                 ..Default::default()
             },
-            layout: layout.handle(),
+            layout: shader_set.pipeline_layout(), 
             ..Default::default()
-        })
+        }, shader_set))
     }
 }

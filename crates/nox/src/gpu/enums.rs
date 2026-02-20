@@ -1,4 +1,4 @@
-use ash::vk;
+use nox_ash::vk;
 use nox_mem::AsRaw;
 
 use nox_error::Display;

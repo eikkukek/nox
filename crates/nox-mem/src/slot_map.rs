@@ -5,9 +5,10 @@
 //!
 //! This module provides:
 //!
-//! [`DynSlotMap<'alloc, T, Alloc: Allocator>`]: generic, allocator-aware base
-//! [`FixedSlotMap<'alloc, T, Alloc: Allocator>`]: [`DynSlotMap`] with a fixed-capacity
-//! [`GlobalSlotMap<'alloc, T, Alloc: Allocator>`]: [`DynSlotMap`] using [`GlobalAlloc`]
+//! [`DynSlotMap`]: a slot map using a local allocator
+//! [`FixedSlotMap`]: [`DynSlotMap`] with a fixed-capacity
+//! and if the `std` feature is enabled
+//! [`SlotMap`]: a slot map using [`StdAlloc`]
 //!
 //! # Features
 //!
@@ -19,9 +20,9 @@
 //! # Examples
 //!
 //! ```rust
-//! use nox_mem::slot_map::GlobalSlotMap;
+//! use nox_mem::slot_map::SlotMap;
 //!
-//! let mut map = GlobalSlotMap::new();
+//! let mut map = SlotMap::new();
 //! let key1 = map.insert("hello");
 //! let key2 = map.insert("world");
 //! assert_eq!(map.get(key1).ok(), Some(&"hello"));
@@ -33,111 +34,143 @@
 use core::{
     marker::PhantomData,
     mem::MaybeUninit,
-    num::NonZeroU32,
-    ops::{Index, IndexMut},
+    ops::{Index, IndexMut, Deref},
+    fmt::{self, Formatter},
 };
+
+use nox_proc::{Error, Display};
 
 use crate::{
-    capacity_policy::{self, CapacityPolicy},
     conditional::{Conditional, False, True},
-    global_alloc::{GlobalAlloc},
-    vec_types::Pointer,
-    Allocator,
-    CapacityError,
-    OptionAlloc,
-    size_of,
+    alloc::{LocalAlloc, LocalAllocExt, LocalAllocWrap},
+    vec::Pointer,
+    collections::{TryReserveError, ReservePolicy},
     impl_traits,
+    num::{UInteger, NonZeroInteger},
 };
 
-#[derive(Clone, Copy, Debug)]
-pub enum SlotMapError {
-    StaleIndex { index: u32, slot_version: u32, index_version: u32 },
-    CapacityError(CapacityError),
+#[derive(Debug, Error)]
+pub enum IndexError<IndexType: UInteger = u32> {
+    #[display("stale slot map index {index}, slot version was {slot_version}")]
+    StaleIndex { index: SlotIndex<(), IndexType>, slot_version: IndexType, },
+    #[display("index {index} was out of bounds with capacity {capacity}")]
+    IndexOutOfBounds { index: SlotIndex<(), IndexType>, capacity: u32, },
 }
 
-impl From<CapacityError> for SlotMapError {
+use IndexError::{StaleIndex, IndexOutOfBounds};
 
-    fn from(value: CapacityError) -> Self {
-        Self::CapacityError(value)
-    }
-}
+pub struct DynPolicy;
 
-impl core::fmt::Display for SlotMapError {
-
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            SlotMapError::StaleIndex { index, slot_version, index_version } => {
-                write!(f, "stale slot map index at {}, slot version is {} while index version is {}", index, slot_version, index_version)
-            },
-            SlotMapError::CapacityError(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl core::error::Error for SlotMapError {
-
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::CapacityError(err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
-type Result<T> = core::result::Result<T, SlotMapError>;
-
-use SlotMapError::StaleIndex;
-use CapacityError::{FixedCapacity, AllocFailed, MaxCapacityExceeded, ZeroSizedElement};
-
-pub struct Dyn {}
-
-impl CapacityPolicy for Dyn {
-
-    fn power_of_two() -> bool {
-        true
-    }
+unsafe impl ReservePolicy<u32> for DynPolicy {
 
     fn can_grow() -> bool {
         true
     }
 
-    fn grow(current: usize, required: usize) -> core::result::Result<usize, CapacityError> {
+    fn grow(current: u32, required: usize) -> core::result::Result<u32, TryReserveError<()>> {
         let power_of_2 = required.next_power_of_two().max(2);
-        if power_of_2 <= current || power_of_2 > u32::MAX as usize {
-            Err(MaxCapacityExceeded { max_capacity: u32::MAX as usize })
+        if power_of_2 > u32::MAX as usize {
+            Err(TryReserveError::max_capacity_exceeded(u32::MAX as usize, power_of_2, ()))
+        } else if power_of_2 <= current as usize {
+            Ok(current)
+        } else { Ok(power_of_2.max(2) as u32) }
+    }
+
+    fn grow_infallible(current: u32, required: usize) -> u32 {
+        let power_of_2 = required.next_power_of_two().max(2);
+        if power_of_2 <= current as usize {
+            current
+        } else if power_of_2 > u32::MAX as usize {
+            panic!("maximum capacity {} reached", u32::MAX)
+        } else {
+            power_of_2.max(2) as u32
         }
-        else { Ok(power_of_2.max(2)) }
     }
 }
 
-pub type Fixed = capacity_policy::Fixed;
+pub type FixedPolicy = crate::vec::FixedPolicy32;
 
-struct Slot<T> {
+struct Slot<T, IndexType: UInteger> {
     value: MaybeUninit<T>,
-    version: u32,
+    version: IndexType::NonZero,
     next_free_index: Option<Option<u32>>,
 }
 
-impl<T> Slot<T> {
+impl<T: Clone, IndexType: UInteger> Clone for Slot<T, IndexType> {
+
+    fn clone(&self) -> Self {
+        Self {
+            value: if self.next_free_index.is_none() {
+                unsafe {
+                    MaybeUninit::new(self.value.assume_init_ref().clone())
+                }
+            } else {
+                MaybeUninit::uninit()
+            },
+            version: self.version,
+            next_free_index: self.next_free_index,
+        }
+    }
+}
+
+impl<T, IndexType: UInteger> Slot<T, IndexType> {
 
     fn empty(next_free_index: Option<u32>) -> Self {
         Self {
             value: MaybeUninit::uninit(),
-            version: 1,
+            version: unsafe {
+                IndexType::NonZero::new_unchecked(IndexType::ONE)
+            },
             next_free_index: Some(next_free_index),
         }
     }
 }
 
-pub struct SlotIndex<T> {
-    version: NonZeroU32,
+#[must_use]
+#[derive(Display)] #[display("(version {version}, index: {index})")]
+pub struct SlotIndex<T, IndexType = u32>
+    where
+        IndexType: UInteger,
+{
+    version: IndexType::NonZero,
     index: u32,
     _marker: PhantomData<T>,
 }
 
-impl<T> core::fmt::Debug for SlotIndex<T> {
+impl<T, IndexType> SlotIndex<T, IndexType>
+    where
+        IndexType: UInteger
+{
 
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    /// Gets the index part of [`SlotIndex`].
+    #[inline(always)]
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+    
+    /// Gets the version part of [`SlotIndex`].
+    #[inline(always)]
+    pub fn version(&self) -> IndexType {
+        self.version.get()
+    }
+   
+    #[inline(always)]
+    fn unit_index(self) -> SlotIndex<(), IndexType> {
+        SlotIndex {
+            version: self.version,
+            index: self.index,
+            _marker: PhantomData,
+        }
+    }
+}
+
+unsafe impl<T, IndexType: UInteger> Send for SlotIndex<T, IndexType> {}
+unsafe impl<T, IndexType: UInteger> Sync for SlotIndex<T, IndexType> {}
+
+impl<T, IndexType: UInteger> fmt::Debug for SlotIndex<T, IndexType> {
+
+    #[inline(always)]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         "SlotIndex { version: ".fmt(f)?;
         self.version.fmt(f)?;
         ", index: ".fmt(f)?;
@@ -146,31 +179,32 @@ impl<T> core::fmt::Debug for SlotIndex<T> {
     }
 }
 
-impl<T> Default for SlotIndex<T> {
+impl<T, IndexType: UInteger> Default for SlotIndex<T, IndexType>
+{
 
+    #[inline(always)]
     fn default() -> Self {
         Self {
-            version: NonZeroU32::new(1).unwrap(),
+            version: unsafe {
+                IndexType::NonZero::new_unchecked(IndexType::ONE)
+            },
             index: u32::MAX,
             _marker: PhantomData,
         }
     }
 }
 
-impl<T> Clone for SlotIndex<T> {
+impl<T, IndexType: UInteger> Clone for SlotIndex<T, IndexType> {
 
+    #[inline(always)]
     fn clone(&self) -> Self {
-        Self {
-            version: self.version,
-            index: self.index,
-            _marker: self._marker,
-        }
+        *self
     }
 }
 
-impl<T> Copy for SlotIndex<T> {}
+impl<T, IndexType: UInteger> Copy for SlotIndex<T, IndexType> {}
 
-impl<T> PartialEq for SlotIndex<T> {
+impl<T, IndexType: UInteger> PartialEq for SlotIndex<T, IndexType> {
 
     fn eq(&self, other: &Self) -> bool {
         self.version == other.version &&
@@ -178,29 +212,29 @@ impl<T> PartialEq for SlotIndex<T> {
     }
 }
 
-impl<T> Eq for SlotIndex<T> {}
+impl<T, IndexType: UInteger> Eq for SlotIndex<T, IndexType> {}
 
-impl<T> core::hash::Hash for SlotIndex<T> {
+impl<T, IndexType: UInteger> core::hash::Hash for SlotIndex<T, IndexType> {
 
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.version.hash(state);
         self.index.hash(state);
     }
 }
 
-pub struct AllocSlotMap<T, Alloc, CapacityPol, IsGlobal>
+pub struct AllocSlotMap<T, Alloc, ReservePol, IsStd, IndexType = u32>
     where
-        T: Sized,
-        Alloc: Allocator,
-        CapacityPol: CapacityPolicy,
-        IsGlobal: Conditional,
+        Alloc: LocalAlloc,
+        ReservePol: ReservePolicy<u32>,
+        IsStd: Conditional,
+        IndexType: UInteger,
 {
-    data: Pointer<Slot<T>>,
+    data: Pointer<Slot<T, IndexType>, u32>,
     capacity: u32,
     len: u32,
     free_head: Option<u32>,
     alloc: Alloc,
-    _marker: PhantomData<(IsGlobal, CapacityPol)>,
+    _marker: PhantomData<(IsStd, ReservePol)>,
 }
 
 /// A dynamic slot map storing values of type `T`, backed by allocator 'Alloc'.
@@ -208,12 +242,12 @@ pub struct AllocSlotMap<T, Alloc, CapacityPol, IsGlobal>
 /// Provides stable, opaque handles for accessing values. Removal leaves versioned
 /// empty slots and insertions reuse free slots.
 ///
-/// See also [`GlobalSlotMap`] for a version using [`GlobalAlloc`].
+/// See also [`SlotMap`] for a version using [`GlobalAlloc`].
 ///
 /// # Type parameters
 ///
 /// - `T`: value type
-/// - `Alloc`: allocator implementing [`Allocator`]
+/// - `Alloc`: allocator implementing [`LocalAlloc`]
 ///
 /// # Errors
 ///
@@ -230,11 +264,11 @@ pub struct AllocSlotMap<T, Alloc, CapacityPol, IsGlobal>
 /// # Example
 ///
 /// ```rust
-/// let allocator = MyAllocator::default();
+/// let allocator = MyLocalAlloc::default();
 /// let mut map = DynSlotMap::new(&allocator);
 /// let key = map.insert("value").unwrap();
 /// map.remove(key);
-pub type DynSlotMap<'alloc, T, Alloc> = AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Dyn, False>;
+pub type DynSlotMap<T, Alloc, Wrap> = AllocSlotMap<T, LocalAllocWrap<Alloc, Wrap>, DynPolicy, False>;
 
 /// A fixed-capacity slot map storing values of type `T`, backed by allocator `Alloc`.
 ///
@@ -246,7 +280,7 @@ pub type DynSlotMap<'alloc, T, Alloc> = AllocSlotMap<T, OptionAlloc<'alloc, Allo
 /// # Type parameters
 ///
 /// - `T`: value type
-/// - `Alloc`: allocator implementing [`Allocator`]
+/// - `Alloc`: allocator implementing [`LocalAlloc`]
 ///
 /// # Errors
 ///
@@ -264,69 +298,45 @@ pub type DynSlotMap<'alloc, T, Alloc> = AllocSlotMap<T, OptionAlloc<'alloc, Allo
 /// # Example
 ///
 /// ```rust
-/// let allocator = MyAllocator::default();
-/// let mut map = FixedSlotMap::new(8, &allocator).unwrap();
+/// let allocator = MyLocalAlloc::default();
+/// let mut map = FixedSlotMap::with_capacity(8, &allocator).unwrap();
 /// let key = map.insert("value").unwrap();
 /// map.remove(key);
 /// ```
-pub type FixedSlotMap<'alloc, T, Alloc> = AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Fixed, False>;
+pub type FixedSlotMap<T, Alloc, Wrap> = AllocSlotMap<T, LocalAllocWrap<Alloc, Wrap>, FixedPolicy, False>;
 
-/// A dynamic slot map storing values of type `T`, backed by [`GlobalAlloc`].
-///
-/// # Type parameters
-///
-/// - `T`: value type
-///
-/// # Example
-///
-/// ```rust
-/// use nox_mem::slot_map::GlobalSlotMap;
-///
-/// let mut map = GlobalSlotMap::new();
-/// let key1 = map.insert("hello");
-/// let key2 = map.insert("world");
-/// assert_eq!(map.get(key1).ok(), Some(&"hello"));
-/// assert_eq!(map.remove(key1).ok(), Some("hello"));
-/// assert_eq!(map.get(key1).ok(), None);
-/// assert_eq!(map.get(key2).ok(), Some(&"world"));
-/// ```
-pub type GlobalSlotMap<T> = AllocSlotMap<T, GlobalAlloc, Dyn, True>;
-
-impl<'alloc, T, Alloc> AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Dyn, False> 
+impl<T, Alloc, Wrap, ReservePol, IndexType>
+    AllocSlotMap<T, LocalAllocWrap<Alloc, Wrap>, ReservePol, False, IndexType>
     where
-        T: Sized,
-        Alloc: Allocator,
+        Alloc: LocalAlloc,
+        Wrap: Deref<Target = Alloc>,
+        IndexType: UInteger,
+        ReservePol: ReservePolicy<u32>,
 {
 
     #[inline(always)]
-    pub fn new(alloc: &'alloc Alloc) -> Self {
+    pub fn new(alloc: Wrap) -> Self {
         Self {
             data: Pointer::dangling(),
             capacity: 0,
             len: 0,
             free_head: None,
-            alloc: OptionAlloc::Some(alloc),
+            alloc: LocalAllocWrap::new(alloc),
             _marker: PhantomData,
         }
     }
 
-    pub fn with_capacity(capacity: u32, alloc: &'alloc Alloc) -> Result<Self> {
+    pub fn with_capacity(capacity: u32, alloc: Wrap) -> Result<Self, TryReserveError<()>> {
         if capacity == 0 {
             return Ok(Self::new(alloc))
         }
-        let data: Pointer<Slot<T>> = unsafe { alloc
+        let capacity = ReservePol::grow(capacity, capacity as usize)?;
+        let data: Pointer<Slot<T, IndexType>, u32> = unsafe { alloc
             .allocate_uninit(capacity as usize)
-            .ok_or(
-                if size_of!(T) == 0 {
-                    ZeroSizedElement
-                }
-                else {
-                    AllocFailed { new_capacity: capacity as usize }
-                }
-            )?
+            .map_err(|err| TryReserveError::alloc_error(err, ()))?
             .into()
         };
-        for i in 0..capacity - 1 {
+        for i in 0..capacity  - 1 {
             unsafe {
                 data.add(i as usize).write(Slot::empty(Some(i + 1)));
             }
@@ -337,138 +347,23 @@ impl<'alloc, T, Alloc> AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Dyn, False>
             capacity,
             len: 0,
             free_head: Some(0),
-            alloc: OptionAlloc::Some(alloc),
+            alloc: LocalAllocWrap::new(alloc),
             _marker: PhantomData,
         })
     }
-}
-
-impl<'alloc, T, Alloc> AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, Fixed, False> 
-    where
-        T: Sized,
-        Alloc: Allocator,
-{
 
     #[inline(always)]
-    pub fn new(capacity: u32, alloc: &'alloc Alloc) -> Result<Self> {
-        if capacity == 0 {
-            return Err(FixedCapacity { capacity: capacity as usize }.into())
-        }
-        let data: Pointer<Slot<T>> = unsafe { alloc
-            .allocate_uninit(capacity as usize)
-            .ok_or(
-                if size_of!(T) == 0 {
-                    ZeroSizedElement
-                }
-                else {
-                    AllocFailed { new_capacity: capacity as usize }
-                }
-            )?
-            .into()
-        };
-        for i in 0..capacity - 1 {
-            unsafe {
-                data.add(i as usize).write(Slot::empty(Some(i + 1)));
-            }
-        }
-        Ok(Self {
-            data: Pointer::dangling(),
-            capacity: 0,
-            len: 0,
-            free_head: None,
-            alloc: OptionAlloc::Some(alloc),
-            _marker: PhantomData,
-        })
-    }
-}
-
-
-impl<'alloc, T, Alloc, CapacityPol> AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, CapacityPol, False>
-    where
-        T: Sized,
-        Alloc: Allocator,
-        CapacityPol: CapacityPolicy,
-{
-
-    #[inline(always)]
-    pub fn with_no_alloc() -> Self {
-        Self {
-            data: Pointer::dangling(),
-            capacity: 0,
-            len: 0,
-            free_head: None,
-            alloc: OptionAlloc::None,
-            _marker: PhantomData,
-        }
-    }
-
-    #[inline(always)]
-    pub fn insert(&mut self, value: T) -> Result<SlotIndex<T>> {
+    pub fn insert(&mut self, value: T) -> Result<SlotIndex<T, IndexType>, TryReserveError<T>> {
         self.insert_internal(value)
     }
 }
 
-impl<T> GlobalSlotMap<T>
+impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, IsStd, IndexType>
     where
-        T: Sized,
-{
-
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self {
-            data: Pointer::dangling(),
-            capacity: 0,
-            len: 0,
-            free_head: None,
-            alloc: GlobalAlloc,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn with_capacity(capacity: u32) -> Self {
-        if capacity == 0 {
-            return Self::new()
-        }
-        let data: Pointer<Slot<T>> = unsafe { GlobalAlloc
-            .allocate_uninit(capacity as usize)
-            .ok_or(
-                if size_of!(T) == 0 {
-                    ZeroSizedElement
-                }
-                else {
-                    AllocFailed { new_capacity: capacity as usize }
-                }
-            ).unwrap()
-            .into()
-        };
-        for i in 0..capacity - 1 {
-            unsafe {
-                data.add(i as usize).write(Slot::empty(Some(i + 1)));
-            }
-        }
-        unsafe { data.add(capacity as usize - 1).write(Slot::empty(None)) };
-        Self {
-            data,
-            capacity,
-            len: 0,
-            free_head: Some(0),
-            alloc: GlobalAlloc,
-            _marker: PhantomData,
-        }
-    }
-
-    #[inline(always)]
-    pub fn insert(&mut self, value: T) -> SlotIndex<T> {
-        self.insert_internal(value).unwrap()
-    }
-}
-
-impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlobal>
-    where
-        T: Sized,
-        Alloc: Allocator,
-        CapacityPol: CapacityPolicy,
-        IsGlobal: Conditional
+        Alloc: LocalAlloc,
+        ReservePol: ReservePolicy<u32>,
+        IsStd: Conditional,
+        IndexType: UInteger,
 {
 
     #[inline(always)]
@@ -486,34 +381,44 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
         self.capacity
     }
 
-    pub fn reserve(&mut self, capacity: u32) -> Result<()> {
-        if !CapacityPol::can_grow() {
-            return Err(FixedCapacity { capacity: self.capacity as usize }.into())
-        }
-        let new_capacity = CapacityPol::grow(self.capacity as usize, capacity as usize)? as u32;
-        if new_capacity == self.capacity { return Ok(()) }
-        let tmp: Pointer<Slot<T>> = unsafe { self.alloc
-            .allocate_uninit(new_capacity as usize)
-            .ok_or(
-                if size_of!(T) == 0 {
-                    ZeroSizedElement
-                }
-                else {
-                    AllocFailed { new_capacity: new_capacity as usize }
-                }
-            )?
+    pub fn reserve(&mut self, capacity: u32) {
+        let capacity = ReservePol
+            ::grow(self.capacity, capacity as usize)
+            .unwrap();
+        self.reserve_internal(capacity).unwrap();
+    }
+
+    pub fn reserve_exact(&mut self, capacity: u32) {
+        self.reserve_internal(capacity).unwrap();
+    }
+
+    pub fn try_reserve(&mut self, capacity: u32) -> Result<(), TryReserveError<()>> {
+        let capacity = ReservePol
+            ::grow(self.capacity, capacity as usize)?;
+        self.reserve_internal(capacity)
+    }
+
+    pub fn try_reserve_exact(&mut self, capacity: u32) -> Result<(), TryReserveError<()>> {
+        self.reserve_internal(capacity)
+    }
+
+    fn reserve_internal(&mut self, capacity: u32) -> Result<(), TryReserveError<()>> {
+        if capacity == self.capacity { return Ok(()) }
+        let tmp: Pointer<Slot<T, IndexType>, u32> = unsafe { self.alloc
+            .allocate_uninit(capacity as usize)
+            .map_err(|err| TryReserveError::alloc_error(err, ()))?
             .into()
         };
         unsafe {
-            self.data.move_elements(tmp, self.capacity as usize);
+            self.data.move_elements(tmp, self.capacity);
         };
-        for i in self.capacity..new_capacity - 1 {
+        for i in self.capacity..capacity - 1 {
             unsafe {
                 tmp.add(i as usize).write(Slot::empty(Some(i + 1)));
             }
         }
         unsafe {
-            tmp.add(new_capacity as usize - 1).write(
+            tmp.add(capacity as usize - 1).write(
                 Slot::empty(self.free_head)
             );
         }
@@ -524,15 +429,21 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
         }
         }
         self.data = tmp;
-        self.capacity = new_capacity;
+        self.capacity = capacity;
         Ok(())
     }
 
     #[inline(always)]
-    fn insert_internal(&mut self, value: T) -> Result<SlotIndex<T>>
+    fn insert_internal(&mut self, value: T) -> Result<SlotIndex<T, IndexType>, TryReserveError<T>>
     {
         if self.free_head.is_none() {
-            self.reserve(self.capacity * 2)?;
+            let capacity = self.capacity as usize * 2;
+            if capacity > u32::MAX as usize {
+                return Err(TryReserveError::max_capacity_exceeded(u32::MAX, capacity, value))
+            }
+            if let Err(err) = self.try_reserve(capacity as u32) {
+                return Err(err.with_value(value))
+            }
         }
         let index = self.free_head.unwrap();
         let free_slot = unsafe { self.data.add(index as usize).as_mut() };
@@ -541,29 +452,36 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
         free_slot.next_free_index = None;
         self.len += 1;
         Ok(SlotIndex {
-            version: NonZeroU32::new(free_slot.version).unwrap(),
+            version: free_slot.version,
             index,
             _marker: PhantomData,
         })
     }
 
     #[inline(always)]
-    pub fn remove(&mut self, index: SlotIndex<T>) -> Result<T>
+    pub fn remove(&mut self, index: SlotIndex<T, IndexType>) -> Result<T, IndexError<IndexType>>
     {
         if index.index >= self.capacity {
             return Err(
-                CapacityError::IndexOutOfBounds {
-                    index: index.index as usize, len: self.capacity as usize }.into()
+                IndexOutOfBounds {
+                    index: index.unit_index(),
+                    capacity: self.capacity,
+                }
             )
         }
         let ptr = unsafe { self.data.add(index.index as usize) };
         let mut slot = unsafe { ptr.read() };
-        let index_version = index.version.get();
+        let index_version = index.version;
         if slot.version != index_version {
-            return Err(StaleIndex { index: index.index, slot_version: slot.version, index_version: index_version })
+            return Err(StaleIndex {
+                index: index.unit_index(),
+                slot_version: slot.version.get(),
+            })
         }
         let value = unsafe { slot.value.assume_init() };
-        slot.version = slot.version.wrapping_add(1);
+        slot.version = IndexType::NonZero
+            ::new(slot.version.get().wrapping_add(IndexType::ONE))
+            .unwrap_or_else(|| unsafe { IndexType::NonZero::new_unchecked(IndexType::ONE) });
         slot.next_free_index = Some(self.free_head);
         slot.value = MaybeUninit::uninit();
         unsafe {
@@ -575,27 +493,30 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
     }
 
     #[inline(always)]
-    pub fn contains(&self, index: SlotIndex<T>) -> bool {
+    pub fn contains(&self, index: SlotIndex<T, IndexType>) -> bool {
         if index.index >= self.capacity {
             return false
         }
-        let index_version = index.version.get();
+        let index_version = index.version;
         let slot = unsafe { self.data.add(index.index as usize).as_ref() };
         slot.version == index_version
     }
 
     #[inline(always)]
-    pub fn get(&self, index: SlotIndex<T>) -> Result<&T> {
+    pub fn get(&self, index: SlotIndex<T, IndexType>) -> Result<&T, IndexError<IndexType>> {
         if index.index >= self.capacity {
-            return Err(
-                CapacityError::IndexOutOfBounds {
-                    index: index.index as usize, len: self.capacity as usize }.into()
-            )
+            return Err(IndexOutOfBounds {
+                index: index.unit_index(),
+                capacity: self.capacity,
+            })
         }
-        let index_version = index.version.get();
+        let index_version = index.version;
         let slot = unsafe { self.data.add(index.index as usize).as_ref() };
         if slot.version != index_version {
-            return Err(StaleIndex { index: index.index, slot_version: slot.version, index_version: index_version })
+            return Err(StaleIndex {
+                index: index.unit_index(),
+                slot_version: slot.version.get(),
+            })
         }
         assert!(slot.next_free_index.is_none(), "invalid index");
         unsafe {
@@ -604,18 +525,51 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
     }
 
     #[inline(always)]
-    pub fn get_mut(&mut self, index: SlotIndex<T>) -> Result<&mut T> {
+    pub fn get_mut(&mut self, index: SlotIndex<T, IndexType>) -> Result<&mut T, IndexError<IndexType>> {
         if index.index >= self.capacity {
-            panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
+            return Err(IndexOutOfBounds {
+                index: index.unit_index(),
+                capacity: self.capacity,
+            })
         }
-        let index_version = index.version.get();
+        let index_version = index.version;
         let slot = unsafe { self.data.add(index.index as usize).as_mut() };
         if slot.version != index_version {
-            return Err(StaleIndex { index: index.index, slot_version: slot.version, index_version: index_version })
+            return Err(StaleIndex {
+                index: index.unit_index(),
+                slot_version: slot.version.get(),
+            })
         }
         assert!(slot.next_free_index.is_none(), "invalid index");
         unsafe {
             Ok(slot.value.assume_init_mut())
+        }
+    }
+    
+    /// Gets a reference to value at `index` bypassing all validity checks including bounds checks.
+    ///
+    /// # Safety
+    /// The index *must* be a valid index, otherwise the value might be uninitialized or out of
+    /// bounds.
+    #[inline(always)]
+    pub unsafe fn get_unchecked(&self, index: SlotIndex<T, IndexType>) -> &T {
+        unsafe {
+            self.data.add(index.index as usize).as_ref()
+            .value.assume_init_ref()
+        }
+    }
+
+    /// Gets a mutable reference to value at `index` bypassing all validity checks including bounds
+    /// checks.
+    ///
+    /// # Safety
+    /// The index *must* be a valid index, otherwise the value might be uninitialized or out of
+    /// bounds.
+    #[inline(always)]
+    pub unsafe fn get_unchecked_mut(&mut self, index: SlotIndex<T, IndexType>) -> &mut T {
+        unsafe {
+            self.data.add(index.index as usize).as_mut()
+            .value.assume_init_mut()
         }
     }
 
@@ -626,7 +580,9 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
                 let slot = self.data.add(i as usize).read();
                 if slot.next_free_index.is_none() {
                     self.remove(SlotIndex {
-                        version: NonZeroU32::new(slot.version).unwrap(), index: i as u32, _marker: PhantomData,
+                        version: slot.version,
+                        index: i,
+                        _marker: PhantomData,
                     }).unwrap();
                 }
             }
@@ -635,31 +591,70 @@ impl<T, Alloc, CapacityPol, IsGlobal> AllocSlotMap<T, Alloc, CapacityPol, IsGlob
     } 
 
     #[inline(always)]
-    pub fn iter(&self) -> Iter<'_, T> {
+    pub fn max_index(&self) -> Option<u32> {
+        unsafe {
+            let capacity = self.capacity as usize;
+            let mut ptr = self.data.add(capacity - 1);
+            for i in (0..capacity).rev() {
+                if ptr.as_ref().next_free_index.is_none() {
+                    return Some(i as u32)
+                }
+                ptr = ptr.sub(1);
+            }
+        }
+        None
+    }
+
+    #[inline(always)]
+    pub fn iter(&self) -> Iter<'_, T, IndexType> {
         unsafe {
             Iter::new(self.data, self.data.add(self.capacity as usize))
         }
     }
 
     #[inline(always)]
-    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+    pub fn values(&self) -> IterValues<'_, T, IndexType> {
+        unsafe {
+            IterValues::new(self.data, self.data.add(self.capacity() as usize))
+        }
+    }
+
+    #[inline(always)]
+    pub fn iter_mut(&mut self) -> IterMut<'_, T, IndexType> {
         unsafe {
             IterMut::new(self.data, self.data.add(self.capacity as usize))
         }
     }
-}
-
-pub struct IterBase<'a, T, IsMut: Conditional> {
-    ptr: Pointer<Slot<T>>,
-    end: Pointer<Slot<T>>,
-    index: u32,
-    _marker: PhantomData<(&'a T, IsMut)>
-}
-
-impl<'a, T, IsMut: Conditional> IterBase<'a, T, IsMut> {
 
     #[inline(always)]
-    unsafe fn new(mut ptr: Pointer<Slot<T>>, end: Pointer<Slot<T>>) ->  Self {
+    pub fn values_mut(&self) -> IterMutValues<'_, T, IndexType> {
+        unsafe {
+            IterMutValues::new(self.data, self.data.add(self.capacity() as usize))
+        }
+    }
+}
+
+pub struct IterBase<'a, T, IndexType, IsMut, JustValues>
+    where
+        IndexType: UInteger,
+        IsMut: Conditional,
+        JustValues: Conditional,
+{
+    ptr: Pointer<Slot<T, IndexType>, u32>,
+    end: Pointer<Slot<T, IndexType>, u32>,
+    index: u32,
+    _marker: PhantomData<(&'a T, IsMut, JustValues)>
+}
+
+impl<'a, T, IndexType, IsMut, JustValues> IterBase<'a, T, IndexType, IsMut, JustValues>
+    where
+        IndexType: UInteger, 
+        IsMut: Conditional,
+        JustValues: Conditional,
+{
+
+    #[inline(always)]
+    unsafe fn new(mut ptr: Pointer<Slot<T, IndexType>, u32>, end: Pointer<Slot<T, IndexType>, u32>) ->  Self {
         let mut index = 0;
         unsafe {
             while ptr != end {
@@ -679,14 +674,31 @@ impl<'a, T, IsMut: Conditional> IterBase<'a, T, IsMut> {
     }
 }
 
-pub type Iter<'a, T> = IterBase<'a, T, False>;
-pub type IterMut<'a, T> = IterBase<'a, T, True>;
+pub type Iter<'a, T, IndexType> = IterBase<'a, T, IndexType, False, False>;
+pub type IterValues<'a, T, IndexType> = IterBase<'a, T, IndexType, False, True>;
+pub type IterMut<'a, T, IndexType> = IterBase<'a, T, IndexType, True, False>;
+pub type IterMutValues<'a, T, IndexType> = IterBase<'a, T, IndexType, True, True>;
 
-impl<'a, T> Iterator for Iter<'a, T> {
+impl<'a, T, IndexType> Iter<'a, T, IndexType>
+    where IndexType: UInteger
+{
 
-    type Item = (SlotIndex<T>, &'a T);
+    pub fn just_values(self) -> IterValues<'a, T, IndexType> {
+        IterValues {
+            ptr: self.ptr,
+            end: self.end,
+            index: self.index,
+            _marker: PhantomData,
+        }
+    }
+}
 
-    #[inline(always)]
+impl<'a, T, IndexType> Iterator for Iter<'a, T, IndexType>
+    where IndexType: UInteger,
+{
+
+    type Item = (SlotIndex<T, IndexType>, &'a T);
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.ptr == self.end {
             None
@@ -694,21 +706,23 @@ impl<'a, T> Iterator for Iter<'a, T> {
         else {
             unsafe {
                 let item = self.ptr.as_ref();
-                self.ptr = self.ptr.add(1);
+                let current_idx = self.index;
+                let mut ptr = self.ptr.add(1);
+                let end = self.end;
                 let mut index = self.index + 1;
-                while self.ptr != self.end {
-                    if self.ptr.as_ref().next_free_index.is_none() {
+                while ptr != end {
+                    if ptr.as_ref().next_free_index.is_none() {
                         break
                     }
-                    self.ptr = self.ptr.add(1);
+                    ptr = ptr.add(1);
                     index += 1;
                 }
-                let current = self.index;
+                self.ptr = ptr;
                 self.index = index;
                 Some((
                     SlotIndex {
-                        version: NonZeroU32::new_unchecked(item.version),
-                        index: current,
+                        version: item.version,
+                        index: current_idx,
                         _marker: PhantomData,
                     },
                     item.value.assume_init_ref(),
@@ -718,11 +732,73 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for IterMut<'a, T> {
+impl<'a, T, IndexType> IterValues<'a, T, IndexType>
+    where IndexType: UInteger
+{
 
-    type Item = (SlotIndex<T>, &'a mut T);
+    pub fn with_indices(self) -> Iter<'a, T, IndexType> {
+        Iter {
+            ptr: self.ptr,
+            end: self.end,
+            index: self.index,
+            _marker: PhantomData,
+        }
+    }
+}
 
-    #[inline(always)]
+impl<'a, T, IndexType> Iterator for IterValues<'a, T, IndexType>
+    where IndexType: UInteger
+{
+
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr == self.end {
+            None
+        }
+        else {
+            unsafe {
+                let item = self.ptr.as_ref();
+                let mut ptr = self.ptr.add(1);
+                let end = self.end;
+                let mut index = self.index + 1;
+                while ptr != end {
+                    if ptr.as_ref().next_free_index.is_none() {
+                        break
+                    }
+                    ptr = ptr.add(1);
+                    index += 1;
+                }
+                self.ptr = ptr;
+                self.index = index;
+                Some(
+                    item.value.assume_init_ref(),
+                )
+            }
+        }
+    }
+}
+
+impl<'a, T, IndexType> IterMut<'a, T, IndexType>
+    where IndexType: UInteger
+{
+
+    pub fn just_values(self) -> IterMutValues<'a, T, IndexType> {
+        IterMutValues {
+            ptr: self.ptr,
+            end: self.end,
+            index: self.index,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, T, IndexType> Iterator for IterMut<'a, T, IndexType>
+    where IndexType: UInteger
+{
+
+    type Item = (SlotIndex<T, IndexType>, &'a mut T);
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.ptr == self.end {
             None
@@ -730,21 +806,23 @@ impl<'a, T> Iterator for IterMut<'a, T> {
         else {
             unsafe {
                 let item = self.ptr.as_mut();
-                self.ptr = self.ptr.add(1);
+                let current_idx = self.index;
+                let mut ptr = self.ptr.add(1);
+                let end = self.end;
                 let mut index = self.index + 1;
-                while self.ptr != self.end {
-                    if self.ptr.as_ref().next_free_index.is_none() {
+                while ptr != end {
+                    if ptr.as_ref().next_free_index.is_none() {
                         break
                     }
-                    self.ptr = self.ptr.add(1);
+                    ptr = ptr.add(1);
                     index += 1;
                 }
-                let current = self.index;
+                self.ptr = ptr;
                 self.index = index;
                 Some((
                     SlotIndex {
-                        version: NonZeroU32::new_unchecked(item.version),
-                        index: current,
+                        version: item.version,
+                        index: current_idx,
                         _marker: PhantomData,
                     },
                     item.value.assume_init_mut(),
@@ -754,21 +832,105 @@ impl<'a, T> Iterator for IterMut<'a, T> {
     }
 }
 
+impl<'a, T, IndexType> IterMutValues<'a, T, IndexType>
+    where IndexType: UInteger
+{
+
+    pub fn with_indices(self) -> IterMut<'a, T, IndexType> {
+        IterMut {
+            ptr: self.ptr,
+            end: self.end,
+            index: self.index,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, T, IndexType> Iterator for IterMutValues<'a, T, IndexType>
+    where IndexType: UInteger
+{
+
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr == self.end {
+            None
+        }
+        else {
+            unsafe {
+                let item = self.ptr.as_mut();
+                let mut ptr = self.ptr.add(1);
+                let end = self.end;
+                let mut index = self.index + 1;
+                while ptr != end {
+                    if ptr.as_ref().next_free_index.is_none() {
+                        break
+                    }
+                    ptr = ptr.add(1);
+                    index += 1;
+                }
+                self.ptr = ptr;
+                self.index = index;
+                Some(
+                    item.value.assume_init_mut(),
+                )
+            }
+        }
+    }
+}
+
+pub struct IterMove<T, Alloc, ReservePol, IsStd, IndexType>
+    where
+        Alloc: LocalAlloc,
+        ReservePol: ReservePolicy<u32>,
+        IsStd: Conditional,
+        IndexType: UInteger,
+{
+    slot_map: AllocSlotMap<T, Alloc, ReservePol, IsStd, IndexType>,
+    off: u32,
+}
+
+impl<T, Alloc, ReservePol, IsStd, IndexType> Iterator for IterMove<T, Alloc, ReservePol, IsStd, IndexType>
+    where
+        Alloc: LocalAlloc,
+        ReservePol: ReservePolicy<u32>,
+        IsStd: Conditional,
+        IndexType: UInteger,
+{
+
+    type Item = (SlotIndex<T, IndexType>, T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut iter = unsafe { IterMut::new(
+            self.slot_map.data.add(self.off as usize),
+            self.slot_map.data.add(self.slot_map.capacity as usize)
+        )};
+        iter.index += self.off;
+        self.off = iter.index;
+        let index = iter.next()?.0;
+        Some((index, self.slot_map.remove(index).unwrap()))
+    }
+}
+
 impl_traits!(
-    for AllocSlotMap<T: Sized, Alloc: Allocator, CapacityPol: CapacityPolicy, IsGlobal: Conditional>
-    Index<SlotIndex<T>> =>
+    for AllocSlotMap<T, Alloc: [LocalAlloc], ReservePol: [ReservePolicy<u32>], IsStd: [Conditional], IndexType: [UInteger]>
+    Index<SlotIndex<T, IndexType>> =>
 
         type Output = T;
 
         #[inline(always)]
-        fn index(&self, index: SlotIndex<T>) -> &Self::Output {
+        fn index(&self, index: SlotIndex<T, IndexType>) -> &Self::Output {
             if index.index >= self.capacity {
-                panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
+                panic!("index {} out of bounds with capacity {}",
+                    index.index, self.capacity
+                )
             }
-            let index_version = index.version.get();
+            let index_version = index.version;
             let slot = unsafe { self.data.add(index.index as usize).as_ref() };
             if slot.version != index_version {
-                panic!("stale index: slot version {}, index version {}", slot.version, index_version);
+                panic!("stale index: slot version {}, index version {}",
+                    slot.version, index_version,
+                );
             }
             assert!(slot.next_free_index.is_none(), "invalid index");
             unsafe {
@@ -776,17 +938,19 @@ impl_traits!(
             }
         }
     ,
-    IndexMut<SlotIndex<T>> =>
+    IndexMut<SlotIndex<T, IndexType>> =>
 
         #[inline(always)]
-        fn index_mut(&mut self, index: SlotIndex<T>) -> &mut Self::Output {
+        fn index_mut(&mut self, index: SlotIndex<T, IndexType>) -> &mut Self::Output {
             if index.index >= self.capacity {
                 panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
             }
-            let index_version = index.version.get();
+            let index_version = index.version;
             let slot = unsafe { self.data.add(index.index as usize).as_mut() };
             if slot.version != index_version {
-                panic!("stale index: slot version {}, index version {}", slot.version, index_version);
+                panic!("stale index: slot version {}, index version {}", 
+                    slot.version, index_version,
+                );
             }
             assert!(slot.next_free_index.is_none(), "invalid index");
             unsafe {
@@ -796,8 +960,8 @@ impl_traits!(
     ,
     IntoIterator for &'map =>
 
-        type Item = (SlotIndex<T>, &'map T);
-        type IntoIter = Iter<'map, T>;
+        type Item = (SlotIndex<T, IndexType>, &'map T);
+        type IntoIter = Iter<'map, T, IndexType>;
 
         #[inline(always)]
         fn into_iter(self) -> Self::IntoIter {
@@ -806,12 +970,25 @@ impl_traits!(
     ,
     IntoIterator for mut &'map =>
 
-        type Item = (SlotIndex<T>, &'map mut T);
-        type IntoIter = IterMut<'map, T>;
+        type Item = (SlotIndex<T, IndexType>, &'map mut T);
+        type IntoIter = IterMut<'map, T, IndexType>;
 
         #[inline(always)]
         fn into_iter(self) -> Self::IntoIter {
             self.iter_mut()
+        }
+    ,
+    IntoIterator =>
+
+        type Item = (SlotIndex<T, IndexType>, T);
+        type IntoIter = IterMove<T, Alloc, ReservePol, IsStd, IndexType>;
+
+        #[inline(always)]
+        fn into_iter(self) -> Self::IntoIter {
+            IterMove {
+                slot_map: self,
+                off: 0,
+            }
         }
     ,
     Drop =>
@@ -823,36 +1000,133 @@ impl_traits!(
     ,
 );
 
-impl_traits!(
-    for GlobalSlotMap<T: Sized>
-    Default =>
+unsafe impl<
+    T: Send,
+    Alloc: LocalAlloc + Send,
+    ReservePol: ReservePolicy<u32>,
+    IsStd: Conditional,
+> Send for AllocSlotMap<T, Alloc, ReservePol, IsStd> {}
+
+unsafe impl<
+    T: Sync,
+    Alloc: LocalAlloc + Sync,
+    ReservePol: ReservePolicy<u32>,
+    IsStd: Conditional,
+> Sync for AllocSlotMap<T, Alloc, ReservePol, IsStd> {}
+
+#[cfg(feature = "std")]
+mod std_features {
+
+    use super::*;
+
+    use crate::alloc::StdAlloc;
+
+    /// A dynamic slot map storing values of type `T`, backed by [`GlobalAlloc`].
+    ///
+    /// # Type parameters
+    ///
+    /// - `T`: value type
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use nox_mem::slot_map::SlotMap;
+    ///
+    /// let mut map = SlotMap::new();
+    /// let key1 = map.insert("hello");
+    /// let key2 = map.insert("world");
+    /// assert_eq!(map.get(key1).ok(), Some(&"hello"));
+    /// assert_eq!(map.remove(key1).ok(), Some("hello"));
+    /// assert_eq!(map.get(key1).ok(), None);
+    /// assert_eq!(map.get(key2).ok(), Some(&"world"));
+    /// ```
+    pub type SlotMap<T, IndexType = u32> = AllocSlotMap<T, StdAlloc, DynPolicy, True, IndexType>;
+
+    impl<T, IndexType> SlotMap<T, IndexType>
+        where IndexType: UInteger
+    {
+
+        #[inline(always)]
+        pub fn new() -> Self {
+            Self {
+                data: Pointer::dangling(),
+                capacity: 0,
+                len: 0,
+                free_head: None,
+                alloc: StdAlloc,
+                _marker: PhantomData,
+            }
+        }
+
+        pub fn with_capacity(capacity: u32) -> Self {
+            if capacity == 0 {
+                return Self::new()
+            }
+            let capacity = DynPolicy::grow(0, capacity as usize).unwrap();
+            let data: Pointer<Slot<T, IndexType>, u32> = unsafe { StdAlloc
+                .allocate_uninit(capacity as usize)
+                .expect("global alloc failed")
+                .into()
+            };
+            for i in 0..capacity - 1 {
+                unsafe {
+                    data.add(i as usize).write(Slot::empty(Some(i + 1)));
+                }
+            }
+            unsafe { data.add(capacity as usize - 1).write(Slot::empty(None)) };
+            Self {
+                data,
+                capacity,
+                len: 0,
+                free_head: Some(0),
+                alloc: StdAlloc,
+                _marker: PhantomData,
+            }
+        }
+
+        #[inline(always)]
+        pub fn insert(&mut self, value: T) -> SlotIndex<T, IndexType> {
+            self.insert_internal(value).unwrap()
+        }
+    }
+
+    impl<T, IndexType> Clone for SlotMap<T, IndexType>
+        where
+            T: Clone,
+            IndexType: UInteger,
+    {
+
+        fn clone(&self) -> Self {
+            let data: Pointer<Slot<T, IndexType>, u32> = unsafe { StdAlloc
+                .allocate_uninit(self.capacity as usize)
+                .expect("global alloc failed")
+                .into()
+            };
+            for i in 0..self.capacity as usize {
+                unsafe {
+                    data.add(i).write(
+                        self.data.add(i).as_ref().clone()
+                    );
+                }
+            }
+            Self {
+                data,
+                capacity: self.capacity,
+                len: self.len,
+                free_head: self.free_head,
+                alloc: StdAlloc,
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    impl<T, IndexType: UInteger> Default for SlotMap<T, IndexType> {
 
         fn default() -> Self {
             Self::new()
         }
-    ,
-);
-
-impl<'alloc, T: Sized, Alloc: Allocator, CapacityPol: CapacityPolicy> Default
-    for AllocSlotMap<T, OptionAlloc<'alloc, Alloc>, CapacityPol, False>
-{
-
-    fn default() -> Self {
-        Self::with_no_alloc()
     }
 }
 
-unsafe impl<
-    T: Sized + Send,
-    Alloc: Allocator + Send,
-    CapacityPol: CapacityPolicy,
-    IsGlobal: Conditional,
-> Send for AllocSlotMap<T, Alloc, CapacityPol, IsGlobal> {}
-
-unsafe impl<
-    'alloc,
-    T: Sized + Sync,
-    Alloc: Allocator + Sync,
-    CapacityPol: CapacityPolicy,
-    IsGlobal: Conditional,
-> Sync for AllocSlotMap<T, Alloc, CapacityPol, IsGlobal> {}
+#[cfg(feature = "std")]
+pub use std_features::*;

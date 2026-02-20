@@ -1,17 +1,24 @@
-use ash::{khr, vk};
+use core::ffi::CStr;
+
+use compact_str::CompactString;
 
 use nox_mem::{
-    vec_types::{Vector, ArrayVec},
-    string_types::ArrayString,
+    vec::{Vector, Vec32},
+    string::ArrayString,
+    vec32,
+    Display,
+    borrow::CowMut,
 };
 
-use crate::expand_warn;
+use nox_ash::vk;
+
+use crate::{
+    expand_warn, log, 
+};
 
 use crate::dev::{
     has_bits, has_not_bits,
-    export::{
-        Version,
-    },
+    prelude::Version,
     error::{Result, Error, Context, ErrorContext, location},
 };
 
@@ -55,28 +62,26 @@ impl QueueFamilyIndices {
     }
 }
 
-#[derive(Clone)]
-pub struct PhysicalDeviceInfo {
-    properties: vk::PhysicalDeviceProperties,
+pub struct PhysicalDeviceInfo<'a> {
     features: vk::PhysicalDeviceFeatures,
+    extended_features: CowMut<'a, [vk::ExtendsPhysicalDeviceFeatures2Obj]>,
+    properties: vk::PhysicalDeviceProperties,
+    extended_properties: CowMut<'a, [vk::ExtendsPhysicalDeviceProperties2Obj]>,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     queue_family_indices: QueueFamilyIndices,
     api_version: Version,
     device_name: ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>,
 }
 
-impl PhysicalDeviceInfo {
+impl<'a> PhysicalDeviceInfo<'a> {
 
     fn new(
-        physical_device: vk::PhysicalDevice,
         instance: &ash::Instance,
+        physical_device: vk::PhysicalDevice,
+        extended_features: &'a mut [vk::ExtendsPhysicalDeviceFeatures2Obj],
+        extended_properties: &'a mut [vk::ExtendsPhysicalDeviceProperties2Obj],
     ) -> Result<Option<Self>>
     {
-        let properties = unsafe { instance.get_physical_device_properties(physical_device) };
-        let device_name = ArrayString
-            ::from_ascii(&properties.device_name)
-            .context_with(|| ErrorContext::StringConversionError(location!()))?;
-        let api_version = Version::from(properties.api_version);
         let queue_family_indices =
             match QueueFamilyIndices::new(physical_device, instance) {
                 Ok(queue_family_indices) => {
@@ -87,44 +92,95 @@ impl PhysicalDeviceInfo {
                 }
                 Err(err) => return Err(err),
             };
-        let features = unsafe { instance.get_physical_device_features(physical_device) };
+        let mut features = vk::PhysicalDeviceFeatures2::default();
+        for feature in extended_features.iter_mut() {
+            feature.clear_p_next();
+            features = features.push_next(feature.as_vk_mut());
+        }
+        unsafe { instance.get_physical_device_features2(physical_device, &mut features) };
+        let features = features.features;
+        let mut properties = vk::PhysicalDeviceProperties2::default();
+        for prop in extended_properties.iter_mut() {
+            prop.clear_p_next();
+            properties = properties.push_next(prop.as_vk_mut());
+        }
+        unsafe { instance.get_physical_device_properties2(physical_device, &mut properties) };
+        let properties = properties.properties;
+        let device_name = ArrayString
+            ::from_c_char_slice(&properties.device_name)
+            .context_with(|| ErrorContext::StringConversionError(location!()))?;
+        let api_version = Version::from(properties.api_version);
         let memory_properties = unsafe { instance.get_physical_device_memory_properties(physical_device) };
-        Ok(
-            Some(
-                Self {
-                    properties,
-                    features,
-                    memory_properties,
-                    queue_family_indices,
-                    api_version,
-                    device_name,
-                }
-            )
-        )
+        Ok(Some(
+            Self {
+                features,
+                extended_features: CowMut::Borrowed(extended_features),
+                properties,
+                extended_properties: CowMut::Borrowed(extended_properties),
+                memory_properties,
+                queue_family_indices,
+                api_version,
+                device_name,
+            }
+        ))
     }
 
+    #[inline(always)]
     pub fn api_version(&self) -> Version {
         self.api_version
     }
 
+    #[inline(always)]
     pub fn device_name(&self) -> &DeviceName {
         &self.device_name
     }
 
+    #[inline(always)]
     pub fn queue_family_indices(&self) -> QueueFamilyIndices {
         self.queue_family_indices
     }
 
-    pub fn properties(&self) -> &vk::PhysicalDeviceProperties {
-        &self.properties
-    }
-
+    #[inline(always)]
     pub fn features(&self) -> &vk::PhysicalDeviceFeatures {
         &self.features
     }
 
+    #[inline(always)]
+    pub fn extended_feature(&self, s_type: vk::StructureType) -> Option<&vk::ExtendsPhysicalDeviceFeatures2Obj> {
+        self.extended_features.iter().find(|feature| {
+            feature.s_type() == s_type
+        })
+    }
+
+    #[inline(always)]
+    pub fn properties(&self) -> &vk::PhysicalDeviceProperties {
+        &self.properties
+    }
+
+    #[inline(always)]
+    pub fn extended_property(&self, s_type: vk::StructureType) -> Option<&vk::ExtendsPhysicalDeviceProperties2Obj> {
+        self.extended_properties.iter().find(|prop| {
+            prop.s_type() == s_type
+        })
+    }
+
+    #[inline(always)]
     pub fn memory_properties(&self) -> &vk::PhysicalDeviceMemoryProperties {
         &self.memory_properties
+    }
+
+    #[inline(always)]
+    pub fn into_owned(self) -> PhysicalDeviceInfo<'static> {
+        PhysicalDeviceInfo {
+            features: self.features,
+            extended_features: CowMut::Owned(self.extended_features.into_owned()),
+            properties: self.properties,
+            extended_properties: CowMut::Owned(self.extended_properties.into_owned()),
+            memory_properties: self.memory_properties,
+            queue_family_indices: self.queue_family_indices,
+            api_version: self.api_version,
+            device_name: self.device_name,
+        }
     }
 }
 
@@ -239,64 +295,70 @@ impl QueueFamilyIndices {
     }
 }
 
-pub fn rate_physical_device(
+#[derive(Display)]
+enum PhysicalDeviceRating<'a> {
+    Ok(i32),
+    #[display("of missing features: {0}")]
+    MissingFeatures(CompactString),
+    #[display("{0}")]
+    UnsuitableProperties(CompactString),
+    #[display("of missing extensions: {0:?}")]
+    MissingExtensions(Vec32<&'a CStr>),
+    #[display("Nox requires at least Vulkan version 1.1 (device version was {0})")]
+    OldVersion(Version),
+}
+
+pub fn rate_physical_device<'a>(
+    instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
     physical_device_info: &PhysicalDeviceInfo,
-    instance: &ash::Instance,
-) -> Result<i32>
+    required_extensions: &[(&'a CStr, Version)],
+    base_feature_check: &impl Fn(&vk::PhysicalDeviceFeatures) -> Option<CompactString>,
+    extended_feature_check: &impl Fn(&vk::ExtendsPhysicalDeviceFeatures2Obj) -> Option<CompactString>,
+    base_property_check: &impl Fn(&vk::PhysicalDeviceProperties) -> Option<CompactString>,
+    extended_property_check: &impl Fn(&vk::ExtendsPhysicalDeviceProperties2Obj) -> Option<CompactString>,
+) -> Result<PhysicalDeviceRating<'a>>
 {
-    if physical_device_info.features.sample_rate_shading == vk::FALSE ||
-        physical_device_info.features.sampler_anisotropy == vk::FALSE {
-        return Ok(-1)
+    if let Some(msg) = base_feature_check(physical_device_info.features()) {
+        return Ok(PhysicalDeviceRating::MissingFeatures(msg))
     }
-    let mut required_extensions = ArrayVec::<ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>, 3>::new();
-    required_extensions.push(ArrayString::from_str(
-        khr::swapchain::NAME
-            .to_str()
-            .context(ErrorContext::StringConversionError(location!()))?
-    )).unwrap();
-    if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_2 {
-        required_extensions.push(ArrayString::from_str(
-            khr::dynamic_rendering::NAME
-                .to_str()
-                .context(ErrorContext::StringConversionError(location!()))?
-        )).unwrap();
-        required_extensions.push(ArrayString::from_str(
-            khr::timeline_semaphore::NAME
-                .to_str()
-                .context(ErrorContext::StringConversionError(location!()))?
-        )).unwrap();
+    for extended in physical_device_info.extended_features.iter() {
+        if let Some(msg) = extended_feature_check(extended) {
+            return Ok(PhysicalDeviceRating::MissingFeatures(msg))
+        }
     }
-    else if physical_device_info.api_version.as_u32() < vk::API_VERSION_1_3 {
-        required_extensions.push(ArrayString::from_str(
-            khr::dynamic_rendering::NAME
-                .to_str()
-                .context(ErrorContext::StringConversionError(location!()))?
-        )).unwrap();
+    if let Some(msg) = base_property_check(physical_device_info.properties()) {
+        return Ok(PhysicalDeviceRating::UnsuitableProperties(msg))
+    }
+    for extended in physical_device_info.extended_properties.iter() {
+        if let Some(msg) = extended_property_check(extended) {
+            return Ok(PhysicalDeviceRating::UnsuitableProperties(msg))
+        }
+    }
+    let api_version = physical_device_info.api_version;
+    if api_version < vk::API_VERSION_1_1 {
+        return Ok(PhysicalDeviceRating::OldVersion(api_version))
+    }
+    let mut check_ext = vec32![];
+    for &(name, version) in required_extensions {
+        if version > api_version {
+            check_ext.push(name);
+        }
     }
     let available_extensions = unsafe {
         instance
             .enumerate_device_extension_properties(physical_device)
             .context("failed to enumerate vulkan device extensions")?
     };
-    let mut found_extensions = false;
-    for extension in &required_extensions {
-        found_extensions = false;
-        for available_extension in &available_extensions {
-            let other = ArrayString::<{vk::MAX_EXTENSION_NAME_SIZE}>
-                ::from_ascii(&available_extension.extension_name)
-                .context(ErrorContext::StringConversionError(location!()))?;
-            if extension == &other {
-                found_extensions = true;
-                break;
-            }
-        }
-        if !found_extensions {
-            break;
-        }
-    }
-    if !found_extensions {
-        return Ok(-1)
+
+    let missing_extensions: Vec32<_> = check_ext.iter().filter_map(|&ext| {
+        (!available_extensions.iter().any(|a| {
+            a.extension_name_as_c_str().unwrap_or_default() == ext
+        })).then_some(ext)
+    }).collect();
+
+    if !missing_extensions.is_empty() {
+        return Ok(PhysicalDeviceRating::MissingExtensions(missing_extensions))
     }
 
     let mut score = 0i32;
@@ -325,12 +387,19 @@ pub fn rate_physical_device(
     score += (physical_device_info.api_version.major() * 50) as i32;
     score += (physical_device_info.api_version.minor() * 10) as i32;
     
-    Ok(score)
+    Ok(PhysicalDeviceRating::Ok(score))
 }
 
-pub fn find_suitable_physical_device(
+pub fn find_suitable_physical_device<'a>(
     instance: &ash::Instance,
-) -> Result<(vk::PhysicalDevice, PhysicalDeviceInfo)>
+    required_extensions: &[(&CStr, Version)],
+    base_feature_check: impl Fn(&vk::PhysicalDeviceFeatures) -> Option<CompactString>,
+    extended_features: &mut [vk::ExtendsPhysicalDeviceFeatures2Obj],
+    extended_feature_check: impl Fn(&vk::ExtendsPhysicalDeviceFeatures2Obj) -> Option<CompactString>,
+    base_property_check: impl Fn(&vk::PhysicalDeviceProperties) -> Option<CompactString>,
+    extended_properties: &mut [vk::ExtendsPhysicalDeviceProperties2Obj],
+    extended_property_check: impl Fn(&vk::ExtendsPhysicalDeviceProperties2Obj) -> Option<CompactString>,
+) -> Result<(vk::PhysicalDevice, PhysicalDeviceInfo<'static>)>
 {
     let physical_devices = unsafe {
         instance
@@ -338,11 +407,12 @@ pub fn find_suitable_physical_device(
             .context("failed to enumerate vulkan devices")?
     };
     let mut best_physical_device : Option<(vk::PhysicalDevice, PhysicalDeviceInfo)> = None;
+    let mut unsuitable = vec32![];
     let mut best_score = -1i32;
     for physical_device in physical_devices {
         let physical_device_info =
             match PhysicalDeviceInfo
-                ::new(physical_device, instance)
+                ::new(instance, physical_device, extended_features, extended_properties)
                 .context("failed to get vulkan physical device info")
             {
                 Ok(device_info) => {
@@ -356,8 +426,17 @@ pub fn find_suitable_physical_device(
                     continue;
                 },
             };
-        let score =
-            match rate_physical_device(physical_device, &physical_device_info, instance)
+        let rating =
+            match rate_physical_device(
+                instance,
+                physical_device,
+                &physical_device_info,
+                required_extensions,
+                &base_feature_check,
+                &extended_feature_check,
+                &base_property_check,
+                &extended_property_check,
+            )
                 .context("failed to rate vulkan physical device")
             {
                 Ok(score) => score,
@@ -366,9 +445,19 @@ pub fn find_suitable_physical_device(
                     continue;
                 },
             };
-        if score > best_score {
-            best_physical_device = Some((physical_device, physical_device_info));
-            best_score = score;
+        match rating {
+            PhysicalDeviceRating::Ok(score) => {
+                if score > best_score {
+                    best_physical_device = Some((physical_device, physical_device_info.into_owned()));
+                    best_score = score;
+                }
+            },
+            _ => unsuitable.push((rating, physical_device_info.device_name)),
+        };
+    }
+    if !unsuitable.is_empty() {
+        for (reason, name) in unsuitable {
+            log::warn!("GPU {} was unsuitable because {}", name, reason);
         }
     }
     best_physical_device

@@ -6,12 +6,13 @@ use winit::keyboard::{PhysicalKey, Key};
 
 pub(crate) use winit::window::Window as WinitWindow;
 
-use rustc_hash::FxHashMap;
+use ahash::AHashMap;
 
 use compact_str::CompactString;
 
+use nox_mem::vec::Vec32;
+
 use crate::{
-    export::mem::vec_types::GlobalVec,
     clipboard::Clipboard,
     dev::or_flag,
 };
@@ -187,7 +188,7 @@ impl WindowAttributes {
     }
 
     #[inline(always)]
-    pub(crate) fn to_winit_attr(self) -> winit::window::WindowAttributes {
+    pub(crate) fn into_winit_attr(self) -> winit::window::WindowAttributes {
         WinitWindow::default_attributes()
             .with_resizable(self.resizable())
             .with_maximized(self.maximized())
@@ -236,16 +237,15 @@ impl InputState {
     }
 }
 
-pub struct Window<'a> {
+pub struct Window {
     clipboard: Clipboard,
-    surface: gpu::Surface<'a>,
+    surface: gpu::Surface,
     pub(super) handle: WinitWindow,
-    host_allocators: &'a gpu::HostAllocators,
     buffered_frames: u32,
-    physical_keys: FxHashMap<PhysicalKey, InputState>,
-    logical_keys: FxHashMap<Key, InputState>,
-    mouse_buttons: FxHashMap<MouseButton, InputState>,
-    pub(super) input_text: GlobalVec<(KeyCode, CompactString)>,
+    physical_keys: AHashMap<PhysicalKey, InputState>,
+    logical_keys: AHashMap<Key, InputState>,
+    mouse_buttons: AHashMap<MouseButton, InputState>,
+    pub(super) input_text: Vec32<(KeyCode, CompactString)>,
     size: (u32, u32),
     cursor_position: (f64, f64),
     mouse_scroll_pixel_delta: (f64, f64),
@@ -255,7 +255,7 @@ pub struct Window<'a> {
     pub(super) flags: u32,
 }
 
-impl<'a> Window<'a> {
+impl Window {
 
     pub(super) const CURSOR_MOVED: u32 = 0x1;
     pub(super) const CURSOR_SET: u32 = 0x2;
@@ -263,6 +263,7 @@ impl<'a> Window<'a> {
     pub(super) const TRANSPARENT_SET: u32 = 0x8;
     pub(super) const SHOULD_CLOSE: u32 = 0x10;
 
+    /// Creates default [`WindowAttributes`].
     pub fn default_attributes() -> WindowAttributes {
         WindowAttributes::new()
     }
@@ -271,26 +272,24 @@ impl<'a> Window<'a> {
         gpu: &mut gpu::GpuContext,
         window: WinitWindow,
         is_transparent: bool,
-        host_allocators: &'a gpu::HostAllocators,
     ) -> Result<Self>
     {
         let clipboard = Clipboard
             ::new(&window)
             .context("failed to create clipboard")?;
-        let surface = gpu.create_surface(&window, host_allocators)?;
+        let surface = gpu.create_surface(&window)?;
         let size = window.inner_size();
         let mut flags = 0;
         or_flag!(flags, Self::TRANSPARENT, is_transparent);
         Ok(Self {
+            clipboard,
             handle: window,
-            host_allocators,
             buffered_frames: gpu.buffered_frames(),
             surface,
-            physical_keys: FxHashMap::default(),
-            logical_keys: FxHashMap::default(),
-            mouse_buttons: FxHashMap::default(),
+            physical_keys: AHashMap::default(),
+            logical_keys: AHashMap::default(),
+            mouse_buttons: AHashMap::default(),
             input_text: Default::default(),
-            clipboard,
             size: (size.width, size.height),
             cursor_position: (0.0, 0.0),
             mouse_scroll_pixel_delta: (0.0, 0.0),
@@ -307,7 +306,7 @@ impl<'a> Window<'a> {
     }
 
     #[inline(always)]
-    pub(crate) fn surface(&mut self) -> &mut gpu::Surface<'a> {
+    pub(crate) fn surface(&mut self) -> &mut gpu::Surface {
         &mut self.surface
     }
     
@@ -319,6 +318,14 @@ impl<'a> Window<'a> {
     #[inline(always)]
     pub(crate) fn last_frame_data(&self) -> gpu::FrameData {
         self.last_frame_data
+    }
+
+    /// Closes the window.
+    ///
+    /// The closed window will still be valid until the end of current frame.
+    #[inline(always)]
+    pub fn close(&mut self) {
+        self.flags |= Self::SHOULD_CLOSE;
     }
 
     #[inline(always)]
@@ -476,32 +483,33 @@ impl<'a> Window<'a> {
                     }
                 };
             },
-            WindowEvent::KeyboardInput { device_id: _, event, is_synthetic: _ } => {
-                match event {
-                    KeyEvent { physical_key, logical_key, text, location: _, state, repeat, .. } => {
-                        let phys = self.physical_keys
-                            .entry(physical_key)
-                            .or_default();
-                        phys.pressed = state == ElementState::Pressed;
-                        phys.released = state == ElementState::Released;
-                        phys.held = state != ElementState::Released;
-                        phys.repeat = repeat;
-                        if let Some(text) = text && (phys.pressed || repeat) {
-                            self.input_text.push((
-                                match physical_key {
-                                    PhysicalKey::Code(c) => c,
-                                    PhysicalKey::Unidentified(_) => KeyCode::Backspace,
-                                },
-                                CompactString::new(&text))
-                            );
-                        }
-                        let logic = self.logical_keys.entry(logical_key).or_default();
-                        logic.pressed = state == ElementState::Pressed;
-                        logic.released = state == ElementState::Released;
-                        logic.held = state != ElementState::Released;
-                        logic.repeat = repeat;
-                    },
-                };
+            WindowEvent::KeyboardInput {
+                device_id: _, 
+                event: KeyEvent {
+                    physical_key, logical_key, text, location: _, state, repeat, ..
+                },
+                is_synthetic: _ 
+            } => {
+                let phys = self.physical_keys
+                    .entry(physical_key)
+                    .or_default();
+                phys.pressed = state == ElementState::Pressed;
+                phys.released = state == ElementState::Released;
+                phys.held = state != ElementState::Released;
+                phys.repeat = repeat;
+                if let Some(text) = text && (phys.pressed || repeat) {
+                    self.input_text.push((
+                        match physical_key {
+                            PhysicalKey::Code(c) => c,
+                            PhysicalKey::Unidentified(_) => KeyCode::Backspace,
+                        },
+                        CompactString::new(&text))
+                    );
+                }
+                let logic = self.logical_keys.entry(logical_key).or_default();
+                logic.pressed = state == ElementState::Pressed;
+                logic.released = state == ElementState::Released;
+                logic.held = state != ElementState::Released;
             },
             WindowEvent::MouseInput { device_id: _, state, button } => {
                 let button = self.mouse_buttons.entry(button).or_default();
@@ -544,24 +552,19 @@ impl<'a> Window<'a> {
     }
 }
 
-impl<'a> Drop for Window<'a> {
+impl Drop for Window {
 
     fn drop(&mut self) {
-        self.surface.clean_up(self.host_allocators);
+        self.surface.clean_up();
     }
 }
 
-pub struct WindowRef<'a, 'b> {
-    pub(super) window: &'a Window<'b>,
+pub struct WindowContext<'a> {
+    pub(super) window: &'a mut Window,
     pub(super) delta_time: time::Duration,
 }
 
-pub struct WindowRefMut<'a, 'b> {
-    pub(super) window: &'a mut Window<'b>,
-    pub(super) delta_time: time::Duration,
-}
-
-impl<'a, 'b> WindowRef<'a, 'b> {
+impl<'a> WindowContext<'a> {
 
     #[inline(always)]
     pub fn delta_time(&self) -> time::Duration {
@@ -574,38 +577,16 @@ impl<'a, 'b> WindowRef<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Deref for WindowRef<'a, 'b> {
+impl<'a> Deref for WindowContext<'a> {
 
-    type Target = Window<'b>;
-
-    fn deref(&self) -> &Self::Target {
-        self.window
-    }
-}
-
-impl<'a, 'b> WindowRefMut<'a, 'b> {
-
-    #[inline(always)]
-    pub fn delta_time(&self) -> time::Duration {
-        self.delta_time
-    }
-
-    #[inline(always)]
-    pub fn delta_time_secs_f32(&self) -> f32 {
-        self.delta_time.as_secs_f32()
-    }
-}
-
-impl<'a, 'b> Deref for WindowRefMut<'a, 'b> {
-
-    type Target = Window<'b>;
+    type Target = Window;
 
     fn deref(&self) -> &Self::Target {
         self.window
     }
 }
 
-impl<'a, 'b> DerefMut for WindowRefMut<'a, 'b> {
+impl<'a> DerefMut for WindowContext<'a> {
 
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.window

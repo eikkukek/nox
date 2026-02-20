@@ -9,14 +9,15 @@ nox-alloc = { path = "../nox-alloc" }
 nox-proc = { path = "../nox-proc" }
 nox-error = { path = "../nox-error" }
 nox-log = { path = "../nox-log" }
+nox-threads = { path = "../nox-threads" }
+nox-ash = { path = "../nox-ash" }
 
-ash = "0.38.0"
 ash-window = "0.13.0"
 raw-window-handle = "0.6.0"
+parking_lot = "0.12.5"
 winit = "0.30"
 spirv-cross2 = { version = "0.4.6", default-features = false }
 shaderc = "0.9.1"
-memmap2 = "0.9.7"
-rustc-hash = "2.1.1"
+ahash = "0.8.12"
 compact_str = { version = "0.9.0" }
 smithay-clipboard = "0.7.2"

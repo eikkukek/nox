@@ -1,100 +1,92 @@
-    use proc_macro::TokenStream;
+use proc_macro::TokenStream;
 
-    use quote::quote;
-    use syn::{DeriveInput, parse_macro_input, spanned::Spanned, punctuated::Punctuated};
-    use find_crate::find_crate;
+use quote::quote;
+use syn::{DeriveInput, parse_macro_input, spanned::Spanned, punctuated::Punctuated};
 
-    use crate::generics::GenericIdents;
+struct Bounds {
+    bounds: Punctuated<syn::TypeParamBound, syn::Token![+]>,
+}
 
-    struct Bounds {
-        bounds: Punctuated<syn::TypeParamBound, syn::Token![+]>,
+impl quote::ToTokens for Bounds {
+
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        self.bounds.to_tokens(tokens);
     }
+}
 
-    impl quote::ToTokens for Bounds {
+impl syn::parse::Parse for Bounds {
 
-        fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-            self.bounds.to_tokens(tokens);
-        }
-    }
-
-    impl syn::parse::Parse for Bounds {
-
-        fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-            let mut bounds = Punctuated::new();
-            while let Ok(arg) = input.parse::<syn::TypeParamBound>() {
-                bounds.push(arg);
-                if let Err(_) =input.parse::<syn::Token![+]>() {
-                    break;
-                }
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut bounds = Punctuated::new();
+        while let Ok(arg) = input.parse::<syn::TypeParamBound>() {
+            bounds.push(arg);
+            if input.parse::<syn::Token![+]>().is_err() {
+                break;
             }
-            Ok(Self {
-                bounds,
-            })
         }
+        Ok(Self {
+            bounds,
+        })
     }
+}
 
-    pub fn handle_input(input: &DeriveInput) -> syn::Result<TokenStream> {
-        let name = &input.ident;
-        let generics = &input.generics;
-        let generic_idents: GenericIdents = generics.into();
-        let where_clause = &generics.where_clause;
-        if let Some(attr) = input.attrs
-            .iter()
-            .find(|attr| {
-                if let Some(ident) = attr.path().get_ident() {
-                    ident == "bounds"
-                } else {
-                    false
-                }
-            })
-        {
-            let bounds = attr.parse_args::<Bounds>()?;
-            let crate_path = find_crate(|c| c == "nox-mem" || c == "nox")
-                .map_err(|err| syn::Error::new(attr.path().span(), format!("failed to find nox-mem crate {err}")))?
-                .name;
-            let pkg_path = if crate_path == "nox" {
-                quote! { nox::mem }
+pub fn handle_input(input: &DeriveInput) -> syn::Result<TokenStream> {
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    if let Some(attr) = input.attrs
+        .iter()
+        .find(|attr| {
+            if let Some(ident) = attr.path().get_ident() {
+                ident == "bounds"
             } else {
-                quote! { nox_mem }
-            };
-            Ok(TokenStream::from(
-                quote! {
-                    unsafe impl #generics #pkg_path::dynamic::Dyn for #name #generic_idents #where_clause {
+                false
+            }
+        })
+    {
+        let bounds = attr.parse_args::<Bounds>()?;
+        Ok(TokenStream::from(
+            quote! {
+                unsafe impl #impl_generics nox_mem::dynamic::Dyn<dyn #bounds> for
+                    #name #ty_generics #where_clause
+                {
+                    type Target = Self;
 
-                        type Target = dyn #bounds;
-                        
-                        unsafe fn raw_parts(ptr: *const Self) -> #pkg_path::dynamic::DynRawParts<Self> {
-                            let s: *const Self::Target = ptr;
-                            let (data, vtable) = unsafe { core::mem::transmute::<*const Self::Target, (*const Self, *const ())>(s) };
-                            #pkg_path::dynamic::DynRawParts {
-                                data,
-                                vtable,
-                            }
+                    unsafe fn raw_parts(ptr: *const Self) -> nox_mem::dynamic::DynRawParts<Self::Target> {
+                        let s: *const (dyn #bounds) = ptr;
+                        unsafe {
+                            core::mem::transmute::<
+                                *const (dyn #bounds),
+                                nox_mem::dynamic::DynRawParts<Self::Target>
+                            >(s)
                         }
+                    }
 
-                        unsafe fn from_raw_parts(raw_parts: #pkg_path::dynamic::DynRawParts<Self>) -> *const Self::Target {
-                            unsafe { core::mem
-                                ::transmute::<(*const Self, *const ()), *mut Self::Target>((raw_parts.data, raw_parts.vtable))
-                            }
+                    unsafe fn from_raw_parts(raw_parts: nox_mem::dynamic::DynRawParts<Self>) -> *const (dyn #bounds) {
+                        unsafe { core::mem
+                            ::transmute::<
+                                nox_mem::dynamic::DynRawParts<Self::Target>,
+                                *mut (dyn #bounds)
+                            >(raw_parts)
                         }
+                    }
 
-                        unsafe fn get_self(target: *const Self::Target) -> *const Self {
-                            unsafe { core::mem
-                                ::transmute::<*const Self::Target, (*const Self, *const ())>(target).0
-                            }
+                    unsafe fn get_self(target: *const (dyn #bounds)) -> *const Self {
+                        unsafe { core::mem
+                            ::transmute::<*const (dyn #bounds), (*const Self, *const ())>(target).0
                         }
                     }
                 }
-            ))
-        } else {
-            Err(syn::Error::new(input.attrs.first().span(), "failed to find 'bounds' attribute"))
-        }
+            }
+        ))
+    } else {
+        Err(syn::Error::new(input.attrs.first().span(), "failed to find 'bounds' attribute"))
     }
+}
 
-    pub fn r#dyn(item: TokenStream) -> TokenStream {
-        let input = parse_macro_input!(item as DeriveInput);
-        match handle_input(&input) {
-            Ok(ts) => ts,
-            Err(err) => err.to_compile_error().into(),
-        }
+pub fn r#dyn(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    match handle_input(&input) {
+        Ok(ts) => ts,
+        Err(err) => err.to_compile_error().into(),
     }
+}

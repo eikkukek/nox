@@ -8,7 +8,7 @@ pub fn glsl_to_spirv(
     input_name: &str,
     shader_kind: shaderc::ShaderKind,
     vulkan_version: Version,
-) -> Result<shaderc::CompilationArtifact, ShaderError>
+) -> Result<shaderc::CompilationArtifact>
 {
     let compiler = shaderc::Compiler::new()?;
     let mut options = shaderc::CompileOptions::new().unwrap();

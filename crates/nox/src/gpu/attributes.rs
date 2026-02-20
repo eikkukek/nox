@@ -1,3 +1,8 @@
+use core::{
+    time::Duration,
+    num::NonZeroU32,
+};
+
 use compact_str::CompactString;
 
 use nox_mem::{
@@ -5,68 +10,89 @@ use nox_mem::{
     impl_as_raw_bit_op
 };
 
-use crate::dev::has_bits;
 use crate::Version;
 
-use super::{MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES};
+use crate::dev::has_bits;
 
-#[repr(u8)]
+use super::{MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES, MemoryLayout};
+
+#[repr(u32)]
 #[derive(AsRaw, Clone, Copy)]
 pub enum Layer {
-    /// Khronos validation layer. For this to be used, the Vulkan SDK needs to be installed.
+    /// Khronos validation layer.
+    ///
+    /// For this to be used, the Vulkan SDK needs to be installed.
     KhronosValidation = 0x1,
 }
 
-impl_as_raw_bit_op!(Layer);
-
-#[repr(u8)]
+#[repr(u32)]
 #[derive(AsRaw, Clone, Copy)]
-pub enum Extension {
-    /// Enables the use of inline uniform blocks (see [`DescriptorType::InlineUniformBlock`]).
-    InlineUniformBlock = 0x1,
-    /// Enables Vulkan debug utils.
-    DebugUtils = 0x2,
+pub enum InstanceExtension {
+    /// Enables the Vulkan debug utils instance extension.
+    DebugUtils = 0x1,
 }
 
-impl_as_raw_bit_op!(Extension);
+#[repr(u32)]
+#[derive(AsRaw, Clone, Copy)]
+pub enum DeviceExtension {
+    /// Enables the push descriptor device extension.
+    PushDescriptor,
+}
 
+impl_as_raw_bit_op!(Layer, InstanceExtension, DeviceExtension);
+
+#[derive(Clone)]
 pub struct GpuAttributes {
     pub(crate) app_name: CompactString,
     pub(crate) app_version: Version,
     pub(super) buffered_frames: u32,
-    pub(super) layers: u8,
-    pub(super) required_layers: u8,
-    pub(super) extensions: u8,
-    pub(super) optional_extensions: u8,
+    pub(super) layers: u32,
+    pub(super) required_layers: u32,
+    pub(super) instance_extensions: u32,
+    pub(super) optional_instance_extensions: u32,
+    pub(super) device_extensions: u32,
+    pub(super) memory_layout: MemoryLayout,
+    pub(super) command_workers: u32,
+    pub(super) frame_timeout: Duration,
 }
 
 impl GpuAttributes {
 
+    /// Sets the Vulkan application `name` used for debugging.
+    ///
+    /// The default is an empty string.
     #[inline(always)]
     pub fn with_app_name(mut self, name: impl AsRef<str>) -> Self {
         self.app_name = CompactString::new(name);
         self
     }
-
+    
+    /// Sets the Vulkan application `version` used for debugging.
+    ///
+    /// The default is [`Version::default()`] (1.0.0).
     #[inline(always)]
     pub fn with_app_version(mut self, version: Version) -> Self {
         self.app_version = version;
         self
     }
 
-    /// Sets how many buffered frames swapchains have (). If surface capabilities don't allow `count`
-    /// buffered frames, swapchains are synchronized as if there were `count` buffered frames
-    /// instead. `count` will be clamped between `MIN_BUFFERED_FRAMES` and `MAX_BUFFERED_FRAMES`.
+    /// Sets how many buffered frames swapchains have.
     ///
-    /// The default is 3.
+    /// `count` will be clamped between [`MIN_BUFFERED_FRAMES`] and [`MAX_BUFFERED_FRAMES`].
+    ///
+    /// If surface capabilities don't allow `count` buffered frames, swapchains are synchronized as
+    /// if there were `count` buffered frames.
+    ///
+    /// The default buffered frame count is 3.
     #[inline(always)]
     pub fn with_buffered_frames(mut self, count: u32) -> Self {
         self.buffered_frames = count.clamp(MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES);
         self
     }
 
-    /// Adds a [`Layer`]. Layers *are not* required by default. Required layers can be added by
-    /// `with_required_layers`
+    /// Adds a [`Layer`].
+    ///
+    /// Layers *are not* required by default. Required layers can be added with `with_required_layers`.
     #[inline(always)]
     pub fn with_layer(mut self, layer: Layer) -> Self {
         self.layers |= layer;
@@ -74,30 +100,64 @@ impl GpuAttributes {
     }
 
     /// Adds a required [`Layer`].
+    ///
+    /// To add an optional layer, use `with_layer`.
     #[inline(always)]
     pub fn with_required_layer(mut self, layer: Layer) -> Self {
         self.required_layers |= layer;
         self
     }
 
-    /// Adds an [`Extension`]. Extensions *are* required by default. Optional extensions can be
-    /// added by `with_optional_extension`.
+    /// Adds an [`InstanceExtension`].
+    ///
+    /// Instance extensions *are* required by default. Optional extensions can be added with
+    /// `with_optional_extension`.
     #[inline(always)]
-    pub fn with_extension(mut self, extension: Extension) -> Self {
-        self.extensions |= extension;
+    pub fn with_instance_extension(mut self, extension: InstanceExtension) -> Self {
+        self.instance_extensions |= extension;
         self
     }
 
-    /// Adds an optional [`Extension`].
+    /// Adds an optional [`InstanceExtension`].
+    ///
+    /// To add a required instance extension, use `with_extension`.
     #[inline(always)]
-    pub fn with_optional_extension(mut self, extension: Extension) -> Self {
-        self.optional_extensions |= extension;
+    pub fn with_optional_instance_extension(mut self, extension: InstanceExtension) -> Self {
+        self.optional_instance_extensions |= extension;
         self
     }
 
-    /// Checks if attributes contains the given [`Layer`]. Returns `Some(true)` if the layer is found
-    /// and required, `Some(false)` if it's found and not required and `None` if the layer isn't
-    /// present.
+    /// Adds a [`DeviceExtension`].
+    ///
+    /// Device extensions are always required.
+    #[inline(always)]
+    pub fn with_device_extension(mut self, extension: DeviceExtension) -> Self {
+        self.device_extensions |= extension;
+        self
+    }
+
+    /// Sets the number of command pools used by the queue scheduler.
+    ///
+    /// The default is 8.
+    #[inline(always)]
+    pub fn with_command_workers(mut self, n: NonZeroU32) -> Self {
+        self.command_workers = n.get();
+        self
+    }
+
+    /// Sets the timeout used when waiting for work to finish per frame.
+    ///
+    /// The default is 2 seconds.
+    #[inline(always)]
+    pub fn with_frame_timeout(mut self, timeout: Duration) -> Self {
+        self.frame_timeout = timeout;
+        self
+    }
+
+    /// Checks if the attributes contains the given [`Layer`].
+    ///
+    /// Returns `Some(true)` if the layer is found and required, `Some(false)` if it's found and
+    /// not required and `None` if the layer isn't present.
     #[inline(always)]
     pub fn contains_layer(&self, layer: Layer) -> Option<bool> {
         if has_bits!(self.required_layers, layer) {
@@ -108,18 +168,25 @@ impl GpuAttributes {
             None
         }
     }
-    /// Checks if attributes contains the given [`Extension`]. Returns `Some(true)` if the extension is found
-    /// and required, `Some(false)` if it's found and not required and `None` if the extension isn't
-    /// present.
+    /// Checks if the attributes contains the given [`InstanceExtension`].
+    ///
+    /// Returns `Some(true)` if the extension is found and required, `Some(false)` if it's found
+    /// and not required and `None` if the extension isn't present.
     #[inline(always)]
-    pub fn contains_extension(&self, extension: Extension) -> Option<bool> {
-        if has_bits!(self.layers, extension) {
+    pub fn contains_instance_extension(&self, extension: InstanceExtension) -> Option<bool> {
+        if has_bits!(self.instance_extensions, extension) {
             Some(true)
-        } else if has_bits!(self.optional_extensions, extension) {
+        } else if has_bits!(self.optional_instance_extensions, extension) {
             Some(false)
         } else {
             None
         }
+    }
+
+    /// Checks if the attributes contains the give [`DeviceExtension`].
+    #[inline(always)]
+    pub fn contains_device_extension(&self, extensions: DeviceExtension) -> bool {
+        has_bits!(self.device_extensions, extensions)
     }
 }
 
@@ -131,7 +198,11 @@ pub fn default_attributes() -> GpuAttributes {
         buffered_frames: 3,
         layers: 0,
         required_layers: 0,
-        extensions: 0,
-        optional_extensions: 0,
+        instance_extensions: 0,
+        optional_instance_extensions: 0,
+        device_extensions: 0,
+        memory_layout: MemoryLayout::default(),
+        command_workers: 8,
+        frame_timeout: Duration::from_secs(2),
     }
 }

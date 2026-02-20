@@ -4,19 +4,23 @@ use crate::{
     gpu,
 };
 
-pub enum Event<'a, 'b, 'c> {
+pub(super) enum RunEvent {
+    Tick,
+}
+
+pub enum Event<'a, 'b, 'c, 'd> {
     /// Nox has initialized.
     ///
     /// Gets called once at the beginning before any other events.
     Initialized {
-        event_loop: &'a mut event_loop::ActiveEventLoop<'b, 'c>,
+        event_loop: &'a event_loop::ActiveEventLoop<'b>,
         gpu: &'a mut gpu::GpuContext<'b>,
     },
     /// Nox is updating.
     ///
     /// Happens once per frame before any GPU work.
     Update {
-        event_loop: &'a mut event_loop::ActiveEventLoop<'b, 'c>,
+        event_loop: &'a event_loop::ActiveEventLoop<'b>,
         gpu: &'a mut gpu::GpuContext<'b>,
     },
     /// Nox is recording compute commands.
@@ -26,7 +30,7 @@ pub enum Event<'a, 'b, 'c> {
     ///
     /// Happens once per frame:
     ComputeWork {
-        commands: &'a mut gpu::ComputeCommands<'b>,
+        commands: &'a mut gpu::ComputeCommands<'b, 'c>,
     },
     /// Nox is recording transfer commands.
     ///
@@ -36,14 +40,15 @@ pub enum Event<'a, 'b, 'c> {
     /// Synchronization can be achieved using a custom [`TimelineSemaphore`].
     TransferWork {
         request_id: gpu::CommandRequestId,
-        commands: &'a mut gpu::TransferCommands<'b, 'c>,
+        commands: &'a mut gpu::TransferCommands<'b, 'c, 'd>,
     },
     /// The frame buffer for window with `window_id` has been (re)created.
     FrameBufferCreated {
         window_id: win::WindowId,
+        event_loop: &'a event_loop::ActiveEventLoop<'b>,
         gpu: &'a mut gpu::GpuContext<'b>,
         new_size: gpu::Dimensions,
-        new_format: gpu::ImageFormat,
+        new_format: gpu::RawFormat,
     },
     /// Nox is constructing a [`FrameGraph`].
     ///
@@ -52,7 +57,7 @@ pub enum Event<'a, 'b, 'c> {
     ///
     /// Happens once per frame.
     Render {
-        frame_graph: &'a mut gpu::FrameGraph<'b>,
+        frame_graph: &'a mut gpu::FrameGraph<'b, 'c>,
         pending_transfers: &'a [gpu::CommandRequestId],
     },
     /// Nox is recording render commands.
@@ -60,7 +65,7 @@ pub enum Event<'a, 'b, 'c> {
     /// Happens for each pass added to the current [`FrameGraph`]
     RenderWork {
         pass_id: gpu::PassId,
-        commands: &'a mut gpu::RenderCommands<'b, 'c>,
+        commands: &'a mut gpu::RenderCommands<'b, 'c, 'd>,
     },
     CleanUp {
         gpu: &'a mut gpu::GpuContext<'b>,
