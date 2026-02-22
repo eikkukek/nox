@@ -1,13 +1,10 @@
 //! [`ash`] with utilities and additions.
 
-mod nox_ash;
 pub mod vk;
 pub mod khr;
 
-pub use nox_ash::{
-    Entry,
-    Instance,
-    Device,
-};
+mod macros;
 
 pub use ash::*;
+
+pub use nox_mem as mem;

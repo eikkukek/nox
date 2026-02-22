@@ -2,11 +2,13 @@
 //!
 //! <https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_present_wait2.html>
 
-use core::ffi::{CStr, c_void};
-
-use crate::{
-    vk,
-    prelude::VkResult,
+use {
+    core::ffi::{CStr, c_void},
+    crate::{
+        vk,
+        prelude::VkResult,
+    },
+    nox_mem::result::ResultExt,
 };
 
 pub use {
@@ -50,7 +52,7 @@ impl DeviceFn {
 unsafe impl Send for DeviceFn {}
 unsafe impl Sync for DeviceFn {}
 
-/// VK_KHR_present_wati2 device-level functions.
+/// VK_KHR_present_wait2 device-level functions.
 #[derive(Clone)]
 pub struct Device {
     fp: DeviceFn,
@@ -79,21 +81,30 @@ impl Device {
 
     /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkWaitForPresent2KHR.html>
     ///
+    /// [`Ok`] values are:
+    ///
+    /// [`vk::Result::SUBOPTIMAL_KHR`]
+    /// [`vk::Result::SUCCESS`]
+    /// [`vk::Result::TIMEOUT`]
+    ///
     /// # Safety
-    /// All Vulkan calls are inherently unsafe, because [`ash`] doesn't do any error checking by
-    /// itself.
+    /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
     #[inline(always)]
     pub unsafe fn wait_for_present2_khr(
         &self,
         swapchain: vk::SwapchainKHR,
         p_present_wait2_info: &vk::PresentWait2InfoKHR,
-    ) -> VkResult<()> {
+    ) -> VkResult<vk::Result> {
         unsafe {
             (self.fp.wait_for_present2_khr)(
                 self.handle,
                 swapchain,
                 p_present_wait2_info,
-            ).result()
-        }
+            )
+        }.result_with_success(vk::Result::SUCCESS)
+        .filter_err(|&err| matches!(
+            err,
+            vk::Result::SUBOPTIMAL_KHR | vk::Result::TIMEOUT,
+        ).then_some(err))
     }
 }
