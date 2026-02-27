@@ -1,4 +1,3 @@
-#[macro_use]
 mod version;
 mod attributes;
 
@@ -7,8 +6,6 @@ pub mod sync;
 mod nox;
 pub mod gpu;
 mod interface;
-
-pub use gpu::ash as nox_ash;
 
 mod clipboard;
 
@@ -27,6 +24,7 @@ mod prelude {
     pub use nox_alloc as alloc;
     pub use nox_log as log;
     pub use nox_threads as threads;
+    pub use nox_ash;
 
     pub use version::Version;
     pub use attributes::*;

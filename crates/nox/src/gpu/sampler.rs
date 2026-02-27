@@ -1,9 +1,8 @@
-use super::*;
+use nox_ash::vk;
 
-use crate::gpu::prelude::{
-    CompareOp,
-    Handle,
-};
+use crate::sync::*;
+
+use crate::gpu::prelude::*;
 
 struct Inner {
     handle: vk::Sampler,
@@ -27,8 +26,8 @@ impl Sampler {
     }
 
     #[inline(always)]
-    pub(crate) fn handle(&self) -> Handle<'_, vk::Sampler> {
-        Handle::new(self.inner.handle)
+    pub(crate) fn handle(&self) -> TransientHandle<'_, vk::Sampler> {
+        TransientHandle::new(self.inner.handle)
     }
 
     pub fn default_attributes() -> SamplerAttributes {
@@ -53,10 +52,10 @@ impl Sampler {
 pub struct SamplerAttributes {
     pub mag_filter: Filter,
     pub min_filter: Filter,
-    pub mip_mode: MipMode,
-    pub address_mode_u: AddressMode,
-    pub address_mode_v: AddressMode,
-    pub address_mode_w: AddressMode,
+    pub mip_mode: MipmapMode,
+    pub address_mode_u: SamplerAddressMode,
+    pub address_mode_v: SamplerAddressMode,
+    pub address_mode_w: SamplerAddressMode,
     pub mip_lod_bias: f32,
     pub max_anisotropy: Option<f32>,
     pub compare_op: Option<CompareOp>,
@@ -67,7 +66,7 @@ pub struct SamplerAttributes {
 
 impl SamplerAttributes {
 
-    /// Specifies which magnification [`Filter`] to apply to look ups. Default is [`Filter::Nearest`].
+    /// Specifies which magnification [`Filter`] to apply to look ups. Default is [`Filter::NEAREST`].
     ///
     /// See the Vulkan docs for more information on filtering:
     /// **<https://docs.vulkan.org/spec/latest/chapters/textures.html#textures-texel-filtering>**.
@@ -77,7 +76,7 @@ impl SamplerAttributes {
         self
     }
 
-    /// Specifies which minification [`Filter`] to apply to look ups. Default is [`Filter::Nearest`].
+    /// Specifies which minification [`Filter`] to apply to look ups. Default is [`Filter::NEAREST`].
     ///
     /// See the Vulkan docs for more information on filtering:
     /// **<https://docs.vulkan.org/spec/latest/chapters/textures.html#textures-texel-filtering>**.
@@ -87,12 +86,12 @@ impl SamplerAttributes {
         self
     }
 
-    /// Specifies which mipmap filter to apply to lookups. Default is [`MipMode::Nearest`].
+    /// Specifies which mipmap filter to apply to lookups. Default is [`MipmapMode::NEAREST`].
     ///
     /// See the Vulkan docs for more information on filtering:
     /// **<https://docs.vulkan.org/spec/latest/chapters/textures.html#textures-texel-filtering>**.
     #[inline(always)]
-    pub fn with_mip_mode(mut self, mode: MipMode) -> Self {
+    pub fn with_mipmap_mode(mut self, mode: MipmapMode) -> Self {
         self.mip_mode = mode;
         self
     }
@@ -119,12 +118,17 @@ impl SamplerAttributes {
     }
 
     /// Specifies which wrapping operation is used when the coordinates of used to sample an image
-    /// would be out of bounds. The default is [`AddressMode::Repeat`] for each coordinate.
+    /// would be out of bounds. The default is [`AddressMode::REPEAT`] for each coordinate.
     ///
     /// See the Vulkan docs for details:
     /// **<https://docs.vulkan.org/spec/latest/chapters/textures.html#textures-wrapping-operation>**.
     #[inline(always)]
-    pub fn with_address_mode(mut self, u: AddressMode, v: AddressMode, w: AddressMode) -> Self {
+    pub fn with_address_mode(
+        mut self,
+        u: SamplerAddressMode,
+        v: SamplerAddressMode,
+        w: SamplerAddressMode,
+    ) -> Self {
         self.address_mode_u = u;
         self.address_mode_v = v;
         self.address_mode_w = w;

@@ -148,20 +148,25 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
     /// destination *must* not overlap.
     #[inline(always)]
     pub unsafe fn clone_elements(self, dst: Self, len: SizeType)
-        where
-            T: Clone
+        where T: Clone
     {
-        if needs_drop::<T>() {
-            unsafe {
-                for i in 0..len.into_usize() {
-                    dst.deref().add(i).write(self.deref().add(i).as_ref().clone());
-                }
+        unsafe {
+            for i in 0..len.into_usize() {
+                dst.deref().add(i).write(self.deref().add(i).as_ref().clone());
             }
         }
-        else {
-            unsafe {
-                self.copy_to_nonoverlapping(*dst, len.into_usize());
-            }
+    }
+
+    /// Clones elements from [`self`] to `dst` up to `len`.
+    /// # Safety
+    /// [`self`] and `dst` need to be valid, aligned pointers to arrays of [`T`] up to `len` and
+    /// [`self`] needs to hold valid, initialized values of [`T`] up to `len`. The source and
+    /// destination *must* not overlap
+    pub unsafe fn fast_clone_elements(self, dst: Self, len: SizeType)
+        where T: Copy
+    {
+        unsafe {
+            self.copy_to_nonoverlapping(*dst, len.into_usize());
         }
     }
 }

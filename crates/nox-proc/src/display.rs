@@ -87,9 +87,9 @@ pub fn handle_enum(input: &syn::DeriveInput, e: &syn::DataEnum) -> syn::Result<O
                 }
             });
         let expanded = quote! {
-            impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause {
+            impl #impl_generics ::core::fmt::Display for #name #ty_generics #where_clause {
                 #[allow(unused_variables, unused_assignments)]
-                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     match self {
                         #( #fmts, )*
                         _ => Ok(()),
@@ -125,10 +125,10 @@ pub fn handle_struct(input: &syn::DeriveInput, s: &syn::DataStruct) -> syn::Resu
                         quote! { "{}", #expr }
                     };
                 Some(quote! {
-                    impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
+                    impl #impl_generics ::core::fmt::Display for #name #ty_generics #where_clause
                     {
                         #[allow(unused_variables, unused_assignments)]
-                        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                             let Self { #( #names ),* } = self;
                             write!(f, #fmt)
                         }
@@ -171,10 +171,10 @@ pub fn handle_struct(input: &syn::DeriveInput, s: &syn::DataStruct) -> syn::Resu
                     fmt.insert(idx, '_');
                 }
                 Some(quote! {
-                    impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
+                    impl #impl_generics ::core::fmt::Display for #name #ty_generics #where_clause
                     {
                         #[allow(unused_variables, unused_assignments)]
-                        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                             let Self(#( #names ),*) = self;
                             write!(f, #fmt)
                         }
@@ -193,9 +193,9 @@ pub fn handle_struct(input: &syn::DeriveInput, s: &syn::DataStruct) -> syn::Resu
     {
         let fmt = attr.parse_args::<LitStr>()?;
         Some(quote! {
-            impl #impl_generics core::fmt::Display for #name #ty_generics #where_clause
+            impl #impl_generics ::core::fmt::Display for #name #ty_generics #where_clause
             {
-                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                     write!(f, #fmt)
                 }
             }

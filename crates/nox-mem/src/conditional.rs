@@ -1,4 +1,4 @@
-pub trait Conditional: 'static {
+pub trait Conditional: 'static + Copy {
 
     const VALUE: bool;
 }

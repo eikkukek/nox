@@ -1,7 +1,7 @@
 use nox_mem::num::UInteger;
 
 #[derive(Clone, Copy)]
-pub(crate) enum StateOverwrite<Range: StateRange> {
+pub(super) enum StateOverwrite<Range: StateRange> {
     NoOverlap,
     Combine(Range),
     Consume(Range::MemoryBarrier),
@@ -9,7 +9,7 @@ pub(crate) enum StateOverwrite<Range: StateRange> {
     Shrink(Range, Range::MemoryBarrier),
 }
 
-pub(crate) trait StateRange: Clone + Copy {
+pub(super) trait StateRange: Clone + Copy {
 
     type MemoryBarrier;
     type State: PartialEq + Eq + Clone + Copy;

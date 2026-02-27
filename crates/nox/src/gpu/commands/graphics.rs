@@ -1,7 +1,7 @@
 mod structs;
+mod cache;
 mod draw;
 
-use std::sync::Arc;
 use core::cell::UnsafeCell;
 
 use nox_ash::vk;
@@ -28,15 +28,15 @@ pub use structs::*;
 pub use draw::*;
 
 #[derive(Default, Clone)]
-pub struct RenderPassInfo {
-    color_attachments: Vec32<PassAttachment>,
-    depth_stencil_attachment: DepthStencilAttachment,
+pub struct RenderPassTemplate {
+    color_attachments: Vec32<PassAttachment<'static>>,
+    depth_stencil_attachment: DepthStencilAttachment<'static>,
     render_area: Option<RenderArea>,
-    msaa_samples: MSAA,
+    msaa_samples: MsaaSamples,
     layer_count: u32,
 }
 
-impl RenderPassInfo {
+impl RenderPassTemplate {
 
     #[inline(always)]
     pub fn new() -> Self {
@@ -44,171 +44,43 @@ impl RenderPassInfo {
     }
 
     #[inline(always)]
-    pub fn with_color_attachment<T>(&mut self, attachment: T) -> &mut Self
-        where T: ToRef<PassAttachment>,
+    pub fn with_color_attachment(mut self, attachment: PassAttachment<'static>) -> Self
     {
-        self.color_attachments.push(attachment
-            .to_ref()
-            .clone()
-        );
+        self.color_attachments.push(attachment);
         self
     }
 
     #[inline(always)]
-    pub fn clear_color_attachments(&mut self) {
-        self.color_attachments.clear();
-    }
-
-    #[inline(always)]
     pub fn with_depth_stencil_attachment(
-        &mut self,
-        attachment: DepthStencilAttachment,
-    ) -> &mut Self
+        mut self,
+        attachment: DepthStencilAttachment<'static>,
+    ) -> Self
     {
         self.depth_stencil_attachment = attachment;
         self
     }
 
     #[inline(always)]
-    pub fn with_render_area(&mut self, area: RenderArea) -> &mut Self {
+    pub fn with_render_area(mut self, area: RenderArea) -> Self {
         self.render_area = Some(area);
         self
     }
 
     #[inline(always)]
-    pub fn with_msaa_samples(&mut self, samples: MSAA) -> &mut Self {
+    pub fn with_msaa_samples(mut self, samples: MSAA) -> Self {
         self.msaa_samples = samples;
         self
     }
 
     #[inline(always)]
-    pub fn with_layer_count(&mut self, count: u32) -> &mut Self {
+    pub fn with_layer_count(mut self, count: u32) -> Self {
         self.layer_count = count;
         self
     }
 }
 
-#[derive(Default)]
-struct BufferCache {
-    ranges: Vec32<(vk::DeviceSize, vk::DeviceSize, vk::PipelineStageFlags2, vk::AccessFlags2, CommandOrdering)>,
-}
-
-impl BufferCache {
-
-    fn touch(
-        &mut self,
-        mut offset: vk::DeviceSize,
-        mut size: vk::DeviceSize,
-        mut stage: vk::PipelineStageFlags2,
-        mut access: vk::AccessFlags2,
-        mut ordering: CommandOrdering,
-    ) -> bool {
-        let new = self.ranges.is_empty();
-        let mut index = 0;
-        for i in (0..self.ranges.len()).rev() {
-            let dst_end = offset + size;
-            let &(src_offset, src_size, src_stage, src_access, src_ordering) = unsafe {
-                self.ranges.get_unchecked(i as usize)
-            };
-            let src_end = src_offset + src_size;
-            if src_offset < dst_end && offset < src_end {
-                let (new_offset, new_size) =
-                if src_offset >= offset && src_end <= dst_end {
-                    (offset, size)
-                } else if
-                    offset >= src_offset &&
-                    dst_end <= src_end
-                {
-                    (src_offset, src_size)
-                } else if src_offset < offset {
-                    let d = offset - src_offset;
-                    let end = (src_offset + d).max(dst_end);
-                    let size = end - src_offset;
-                    (src_offset, size)
-                } else {
-                    let d = src_offset - offset;
-                    let end = (offset + d).max(src_end);
-                    let size = end - offset;
-                    (offset, size)
-                };
-                self.ranges.remove(i);
-                offset = new_offset;
-                size = new_size;
-                stage |= src_stage;
-                access |= src_access;
-                if src_ordering == CommandOrdering::Strict
-                {
-                    ordering = CommandOrdering::Strict;
-                }
-            }
-            index = i;
-        }
-        self.ranges.insert(index, (offset, size, stage, access, ordering));
-        new
-    }
-
-    #[inline(always)]
-    fn reset(&mut self) {
-        self.ranges.clear();
-    }
-}
-
-#[derive(Default)]
-struct ImageCache {
-    layout: Option<ShaderImageLayout>,
-    access: Option<u8>,
-    shader_stage_mask: vk::ShaderStageFlags,
-    subresource_ranges: AHashSet<Option<ImageSubresourceRange>>,
-}
-
-impl ImageCache {
-
-    #[inline(always)]
-    fn touch(
-        &mut self,
-        layout: ShaderImageLayout,
-        access: Option<ShaderAccess>,
-        shader_stage_mask: vk::ShaderStageFlags,
-    ) -> bool
-    {
-        if let Some(access) = access {
-            let current = self.access.get_or_insert(access.as_raw());
-            *current |= access;
-        }
-        self.shader_stage_mask |= shader_stage_mask;
-        match &mut self.layout {
-            Some(current) => {
-                *current = current.combine(layout);
-                false
-            },
-            None => {
-                self.layout = Some(layout);
-                true
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn reset(&mut self) {
-        self.layout = None;
-        self.access = None;
-        self.subresource_ranges.clear();
-    }
-}
-
-#[derive(Default)]
-pub(super) struct GraphicsCommandCache {
-    image_memory_barrier_cache: ImageMemoryBarrierCache,
-    image_cache: AHashMap<ImageId, ImageCache>,
-    image_id_cache: Vec32<ImageId>,
-    buffer_memory_barrier_cache: BufferMemoryBarrierCache,
-    buffer_cache: AHashMap<BufferId, BufferCache>,
-    buffer_id_cache: Vec32<BufferId>,
-    draw_cache: UnsafeCell<DrawCommandCache>,
-}
-
 pub struct GraphicsCommands<'a, 'b> {
-    resources: Arc<Resources>,
+    gpu: Gpu,
     recorder: &'a mut CommandRecorder<'b>,
     primary_command_buffer: vk::CommandBuffer,
     wait_scope: vk::PipelineStageFlags2,
@@ -248,14 +120,14 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
             flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
             ..Default::default()
         };
-        let resources = recorder.resources().clone();
+        let gpu = recorder.gpu().clone();
         unsafe {
-            resources.vk().device()
+            gpu.vk().device()
                 .begin_command_buffer(command_buffer, &begin_info)
                 .context("failed to begin primary command buffer")?;
         }
         Ok(Self {
-            resources,
+            gpu,
             recorder,
             primary_command_buffer: command_buffer,
             wait_scope: vk::PipelineStageFlags2::NONE,
@@ -268,19 +140,19 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
 
     pub fn begin_rendering<F>(
         &mut self,
-        pass: &RenderPassInfo,
+        template: &RenderPassTemplate,
     ) -> Result<ActiveRenderPass<'_, 'a, 'b, impl Guard<True>>>
     {
         self.command_timeline_value += 1;
         let command_timeline_value = self.command_timeline_value;
         let command_id = self.command_id;
         let command_buffer = self.primary_command_buffer;
-        let tmp_alloc = self.resources.tmp_alloc();
+        let tmp_alloc = self.gpu.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
-        let msaa_samples = pass.msaa_samples;
+        let msaa_samples = template.msaa_samples;
         let mut vk_color_attachments = NonNullVec32
-            ::with_capacity(pass.color_attachments.len() as u32, &tmp_alloc)?;
-        let queue_family_index = self.resources.vk().queue_family_indices().graphics_index(); 
+            ::with_capacity(template.color_attachments.len() as u32, &tmp_alloc)?;
+        let queue_family_index = self.gpu.vk().queue_family_indices().graphics_index(); 
         let mut min_extent = vk::Extent2D {
             width: u32::MAX,
             height: u32::MAX,
@@ -352,11 +224,11 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
             ))?;
             unsafe {
                 scheduler::cmd_pipeline_barrier(
-                    self.recorder.resources().vk(),
+                    self.recorder.gpu().vk(),
                     command_buffer,
                     &[],
                     &[(handle, &memory_barriers)],
-                    command_id,
+                    command_id.index(),
                     command_timeline_value,
                     &tmp_alloc,
                 ).context_with(|| format_compact!(
@@ -444,11 +316,11 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
                 ))?;
                 unsafe {
                     scheduler::cmd_pipeline_barrier(
-                        self.recorder.resources().vk(),
+                        self.recorder.gpu().vk(),
                         command_buffer,
                         &[],
                         &[(handle, &memory_barriers)],
-                        command_id,
+                        command_id.index(),
                         command_timeline_value,
                         &tmp_alloc,
                     ).context_with(|| format_compact!(
@@ -588,8 +460,8 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
             layer_count: pass.layer_count,
             color_attachment_count: vk_color_attachments.len(),
             p_color_attachments: vk_color_attachments.as_ptr(),
-            p_depth_attachment: depth_attachment.as_ptr(),
-            p_stencil_attachment: stencil_attachment.as_ptr(),
+            p_depth_attachment: depth_attachment.as_ref().as_ptr(),
+            p_stencil_attachment: stencil_attachment.as_ref().as_ptr(),
             ..Default::default()
         };
         if !pass.color_attachments.is_empty() {
@@ -600,9 +472,9 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
             self.signal_scope |= vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS;
         }
         unsafe {
-            self.resources
+            self.gpu
                 .vk()
-                .dynamic_rendering_device()
+                .device()
                 .cmd_begin_rendering(command_buffer, &rendering_info);
             vk_color_attachments.drop_and_free(&tmp_alloc);
         }
@@ -624,16 +496,16 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
     ) -> Result<()>
     {
         self.wait_scope |= storage.wait_scope;
-        let tmp_alloc = self.resources.tmp_alloc();
+        let tmp_alloc = self.gpu.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
-        let pools = self.resources.get_shader_resource_pools();
+        let pools = self.gpu.get_shader_resource_pools();
         let mut write_cache = FixedVec32::with_len_with(pools.capacity(), |_| None, &tmp_alloc)?;
         let command_id = self.command_id;
         let command_timeline_value = self.command_timeline_value;
         let primary_command_buffer = self.primary_command_buffer;
-        let queue_family_index = self.resources.vk().queue_family_indices().graphics_index();
+        let queue_family_index = self.gpu.vk().queue_family_indices().graphics_index();
         let cmd_cache = unsafe {
-            &mut *self.recorder.cache()
+            self.recorder.cache().as_mut()
         };
         let cmd_cache = &mut cmd_cache.graphics_command_cache;
         let mut all_shader_stages = vk::ShaderStageFlags::empty();
@@ -764,11 +636,11 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
                 ))?;
                 unsafe {
                     scheduler::cmd_pipeline_barrier(
-                        self.resources.vk(),
+                        self.gpu.vk(),
                         primary_command_buffer,
                         &[(handle, memory_barriers)],
                         &[],
-                        command_id,
+                        command_id.index(),
                         command_timeline_value,
                         &tmp_alloc,
                     ).context_with(|| format_compact!(
@@ -808,10 +680,10 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
                     ))?;
                     unsafe {
                         scheduler::cmd_pipeline_barrier(
-                            self.resources.vk(),
+                            self.gpu.vk(),
                             primary_command_buffer,
                             &[], &[(handle, memory_barriers)],
-                            command_id,
+                            command_id.index(),
                             command_timeline_value,
                             &tmp_alloc,
                         ).context_with(|| format_compact!(
@@ -824,7 +696,7 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
         cmd_cache.image_id_cache.clear();
         cmd_cache.buffer_id_cache.clear();
         unsafe {
-            self.resources.vk().device()
+            self.gpu.vk().device()
             .cmd_execute_commands(primary_command_buffer, &[storage.command_buffer]);
         }
         Ok(())
@@ -834,7 +706,7 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
         where Alloc: LocalAlloc<Error = Error>
     {
         unsafe {
-            self.resources.vk().device()
+            self.gpu.vk().device()
                 .end_command_buffer(self.primary_command_buffer)
                 .context("failed to end command buffer")?;
         }
@@ -845,6 +717,7 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
             timeline_value: self.command_timeline_value,
             wait_scope: self.wait_scope,
             signal_scope: self.signal_scope,
+            queue: self.gpu.vk().graphics_queue(),
         })
     }
 }
@@ -882,7 +755,7 @@ impl<'a, 'b, 'c, Alloc> ActiveRenderPass<'a, 'b, 'c, Alloc>
             ..Default::default()
         };
         unsafe {
-            self.cmd.resources.vk().device()
+            self.cmd.gpu.vk().device()
             .begin_command_buffer(command_buffer, &begin_info)
             .context("failed to begin secondary command buffer")?;
         }
@@ -901,14 +774,14 @@ impl<'a, 'b, 'c, Alloc> ActiveRenderPass<'a, 'b, 'c, Alloc>
             DrawCommandAlloc::Borrowed(&stack),
         )? };
         let mut draw_commands = DrawCommands {
-            resources: &self.cmd.resources,
+            gpu: &self.cmd.gpu,
             storage: &mut storage,
             buffers: DynResourceReadGuard::new(&self.cmd.recorder.buffers),
             images: DynResourceReadGuard::new(&self.cmd.recorder.images),
         };
         f(&mut draw_commands)?;
         unsafe {
-            self.cmd.resources.vk().device()
+            self.cmd.gpu.vk().device()
             .end_command_buffer(command_buffer)
             .context("failed to end secondary command buffer")?;
         }
@@ -925,9 +798,9 @@ impl<'a, 'b, 'c, Alloc> Drop for ActiveRenderPass<'a, 'b, 'c, Alloc>
 
     fn drop(&mut self) {
         unsafe {
-            self.cmd.resources
+            self.cmd.gpu
                 .vk()
-                .dynamic_rendering_device()
+                .device()
                 .cmd_end_rendering(self.cmd.primary_command_buffer);
             self.color_formats.drop_and_free(&self.tmp_alloc);
         }

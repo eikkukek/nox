@@ -1,20 +1,28 @@
-use core::{
-    time::Duration,
-    num::NonZeroU32,
+use {
+    core::{
+        time::Duration,
+        num::NonZeroU32,
+    },
+    compact_str::CompactString,
+    nox_mem::{
+        AsRaw,
+        impl_as_raw_bit_op,
+        vec::{Vec32, Vector},
+        vec32,
+    },
+    nox_ash::vk,
+    crate::{
+        Version,
+        dev::has_bits,
+    },
 };
 
-use compact_str::CompactString;
 
-use nox_mem::{
-    AsRaw,
-    impl_as_raw_bit_op
+use super::{
+    MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES,
+    MemoryLayout, ext,
+    BaseDeviceFeatures,
 };
-
-use crate::Version;
-
-use crate::dev::has_bits;
-
-use super::{MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES, MemoryLayout};
 
 #[repr(u32)]
 #[derive(AsRaw, Clone, Copy)]
@@ -32,14 +40,7 @@ pub enum InstanceExtension {
     DebugUtils = 0x1,
 }
 
-#[repr(u32)]
-#[derive(AsRaw, Clone, Copy)]
-pub enum DeviceExtension {
-    /// Enables the push descriptor device extension.
-    PushDescriptor,
-}
-
-impl_as_raw_bit_op!(Layer, InstanceExtension, DeviceExtension);
+impl_as_raw_bit_op!(Layer, InstanceExtension);
 
 #[derive(Clone)]
 pub struct GpuAttributes {
@@ -50,10 +51,11 @@ pub struct GpuAttributes {
     pub(super) required_layers: u32,
     pub(super) instance_extensions: u32,
     pub(super) optional_instance_extensions: u32,
-    pub(super) device_extensions: u32,
+    pub(super) device_extensions: Vec32<ext::DeviceExtensionObj>,
     pub(super) memory_layout: MemoryLayout,
     pub(super) command_workers: u32,
     pub(super) frame_timeout: Duration,
+    pub(super) required_features: BaseDeviceFeatures,
 }
 
 impl GpuAttributes {
@@ -127,12 +129,12 @@ impl GpuAttributes {
         self
     }
 
-    /// Adds a [`DeviceExtension`].
-    ///
-    /// Device extensions are always required.
+    /// Adds an [`ext::DeviceExtension`].
     #[inline(always)]
-    pub fn with_device_extension(mut self, extension: DeviceExtension) -> Self {
-        self.device_extensions |= extension;
+    pub fn with_device_extension<Ext>(mut self, extension: Ext) -> Self
+        where Ext: ext::DeviceExtension,
+    {
+        self.device_extensions.push(Box::new(extension).into());
         self
     }
 
@@ -151,6 +153,12 @@ impl GpuAttributes {
     #[inline(always)]
     pub fn with_frame_timeout(mut self, timeout: Duration) -> Self {
         self.frame_timeout = timeout;
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_required_device_features(mut self, features: BaseDeviceFeatures) -> Self {
+        self.required_features = features;
         self
     }
 
@@ -182,12 +190,6 @@ impl GpuAttributes {
             None
         }
     }
-
-    /// Checks if the attributes contains the give [`DeviceExtension`].
-    #[inline(always)]
-    pub fn contains_device_extension(&self, extensions: DeviceExtension) -> bool {
-        has_bits!(self.device_extensions, extensions)
-    }
 }
 
 /// Creates default [`GpuAttributes`] with no layers or extensions.
@@ -200,9 +202,10 @@ pub fn default_attributes() -> GpuAttributes {
         required_layers: 0,
         instance_extensions: 0,
         optional_instance_extensions: 0,
-        device_extensions: 0,
+        device_extensions: vec32![],
         memory_layout: MemoryLayout::default(),
         command_workers: 8,
         frame_timeout: Duration::from_secs(2),
+        required_features: BaseDeviceFeatures::default(),
     }
 }

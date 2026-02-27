@@ -2,22 +2,27 @@ use std::sync::Arc;
 
 use core::num::NonZeroU32;
 
-use winit::{window::Window, dpi::PhysicalSize};
+use winit::dpi::PhysicalSize;
 use raw_window_handle::{HasWindowHandle, HasDisplayHandle};
 
 use compact_str::format_compact;
 
 use nox_ash::vk;
-use nox_mem::conditional::True;
+use nox_mem::{
+    conditional::True,
+    vec::{NonNullVec32, Vector},
+};
 
 use nox_alloc::arena::RwArena;
 
-use crate::dev::error::*;
+use crate::{
+    dev::error::*,
+    win::WinitWindow,
+};
 
 use super::{
-    Swapchain,
-    Vulkan,
-    MemoryLayout,
+    commands::scheduler::cmd_pipeline_barrier,
+    *
 };
 
 #[derive(Clone, Copy)]
@@ -29,22 +34,36 @@ enum SwapchainState {
     },
 }
 
+pub struct AcquireImageData {
+    pub image: ImageId,
+    pub semaphore: vk::Semaphore,
+    pub recreated: bool,
+}
+
 pub(crate) struct Surface {
-    vk: Arc<Vulkan>,
+    gpu: Gpu,
+    window: Arc<WinitWindow>,
+    id: SurfaceId,
     handle: vk::SurfaceKHR,
     swapchain_state: SwapchainState,
     swapchain: Option<Swapchain>,
+    real_buffered_frames: u32,
+    buffered_frames: u32,
+    image_ids: NonNullVec32<'static, ImageId>,
+    frame_index: u32,
+    image_index: u32,
     alloc: RwArena,
     tmp_alloc: RwArena<True>,
     present_queue: vk::Queue,
+    present_queue_family_index: u32,
     destroyed: bool,
 }
 
 impl Surface {
 
     pub fn new(
-        window: &Window,
-        vk: Arc<Vulkan>,
+        window: Arc<WinitWindow>,
+        gpu: Gpu,
         buffered_frames: u32,
         layout: MemoryLayout
     ) -> Result<Self>
@@ -54,8 +73,8 @@ impl Surface {
         let handle = unsafe {
             ash_window
             ::create_surface(
-                vk.entry(),
-                vk.instance(),
+                gpu.vk().entry(),
+                gpu.vk().instance(),
                 window.display_handle().unwrap().as_raw(),
                 window.window_handle().unwrap().as_raw(),
                 None
@@ -63,16 +82,16 @@ impl Surface {
             .context("failed to create vulkan surface")?
         };
 
-        let properties = unsafe { vk.instance()
-            .get_physical_device_queue_family_properties(vk.physical_device())
+        let properties = unsafe { gpu.vk().instance()
+            .get_physical_device_queue_family_properties(gpu.vk().physical_device())
         };
 
         let mut queue_family_index = None;
 
         for (i, _) in properties.iter().enumerate() {
             let present_supported = unsafe {
-                vk.surface_instance()
-                    .get_physical_device_surface_support(vk.physical_device(), i as u32, handle)
+                gpu.vk().surface_instance()
+                    .get_physical_device_surface_support(gpu.vk().physical_device(), i as u32, handle)
                     .context("failed to query vulkan surface support")?
             };
             if present_supported {
@@ -87,9 +106,11 @@ impl Surface {
                 window.id(),
             )))
         };
-        let present_queue = unsafe { vk.device().get_device_queue(queue_family_index, 0) };
+        let present_queue = unsafe { gpu.vk().device().get_device_queue(queue_family_index, 0) };
         Ok(Self {
-            vk,
+            gpu,
+            window,
+            id: Default::default(),
             handle,
             swapchain: None,
             swapchain_state: SwapchainState::OutOfDate {
@@ -97,10 +118,21 @@ impl Surface {
                 size: window.inner_size(),
             },
             present_queue,
+            present_queue_family_index: queue_family_index,
+            image_ids: Default::default(),
+            frame_index: 0,
+            image_index: 0,
             alloc,
             tmp_alloc,
             destroyed: false,
+            real_buffered_frames: 0,
+            buffered_frames: 0,
         })
+    }
+
+    #[inline(always)]
+    pub(super) unsafe fn set_id(&mut self, id: SurfaceId) {
+        self.id = id;
     }
 
     pub fn request_swapchain_update(
@@ -117,50 +149,131 @@ impl Surface {
     fn update_swapchain(
         &mut self,
         framebuffer_size: PhysicalSize<u32>,
-        buffered_frames: u32,
-    ) -> Result<()> {
+        mut buffered_frames: u32,
+    ) -> Result<&mut Swapchain> {
         if let Some(mut swapchain) = self.swapchain.take() {
             swapchain.destroy(
-                &self.vk,
+                &self.gpu.vk(),
                 self.present_queue,
             );
         }
+        self.gpu.destroy_resources(&[], &self.image_ids)?;
         unsafe {
             self.alloc.clear();
         }
-        self.swapchain = Some(Swapchain::new(
-            &self.vk,
+        self.buffered_frames = buffered_frames;
+        let swapchain = self.swapchain.insert(Swapchain::new(
+            self.gpu.vk(),
             self.handle,
             vk::Extent2D { width: framebuffer_size.width, height: framebuffer_size.height },
-            buffered_frames,
+            &mut buffered_frames,
             &self.alloc,
             &self.tmp_alloc,
         ).context("failed to create swapchain")?);
         self.swapchain_state = SwapchainState::Valid;
-        Ok(())
+        self.real_buffered_frames = buffered_frames;
+        let images = swapchain.images();
+        let n_images = images.handles.len() as u32;
+        self.image_ids = NonNullVec32::with_capacity(
+            n_images,
+            &self.alloc
+        )?.into_static();
+        self.image_ids.resize(n_images, Default::default());
+        unsafe {
+            self.gpu.create_swapchain_images(
+                &images,
+                &mut self.image_ids,
+                &self.alloc
+            ).context("failed to create swapchain images")?;
+        }
+        Ok(swapchain)
     }
 
-    pub fn get_or_init_swapchain(
+    pub fn acquire_next_image(
         &mut self,
-    ) -> Result<(&mut Swapchain, bool)> {
+    ) -> Result<AcquireImageData> {
         let mut recreated = false;
-        match self.swapchain_state {
-            SwapchainState::Valid => {},
+        let swapchain = match self.swapchain_state {
+            SwapchainState::Valid => unsafe { self.swapchain.as_mut().unwrap_unchecked() },
             SwapchainState::OutOfDate { buffered_frames, size, } => {
                 recreated = true;
                 self.update_swapchain(
                     size,
                     buffered_frames.get(),
-                )?;
+                )?
             },
+        };
+        unsafe {
+            let Some(data) = swapchain.acquire_next_image(
+                self.gpu.vk(), self.frame_index,
+                ).context("failed to acquire next swapchain image")? else
+            {
+                self.request_swapchain_update(
+                    self.buffered_frames,
+                    self.window.inner_size(),
+                );
+                return self.acquire_next_image()
+            };
+            if data.suboptimal {
+                self.request_swapchain_update(
+                    self.buffered_frames,
+                    self.window.inner_size()
+                );
+            }
+            self.image_index = data.image_index;
+            Ok(AcquireImageData {
+                image: self.image_ids[data.image_index as usize],
+                semaphore: data.acquire_image_semaphore,
+                recreated 
+            })
         }
-        Ok((self.swapchain.as_mut().unwrap(), recreated))
     }
 
-    pub fn get_swapchain_context(
-        &mut self
-    ) -> Option<&mut Swapchain> {
-        self.swapchain.as_mut()
+    pub fn record_present(
+        &mut self,
+        recorder: &mut CommandRecorder<'_>,
+        command_buffer: vk::CommandBuffer,
+    ) -> Result<()> {
+        let Some(swapchain) = self.swapchain else {
+            return Ok(())
+        };
+        let image = recorder
+            .register_image(self.image_ids[self.image_index as usize])
+            .context("failed to get swapchain image")?;
+        let wait_stage_mask = image.get_states(
+            ImageAspect::COLOR,
+            0,
+        ).unwrap()[0].state.stage_mask;
+        let barriers = image.memory_barrier(
+            ImageSubresourceState {
+                stage_mask: vk::PipelineStageFlags2::NONE,
+                access_mask: vk::AccessFlags2::NONE,
+                layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                queue_family_index: self.present_queue_family_index,
+                command_index: COMMAND_INDEX_IGNORED,
+                command_timeline_value: 0,
+            },
+            None,
+            true,
+            &mut unsafe { recorder.cache().as_mut() }.graphics_command_cache.image_memory_barrier_cache,
+        ).context("swapchain image memory barrier failed")?;
+        let tmp_alloc = recorder.gpu().tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        unsafe {
+            cmd_pipeline_barrier(
+                recorder.gpu().vk(),
+                command_buffer,
+                &[],
+                &[(image.handle(), barriers)],
+                COMMAND_INDEX_IGNORED,
+                0,
+                &tmp_alloc,
+            ).context("swapchain image memory barrier failed")?;
+        };
+        unsafe { recorder.cache().as_mut().present_submits
+            .add_swapchain(self.swapchain.map(|s| s.handle()).unwrap_unchecked(), self.image_index);
+        }
+        Ok(())
     }
 
     pub fn present_queue(&self) -> vk::Queue {
@@ -170,12 +283,13 @@ impl Surface {
     pub fn clean_up(&mut self) {
         if let Some(mut swapchain) = self.swapchain.take() {
             swapchain.destroy(
-                &self.vk,
+                &self.gpu.vk(),
                 self.present_queue,
             );
         }
+        self.gpu.destroy_resources(&[], &self.image_ids);
         unsafe {
-            self.vk.surface_instance()
+            self.gpu.vk().surface_instance()
                 .destroy_surface(self.handle, None);
         }
     }

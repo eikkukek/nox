@@ -1,6 +1,6 @@
-//! VK_KHR_present_wait2 device extension.
-//!
 //! <https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_present_wait2.html>
+//!
+//! VK_KHR_present_wait2 device extension.
 
 use {
     core::ffi::{CStr, c_void},

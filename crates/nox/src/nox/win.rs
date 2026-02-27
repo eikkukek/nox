@@ -15,6 +15,7 @@ use nox_mem::vec::Vec32;
 use crate::{
     clipboard::Clipboard,
     dev::or_flag,
+    sync::Arc,
 };
 
 use super::*;
@@ -240,7 +241,7 @@ impl InputState {
 pub struct Window {
     clipboard: Clipboard,
     surface: gpu::Surface,
-    pub(super) handle: WinitWindow,
+    pub(super) handle: Arc<WinitWindow>,
     buffered_frames: u32,
     physical_keys: AHashMap<PhysicalKey, InputState>,
     logical_keys: AHashMap<Key, InputState>,
@@ -251,7 +252,6 @@ pub struct Window {
     mouse_scroll_pixel_delta: (f64, f64),
     mouse_scroll_line_delta: (f32, f32),
     pub(super) current_cursor: CursorIcon,
-    last_frame_data: gpu::FrameData,
     pub(super) flags: u32,
 }
 

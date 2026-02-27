@@ -26,8 +26,10 @@ use crate::sync::Arc;
 use crate::{
     error,
     dev::error::*,
-    gpu::prelude::*,
-    misc::ToRef,
+    gpu::{
+        surface,
+        prelude::*
+    },
 };
 
 use super::prelude::GraphicsCommandCache;
@@ -168,11 +170,12 @@ impl CommandPool {
                 command_buffer_count: n_alloc,
                 ..Default::default()
             };
-            helpers::allocate_command_buffers(
-                vk.device(),
-                &alloc_info,
-                new_buffers,
-            ).context("failed to allocate command buffers")?;
+            unsafe {
+                vk.device().allocate_command_buffers(
+                    &alloc_info,
+                    new_buffers
+                ).context("failed to allocate command buffers")?;
+            }
         }
         let buffers = &self.primaries[self.next_primary as usize..new_next_primary as usize];
         self.next_primary = new_next_primary;
@@ -198,11 +201,12 @@ impl CommandPool {
                 command_buffer_count: n_alloc,
                 ..Default::default()
             };
-            helpers::allocate_command_buffers(
-                vk.device(),
-                &alloc_info,
-                new_buffers,
-            ).context("failed to allocate command buffers")?;
+            unsafe {
+                vk.device().allocate_command_buffers(
+                    &alloc_info,
+                    new_buffers
+                ).context("failed to allocate command buffers")?;
+            }
         }
         let buffers = &self.secondaries[self.next_secondary as usize..new_next_secondary as usize];
         self.next_secondary = new_next_secondary;
@@ -237,8 +241,8 @@ enum CommandPoolResetResult {
     Pending(u64),
 }
 
-pub(super) struct CommandPoolSet {
-    resources: Arc<Resources>,
+pub(crate) struct CommandPoolSet {
+    gpu: Gpu,
     graphics: CommandPool,
     transfer: CommandPool,
     compute: CommandPool,
@@ -249,16 +253,16 @@ pub(super) struct CommandPoolSet {
 
 impl CommandPoolSet {
 
-    fn new(resources: Arc<Resources>) -> Result<Self> {
-        let vk = resources.vk();
+    fn new(gpu: Gpu) -> Result<Self> {
+        let vk = gpu.vk();
         let indices = vk.queue_family_indices();
         let mut semaphore_id = Default::default();
-        resources.create_timeline_semaphores((0..1).map(|_| 0), |_, id| semaphore_id = id)?;
+        gpu.create_timeline_semaphores((0..1).map(|_| 0), |_, id| semaphore_id = id)?;
         Ok(Self {
             graphics: CommandPool::new(vk, indices.graphics_index())?,
             transfer: CommandPool::new(vk, indices.transfer_index())?,
             compute: CommandPool::new(vk, indices.compute_index())?,
-            resources,
+            gpu,
             semaphore_id,
             timeline_value: 0,
             last_reset: 0,
@@ -271,7 +275,7 @@ impl CommandPoolSet {
         kind: CommandBufferKind,
         n: u32,
     ) -> Result<&[vk::CommandBuffer]> {
-        let vk = self.resources.vk();
+        let vk = self.gpu.vk();
         match kind {
             CommandBufferKind::Graphics => self.graphics.allocate_primaries(vk, n),
             CommandBufferKind::Transfer => self.transfer.allocate_primaries(vk, n),
@@ -285,7 +289,7 @@ impl CommandPoolSet {
         kind: CommandBufferKind,
         n: u32,
     ) -> Result<&[vk::CommandBuffer]> {
-        let vk = self.resources.vk();
+        let vk = self.gpu.vk();
         match kind {
             CommandBufferKind::Graphics => self.graphics.allocate_secondaries(vk, n),
             CommandBufferKind::Transfer => self.transfer.allocate_secondaries(vk, n),
@@ -298,8 +302,8 @@ impl CommandPoolSet {
         &mut self,
         current_frame: u64,
     ) -> Result<CommandPoolResetResult> {
-        if self.resources.get_semaphore_counter_value(self.semaphore_id)? >= self.timeline_value {
-            let vk = self.resources.vk();
+        if self.gpu.get_semaphore_counter_value(self.semaphore_id)? >= self.timeline_value {
+            let vk = self.gpu.vk();
             unsafe {
                 self.graphics.reset(vk)?;
                 self.transfer.reset(vk)?;
@@ -318,16 +322,16 @@ impl CommandPoolSet {
         &mut self,
         current_frame: u64,
     ) -> Result<(TimelineSemaphoreId, u64)> {
-        if self.resources.wait_for_semaphores(
+        if self.gpu.wait_for_semaphores(
             &[(self.semaphore_id, self.timeline_value)],
-            self.resources.vk().frame_timout(),
+            self.gpu.vk().frame_timeout(),
         )? {
             self.timeline_value += 1;
             self.last_reset = current_frame;
             Ok((self.semaphore_id, self.timeline_value))
         } else {
             Err(Error::just_context(format_compact!(
-                "frame timeout {} nanoseconds reached at {}", self.resources.vk().frame_timout(), location!(),
+                "frame timeout {} nanoseconds reached at {}", self.gpu.vk().frame_timeout(), location!(),
             )))
         }
     }
@@ -337,11 +341,11 @@ impl Drop for CommandPoolSet {
 
     fn drop(&mut self) {
         unsafe {
-            let vk = self.resources.vk();
+            let vk = self.gpu.vk();
             self.graphics.destroy(vk);
             self.transfer.destroy(vk);
             self.compute.destroy(vk);
-            self.resources.destroy_timeline_semaphores(&[self.semaphore_id]);
+            self.gpu.destroy_timeline_semaphores(&[self.semaphore_id]);
         }
     }
 }
@@ -356,11 +360,13 @@ unsafe impl Send for CommandFrameResources {}
 unsafe impl Sync for CommandFrameResources {}
 
 pub(super) struct CommandResources {
-    dependencies: Vec32<CommandDependency>,
     semaphore_id: TimelineSemaphoreId,
     timeline_value: u64,
+    dependencies: Vec32<CommandDependency>,
+    signal_semaphores: Vec32<(TimelineSemaphoreId, u64)>,
     wait_semaphores: AHashMap<TimelineSemaphoreId, (u64, MemoryDependencyHint)>,
     wait_semaphore_cache: Vec32<TimelineSemaphoreId>,
+    touches_swapchain_images: AHashSet<vk::Semaphore>,
 }
 
 impl CommandResources {
@@ -369,10 +375,12 @@ impl CommandResources {
     {
         Self {
             dependencies: vec32![],
+            signal_semaphores: vec32![],
             semaphore_id,
             timeline_value: 0,
             wait_semaphores: AHashMap::default(),
             wait_semaphore_cache: vec32![],
+            touches_swapchain_images: AHashSet::default(),
         }
     }
 
@@ -402,9 +410,12 @@ impl CommandResources {
 
     #[inline(always)]
     pub fn finish(&mut self, timeline_value: u64) {
+        self.timeline_value = timeline_value;
+        self.dependencies.clear();
+        self.signal_semaphores.clear();
         self.wait_semaphores.clear();
         self.wait_semaphore_cache.clear();
-        self.timeline_value = timeline_value;
+        self.touches_swapchain_images.clear();
     }
 }
 
@@ -428,7 +439,7 @@ impl FlushResources {
 }
 
 struct Inner {
-    resources: Arc<Resources>,
+    gpu: Gpu,
     frame_semaphore: TimelineSemaphoreId,
     current_frame: u64,
     workers: Vec32<CommandPoolSet>,
@@ -448,13 +459,13 @@ crate::assert_sync!(Inner);
 
 impl Inner {
 
-    fn new(resources: Arc<Resources>, num_workers: u32) -> Result<Self>
+    fn new(gpu: Gpu, num_workers: u32) -> Result<Self>
     {
         let mut frame_semaphore = Default::default();
-        resources.create_timeline_semaphores((0..1).map(|_| 0), |_, id| frame_semaphore = id)?;
+        gpu.create_timeline_semaphores((0..1).map(|_| 0), |_, id| frame_semaphore = id)?;
         let mut workers = vec32![];
         workers.try_extend((0..num_workers).map(|_| {
-            CommandPoolSet::new(resources.clone())
+            CommandPoolSet::new(gpu.clone())
         }))?;
         Ok(Self {
             frame_semaphore,
@@ -462,12 +473,12 @@ impl Inner {
             workers,
             free_worker: 0,
             commands: SlotMap::with_capacity(8),
-            stack: Arc::new(RwArena::with_fallback(resources.memory_layout().tmp_arena_size())
+            stack: Arc::new(RwArena::with_fallback(gpu.memory_layout().tmp_arena_size())
                 .context("failed to create arena alloc")?
             ),
             command_resources: vec32![],
             flush_resources: FlushResources::default(),
-            resources,
+            gpu,
             touched_images: AHashSet::default(),
             touched_image_id_cache: vec![],
             touched_buffers: AHashSet::default(),
@@ -483,7 +494,7 @@ impl Drop for Inner {
             .iter()
             .map(|r| r.semaphore_id)
             .collect();
-        self.resources.destroy_timeline_semaphores(&semaphores);
+        self.gpu.destroy_timeline_semaphores(&semaphores);
     }
 }
 
@@ -501,15 +512,34 @@ pub struct Command<'a, 'b> {
 impl<'a, 'b> Command<'a, 'b> {
 
     #[inline(always)]
-    pub fn with_dependencies<T: ToRef<CommandDependency>>(
+    pub fn with_dependency(
         self,
-        dependencies: impl IntoIterator<Item = T>,
+        dependencies: CommandDependency,
     ) -> Self
     {
-        self.resources.dependencies.extend(dependencies
-            .into_iter()
-            .map(|t| t.to_ref().clone())
-        );
+        self.resources.dependencies.push(dependencies);
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_wait_semaphore(
+        self,
+        id: TimelineSemaphoreId,
+        value: u64,
+        dependency_hint: MemoryDependencyHint,
+    ) -> Self 
+    {
+        self.resources.add_wait_for_semaphore(id, value, dependency_hint);
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_signal_semaphore(
+        self,
+        id: TimelineSemaphoreId,
+        value: u64,
+    ) -> Self {
+        self.resources.signal_semaphores.push((id, value));
         self
     }
 
@@ -533,7 +563,7 @@ impl<'a, 'b> Drop for Command<'a, 'b> {
 }
 
 pub struct CommandScheduler<'a> {
-    resources: Arc<Resources>,
+    gpu: Gpu,
     inner: UnsafeCell<RwLockWriteGuard<'a, Inner>>,
 }
 
@@ -544,7 +574,7 @@ impl<'a> CommandScheduler<'a> {
             self.inner.get_mut().command_resources.len();
         let capacity = self.inner.get_mut().commands.capacity();
         self.inner.get_mut().command_resources.reserve(capacity);
-        unsafe { &*self.inner.get() }.resources.create_timeline_semaphores(
+        unsafe { &*self.inner.get() }.gpu.create_timeline_semaphores(
             (0..n_new_resources).map(|_| 0),
             |_, id| self.inner.get_mut().command_resources.push(CommandResources::new(id))
         )
@@ -713,12 +743,12 @@ impl QueueScheduler {
 
     #[inline(always)]
     pub fn new(
-        resources: Arc<Resources>,
+        gpu: Gpu,
         num_workers: u32,
     ) -> Result<Self>
     {
         Ok(Self {
-            inner: Arc::new(RwLock::new(Inner::new(resources, num_workers)?)),
+            inner: Arc::new(RwLock::new(Inner::new(gpu, num_workers)?)),
         })
     }
 
@@ -736,8 +766,9 @@ impl QueueScheduler {
         where Alloc: LocalAlloc<Error = Error>
     {
         let inner = self.inner.write();
-        let resources = inner.resources.clone();
+        let resources = inner.gpu.clone();
         let mut recorder = CommandRecorder {
+            surfaces: resources.write_surfaces(),
             buffers: resources.write_buffers(),
             images: resources.write_images(),
             inner,
@@ -747,13 +778,36 @@ impl QueueScheduler {
     }
 }
 
+pub struct PresentSubmits {
+    swapchains: Vec32<(vk::SwapchainKHR, u32)>,
+}
+
+impl PresentSubmits {
+
+    pub unsafe fn add_swapchain(
+        &mut self,
+        handle: vk::SwapchainKHR,
+        image_index: u32,
+    ) {
+        self.swapchains.push((handle, image_index));
+    }
+
+    fn clear(&mut self) {
+        self.swapchains.clear();
+    }
+}
+
 #[derive(Default)]
 pub(super) struct CommandRecorderCache {
     pub graphics_command_cache: GraphicsCommandCache,
+    pub present_submits: PresentSubmits,
+    acquired_images: Vec32<surface::AcquireImageData>,
+    acquired_image_semaphores: AHashMap<ImageId, vk::Semaphore>,
 }
 
 pub(crate) struct CommandRecorder<'a> {
     inner: RwLockWriteGuard<'a, Inner>,
+    surfaces: ResourceWriteGuard<'a, Surface, SurfaceId>,
     pub(super) buffers: ResourceWriteGuard<'a, BufferMeta, BufferId>,
     pub(super) images: ResourceWriteGuard<'a, ImageMeta, ImageId>,
     pub(super) cache: &'a mut CommandRecorderCache,
@@ -780,8 +834,8 @@ impl<'a> CommandRecorder<'a> {
     }
 
     #[inline(always)]
-    pub fn resources(&self) -> &Arc<Resources> {
-        &self.inner.resources
+    pub fn gpu(&self) -> &Gpu {
+        &self.inner.gpu
     }
 
     #[inline(always)]
@@ -790,8 +844,8 @@ impl<'a> CommandRecorder<'a> {
     }
 
     #[inline(always)]
-    pub fn cache(&mut self) -> *mut CommandRecorderCache {
-        self.cache
+    pub fn cache(&mut self) -> NonNull<CommandRecorderCache> {
+        NonNull::from_mut(self.cache)
     }
 
     #[inline(always)]
@@ -817,14 +871,29 @@ impl<'a> CommandRecorder<'a> {
     }
 
     #[inline(always)]
-    pub fn register_image(&mut self, id: ImageId) -> Result<&mut ImageMeta> {
-        if self.inner.flush_resources.registered_images.insert(id){
+    pub fn register_image(
+        &mut self,
+        id: ImageId,
+        command_index: u32,
+    ) -> Result<&mut ImageMeta>
+    {
+        if self.inner.flush_resources.registered_images.insert(id) {
             self.inner.flush_resources.flush_images.push(id);
         }
         if self.inner.touched_images.insert(id) {
             self.inner.touched_image_id_cache.push(id);
         }
-        self.images.get_mut(id)
+        let image = self.images.get_mut(id)?;
+        if image.is_swapchain() {
+            let Some(&semaphore) = self.cache.acquired_image_semaphores.get(&id) else {
+                return Err(Error::just_context(format_compact!(
+                    "attempting to use a swapchain image {id} that wasn't acquired this frame"
+                )))
+            };
+            self.inner.command_resources[command_index as usize]
+            .touches_swapchain_images.insert(semaphore);
+        }
+        Ok(image)
     }
     
     fn compile<'b, Alloc>(
@@ -835,6 +904,18 @@ impl<'a> CommandRecorder<'a> {
     {
         if self.inner.commands.is_empty() {
             return Ok(FixedVec32::new(alloc))
+        }
+        self.cache.present_submits.clear();
+        self.cache.acquired_images.clear();
+        self.cache.acquired_image_semaphores.clear();
+        for (id, surface) in self.surfaces.iter() {
+            let image = surface
+                .acquire_next_image()
+                .context_with(|| format_compact!("failed to acquire surface {id} image"))?;
+            self.cache.acquired_image_semaphores.insert(image.image, image.semaphore);
+            self.cache.acquired_images.push(
+                image,
+            );
         }
         let max_index = self.inner.commands.max_index().unwrap() + 1;
         let mut in_degree = FixedVec32::with_len(max_index, 0, alloc)?;
@@ -971,13 +1052,70 @@ impl<'a> CommandRecorder<'a> {
             let command_resources = unsafe {
                 inner.command_resources.get_unchecked_mut(index)
             };
+            let signal = unsafe { inner.gpu
+                .get_timeline_semaphore(command_resources.semaphore_id)
+                .unwrap_unchecked()
+            };
+            let mut submit_info = SubmitInfo {
+                queue: command_result.queue,
+                wait_semaphore_infos: NonNullVec32::with_capacity(
+                    command_resources.touches_swapchain_images.len() as u32 + command_resources.wait_semaphore_cache.len(),
+                    alloc
+                )?,
+                command_buffer_infos: NonNullVec32::with_capacity(
+                    command_result.primary_command_buffers.len(),
+                    alloc
+                )?,
+                signal_semaphore_infos: NonNullVec32::with_capacity(
+                    1 + command_resources.signal_semaphores.len(), alloc
+                )?,
+                alloc,
+            };
+            submit_info.wait_semaphore_infos.extend(command_resources.touches_swapchain_images
+                .iter()
+                .map(|&semaphore| {
+                    vk::SemaphoreSubmitInfo {
+                        semaphore,
+                        stage_mask: command_result.wait_scope,
+                        ..Default::default()
+                    }
+                })
+            );
+            submit_info.wait_semaphore_infos.try_extend(command_resources.wait_semaphore_cache
+                .iter()
+                .map(|&id| unsafe {
+                    let &(value, dependency_hint) = command_resources.wait_semaphores.get(&id).unwrap_unchecked();
+                    vk::SemaphoreSubmitInfo {
+                        semaphore: self.gpu().get_timeline_semaphore(id)?,
+                        value,
+                        stage_mask: if dependency_hint.is_empty() {
+                            command_result.wait_scope
+                        } else {
+                            dependency_hint.into()
+                        },
+                        ..Default::default()
+                    }
+                })
+            )?;
+            submit_info.command_buffer_infos.extend(command_result.primary_command_buffers
+                .iter().map(|&command_buffer| {
+                    vk::CommandBufferSubmitInfo {
+                        command_buffer,
+                        ..Default::default()
+                    }
+                })
+            );
+            submit_info.signal_semaphore_infos.push(vk::SemaphoreSubmitInfo {
+                semaphore: signal,
+                value: timeline_value,
+                stage_mask: command_result.signal_scope,
+                ..Default::default()
+            });
+            submits.push(submit_info);
             command_resources.finish(timeline_value);
             global_wait_semaphore_infos.push(vk::SemaphoreSubmitInfo {
                 s_type: vk::StructureType::SEMAPHORE_SUBMIT_INFO,
-                semaphore: unsafe { inner.resources
-                    .get_timeline_semaphore(command_resources.semaphore_id)
-                    .unwrap_unchecked()
-                },
+                semaphore: signal,
                 value: timeline_value,
                 stage_mask: vk::PipelineStageFlags2::NONE,
                 ..Default::default()
@@ -989,7 +1127,7 @@ impl<'a> CommandRecorder<'a> {
         global_signal_semaphore_infos.append(&[
             vk::SemaphoreSubmitInfo {
                 s_type: vk::StructureType::SEMAPHORE_SUBMIT_INFO,
-                semaphore: unsafe { self.inner.resources
+                semaphore: unsafe { self.inner.gpu
                     .get_timeline_semaphore(worker.semaphore_id) 
                     .unwrap_unchecked()
                 },
@@ -999,7 +1137,7 @@ impl<'a> CommandRecorder<'a> {
             },
             vk::SemaphoreSubmitInfo {
                 s_type: vk::StructureType::SEMAPHORE_SUBMIT_INFO,
-                semaphore: unsafe { self.inner.resources
+                semaphore: unsafe { self.inner.gpu
                     .get_timeline_semaphore(self.inner.frame_semaphore) 
                     .unwrap_unchecked()
                 },
@@ -1009,7 +1147,7 @@ impl<'a> CommandRecorder<'a> {
             },
         ]);
         submits.push(SubmitInfo {
-            queue: self.inner.resources.vk().graphics_queue(),
+            queue: self.inner.gpu.vk().graphics_queue(),
             wait_semaphore_infos: global_wait_semaphore_infos,
             command_buffer_infos: Default::default(),
             signal_semaphore_infos: global_signal_semaphore_infos,
@@ -1043,7 +1181,7 @@ pub unsafe fn cmd_pipeline_barrier<Alloc>(
     command_buffer: vk::CommandBuffer,
     buffer_barriers: &[(vk::Buffer, &[BufferMemoryBarrier])],
     image_barriers: &[(vk::Image, &[ImageMemoryBarrier])],
-    command_id: CommandId,
+    command_index: u32,
     command_timeline_value: u64,
     alloc: &Alloc,
 ) -> Result<()>
@@ -1059,7 +1197,8 @@ pub unsafe fn cmd_pipeline_barrier<Alloc>(
     )?;
     for &(handle, barriers) in buffer_barriers {
         for barrier in barriers {
-            if barrier.src_command_index == command_id.index() &&
+            if barrier.src_command_index != COMMAND_INDEX_IGNORED &&
+                barrier.src_command_index == command_index &&
                 barrier.src_command_timeline_value == command_timeline_value 
             {
                 return Err(Error::just_context(format_compact!(
@@ -1071,7 +1210,8 @@ pub unsafe fn cmd_pipeline_barrier<Alloc>(
     }
     for &(handle, barriers) in image_barriers {
         for barrier in barriers {
-            if barrier.src_command_index == command_id.index() &&
+            if barrier.src_command_index != COMMAND_INDEX_IGNORED &&
+                barrier.src_command_index == command_index &&
                 barrier.src_command_timeline_value == command_timeline_value
             {
                 return Err(Error::just_context(format_compact!(
@@ -1090,8 +1230,7 @@ pub unsafe fn cmd_pipeline_barrier<Alloc>(
         ..Default::default()
     };
     unsafe {
-        vk.synchronization2_device()
-            .cmd_pipeline_barrier2(command_buffer, &dependency_info);
+        vk.device().cmd_pipeline_barrier2(command_buffer, &dependency_info);
         vk_buffer_barriers.drop_and_free(alloc);
         vk_image_barriers.drop_and_free(alloc);
     }

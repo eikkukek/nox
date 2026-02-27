@@ -5,7 +5,7 @@ use core::{
     slice,
 };
 
-use nox_ash::vk;
+use nox_ash::vk::{self, ptr_chain_iter_const, TaggedStructure};
 
 use nox_mem::{
     vec::{Vec32, Vector},
@@ -248,6 +248,18 @@ unsafe impl MemoryBinder for LinearBinder {
         let granularity = self.vk
             .physical_device_info()
             .properties().limits.buffer_image_granularity;
+        unsafe {
+            if let Some(dedicated_requirements) = ptr_chain_iter_const(memory_requirements)
+                .find(|ptr| (**ptr).s_type == vk::MemoryDedicatedRequirements::STRUCTURE_TYPE)
+            {
+                let dedicated_requirements = dedicated_requirements
+                    .cast::<vk::MemoryDedicatedRequirements>()
+                    .as_ref().unwrap();
+                if dedicated_requirements.prefers_dedicated_allocation != 0 {
+                    return self.fallback.alloc(memory_requirements)
+                }
+            }
+        }
         for (blocks, type_index, free_index) in self.blocks.iter_mut() {
             if memory_requirements.memory_requirements.memory_type_bits & (1 << *type_index) != 0 {
                 if block_size < memory_requirements.memory_requirements.size {

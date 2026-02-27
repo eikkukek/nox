@@ -7,3 +7,4 @@ edition = "2024"
 ash = "0.38.0"
 
 nox-mem = { path = "../nox-mem" }
+nox-proc = { path = "../nox-proc" }

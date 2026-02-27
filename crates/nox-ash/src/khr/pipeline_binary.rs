@@ -88,6 +88,9 @@ impl DeviceFn {
     }
 }
 
+unsafe impl Send for DeviceFn {}
+unsafe impl Sync for DeviceFn {}
+
 /// VK_KHR_pipeline_binary device-level functions.
 #[derive(Clone)]
 pub struct Device {
@@ -117,13 +120,10 @@ impl Device {
     }
 
     /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCreatePipelineBinariesKHR.html>
-    ///
-    /// [`Ok`] values are:
-    ///
+    /// # [`Ok`] values
     /// [`vk::Result::INCOMPLETE`]
     /// [`vk::Result::PIPELINE_BARRIER_MISSING`]
     /// [`vk::Result::SUCCESS`]
-    ///
     /// # Safety
     /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
     #[inline(always)]

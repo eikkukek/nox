@@ -1,23 +1,19 @@
-use core::hash::{Hash, Hasher};
-
 use nox_ash::vk;
 
 use nox_mem::{
-    Hashable,
     AsRaw,
-    vec::{Vector, Vec32, FixedVec32},
-    alloc::LocalAlloc,
+    vec::{Vector, Vec32},
 };
 
-use crate::gpu::*;
+use crate::gpu::prelude::*;
 
 use super::*;
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy)]
 pub struct DepthBiasInfo {
-    pub constant_factor: Hashable<f32>,
-    pub clamp: Hashable<f32>,
-    pub slope_factor: Hashable<f32>,
+    pub constant_factor: f32,
+    pub clamp: f32,
+    pub slope_factor: f32,
 }
 
 impl DepthBiasInfo {
@@ -36,10 +32,10 @@ impl DepthBiasInfo {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy)]
 pub struct SampleShadingInfo {
-    pub samples: MSAA,
-    pub min_shading: Hashable<f32>,
+    pub samples: MsaaSamples,
+    pub min_shading: f32,
     pub alpha_to_coverage: bool,
     pub alpha_to_one: bool,
 }
@@ -48,7 +44,7 @@ impl SampleShadingInfo {
 
     #[inline(always)]
     pub fn new(
-        samples: MSAA,
+        samples: MsaaSamples,
         min_shading: f32,
         alpha_to_coverage: bool,
         alpha_to_one: bool,
@@ -63,10 +59,10 @@ impl SampleShadingInfo {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy)]
 pub struct DepthBounds {
-    pub min: Hashable<f32>,
-    pub max: Hashable<f32>,
+    pub min: f32,
+    pub max: f32,
 }
 
 impl DepthBounds {
@@ -79,7 +75,7 @@ impl DepthBounds {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub struct StencilOpState {
     /// Operation performed when stencil test fails
     pub fail_op: StencilOp,
@@ -127,13 +123,13 @@ impl From<StencilOpState> for vk::StencilOpState {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy)]
 pub struct StencilTestInfo {
     pub front: StencilOpState,
     pub back: StencilOpState,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub struct DepthStencilInfo {
     pub compare_op: CompareOp,
     pub depth_bounds: Option<DepthBounds>,
@@ -153,7 +149,7 @@ impl Default for DepthStencilInfo {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub struct WriteMask {
     mask: u32,
 }
@@ -225,7 +221,7 @@ impl AsRaw for WriteMask {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub struct ColorOutputBlendState {
     pub src_color_blend_factor: BlendFactor,
     pub dst_color_blend_factor: BlendFactor,
@@ -235,7 +231,7 @@ pub struct ColorOutputBlendState {
     pub alpha_blend_op: BlendOp,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 struct ColorOutputState(WriteMask, Option<ColorOutputBlendState>);
 
 impl From<ColorOutputState> for vk::PipelineColorBlendAttachmentState {
@@ -283,18 +279,13 @@ impl From<vk::PipelineColorBlendAttachmentState> for ColorOutputState {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BlendConstants([Hashable<f32>; 4]);
+#[derive(Default, Clone, Copy)]
+pub struct BlendConstants([f32; 4]);
 
 impl From<BlendConstants> for [f32; 4] {
 
     fn from(value: BlendConstants) -> Self {
-        [
-            value.0[0].to_inner(),
-            value.0[1].to_inner(),
-            value.0[2].to_inner(),
-            value.0[3].to_inner(),
-        ]
+        value.0
     }
 }
 
@@ -317,60 +308,4 @@ impl ColorBlendInfo {
     pub fn attachments(&self) -> &[vk::PipelineColorBlendAttachmentState] {
         &self.color_blend_attachment_states
     }
-}
-
-impl Hash for ColorBlendInfo {
-
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.color_blend_attachment_states.len().hash(state);
-        for output in self.color_blend_attachment_states.iter()
-            .map(|&v| ColorOutputState::from(v))
-        {
-            output.hash(state);
-        }
-        self.blend_constants.hash(state);
-        self.logic_op.hash(state);
-    }
-}
-
-impl PartialEq for ColorBlendInfo {
-
-    fn eq(&self, other: &Self) -> bool {
-        if self.color_blend_attachment_states.len() !=
-            other.color_blend_attachment_states.len()
-        {
-            return false
-        }
-        for (i, output) in self.color_blend_attachment_states.iter()
-            .map(|&v| ColorOutputState::from(v)).enumerate()
-        {
-            if output != other.color_blend_attachment_states[i].into() {
-                return false
-            }
-        }
-        self.blend_constants == other.blend_constants &&
-        self.logic_op == other.logic_op
-    }
-}
-
-impl Eq for ColorBlendInfo {}
-
-pub(crate) struct CreateInfos<'a, Alloc>
-    where 
-        Alloc: LocalAlloc,
-        &'a Alloc: AsRef<Alloc>,
-{
-    pub shader_stage_infos: FixedVec32<'a, vk::PipelineShaderStageCreateInfo<'static>, Alloc>,
-    pub _vertex_input_bindings: FixedVec32<'a, vk::VertexInputBindingDescription, Alloc>,
-    pub _vertex_input_attributes: FixedVec32<'a, vk::VertexInputAttributeDescription, Alloc>,
-    pub vertex_input_state: vk::PipelineVertexInputStateCreateInfo<'static>,
-    pub input_assembly_state: vk::PipelineInputAssemblyStateCreateInfo<'a>,
-    pub tesellation_state: vk::PipelineTessellationStateCreateInfo<'a>,
-    pub rasterization_state: vk::PipelineRasterizationStateCreateInfo<'a>,
-    pub multisample_state: vk::PipelineMultisampleStateCreateInfo<'a>,
-    pub depth_stencil_state: vk::PipelineDepthStencilStateCreateInfo<'a>,
-    pub color_blend_state: vk::PipelineColorBlendStateCreateInfo<'a>,
-    pub dynamic_state: vk::PipelineDynamicStateCreateInfo<'a>,
-    pub rendering_info: vk::PipelineRenderingCreateInfo<'a>,
-    pub layout: vk::PipelineLayout,
 }

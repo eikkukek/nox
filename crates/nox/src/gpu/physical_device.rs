@@ -1,13 +1,10 @@
 use core::ffi::CStr;
 
-use compact_str::CompactString;
-
 use nox_mem::{
     vec::{Vector, Vec32},
     string::ArrayString,
     vec32,
     Display,
-    borrow::CowMut,
 };
 
 use nox_ash::vk;
@@ -22,7 +19,7 @@ use crate::dev::{
     error::{Result, Error, Context, ErrorContext, location},
 };
 
-use super::DeviceName;
+use super::{DeviceName, GpuAttributes, ext};
 
 #[derive(Clone, Copy)]
 pub struct QueueFamilyIndex {
@@ -62,24 +59,20 @@ impl QueueFamilyIndices {
     }
 }
 
-pub struct PhysicalDeviceInfo<'a> {
+pub struct PhysicalDeviceInfo {
     features: vk::PhysicalDeviceFeatures,
-    extended_features: CowMut<'a, [vk::ExtendsPhysicalDeviceFeatures2Obj]>,
     properties: vk::PhysicalDeviceProperties,
-    extended_properties: CowMut<'a, [vk::ExtendsPhysicalDeviceProperties2Obj]>,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     queue_family_indices: QueueFamilyIndices,
     api_version: Version,
     device_name: ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>,
 }
 
-impl<'a> PhysicalDeviceInfo<'a> {
+impl PhysicalDeviceInfo {
 
     fn new(
-        instance: &ash::Instance,
+        instance: &nox_ash::Instance,
         physical_device: vk::PhysicalDevice,
-        extended_features: &'a mut [vk::ExtendsPhysicalDeviceFeatures2Obj],
-        extended_properties: &'a mut [vk::ExtendsPhysicalDeviceProperties2Obj],
     ) -> Result<Option<Self>>
     {
         let queue_family_indices =
@@ -92,20 +85,8 @@ impl<'a> PhysicalDeviceInfo<'a> {
                 }
                 Err(err) => return Err(err),
             };
-        let mut features = vk::PhysicalDeviceFeatures2::default();
-        for feature in extended_features.iter_mut() {
-            feature.clear_p_next();
-            features = features.push_next(feature.as_vk_mut());
-        }
-        unsafe { instance.get_physical_device_features2(physical_device, &mut features) };
-        let features = features.features;
-        let mut properties = vk::PhysicalDeviceProperties2::default();
-        for prop in extended_properties.iter_mut() {
-            prop.clear_p_next();
-            properties = properties.push_next(prop.as_vk_mut());
-        }
-        unsafe { instance.get_physical_device_properties2(physical_device, &mut properties) };
-        let properties = properties.properties;
+        let mut features = unsafe { instance.get_physical_device_features(physical_device) };
+        let mut properties = unsafe { instance.get_physical_device_properties(physical_device) };
         let device_name = ArrayString
             ::from_c_char_slice(&properties.device_name)
             .context_with(|| ErrorContext::StringConversionError(location!()))?;
@@ -114,9 +95,7 @@ impl<'a> PhysicalDeviceInfo<'a> {
         Ok(Some(
             Self {
                 features,
-                extended_features: CowMut::Borrowed(extended_features),
                 properties,
-                extended_properties: CowMut::Borrowed(extended_properties),
                 memory_properties,
                 queue_family_indices,
                 api_version,
@@ -146,22 +125,13 @@ impl<'a> PhysicalDeviceInfo<'a> {
     }
 
     #[inline(always)]
-    pub fn extended_feature(&self, s_type: vk::StructureType) -> Option<&vk::ExtendsPhysicalDeviceFeatures2Obj> {
-        self.extended_features.iter().find(|feature| {
-            feature.s_type() == s_type
-        })
-    }
-
-    #[inline(always)]
     pub fn properties(&self) -> &vk::PhysicalDeviceProperties {
         &self.properties
     }
 
     #[inline(always)]
-    pub fn extended_property(&self, s_type: vk::StructureType) -> Option<&vk::ExtendsPhysicalDeviceProperties2Obj> {
-        self.extended_properties.iter().find(|prop| {
-            prop.s_type() == s_type
-        })
+    pub fn limits(&self) -> &vk::PhysicalDeviceLimits {
+        &self.properties.limits
     }
 
     #[inline(always)]
@@ -173,9 +143,7 @@ impl<'a> PhysicalDeviceInfo<'a> {
     pub fn into_owned(self) -> PhysicalDeviceInfo<'static> {
         PhysicalDeviceInfo {
             features: self.features,
-            extended_features: CowMut::Owned(self.extended_features.into_owned()),
             properties: self.properties,
-            extended_properties: CowMut::Owned(self.extended_properties.into_owned()),
             memory_properties: self.memory_properties,
             queue_family_indices: self.queue_family_indices,
             api_version: self.api_version,
@@ -188,7 +156,7 @@ impl QueueFamilyIndices {
 
     pub fn new(
         physical_device: vk::PhysicalDevice,
-        instance: &ash::Instance,
+        instance: &nox_ash::Instance,
     ) -> Result<Option<Self>>
     {
         let properties = unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
@@ -299,9 +267,9 @@ impl QueueFamilyIndices {
 enum PhysicalDeviceRating<'a> {
     Ok(i32),
     #[display("of missing features: {0}")]
-    MissingFeatures(CompactString),
+    MissingFeatures(ext::MissingDeviceFeatureError),
     #[display("{0}")]
-    UnsuitableProperties(CompactString),
+    UnsuitableProperties(String),
     #[display("of missing extensions: {0:?}")]
     MissingExtensions(Vec32<&'a CStr>),
     #[display("Nox requires at least Vulkan version 1.1 (device version was {0})")]
@@ -309,30 +277,29 @@ enum PhysicalDeviceRating<'a> {
 }
 
 pub fn rate_physical_device<'a>(
-    instance: &ash::Instance,
+    instance: &nox_ash::Instance,
+    attributes: &GpuAttributes,
     physical_device: vk::PhysicalDevice,
     physical_device_info: &PhysicalDeviceInfo,
-    required_extensions: &[(&'a CStr, Version)],
-    base_feature_check: &impl Fn(&vk::PhysicalDeviceFeatures) -> Option<CompactString>,
-    extended_feature_check: &impl Fn(&vk::ExtendsPhysicalDeviceFeatures2Obj) -> Option<CompactString>,
-    base_property_check: &impl Fn(&vk::PhysicalDeviceProperties) -> Option<CompactString>,
-    extended_property_check: &impl Fn(&vk::ExtendsPhysicalDeviceProperties2Obj) -> Option<CompactString>,
+    device_extension_infos: &[ext::DeviceExtensionInfo],
 ) -> Result<PhysicalDeviceRating<'a>>
 {
-    if let Some(msg) = base_feature_check(physical_device_info.features()) {
-        return Ok(PhysicalDeviceRating::MissingFeatures(msg))
+    let mut vulkan14_features = None;
+    if let Some(err) = attributes.required_features.missing_features(physical_device_info.features()) {
+        return Ok(PhysicalDeviceRating::MissingFeatures(err))
     }
-    for extended in physical_device_info.extended_features.iter() {
-        if let Some(msg) = extended_feature_check(extended) {
-            return Ok(PhysicalDeviceRating::MissingFeatures(msg))
-        }
-    }
-    if let Some(msg) = base_property_check(physical_device_info.properties()) {
-        return Ok(PhysicalDeviceRating::UnsuitableProperties(msg))
-    }
-    for extended in physical_device_info.extended_properties.iter() {
-        if let Some(msg) = extended_property_check(extended) {
-            return Ok(PhysicalDeviceRating::UnsuitableProperties(msg))
+    let context = unsafe { ext::PhysicalDeviceContext::new(
+        instance,
+        &mut vulkan14_features,
+        None,
+        physical_device,
+        physical_device_info.api_version,
+    ) };
+    for info in device_extension_infos {
+        if let Some(precondition) = info.precondition &&
+            let Some(err) = precondition.call(&context)
+        {
+            return Ok(PhysicalDeviceRating::MissingFeatures(err))
         }
     }
     let api_version = physical_device_info.api_version;
@@ -340,9 +307,9 @@ pub fn rate_physical_device<'a>(
         return Ok(PhysicalDeviceRating::OldVersion(api_version))
     }
     let mut check_ext = vec32![];
-    for &(name, version) in required_extensions {
-        if version > api_version {
-            check_ext.push(name);
+    for info in device_extension_infos {
+        if info.deprecation_version > api_version {
+            check_ext.push(info.name);
         }
     }
     let available_extensions = unsafe {
@@ -391,15 +358,10 @@ pub fn rate_physical_device<'a>(
 }
 
 pub fn find_suitable_physical_device<'a>(
-    instance: &ash::Instance,
-    required_extensions: &[(&CStr, Version)],
-    base_feature_check: impl Fn(&vk::PhysicalDeviceFeatures) -> Option<CompactString>,
-    extended_features: &mut [vk::ExtendsPhysicalDeviceFeatures2Obj],
-    extended_feature_check: impl Fn(&vk::ExtendsPhysicalDeviceFeatures2Obj) -> Option<CompactString>,
-    base_property_check: impl Fn(&vk::PhysicalDeviceProperties) -> Option<CompactString>,
-    extended_properties: &mut [vk::ExtendsPhysicalDeviceProperties2Obj],
-    extended_property_check: impl Fn(&vk::ExtendsPhysicalDeviceProperties2Obj) -> Option<CompactString>,
-) -> Result<(vk::PhysicalDevice, PhysicalDeviceInfo<'static>)>
+    instance: &nox_ash::Instance,
+    attributes: &GpuAttributes,
+    device_extension_infos: &[ext::DeviceExtensionInfo],
+) -> Result<(vk::PhysicalDevice, PhysicalDeviceInfo)>
 {
     let physical_devices = unsafe {
         instance
@@ -412,7 +374,7 @@ pub fn find_suitable_physical_device<'a>(
     for physical_device in physical_devices {
         let physical_device_info =
             match PhysicalDeviceInfo
-                ::new(instance, physical_device, extended_features, extended_properties)
+                ::new(instance, physical_device)
                 .context("failed to get vulkan physical device info")
             {
                 Ok(device_info) => {
@@ -429,15 +391,11 @@ pub fn find_suitable_physical_device<'a>(
         let rating =
             match rate_physical_device(
                 instance,
+                attributes,
                 physical_device,
                 &physical_device_info,
-                required_extensions,
-                &base_feature_check,
-                &extended_feature_check,
-                &base_property_check,
-                &extended_property_check,
-            )
-                .context("failed to rate vulkan physical device")
+                device_extension_infos,
+            ).context("failed to rate vulkan physical device")
             {
                 Ok(score) => score,
                 Err(err) => {

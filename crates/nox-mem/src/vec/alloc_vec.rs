@@ -594,6 +594,26 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         self.len = SizeType::from_usize_unchecked(len);
     }
 
+    fn fast_append(&mut self, slice: &[T])
+        where T: Copy
+    {
+        let len = self.len.into_usize() + slice.len();
+        let capacity = ReservePol
+            ::grow(self.capacity, len)
+            .unwrap();
+        self.reserve_exact(capacity);
+        unsafe {
+            Pointer
+                ::new(slice.as_ptr().cast_mut())
+                .unwrap()
+                .fast_clone_elements(
+                    self.data.add(self.len.into_usize()),
+                    FromUsize::from_usize_unchecked(slice.len()),
+                );
+        }
+        self.len = SizeType::from_usize_unchecked(len);
+    }
+
     fn append_map<U, F>(&mut self, slice: &[U], mut f: F)
         where
             F: FnMut(&U) -> T
@@ -931,6 +951,25 @@ impl<T, Alloc, ReservePol, IsStd, SizeType>
             unsafe {
                 self.data.add(len + i).write(f(u));
             }
+        }
+        self.len = SizeType::from_usize_unchecked(len);
+        Ok(())
+    }
+
+    fn fallible_fast_append(&mut self, slice: &[T]) -> Result<(), TryReserveError<()>>
+        where T: Copy
+    {
+        let len = self.len.into_usize() + slice.len();
+        let capacity = ReservePol::grow(self.capacity, len)?;
+        self.fallible_reserve_exact(capacity)?;
+        unsafe {
+            Pointer
+                ::new(slice.as_ptr().cast_mut())
+                .unwrap()
+                .fast_clone_elements(
+                    self.data.add(self.len.into_usize()),
+                    SizeType::from_usize_unchecked(slice.len()),
+                );
         }
         self.len = SizeType::from_usize_unchecked(len);
         Ok(())

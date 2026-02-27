@@ -4,6 +4,8 @@ mod r#dyn;
 mod as_raw;
 mod display;
 mod error;
+mod nox_ash_structure;
+mod feature_struct;
 mod vertex_input;
 
 extern crate proc_macro;
@@ -32,6 +34,18 @@ pub fn display(item: TokenStream) -> TokenStream {
 #[proc_macro_derive(Error, attributes(display, source, from))]
 pub fn error(item: TokenStream) -> TokenStream {
     error::error(item)
+}
+
+/// Derive macro for [`ash`]-like structures that implement [`ash::vk::TaggedStructure`].
+#[proc_macro_derive(Structure)]
+pub fn nox_ash_structure(item: TokenStream) -> TokenStream {
+    nox_ash_structure::nox_ash_structure(item)
+}
+
+/// Derive macro for Vulkan feature structs.
+#[proc_macro_derive(FeatureStruct, attributes(on))]
+pub fn feature_struct(item: TokenStream) -> TokenStream {
+    feature_struct::feature_struct(item)
 }
 
 /// Derive macro for [VertexInput]

@@ -9,12 +9,13 @@ use nox_mem::{
     vec::{Vector, FixedVec32, NonNullVec32},
     conditional::True,
     alloc::LocalAlloc,
+    result::ResultExt,
 };
 
 use nox_alloc::arena::*;
 
 use nox_ash::{
-    vk::{self, TaggedStructure, StructureTypeExt},
+    vk::{self, TaggedStructure, StructureTypeKHR},
     khr::swapchain,
 };
 
@@ -23,98 +24,43 @@ use crate::dev::{
     has_bits, has_not_bits,
 };
 
-use super::{
-    Gpu, ImageSubresourceState,
-    ImageSubresourceRange, ImageAspect,
-    COMMAND_REQUEST_IGNORED,
-};
+use super::Vulkan;
 
 #[derive(Clone, Copy)]
-pub struct FrameData {
-    pub image: vk::Image,
-    pub image_view: vk::ImageView,
-    pub image_state: ImageSubresourceState,
-    pub format: vk::Format,
-    pub extent: vk::Extent2D,
+pub struct SwapchainFrameData {
+    pub image_index: u32,
     pub suboptimal: bool,
-}
-
-impl FrameData {
-
-    pub fn new(
-        image: vk::Image,
-        image_view: vk::ImageView,
-        image_state: ImageSubresourceState,
-        format: vk::Format,
-        extent: vk::Extent2D,
-        suboptimal: bool,
-    ) -> Self {
-        Self {
-            image,
-            image_view,
-            image_state,
-            format,
-            extent,
-            suboptimal,
-        }
-    }
+    pub acquire_image_semaphore: vk::Semaphore,
 }
 
 #[derive(Default, Clone, Copy)]
 struct TiedResources {
-    image_view: vk::ImageView,
     present_wait_semaphore: vk::Semaphore,
 }
 
 impl TiedResources {
 
     fn new(
-        gpu: &Gpu,
+        vk: &Vulkan,
         image: vk::Image,
         image_format: vk::Format,
     ) -> Result<Self> {
-        let image_view_create_info = vk::ImageViewCreateInfo {
-            s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
-            image,
-            view_type: vk::ImageViewType::TYPE_2D,
-            format: image_format,
-            components: vk::ComponentMapping {
-                r: vk::ComponentSwizzle::IDENTITY,
-                g: vk::ComponentSwizzle::IDENTITY,
-                b: vk::ComponentSwizzle::IDENTITY,
-                a: vk::ComponentSwizzle::IDENTITY,
-            },
-            subresource_range: vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-            ..Default::default()
-        };
-        let image_view = unsafe { gpu.vk().device()
-            .create_image_view(&image_view_create_info, None)
-            .context("failed to create image view")?
-        };
         let semaphore_create_info = vk::SemaphoreCreateInfo {
             s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
             ..Default::default()
         };
-        let present_wait_semaphore = unsafe { gpu.vk().device()
+        let present_wait_semaphore = unsafe { vk.device()
             .create_semaphore(&semaphore_create_info, None)
             .context("failed to create semaphore")?
         };
         Ok(Self {
-            image_view,
             present_wait_semaphore,
         })
     }
 
-    fn destroy(self, resources: &Gpu) {
+    fn destroy(self, vk: &Vulkan) {
         unsafe {
-            resources.vk().device().destroy_image_view(self.image_view, None);
-            resources.vk().device().destroy_semaphore(self.present_wait_semaphore, None);
+            vk.device().destroy_semaphore(self.present_wait_semaphore, None);
         }
     }
 }
@@ -122,27 +68,38 @@ impl TiedResources {
 #[derive(Default, Clone, Copy)]
 struct UntiedResources {
     image_ready_semaphore: vk::Semaphore,
+    fence: vk::Fence,
 }
 
 impl UntiedResources {
 
-    pub fn new(gpu: &Gpu) -> Result<Self> { 
+    pub fn new(vk: &Vulkan) -> Result<Self> { 
         let semaphore_create_info = vk::SemaphoreCreateInfo {
             s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
             ..Default::default()
         };
-        let image_ready_semaphore = unsafe { gpu.vk().device()
+        let image_ready_semaphore = unsafe { vk.device()
             .create_semaphore(&semaphore_create_info, None)
             .context("failed to create semaphore")?
         };
+        let fence_create_info = vk::FenceCreateInfo {
+            s_type: vk::StructureType::FENCE_CREATE_INFO,
+            flags: vk::FenceCreateFlags::SIGNALED,
+            ..Default::default()
+        };
+        let fence = unsafe {
+            vk.device().create_fence(&fence_create_info, None)
+            .context("failed to create fence")?
+        };
         Ok(Self {
             image_ready_semaphore,
+            fence,
         })
     }
 
-    fn destroy(self, gpu: &Gpu) {
+    fn destroy(self, vk: &Vulkan) {
         unsafe {
-            gpu.vk().device().destroy_semaphore(self.image_ready_semaphore, None);
+            vk.device().destroy_semaphore(self.image_ready_semaphore, None);
         }
     }
 }
@@ -155,7 +112,7 @@ struct Resources {
 impl Resources {
 
     fn new<Alloc: LocalAlloc<Error = Error>>(
-        gpu: &Gpu,
+        vk: &Vulkan,
         images: &[vk::Image],
         buffered_frames: u32,
         image_format: vk::Format,
@@ -203,7 +160,7 @@ impl Resources {
 
     fn destroy(
         &mut self,
-        gpu: &Gpu,
+        vk: &Vulkan,
         present_queue: vk::Queue,
         image_count: u32,
         handle: vk::SwapchainKHR,
@@ -249,20 +206,28 @@ pub enum PresentResult {
 
 pub struct SwapchainSubmitSemaphores {
     pub wait_semaphore: vk::Semaphore,
-    pub wait_stage: vk::PipelineStageFlags,
+    pub wait_stage_mask: vk::PipelineStageFlags2,
     pub signal_semaphore: vk::Semaphore,
+    pub signal_stage_mask: vk::PipelineStageFlags2,
 }
 
 pub struct Swapchain {
     resources: Resources,
     image_count: u32,
     images: NonNull<vk::Image>,
-    image_states: NonNull<ImageSubresourceState>,
     handle: vk::SwapchainKHR,
     image_index: u32,
     surface_format: vk::SurfaceFormatKHR,
     image_extent: vk::Extent2D,
+    image_usage: vk::ImageUsageFlags,
     present_id: Option<NonZeroU64>,
+}
+
+pub struct SwapchainImages<'a> {
+    pub handles: &'a [vk::Image],
+    pub format: vk::Format,
+    pub extent: vk::Extent2D,
+    pub usage: vk::ImageUsageFlags,
 }
 
 unsafe impl Send for Swapchain {}
@@ -278,10 +243,10 @@ impl Swapchain {
     }
 
     pub fn new(
-        gpu: &Gpu,
+        vk: &Vulkan,
         surface: vk::SurfaceKHR,
         framebuffer_extent: vk::Extent2D,
-        mut buffered_frames: u32,
+        buffered_frames: &mut u32,
         alloc: &RwArena,
         tmp_alloc: &(impl Arena<True> + ImmutArena),
     ) -> Result<Self>
@@ -290,10 +255,10 @@ impl Swapchain {
             return Err(Error::just_context("frame buffer size was 0"))
         }
         let surface_format = find_surface_format(
-            gpu, surface, tmp_alloc,
+            vk, surface, tmp_alloc,
         )?;
         let present_mode = find_present_mode(
-            gpu, surface, tmp_alloc,
+            vk, surface, tmp_alloc,
         )?;
         let mut id2 = vk::SurfaceCapabilitiesPresentId2KHR::default();
         let mut wait2 = vk::SurfaceCapabilitiesPresentWait2KHR::default();
@@ -307,9 +272,9 @@ impl Swapchain {
             .push_next(&mut id2)
             .push_next(&mut wait2);
         unsafe {
-            gpu.vk().get_surface_capabilities2_instance()
+            vk.get_surface_capabilities2_instance()
                 .get_physical_device_surface_capabilities2(
-                    gpu.vk().physical_device(), &mut surface_info, &mut capabilities,
+                    vk.physical_device(), &mut surface_info, &mut capabilities,
                 ).context("failed to get physical device surface capabilities")?;
         };
         let present_id = (id2.present_id2_supported != 0 && wait2.present_wait2_supported != 0)
@@ -329,13 +294,13 @@ impl Swapchain {
             return Err(Error::just_context("swapchain extent was 0"));
         }
         let mut actual_image_count = capabilities.surface_capabilities.min_image_count + 1;
-        actual_image_count = actual_image_count.max(buffered_frames);
+        actual_image_count = actual_image_count.max(*buffered_frames);
         if capabilities.surface_capabilities.max_image_count > 0 &&
             actual_image_count > capabilities.surface_capabilities.max_image_count
         {
             actual_image_count = capabilities.surface_capabilities.max_image_count;
-            if actual_image_count < buffered_frames {
-                buffered_frames = actual_image_count;
+            if actual_image_count < *buffered_frames {
+                *buffered_frames = actual_image_count;
             }
         }
         let mut pre_transform = capabilities.surface_capabilities.current_transform;
@@ -375,14 +340,14 @@ impl Swapchain {
             ..Default::default()
         };
         let handle = unsafe {
-            match gpu.vk().swapchain_device().create_swapchain(&create_info, None) {
+            match vk.swapchain_device().create_swapchain(&create_info, None) {
                 Ok(swapchain) => swapchain,
                 Err(err) => return Err(Error::new(err, "failed to create swapchain")),
             }
         };
         let mut image_count = 0u32;
         unsafe {
-            gpu.vk().swapchain_device().get_swapchain_images_khr(
+            vk.swapchain_device().get_swapchain_images_khr(
                 handle, &mut image_count, ptr::null_mut()
             ).context("failed to get Vulkan swapchain images")?;
         };
@@ -392,32 +357,17 @@ impl Swapchain {
                 alloc,
             )?;
         images.resize(image_count, Default::default());
-        let mut image_states = NonNullVec32
-            ::with_capacity(
-                image_count,
-                alloc,
-            )?;
-        image_states.resize(image_count,
-            ImageSubresourceState::new(
-                vk::PipelineStageFlags2::NONE,
-                vk::AccessFlags2::NONE,
-                vk::ImageLayout::UNDEFINED,
-                vk::QUEUE_FAMILY_IGNORED,
-                COMMAND_REQUEST_IGNORED,
-                0,
-            )
-        );
         unsafe {
-            gpu.vk().swapchain_device().get_swapchain_images_khr(
+            vk.swapchain_device().get_swapchain_images_khr(
                 handle,
                 &mut image_count,
                 images.as_mut_ptr(),
             ).context("failed to get Vulkan swapchain images")?;
         };
         let resources = Resources::new(
-            gpu,
+            vk,
             &images,
-            buffered_frames,
+            *buffered_frames,
             surface_format.format,
             alloc,
         )?;
@@ -425,18 +375,18 @@ impl Swapchain {
             resources,
             image_count: images.len(),
             images: images.into_inner(),
-            image_states: image_states.into_inner(),
             handle,
             image_index: 0,
             surface_format,
             image_extent,
+            image_usage,
             present_id,
         })
     }
 
     pub fn destroy(
         &mut self,
-        gpu: &Gpu,
+        vk: &Vulkan,
         present_queue: vk::Queue,
     ) -> Result<()>
     {
@@ -445,66 +395,91 @@ impl Swapchain {
                 let info = vk::PresentWait2InfoKHR {
                     s_type: vk::PresentWait2InfoKHR::STRUCTURE_TYPE,
                     present_id: id.get(),
-                    timeout: gpu.vk().frame_timeout(),
+                    timeout: vk.frame_timeout(),
                     ..Default::default()
                 };
-                if let Err(err) = gpu.vk().present_wait2_device().wait_for_present2_khr(
+                let result = vk.present_wait2_device().wait_for_present2_khr(
                     self.handle,
                     &info
-                ) {
-                    if err == vk::Result::TIMEOUT {
-                        return Err(Error::just_context(format_compact!(
-                            "frame timeout {} nanoseconds reached at {}",
-                            gpu.vk().frame_timeout(), location!(),
-                        )))
-                    } else {
-                        return Err(Error::just_context(format_compact!(
-                            "unexpected vulkan error at {}",
-                            location!(),
-                        )))
-                    }
+                ).filter_err(|&err| (err == vk::Result::ERROR_OUT_OF_DATE_KHR).then_some(err))
+                .context("unexpected vulkan error at {}")?;
+                if result == vk::Result::TIMEOUT {
+                    return Err(Error::just_context(format_compact!(
+                        "frame timeout {} nanoseconds reached at {}",
+                        vk.frame_timeout(), location!(),
+                    )))
                 }
             } else {
-                if gpu.vk().device().queue_wait_idle(present_queue).is_err() &&
-                    gpu.vk().device().device_wait_idle().is_err()
+                if vk.device().queue_wait_idle(present_queue).is_err() &&
+                    vk.device().device_wait_idle().is_err()
                 {
                     panic!("GPU hang")
                 }
             }
         }
         self.resources.destroy(
-            gpu,
+            vk,
             present_queue,
             self.image_count,
             self.handle,
             self.present_id,
         );
-        unsafe { gpu.vk().swapchain_device().destroy_swapchain(self.handle, None); }
+        unsafe { vk.swapchain_device().destroy_swapchain(self.handle, None); }
         Ok(())
     }
 
-    pub fn subresource_range_info() -> ImageSubresourceRange {
-        ImageSubresourceRange
-            ::new(ImageAspect::Color as _, 0, 1, 0, 1)
-            .unwrap()
+
+    #[inline(always)]
+    pub fn handle(&self) -> vk::SwapchainKHR {
+        self.handle
     }
 
-    pub unsafe fn setup_image(
+    #[inline(always)]
+    pub fn images(&self) -> SwapchainImages<'_> {
+        SwapchainImages {
+            handles: unsafe {
+                core::slice::from_raw_parts(
+                    self.images.as_ptr(),
+                    self.image_count as usize,
+                )
+            },
+            format: self.surface_format.format,
+            extent: self.image_extent,
+            usage: self.image_usage
+        }
+    }
+
+    pub unsafe fn acquire_next_image(
         &mut self,
-        gpu: &Gpu,
-        frame_index: usize,
-    ) -> Result<Option<FrameData>>
+        vk: &Vulkan,
+        frame_index: u32,
+    ) -> Result<Option<SwapchainFrameData>>
     {
-        assert!(frame_index < self.image_count as usize);
         let untied_resources = unsafe {
-            self.resources.get_untied_resources(frame_index)
+            self.resources.get_untied_resources(frame_index as usize)
         };
-        let (next_image, suboptimal) = unsafe { match gpu.vk().swapchain_device()
+        unsafe {
+            if vk.device().wait_for_fences(
+                &[untied_resources.fence],
+                true, vk.frame_timeout()
+                ).context("unexpected fence wait error")? == vk::Result::TIMEOUT
+            {
+                return Err(Error::just_context(
+                    format_compact!(
+                        "frame timeout {} nanoseconds reached at {}", vk.frame_timeout(),
+                        location!(),
+                    )
+                ))
+            }
+            vk.device().reset_fences(&[untied_resources.fence])
+            .context("failed to reset fence")?;
+        }
+        let (image_index, suboptimal) = unsafe { match vk.swapchain_device()
             .acquire_next_image(
                 self.handle,
-                gpu.vk().frame_timeout(),
+                vk.frame_timeout(),
                 untied_resources.image_ready_semaphore,
-                vk::Fence::null()
+                untied_resources.fence,
             ) {
                 Ok(image) => image,
                 Err(err) => {
@@ -514,83 +489,48 @@ impl Swapchain {
                     return Err(Error::new(err, "failed to acquire swapchain image"))
                 }
             }};
-        if next_image >= self.image_count {
+        if image_index >= self.image_count {
             return Err(Error::just_context(format_compact!(
                 "aquired Vulkan image index {} was out of bounds with image count {}",
-                next_image, self.image_count,
+                image_index, self.image_count,
             )))
         }
         let tied_resources = unsafe { 
-            self.resources.get_tied_resources(next_image)
+            self.resources.get_tied_resources(image_index)
         };
-        self.image_index = next_image;
-        let image_index = next_image as usize;
+        self.image_index = image_index;
         unsafe {
             Ok(Some(
-                FrameData::new(
-                    self.images.add(image_index).read(),
-                    tied_resources.image_view,
-                    self.image_states.add(image_index).read(),
-                    self.surface_format.format,
-                    self.image_extent,
+                SwapchainFrameData {
+                    image_index,
                     suboptimal,
-                )
+                    acquire_image_semaphore: untied_resources.image_ready_semaphore,
+                }
             ))
         }
     }
 
-    pub unsafe fn setup_submit(
+    pub unsafe fn get_submit_semaphores(
         &mut self,
-        device: &Gpu,
-        command_buffer: vk::CommandBuffer,
-        src_image_state: ImageState,
-        graphics_queue_index: u32,
-        frame_index: usize,
+        vk: &Vulkan,
+        frame_index: u32,
+        wait_stage_mask: vk::PipelineStageFlags2,
     ) -> SwapchainSubmitSemaphores {
         let untied_resources = unsafe {
-            self.resources.get_untied_resources(frame_index)
+            self.resources.get_untied_resources(frame_index as usize)
         };
         let tied_resources = unsafe {
             self.resources.get_tied_resources(self.image_index)
         };
-        let image_index = self.image_index as usize;
-        let dst_image_state = ImageState::new(
-            vk::AccessFlags::NONE,
-            vk::ImageLayout::PRESENT_SRC_KHR,
-            graphics_queue_index,
-            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-        );
-        let memory_barrier = src_image_state.to_memory_barrier(
-            unsafe {
-                self.images.add(image_index).read()
-            },
-            dst_image_state,
-            Self::subresource_range_info()
-        );
-        unsafe {
-            device.cmd_pipeline_barrier(
-                command_buffer,
-                src_image_state.pipeline_stage,
-                dst_image_state.pipeline_stage,
-                Default::default(),
-                Default::default(),
-                Default::default(),
-                &[memory_barrier],
-            );
-        }
-        unsafe {
-            self.image_states
-                .add(image_index)
-                .write(dst_image_state);
-        }
         SwapchainSubmitSemaphores {
             wait_semaphore: untied_resources.image_ready_semaphore,
-            wait_stage: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            wait_stage_mask,
             signal_semaphore: tied_resources.present_wait_semaphore,
+            signal_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
         }
     }
 
-    pub fn present_submit(
+    pub unsafe fn present_submit(
         &mut self,
         swapchain_device: &swapchain::Device,
         present_queue: vk::Queue,
@@ -640,16 +580,16 @@ impl Swapchain {
 }
 
 fn find_surface_format<Alloc: Arena<True> + ImmutArena>(
-    gpu: &Gpu,
+    vk: &Vulkan,
     surface_handle: vk::SurfaceKHR,
     tmp_alloc: &Alloc,
 ) -> Result<vk::SurfaceFormatKHR>
 {
     unsafe {
-        let physical_device = gpu.vk().physical_device();
+        let physical_device = vk.physical_device();
         let tmp_alloc = tmp_alloc.guard();
         let mut count = 0u32;
-        gpu.vk().surface_instance().get_physical_device_surface_formats_khr(
+        vk.surface_instance().get_physical_device_surface_formats_khr(
             physical_device,
             surface_handle,
             &mut count,
@@ -657,7 +597,7 @@ fn find_surface_format<Alloc: Arena<True> + ImmutArena>(
         ).context("failed to get Vulkan surface formats")?;
         let mut formats = FixedVec32
             ::with_len(count, Default::default(), &tmp_alloc)?;
-        gpu.vk().surface_instance().get_physical_device_surface_formats_khr(
+        vk.surface_instance().get_physical_device_surface_formats_khr(
             physical_device,
             surface_handle,
             &mut count,
@@ -674,16 +614,16 @@ fn find_surface_format<Alloc: Arena<True> + ImmutArena>(
 }
 
 fn find_present_mode<Alloc: Arena<True> + ImmutArena>(
-    gpu: &Gpu,
+    vk: &Vulkan,
     surface: vk::SurfaceKHR,
     tmp_alloc: &Alloc,
 ) -> Result<vk::PresentModeKHR>
 {
     unsafe {
         let tmp_alloc = tmp_alloc.guard();
-        let physical_device = gpu.vk().physical_device();
+        let physical_device = vk.physical_device();
         let mut count = 0u32;
-        gpu.vk().surface_instance().get_physical_device_surface_present_modes_khr(
+        vk.surface_instance().get_physical_device_surface_present_modes_khr(
             physical_device,
             surface,
             &mut count,
@@ -691,7 +631,7 @@ fn find_present_mode<Alloc: Arena<True> + ImmutArena>(
         ).context("failed to get Vulkan surface present modes")?;
         let mut modes = FixedVec32
             ::with_len(count, Default::default(), &tmp_alloc)?;
-        gpu.vk().surface_instance().get_physical_device_surface_present_modes_khr(
+        vk.surface_instance().get_physical_device_surface_present_modes_khr(
             physical_device,
             surface,
             &mut count,

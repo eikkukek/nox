@@ -144,7 +144,6 @@ impl ResolveInfo {
 
 #[derive(Clone, Copy)]
 pub struct PassAttachment {
-    pub image_id: ImageId,
     pub range: Option<ImageRange>,
     pub resolve: Option<ResolveInfo>,
     pub load_op: AttachmentLoadOp,
@@ -156,10 +155,9 @@ pub struct PassAttachment {
 impl PassAttachment {
 
     #[inline(always)]
-    pub fn new(image_id: ImageId) -> Self
+    pub fn new() -> PassAttachment<'static>
     {
         Self {
-            image_id,
             range: None,
             resolve: None,
             load_op: Default::default(),
@@ -170,37 +168,37 @@ impl PassAttachment {
     }
 
     #[inline(always)]
-    pub fn with_range(&mut self, range: impl Into<Option<ImageRange>>) -> &mut Self {
+    pub fn with_range(mut self, range: impl Into<Option<ImageRange>>) -> Self {
         self.range = range.into();
         self
     }
 
     #[inline(always)]
-    pub fn with_resolve(&mut self, info: impl Into<Option<ResolveInfo>>) -> &mut Self {
+    pub fn with_resolve(mut self, info: impl Into<Option<ResolveInfo>>) -> Self {
         self.resolve = info.into();
         self
     }
 
     #[inline(always)]
-    pub fn with_load_op(&mut self, load_op: AttachmentLoadOp) -> &mut Self {
+    pub fn with_load_op(mut self, load_op: AttachmentLoadOp) -> Self {
         self.load_op = load_op;
         self
     }
 
     #[inline(always)]
-    pub fn with_store_op(&mut self, store_op: AttachmentStoreOp) -> &mut Self {
+    pub fn with_store_op(mut self, store_op: AttachmentStoreOp) -> Self {
         self.store_op = store_op;
         self
     }
 
     #[inline(always)]
-    pub fn with_clear_value(&mut self, value: impl Into<ClearValue>) -> &mut Self {
+    pub fn with_clear_value(mut self, value: impl Into<ClearValue>) -> Self {
         self.clear_value = value.into();
         self
     }
 
     #[inline(always)]
-    pub fn with_preserve_contents(&mut self, value: bool) -> &mut Self {
+    pub fn with_preserve_contents(mut self, value: bool) -> Self {
         self.preserve_contents = value;
         self
     }
@@ -220,32 +218,27 @@ pub enum DepthStencilAttachment {
 impl Default for DepthStencilAttachment {
 
     fn default() -> Self {
-        Self::default()
+        Self::None
     }
 }
 
 impl DepthStencilAttachment {
 
     #[inline(always)]
-    pub fn depth<T>(attachment: T) -> Self
-        where T: ToRef<PassAttachment>,
+    pub fn depth(attachment: PassAttachment) -> Self
     {
-        Self::Depth(attachment.to_ref().clone())
+        Self::Depth(attachment)
     }
 
     #[inline(always)]
-    pub fn stencil<T>(attachment: T) -> Self
-        where T: ToRef<PassAttachment>,
+    pub fn stencil(attachment: PassAttachment) -> Self
     {
-        Self::Stencil(attachment.to_ref().clone())
+        Self::Stencil(attachment)
     }
 
     #[inline(always)]
-    pub fn depth_stencil<T, U>(depth: T, stencil: U) -> Self
-        where
-            T: ToRef<PassAttachment>,
-            U: ToRef<PassAttachment>,
+    pub fn depth_stencil(depth: PassAttachment, stencil: PassAttachment) -> Self
     {
-        Self::DepthStencil { depth: depth.to_ref().clone(), stencil: stencil.to_ref().clone(), }
+        Self::DepthStencil { depth: depth, stencil: stencil, }
     }
 }

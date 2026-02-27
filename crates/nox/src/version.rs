@@ -1,5 +1,7 @@
 use core::fmt::{self, Display};
 
+use nox_ash::vk;
+
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Version(pub u32);
@@ -7,6 +9,12 @@ pub struct Version(pub u32);
 impl Version {
 
     pub const MAX: Version = Version(!0);
+
+    pub const VULKAN_API_VERSION_1_0: Version = Version(vk::API_VERSION_1_0);
+    pub const VULKAN_API_VERSION_1_1: Version = Version(vk::API_VERSION_1_1);
+    pub const VULKAN_API_VERSION_1_2: Version = Version(vk::API_VERSION_1_2);
+    pub const VULKAN_API_VERSION_1_3: Version = Version(vk::API_VERSION_1_3);
+    pub const VULKAN_API_VERSION_1_4: Version = Version(vk::API_VERSION_1_4);
 
     #[inline(always)]
     pub const fn new(major: u32, minor: u32, patch: u32) -> Self {

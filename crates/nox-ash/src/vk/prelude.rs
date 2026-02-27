@@ -46,8 +46,11 @@ pub unsafe trait ExtendsStructureExt<What: ?Sized>:
 
     type ExtendsObj;
 
-    /// Boxes [`self`] as an Extends* trait objects.
-    fn boxed_default() -> Self::ExtendsObj;
+    /// Boxes [`Self::default`] as an Extends* trait object.
+    fn obj_default() -> Self::ExtendsObj;
+
+    /// Boxes [`self`] as an Extends* trait object.
+    fn into_obj(self) -> Self::ExtendsObj;
 
     /// Makes getting a reference to self easier.
     ///
@@ -152,7 +155,7 @@ macro_rules! impl_extends_structure_obj {
             }
 
             unsafe impl<T> ExtendsStructureExt<dyn [<Extends $name>]> for T
-                where T: 
+                where T:
                     [<Extends $name>] + Default +
                     Copy + Send + Sync +
                     TaggedStructure + 'static
@@ -163,8 +166,13 @@ macro_rules! impl_extends_structure_obj {
                     type ExtendsObj = [<Extends $name Obj>];
                     
                     #[inline(always)]
-                    fn boxed_default() -> Self::ExtendsObj {
-                        [<Extends $name Obj>]::new(Self::default())
+                    fn obj_default() -> Self::ExtendsObj {
+                        Self::ExtendsObj::new(Self::default())
+                    }
+
+                    #[inline(always)]
+                    fn into_obj(self) -> Self::ExtendsObj {
+                        Self::ExtendsObj::new(self)
                     }
 
                     #[inline(always)]

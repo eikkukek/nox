@@ -6,7 +6,7 @@ use nox_mem::slice::AllocSlice;
 
 use crate::dev::error::{Result, Error};
 
-use crate::gpu::prelude::{Vulkan, Handle};
+use crate::gpu::prelude::{Vulkan, TransientHandle};
 
 struct Inner {
     vk: Arc<Vulkan>,
@@ -26,8 +26,8 @@ impl PipelineCache {
         }
     }
 
-    pub(crate) fn handle(&self) -> Handle<'_, vk::PipelineCache> {
-        Handle::new(self.inner.handle)
+    pub(crate) fn handle(&self) -> TransientHandle<'_, vk::PipelineCache> {
+        TransientHandle::new(self.inner.handle)
     }
 
     #[inline(always)]

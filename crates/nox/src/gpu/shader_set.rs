@@ -1,5 +1,3 @@
-mod pool;
-
 use std::ffi::CString;
 use core::{
     marker::PhantomData,
@@ -11,12 +9,14 @@ use parking_lot::RwLockWriteGuard;
 
 use ahash::AHashMap;
 
+use compact_str::format_compact;
+
 use nox_ash::vk;
 use nox_proc::Display;
 use nox_mem::{
-    alloc::{StdAlloc, Layout},
+    alloc::{StdAlloc, LocalAlloc, Layout},
+    slot_map::{SlotMap, SlotIndex},
     option::OptionExt,
-    slice_mut,
     align_up,
     vec::{Vec32, FixedVec32, ArrayVec, Vector, Pointer},
     vec32,
@@ -25,23 +25,50 @@ use nox_threads::{
     futures::{
         future::RemoteHandle,
     },
-    executor::ThreadPool,
+    executor::{ThreadPool, SpawnExt},
 };
 use nox_alloc::arena::Arena;
 
 use crate::{
     log,
-    gpu::prelude::*,
-    sync::{Arc, FutureLock},
+    gpu::{
+        prelude::*,
+        TmpAllocs,
+        ext,
+    },
+    sync::{Arc, FutureLock, RwLock},
+    dev::error::*,
 };
 
-pub use pool::*;
+nox_ash::ash_style_enum!(
+    /// Specifies how a descriptor set *can* be used.
+    #[flags(Flags32)]
+    #[default = Self::empty()]
+    pub enum DescriptorSetFlags {
+        /// *This requires enabling the [`push_descriptor`] device extension.*
+        ///
+        /// Specifies that the descriptor set *must* not be allocated from a
+        /// [`ShaderResourcePool`], but instead should be pushed by `cmd_push_descriptor_set` or
+        /// `cmd_push_descriptor_set2` provided by [`GraphicsCommands`] and [`ComputeCommands`].
+        #[display("Push Descriptor")]
+        PUSH_DESCRIPTOR = 0x1,
+    }
+);
 
 #[derive(Clone)]
 pub(crate) struct DescriptorSetLayout {
     pub handle: vk::DescriptorSetLayout,
     pub bindings: Vec32<DescriptorSetLayoutBinding>,
     pub shader_stage_mask: vk::ShaderStageFlags,
+    pub flags: DescriptorSetFlags,
+}
+
+impl DescriptorSetLayout {
+
+    #[inline(always)]
+    pub fn is_push_descriptor(&self) -> bool {
+        self.flags.contains(DescriptorSetFlags::PUSH_DESCRIPTOR)
+    }
 }
 
 struct ShaderSet {
@@ -64,8 +91,8 @@ impl ShaderSet {
     }
 
     #[inline(always)]
-    pub(crate) fn load(&self) -> Result<Arc<ShaderSetInner>> {
-        self.inner.load().cloned()
+    pub(crate) fn load(&self) -> Result<&Arc<ShaderSetInner>> {
+        self.inner.load()
     }
 }
 
@@ -231,6 +258,8 @@ pub struct ShaderSetId(pub(super) SlotIndex<ShaderSet>);
 #[derive(Clone)]
 pub struct ShaderSetAttributes {
     count_spec: AHashMap<(u32, u32), Vec32<SpecializationConstant<u32>>>,
+    flags: AHashMap<u32, DescriptorSetFlags>,
+    push_descriptor_required: bool,
 }
 
 impl ShaderSetAttributes {
@@ -239,6 +268,8 @@ impl ShaderSetAttributes {
     fn new() -> Self {
         Self {
             count_spec: AHashMap::default(),
+            flags: AHashMap::default(),
+            push_descriptor_required: false,
         }
     }
 
@@ -251,25 +282,47 @@ impl ShaderSetAttributes {
     ) -> Self {
         self.count_spec
             .entry((descriptor_set, binding))
-            .and_modify(|c| { c.push(constant); })
-            .or_insert(vec32![constant]);
+            .and_modify(|c| c.push(constant))
+            .or_insert_with(|| vec32![constant]);
+        self
+    }
+
+    #[inline(always)]
+    pub fn with_descriptor_set_flags(
+        mut self,
+        descriptor_set: u32,
+        flags: DescriptorSetFlags,
+    ) -> Self {
+        self.flags
+            .entry(descriptor_set)
+            .and_modify(|f| *f |= flags)
+            .or_insert(flags);
+        if flags.contains(DescriptorSetFlags::PUSH_DESCRIPTOR) {
+            self.push_descriptor_required = true;
+        }
         self
     }
 }
 
 #[derive(Clone)]
 struct DescriptorSetLayoutKey {
+    flags: DescriptorSetFlags,
     bindings: Vec32<DescriptorSetLayoutBinding>,
     hash: u64,
 }
 
 impl DescriptorSetLayoutKey {
 
-    fn new(bindings: Vec32<DescriptorSetLayoutBinding>) -> Self {
+    fn new(
+        flags: DescriptorSetFlags,
+        bindings: Vec32<DescriptorSetLayoutBinding>
+    ) -> Self {
         let mut hasher = ahash::AHasher::default();
+        flags.hash(&mut hasher);
         bindings.hash(&mut hasher);
         let hash = hasher.finish();
         Self {
+            flags,
             bindings,
             hash,
         }
@@ -306,7 +359,7 @@ pub(crate) struct ShaderCache {
 impl ShaderCache {
 
     #[inline(always)]
-    pub(super) fn new(vk: Arc<Vulkan>) -> Self {
+    pub(crate) fn new(vk: Arc<Vulkan>) -> Self {
         Self {
             vk,
             shader_sets: Default::default(),
@@ -327,6 +380,9 @@ impl ShaderCache {
     {
         let descriptor_set_layout_cache = self.descriptor_set_layouts.clone();
         let vk = self.vk.clone();
+        let mut max_push_descriptors = vk.enabled_device_extensions()
+            .get_attribute(ext::push_descriptor::MAX_PUSH_DESCRIPTORS_ATTRIBUTE_NAME)
+            .u32().unwrap_or(0);
         let index = self.shader_sets.insert(ShaderSet::new(
             thread_pool.spawn_with_handle(async move {
                 let mut shaders_inner = ArrayVec::<_, N_SHADERS>::new();
@@ -338,19 +394,28 @@ impl ShaderCache {
                 }
                 let tmp_alloc = tmp_allocs.tmp_alloc();
                 let tmp_alloc = tmp_alloc.guard();
-                let mut sets = Vec32::<(Vec32<DescriptorSetLayoutBinding>, vk::ShaderStageFlags)>::new();
+                let mut sets = Vec32::<(
+                    Vec32<DescriptorSetLayoutBinding>,
+                    vk::ShaderStageFlags,
+                    DescriptorSetFlags,
+                )>::new();
                 let mut push_constant_ranges = Vec32::new();
                 for shader in &mut shaders_inner {
                     for uniform in shader.uniforms() {
                         let set = uniform.set;
                         if set >= sets.len() {
-                            sets.resize(set + 1, (vec32![], vk::ShaderStageFlags::empty()));
+                            sets.resize(set + 1, (
+                                vec32![],
+                                vk::ShaderStageFlags::empty(),
+                                DescriptorSetFlags::empty(),
+                            ));
                             unsafe {
-                                sets.last_mut().unwrap_unchecked().0
-                                .reserve(4);
+                                let last = sets.last_mut().unwrap_unchecked();
+                                last.0.reserve(4);
+                                last.2 = attributes.flags.get(&set).copied().unwrap_or_default();
                             }
                         }
-                        let (bindings, stage_mask) = unsafe {
+                        let (bindings, stage_mask, _) = unsafe {
                             sets.get_unchecked_mut(set as usize)
                         };
                         *stage_mask |= shader.stage().into();
@@ -366,9 +431,24 @@ impl ShaderCache {
                     }
                 }
                 let mut descriptor_set_layouts = Vec32::with_capacity(sets.len());
-                for (mut bindings, stage_mask) in sets {
+                for (mut bindings, stage_mask, flags) in sets {
                     bindings.sort_unstable_by(|a, b| a.binding.cmp(&b.binding));
-                    let key = DescriptorSetLayoutKey::new(bindings);
+                    let mut layout_flags = vk::DescriptorSetLayoutCreateFlags::empty();
+                    if flags.contains(DescriptorSetFlags::PUSH_DESCRIPTOR)
+                    {
+                        layout_flags |= vk::DescriptorSetLayoutCreateFlags::PUSH_DESCRIPTOR_KHR;
+                        let binding_count: u32 = bindings
+                            .iter()
+                            .map(|binding| binding.descriptor_count)
+                            .sum();
+                        if binding_count > max_push_descriptors {
+                            return Err(Error::just_context(format_compact!(
+                                "descriptor with push descriptor flag has {} descriptors when max push descriptors count is {}",
+                                binding_count, max_push_descriptors,
+                            )))
+                        }
+                    }
+                    let key = DescriptorSetLayoutKey::new(flags, bindings);
                     let mut cache = descriptor_set_layout_cache.write();
                     let handle = cache
                         .get(&key)
@@ -377,6 +457,7 @@ impl ShaderCache {
                             let binding_count = key.bindings.len() as u32;
                             let create_info = vk::DescriptorSetLayoutCreateInfo {
                                 s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                flags: layout_flags,
                                 binding_count,
                                 p_bindings: key.bindings.as_ptr() as _,
                                 ..Default::default()
@@ -392,6 +473,7 @@ impl ShaderCache {
                         handle,
                         bindings: key.bindings,
                         shader_stage_mask: stage_mask,
+                        flags,
                     });
                 }
                 let mut vk_set_layouts = FixedVec32
@@ -419,7 +501,7 @@ impl ShaderCache {
                         .create_pipeline_layout(&create_info, None)
                 }.context("failed to create pipeline layout")?;
                 let mut shader_modules = ArrayVec::<_, N_SHADERS>::new();
-                shader_modules.fallible_extend(
+                shader_modules.try_extend(
                     shaders_inner.iter_mut().map(|shader| {
                         let info = vk::ShaderModuleCreateInfo {
                             s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
@@ -459,19 +541,17 @@ impl ShaderCache {
     }
 
     #[inline(always)]
-    pub fn delete_shader_set(&mut self, id: ShaderSetId) -> Result<()> {
-        self.shader_sets
-            .remove(id.0)
-            .context("failed to find shader set")
-            .map(|_| ())
+    pub fn delete_shader_set(&mut self, id: ShaderSetId) {
+        self.shader_sets.remove(id.0).ok();
     }
 
     #[inline(always)]
-    pub fn get_shader_set(&self, id: ShaderSetId) -> Result<Arc<ShaderSetInner>> {
+    pub fn get_shader_set(&self, id: ShaderSetId) -> Result<&Arc<ShaderSetInner>> {
         self.shader_sets
             .get(id.0)
-            .context("failed to find shader set")?
-            .load()
+            .context_with(|| format_compact!(
+                "invalid shader set id {id}",
+            ))?.load()
     }
 }
 

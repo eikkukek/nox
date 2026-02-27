@@ -157,16 +157,23 @@ pub trait Vector<T, SizeType = usize>:
     /// May panic if the vector has a fixed capacity or if an allocation fails. See the
     /// [`FallibleVec`] trait for vectors that may fail to reserve more capacity.
     fn append(&mut self, slice: &[T])
-        where
-            T: Clone;
+        where T: Clone;
 
     /// Maps and appends the contents of a slice over [`U`] to the vector.
     ///
     /// May panic if the vector has a fixed capacity or if an allocation fails. See the
     /// [`FallibleVec`] trait for vectors that may fail to reserve more capacity.
     fn append_map<U, F>(&mut self, slice: &[U], f: F)
-        where
-            F: FnMut(&U) -> T;
+        where F: FnMut(&U) -> T;
+
+    /// Appends the contents of a slice over [`T`] to the vector.
+    ///
+    /// This may be faster than [`Vector::append`] for [`Copy`] data.
+    ///
+    /// May panic if the vector has a fixed capacity or if an allocation fails. See the
+    /// [`FallibleVec`] trait for vectors that may fail to reserve more capacity.
+    fn fast_append(&mut self, slice: &[T])
+        where T: Copy;
 
     /// Removes and returns an element from the vector at the given `index`.
     ///
@@ -205,8 +212,7 @@ pub trait Vector<T, SizeType = usize>:
     ///
     /// This preserves the order of the elements.
     fn retain<F>(&mut self, mut p: F)
-        where 
-            F: FnMut(&T) -> bool,
+        where F: FnMut(&T) -> bool,
     {
         for i in SizeType::ZERO.iter(self.len()).rev() {
             if !p(&self[i.into_usize()]) {
@@ -219,8 +225,7 @@ pub trait Vector<T, SizeType = usize>:
     ///
     /// This may not preserve the order of elements.
     fn retain_unordered<F>(&mut self, mut p: F)
-        where 
-            F: FnMut(&T) -> bool,
+        where F: FnMut(&T) -> bool,
     {
         for i in SizeType::ZERO.iter(self.len()).rev() {
             if !p(&self[i.into_usize()]) {
@@ -393,15 +398,21 @@ pub trait FallibleVec<T, SizeType = usize>: Vector<T, SizeType>
     ///
     /// This is a part of operations that may fail because the vector fails to reserve more space.
     fn fallible_append(&mut self, slice: &[T]) -> Result<(), TryReserveError<()>>
-        where
-            T: Clone;
+        where T: Clone;
+
+    /// Tries to append the contents of a slice over [`T`] to the vector.
+    ///
+    /// This may be faster than [`FallibleVec::fallible_append`] for [`Copy`] types.
+    ///
+    /// This is a part of operations that may fail because the vector fails to reserve more space.
+    fn fallible_fast_append(&mut self, slice: &[T]) -> Result<(), TryReserveError<()>>
+        where T: Copy;
 
     /// Tries to map and append the contents of a slice over [`U`] to the vector.
     ///
     /// This is a part of operations that may fail because the vector fails to reserve more space.
     fn fallible_append_map<U, F>(&mut self, slice: &[U], f: F) -> Result<(), TryReserveError<()>>
-        where
-            F: FnMut(&U) -> T;
+        where F: FnMut(&U) -> T;
 
     /// Tries to map and append the contents of a slice over [`U`] to the vector.
     ///

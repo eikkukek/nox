@@ -7,7 +7,10 @@ use nox_mem::{
     vec32,
 };
 
-use crate::gpu::prelude::*;
+use crate::gpu::prelude::{
+    subresource_state::*,
+    *
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct ImageSubresourceState {
@@ -146,8 +149,8 @@ impl StateRange for ImageMipRange {
 
 #[derive(Default)]
 pub(crate) struct ImageMemoryBarrierCache {
-    pub(super) cache: AHashMap<(vk::ImageAspectFlags, u32, u32), Vec32<ImageMemoryBarrier>>,
-    pub(super) touched: Vec32<(vk::ImageAspectFlags, u32, u32)>,
+    pub(super) cache: AHashMap<(ImageAspect, u32, u32), Vec32<ImageMemoryBarrier>>,
+    pub(super) touched: Vec32<(ImageAspect, u32, u32)>,
     pub(super) barriers: Vec32<ImageMemoryBarrier>,
 }
 
@@ -161,7 +164,7 @@ impl ImageMemoryBarrierCache {
     #[inline(always)]
     pub(super) fn insert(
         &mut self,
-        aspect: vk::ImageAspectFlags,
+        aspect: ImageAspect,
         barrier: ImageMemoryBarrier,
     ) {
         let key = (

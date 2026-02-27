@@ -68,10 +68,8 @@ impl<Alloc, F> ArenaGuard<Alloc, F>
     /// # Safety
     /// Any allocations still in use in the guard's region will become invalid.
     #[inline(always)]
-    pub unsafe fn clear(&self) {
-        unsafe {
-            &mut *self.inner.get()
-        }.pos = self.pos_rollback;
+    pub unsafe fn clear(&mut self) {
+        self.inner.get_mut().pos = self.pos_rollback;
     }
 }
 

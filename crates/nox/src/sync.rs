@@ -1,7 +1,7 @@
 //! The sync prelude of [`nox`].
 
 pub use std::sync::{
-    Arc, OnceLock, LazyLock,
+    Arc, OnceLock, LazyLock, atomic,
 };
 
 pub use parking_lot::{

@@ -7,12 +7,12 @@ use nox_mem::{
     vec::NonNullVec32,
 };
 
-pub(super) struct CommandResult<'a> 
-{
+pub(super) struct CommandResult<'a>  {
     pub primary_command_buffers: NonNullVec32<'a, vk::CommandBuffer>,
     pub timeline_value: u64,
     pub wait_scope: vk::PipelineStageFlags2,
     pub signal_scope: vk::PipelineStageFlags2,
+    pub queue: vk::Queue,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

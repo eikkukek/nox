@@ -1,3 +1,4 @@
+mod create_info;
 mod properties;
 mod state;
 mod error;
@@ -14,8 +15,6 @@ use parking_lot::{
 use compact_str::format_compact;
 
 use nox_mem::{
-    AsRaw,
-    impl_as_raw_bit_op,
     vec::{Vec32, Vector},
     vec32,
     slot_map::SlotMap,
@@ -24,9 +23,8 @@ use nox_mem::{
 use crate::gpu::prelude::{
     memory_binder::{DeviceMemory, MemoryBinder},
     Vulkan,
-    StateRange,
-    StateOverwrite,
-    COMMAND_REQUEST_IGNORED,
+    subresource_state::*,
+    COMMAND_INDEX_IGNORED,
     CommandOrdering,
     BufferId,
     ResourceId,
@@ -37,22 +35,10 @@ use crate::dev::has_not_bits;
 use crate::dev::error as dev_error;
 use dev_error::Context;
 
+pub use create_info::*;
 pub use error::BufferError;
 pub(crate) use properties::BufferProperties;
 pub(crate) use state::*;
-
-#[repr(u32)]
-#[derive(Clone, Copy, AsRaw, PartialEq, Eq)]
-pub enum BufferUsage {
-    TransferSrc = vk::BufferUsageFlags::TRANSFER_SRC.as_raw(),
-    TransferDst = vk::BufferUsageFlags::TRANSFER_DST.as_raw(),
-    IndexBuffer = vk::BufferUsageFlags::INDEX_BUFFER.as_raw(),
-    VertexBuffer = vk::BufferUsageFlags::VERTEX_BUFFER.as_raw(),
-    UniformBuffer = vk::BufferUsageFlags::UNIFORM_BUFFER.as_raw(),
-    StorageBuffer = vk::BufferUsageFlags::STORAGE_BUFFER.as_raw(),
-}
-
-impl_as_raw_bit_op!(BufferUsage);
 
 pub(crate) struct BufferMeta {
     vk: Arc<Vulkan>,
@@ -66,12 +52,18 @@ pub(crate) struct BufferMeta {
 impl BufferMeta {
 
     #[inline(always)]
-    pub fn new(
+    fn new(
         vk: Arc<Vulkan>,
-        properties: BufferProperties,
+        create_info: &BufferCreateInfo<'_>,
         alloc: &mut (impl MemoryBinder + ?Sized),
+        bind_memory_info: &mut vk::BindBufferMemoryInfo<'static>,
     ) -> Result<Self, dev_error::Error>
     {
+        let properties = BufferProperties {
+            size: create_info.size.get(),
+            usage: create_info.usage.into(),
+            create_flags: create_info.create_flags,
+        };
         let create_info = vk::BufferCreateInfo {
             s_type: vk::StructureType::BUFFER_CREATE_INFO,
             flags: properties.create_flags,
@@ -87,7 +79,7 @@ impl BufferMeta {
         };
         let mut mem_requirements = Default::default();
         unsafe {
-            vk.maintenance4_device()
+            vk.device()
             .get_device_buffer_memory_requirements(&device_mem_requirements, &mut mem_requirements);
         }
         let memory = unsafe { alloc.alloc(&mem_requirements)
@@ -97,12 +89,12 @@ impl BufferMeta {
             vk.device().create_buffer(&create_info, None)
             .context("failed to create Vulkan buffer")?
         };
-        unsafe {
-            vk.device().bind_buffer_memory(
-                handle, memory.device_memory(),
-                memory.offset(),
-            ).context("failed to bind buffer memory")?;
-        }
+        *bind_memory_info = vk::BindBufferMemoryInfo {
+             buffer: handle,
+             memory: memory.device_memory(),
+             memory_offset: memory.offset(),
+             ..Default::default()
+        };
         Ok(Self {
             handle,
             memory,
@@ -113,7 +105,7 @@ impl BufferMeta {
                     vk::AccessFlags2::NONE,
                     vk::PipelineStageFlags2::NONE,
                     vk::QUEUE_FAMILY_IGNORED,
-                    COMMAND_REQUEST_IGNORED,
+                    COMMAND_INDEX_IGNORED,
                     0
                 ),
                 offset: 0,

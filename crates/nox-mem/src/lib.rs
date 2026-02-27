@@ -3,7 +3,6 @@
 #[cfg(feature = "std")]
 extern crate std;
 
-#[macro_use]
 pub mod conditional;
 pub mod collections;
 pub mod num;
@@ -14,6 +13,7 @@ pub mod slot_map;
 pub mod dynamic;
 pub mod cell;
 pub mod option;
+pub mod result;
 #[cfg(feature = "std")]
 pub mod iter;
 #[cfg(feature = "std")]

@@ -3,7 +3,7 @@ use super::*;
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ImageProperties {
     pub dimensions: Dimensions,
-    pub aspect_mask: u32,
+    pub aspect_mask: ImageAspect,
     pub format: vk::Format,
     pub usage: vk::ImageUsageFlags,
     pub samples: MSAA,
@@ -26,7 +26,7 @@ impl ImageProperties {
         }
     }
 
-    pub fn validate_range(&self, range: ImageRange) -> Result<vk::ImageViewType, ImageError> {
+    pub fn validate_range(&self, range: &ImageRange) -> Result<vk::ImageViewType, ImageError> {
         if let Some(component_info) = range.component_info &&
             !self.has_mutable_format() && self.format != component_info.format
         {
@@ -35,9 +35,11 @@ impl ImageProperties {
                 requested_format: component_info.format,
             })
         }
-        let subresource_info = range.subresource;
+        let subresource_info = range.subresource_range;
         if has_not_bits!(self.aspect_mask, subresource_info.aspect_mask) {
-            return Err(ImageError::AspectMismatch)
+            return Err(ImageError::AspectMismatch(
+                subresource_info.aspect_mask ^ self.aspect_mask & subresource_info.aspect_mask
+            ))
         }
         if subresource_info.base_mip_level + subresource_info.level_count.get() > self.mip_levels ||
             subresource_info.base_array_layer + subresource_info.layer_count.get() > self.array_layers
@@ -56,12 +58,12 @@ impl ImageProperties {
                 Err(ImageError::ValidationError(format_compact!(
                     "image is not cube compatible"
                 )))
-            } else if !range.subresource.layer_count.get().is_multiple_of(6) {
+            } else if !range.subresource_range.layer_count.get().is_multiple_of(6) {
                 Err(ImageError::ValidationError(format_compact!(
                     "cube subview layer count {} must be multiple of 6",
-                    range.subresource.layer_count,
+                    range.subresource_range.layer_count,
                 )))
-            } else if range.subresource.layer_count.get() > 6 {
+            } else if range.subresource_range.layer_count.get() > 6 {
                 Ok(vk::ImageViewType::CUBE_ARRAY)
             } else {
                 Ok(vk::ImageViewType::CUBE)
@@ -69,7 +71,7 @@ impl ImageProperties {
         } else {
             Ok(if self.dimensions.depth > 1 {
                 vk::ImageViewType::TYPE_3D
-            } else if range.subresource.layer_count.get() > 1 {
+            } else if range.subresource_range.layer_count.get() > 1 {
                 vk::ImageViewType::TYPE_2D_ARRAY
             } else {
                 vk::ImageViewType::TYPE_2D

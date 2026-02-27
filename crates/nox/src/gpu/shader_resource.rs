@@ -2,20 +2,33 @@ use core::{
     ops::{Deref, DerefMut},
     num::NonZeroU64,
     ptr::NonNull,
+    marker::PhantomData,
 };
-
-use nox_ash::vk::Handle;
 
 use ahash::{AHashMap, AHashSet};
 
+use compact_str::format_compact;
+
+use nox_ash::vk::{self, Handle};
+
 use nox_mem::{
-    vec::NonNullVec32,
-    alloc::dealloc,
+    vec::{Vec32, NonNullVec32, FixedVec32, Vector},
+    slot_map::*,
+    AsRaw,
+    slice, slice_mut,
+    alloc::{Layout, dealloc, LocalAlloc},
+    Display,
+    vec32,
 };
 
 use nox_alloc::arena::{self, CellArena};
 
-use super::*;
+use crate::{
+    gpu::prelude::*,
+    dev::error::*,
+    log,
+    sync::*,
+};
 
 #[repr(i32)]
 #[derive(AsRaw, Clone, Copy, PartialEq, Eq, Debug, Display)]
@@ -188,7 +201,7 @@ impl ShaderResource {
 
     fn validate_bindings(
         &mut self,
-        resources: &Resources,
+        gpu: &Gpu,
     ) {
         self.flags = 0;
         if self.is_maybe_poisoned() {
@@ -208,7 +221,7 @@ impl ShaderResource {
             let ty = binding.descriptor_type();
             for buffer in binding.descriptor_buffers_mut() {
                 if let Some((id, _, _)) = buffer.buffer {
-                    if !resources.is_buffer_valid(id) {
+                    if !gpu.is_buffer_valid(id) {
                         self.flags &= !Self::IS_VALID;
                         return
                     }
@@ -226,7 +239,7 @@ impl ShaderResource {
                 }
                 if requires_image {
                     if let Some((id, _, _)) = image.image {
-                        if !resources.is_image_valid(id) {
+                        if !gpu.is_image_valid(id) {
                             self.flags &= !Self::IS_VALID;
                             return
                         }
@@ -382,10 +395,10 @@ struct Inner {
 impl Inner {
 
     #[inline(always)]
-    fn update(&mut self, resources: &Resources) {
+    fn update(&mut self, gpu: &Gpu) {
         for &id in self.pending_validations.iter() {
             if let Ok(resource) = self.shader_resources.get_mut(id.0) {
-                resource.validate_bindings(resources);
+                resource.validate_bindings(gpu);
             }
         }
         self.pending_validations.clear();
@@ -501,24 +514,35 @@ impl ShaderResourcePool {
             )))
         }
         let mut set_layouts = FixedVec32
-            ::with_capacity(set_infos.len() as u32, tmp_alloc)?;
-        let mut resources = FixedVec32
-            ::with_capacity(set_infos.len() as u32, tmp_alloc)?;
-        for (i, info) in set_infos.iter().enumerate() {
+            ::with_capacity(count, tmp_alloc)?;
+        let mut sets = FixedVec32
+            ::with_capacity(count, tmp_alloc)?;
+        sets.try_extend(set_infos.iter().enumerate().map(|(i, info)| {
             let set = shader_cache
                 .get_shader_set(info.shader_set_id)
                 .context_with(|| format_compact!(
                     "failed to get shader set {} at index {i}",
                     info.shader_set_id
                 ))?;
-            let layout = &set
-                .descriptor_set_layouts()
+            let layout = set.descriptor_set_layouts()
                 .get(info.descriptor_set_index as usize)
                 .ok_or_else(|| Error::just_context(format_compact!(
                     "invalid descriptor set index {} for shader set {}",
                     info.descriptor_set_index, info.shader_set_id,
                 )))?;
-            let alloc_size: usize = layout.bindings
+            if layout.is_push_descriptor() {
+                return Err(Error::just_context(format_compact!(
+                "attempting to allocate shader resources with descriptor set index {} of shader set {} that has the push descriptor flag set",
+                info.descriptor_set_index, info.shader_set_id,
+                )))
+            }
+            set_layouts.push(layout.handle);
+            Ok(layout)
+        }))?;
+        let mut resources = FixedVec32
+            ::with_capacity(count, tmp_alloc)?;
+        for set in sets {
+            let alloc_size: usize = set.bindings
                 .iter().map(|binding|
                     size_of::<ShaderResourceBinding>() +
                     if binding.descriptor_type.is_buffer() {
@@ -532,9 +556,9 @@ impl ShaderResourcePool {
                 .sum();
             let alloc = CellArena::new(alloc_size)?;
             let mut bindings = NonNullVec32
-                ::with_capacity(layout.bindings.len(), &alloc)?
+                ::with_capacity(set.bindings.len(), &alloc)?
                 .into_static();
-            bindings.try_extend(layout.bindings
+            bindings.try_extend(set.bindings
                 .iter()
                 .map(|binding| {
                     if let Some(pool) = inner.pools.get_mut(&binding.descriptor_type) {
@@ -591,9 +615,8 @@ impl ShaderResourcePool {
                     }
                 })
             )?;
-            set_layouts.push(layout.handle);
             resources.push(ShaderResource::new(
-                bindings, layout.shader_stage_mask,
+                bindings, set.shader_stage_mask,
                 alloc.into_inner(),
             ));
         }
@@ -607,6 +630,9 @@ impl ShaderResourcePool {
         let mut sets = FixedVec32
             ::with_capacity(count, tmp_alloc)?;
         let device = inner.vk.device();
+        unsafe {
+            device.allocate_descriptor_sets(&info, &mut sets)
+        }.context("failed to allocate descriptor sets")?;
         let res = unsafe {
             (device.fp_v1_0().allocate_descriptor_sets)(device.handle(), &info, sets.as_mut_ptr())
         };
@@ -634,7 +660,7 @@ impl ShaderResourcePool {
 
     pub unsafe fn free<Alloc>(
         &self,
-        resources: &Resources,
+        gpu: &Gpu,
         queue_scheduler: &QueueSchedulerReadLock,
         ids: &[ShaderResourceId],
         tmp_alloc: &Alloc,
@@ -645,7 +671,7 @@ impl ShaderResourcePool {
         let mut inner = self.inner.write();
         let mut descriptor_sets = FixedVec32
             ::with_capacity(ids.len() as u32, tmp_alloc)?;
-        let finsihed_frame = resources
+        let finsihed_frame = gpu
             .get_semaphore_counter_value(queue_scheduler.get_frame_semaphore_id())?;
         for &id in ids {
             if let Ok(resource) = inner.shader_resources.remove(id.1.0) {
@@ -690,9 +716,9 @@ impl ShaderResourcePool {
 
     pub fn update(
         &self,
-        resources: &Resources,
+        gpu: &Gpu,
     ) {
-        self.inner.write().update(resources);
+        self.inner.write().update(gpu);
     }
 
     #[inline(always)]
@@ -923,7 +949,7 @@ impl<'a, 'b> ShaderResourceUpdateContext<'a, 'b> {
     #[inline(always)]
     pub fn update_buffer<'c, Alloc>(
         &mut self,
-        resources: &Resources,
+        gpu: &Gpu,
         update: &ShaderResourceBufferUpdate,
         alloc: &'c Alloc,
     ) -> Result<(vk::DescriptorType, FixedVec32<'c, vk::DescriptorBufferInfo, Alloc>)>
@@ -969,12 +995,12 @@ impl<'a, 'b> ShaderResourceUpdateContext<'a, 'b> {
             if let Some((id, _, _)) = descriptor.buffer {
                 pool.untrack_buffer(id, descriptor.buffer_track_id)?;
             }
-            let buffers = resources.buffers.read();
+            let buffers = gpu.read_buffers();
             let buffer = buffers
-                .get(info.buffer_id.0)
+                .get(info.buffer_id)
                 .context_with(|| format_compact!(
-                    "invalid buffer id {} for shader resource {} update (binding {}, index {}, type {ty})",
-                    info.buffer_id, update.resource_id, update.binding, starting_idx + i,
+                    "failed to get buffer for shader resource {} update (binding {}, index {}, type {ty})",
+                    update.resource_id, update.binding, starting_idx + i,
                 ))?;
             if let Some(err) = buffer.validate_usage(usage) {
                 return Err(Error::new(err, format_compact!(
@@ -1010,7 +1036,7 @@ impl<'a, 'b> ShaderResourceUpdateContext<'a, 'b> {
     #[inline(always)]
     pub fn update_image<'c, Alloc>(
         &mut self,
-        resources: &Resources,
+        gpu: &Gpu,
         update: &ShaderResourceImageUpdate,
         alloc: &'c Alloc,
     ) -> Result<(vk::DescriptorType, FixedVec32<'c, vk::DescriptorImageInfo, Alloc>)>
@@ -1090,17 +1116,17 @@ impl<'a, 'b> ShaderResourceUpdateContext<'a, 'b> {
                         )))
                     };
                     if let Some(range_info) = range_info {
-                        let mut images = resources.images.write();
+                        let mut images = gpu.write_images();
                         let image = images
-                            .get_mut(image_id.0)
+                            .get_mut(image_id)
                             .context_with(|| format_compact!(
-                                "invalid image id {} for shader resource {} update (binding {}, index {}, type {ty})",
-                                image_id, update.resource_id, update.binding, starting_idx + i,
+                                "failed to get image shader resource {} update (binding {}, index {}, type {ty})",
+                                update.resource_id, update.binding, starting_idx + i,
                             ))?;
                         if let Some(err) = image.validate_usage(image_usage) {
                             return Err(Error::new(err, format_compact!(
-                                "image {} usage mismatch for shader resource {} update (binding {}, index {}, type {ty})",
-                                image_id, update.resource_id, update.binding, starting_idx + i,
+                                "image {image_id} usage mismatch for shader resource {} update (binding {}, index {}, type {ty})",
+                                update.resource_id, update.binding, starting_idx + i,
                             )))
                         }
                         let view = image
@@ -1114,17 +1140,17 @@ impl<'a, 'b> ShaderResourceUpdateContext<'a, 'b> {
                         view
                     }
                     else {
-                        let images = resources.images.read();
+                        let images = gpu.read_images();
                         let image = images
-                            .get(image_id.0)
+                            .get(image_id)
                             .context_with(|| format_compact!(
-                                "invalid image id {} for shader resource {} (binding {}, index {}, type {ty})",
-                                image_id, update.resource_id, update.binding, starting_idx + i,
+                                "failed to get image for shader resource {} (binding {}, index {}, type {ty})",
+                                update.resource_id, update.binding, starting_idx + i,
                             ))?;
                         if let Some(err) = image.validate_usage(image_usage) {
                             return Err(Error::new(err, format_compact!(
-                                "image {} usage mismatch for shader resource {}, (binding {}, index {}, type {ty})",
-                                image_id, update.resource_id, update.binding, starting_idx + i,
+                                "image {image_id} usage mismatch for shader resource {}, (binding {}, index {}, type {ty})",
+                                update.resource_id, update.binding, starting_idx + i,
                             )))
                         }
                         let view = image.get_view();

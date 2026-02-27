@@ -200,6 +200,12 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         self.fallible_append_map(slice, f).unwrap()
     }
 
+    fn fast_append(&mut self, slice: &[T])
+        where T: Copy
+    {
+        self.fallible_fast_append(slice).unwrap()
+    }
+
     fn remove(&mut self, index: usize) -> T {
         if index >= self.len {
             panic!("index {} was out of bounds with len {} when removing", index, self.len())
@@ -437,6 +443,26 @@ impl<T, const N: usize> FallibleVec<T> for ArrayVec<T, N> {
             unsafe {
                 ptr.add(len + i).write(f(u));
             }
+        }
+        self.len = len;
+        Ok(())
+    }
+
+    fn fallible_fast_append(&mut self, slice: &[T]) -> Result<(), TryReserveError<()>>
+        where T: Copy
+    {
+        let len = self.len + slice.len();
+        if len > N {
+            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
+        }
+        unsafe {
+            Pointer
+                ::new(slice.as_ptr().cast_mut())
+                .unwrap()
+                .fast_clone_elements(
+                    Pointer::new(self.as_mut_ptr()).unwrap_unchecked().add(self.len),
+                    slice.len()
+                );
         }
         self.len = len;
         Ok(())
