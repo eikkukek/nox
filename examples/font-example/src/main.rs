@@ -6,10 +6,8 @@ use memmap2::Mmap;
 
 use nox::{
     event_loop::ActiveEventLoop,
-    gpu,
-    mem::{
-        collections::{EntryExt, HashMap},
-    },
+    gpu::{self, memory_binder::MemoryBinder},
+    mem::collections::{EntryExt, HashMap},
     sync::{Arc, SwapLock, atomic::{self, AtomicU64}},
 };
 
@@ -32,7 +30,7 @@ pub struct App {
     rendered_text: Arc<RenderedText>,
     semaphore: gpu::TimelineSemaphoreId,
     semaphore_value: u64,
-    image_alloc: gpu::MemoryBinderId,
+    image_alloc: gpu::memory_binder::LinearBinder,
     frame_semaphore: gpu::TimelineSemaphoreId,
     frame: u64,
 }
@@ -123,6 +121,12 @@ impl App {
             .map(|_| Default::default())
             .collect();
         let mut staging_buffer = Default::default();
+        let memory_binder = gpu::memory_binder::GlobalBinder
+            ::new(
+                event_loop.gpu().clone(),
+                gpu::MemoryProperties::HOST_VISIBLE | gpu::MemoryProperties::HOST_COHERENT,
+                gpu::MemoryProperties::HOST_VISIBLE | gpu::MemoryProperties::HOST_COHERENT,
+            );
         let staging_buffer_size = 1 << 24;
         event_loop
             .gpu()
@@ -131,31 +135,32 @@ impl App {
                     &mut staging_buffer,
                     staging_buffer_size,
                     gpu::BufferUsages::TRANSFER_SRC,
-                ).unwrap().with_memory_binder(gpu::ResourceBinder::global_mappable())],
+                    &memory_binder,
+                ).unwrap()],
                 []
             )?;
-        let (map, map_size) = event_loop.gpu().map_buffer(staging_buffer)?;
+        let map = event_loop.gpu().map_buffer(staging_buffer)?;
         let mut staging_used = 0;
         for (i, (_, text)) in rendered_text.iter().enumerate() {
             let n_vertices = size_of_val(text.trigs.vertices.as_slice());
-            assert!(staging_used + n_vertices <= map_size);
+            assert!(staging_used + n_vertices <= map.size);
             unsafe {
                 text.trigs.vertices.as_ptr().cast::<u8>()
-                .copy_to_nonoverlapping(map.add(staging_used), n_vertices);
+                .copy_to_nonoverlapping(map.map.add(staging_used), n_vertices);
             }
             staging_used += n_vertices;
             let n_offsets = size_of_val(text.offsets.as_slice());
-            assert!(staging_used + n_offsets <= map_size);
+            assert!(staging_used + n_offsets <= map.size);
             unsafe {
                 text.offsets.as_ptr().cast::<u8>()
-                .copy_to_nonoverlapping(map.add(staging_used), n_offsets);
+                .copy_to_nonoverlapping(map.map.add(staging_used), n_offsets);
             }
             staging_used += n_offsets;
             let n_indices = size_of_val(text.trigs.indices.as_slice());
-            assert!(staging_used + n_indices <= map_size);
+            assert!(staging_used + n_indices <= map.size);
             unsafe {
                 text.trigs.indices.as_ptr().cast::<u8>()
-                .copy_to_nonoverlapping(map.add(staging_used), n_indices);
+                .copy_to_nonoverlapping(map.map.add(staging_used), n_indices);
             }
             staging_used += n_indices;
             let (mut vertex, mut offset, mut index) = Default::default();
@@ -167,16 +172,19 @@ impl App {
                             &mut vertex,
                             n_vertices as gpu::DeviceSize,
                             gpu::BufferUsages::VERTEX_BUFFER | gpu::BufferUsages::TRANSFER_DST,
+                            &memory_binder,
                         ).unwrap(),
                         gpu::BufferCreateInfo::new(
                             &mut offset,
                             n_offsets as gpu::DeviceSize,
                             gpu::BufferUsages::VERTEX_BUFFER | gpu::BufferUsages::TRANSFER_DST,
+                            &memory_binder,
                         ).unwrap(),
                         gpu::BufferCreateInfo::new(
                             &mut index,
                             n_indices as gpu::DeviceSize,
                             gpu::BufferUsages::INDEX_BUFFER | gpu::BufferUsages::TRANSFER_DST,
+                            &memory_binder,
                         ).unwrap()
                     ],
                     []
@@ -266,8 +274,11 @@ impl App {
             rendered_text,
             semaphore,
             semaphore_value: 1,
-            image_alloc: event_loop.gpu().create_memory_binder(gpu::memory_binder::LinearBinder
-                ::default_attributes(1 << 24)
+            image_alloc: gpu::memory_binder::LinearBinder::new(
+                event_loop.gpu().clone(),
+                1 << 25,
+                gpu::MemoryProperties::DEVICE_LOCAL,
+                gpu::MemoryProperties::HOST_VISIBLE
             )?,
             frame_semaphore,
             frame: 3,
@@ -388,7 +399,7 @@ impl App {
                 Ok(())
             },
             nox::Event::GpuEvent(event) => match event {
-                gpu::Event::SwapchainCreated { surface_id: _, new_format, new_size } => {
+                gpu::Event::SwapchainCreated { surface_id: _, new_format, new_size, image_count: _ } => {
                     if event_loop.gpu().wait_for_semaphores(&[(self.frame_semaphore, self.frame - 1)], u64::MAX)? 
                     {
                         if self.fb_state.images.load()[0] != gpu::ImageViewId::default() {
@@ -400,33 +411,30 @@ impl App {
                             )?;
                         }
                         unsafe {
-                            event_loop.gpu().release_memory_binder_resources(self.image_alloc)?;
+                            self.image_alloc.release_resources();
                         }
                         let (mut a, mut b, mut c) = Default::default();
                         event_loop.gpu().create_resources(
                             [],
                             [
                                 gpu::ImageCreateInfo
-                                    ::new(&mut a)
+                                    ::new(&mut a, &self.image_alloc)
                                     .with_format(new_format, false)
                                     .with_dimensions(new_size)
                                     .with_usage(gpu::ImageUsages::COLOR_ATTACHMENT)
-                                    .with_samples(gpu::MsaaSamples::X8)
-                                    .with_memory_binder(gpu::ResourceBinder::new(self.image_alloc)),
+                                    .with_samples(gpu::MsaaSamples::X8),
                                 gpu::ImageCreateInfo
-                                    ::new(&mut b)
+                                    ::new(&mut b, &self.image_alloc)
                                     .with_format(new_format, false)
                                     .with_dimensions(gpu::Dimensions::new(new_size.0, new_size.1, 1))
                                     .with_usage(gpu::ImageUsages::COLOR_ATTACHMENT)
-                                    .with_samples(gpu::MsaaSamples::X8)
-                                    .with_memory_binder(gpu::ResourceBinder::new(self.image_alloc)),
+                                    .with_samples(gpu::MsaaSamples::X8),
                                 gpu::ImageCreateInfo
-                                    ::new(&mut c)
+                                    ::new(&mut c, &self.image_alloc)
                                     .with_format(new_format, false)
                                     .with_dimensions(gpu::Dimensions::new(new_size.0, new_size.1, 1))
                                     .with_usage(gpu::ImageUsages::COLOR_ATTACHMENT)
-                                    .with_samples(gpu::MsaaSamples::X8)
-                                    .with_memory_binder(gpu::ResourceBinder::new(self.image_alloc)),
+                                    .with_samples(gpu::MsaaSamples::X8),
                             ]
                         )?;
                         self.fb_state.images.modify(|images| {

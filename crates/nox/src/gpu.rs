@@ -89,6 +89,7 @@ pub(crate) mod prelude {
         super::ext,
         surface::VulkanWindow,
         super::event::Event,
+        super::memory_binder::MemoryProperties,
     };
 
     pub type DeviceName = ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
@@ -106,8 +107,6 @@ pub(crate) mod prelude {
     pub(crate) const COMMAND_INDEX_IGNORED: u32 = u32::MAX;
 }
 use commands::scheduler::QueueScheduler;
-
-use memory_binder::{DefaultBinder, MemoryBinderAttributes, MemoryBinderInfo};
 
 pub use prelude::*;
 
@@ -208,11 +207,8 @@ struct GpuInner {
     surfaces: RwLock<SlotMap<Surface>>,
     buffers: RwLock<SlotMap<BufferMeta>>,
     images: RwLock<SlotMap<ImageMeta>>,
-    memory_binders: SwapLock<SlotMap<MemoryBinderResource>>,
     timeline_semaphores: RwLock<SlotMap<vk::Semaphore>>,
     draw_commands: RwLock<SlotMap<DrawCommandResource>>,
-    default_binder: DefaultBinder,
-    default_binder_mappable: DefaultBinder,
     tmp_allocs: Arc<TmpAllocs>,
     buffered_frames: u32,
     device: LogicalDevice,
@@ -234,14 +230,6 @@ impl Gpu {
         memory_layout: MemoryLayout,
         buffered_frames: u32,
     ) -> Result<Self> {
-        let default_binder = DefaultBinder::new(
-            device.clone(),
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        );
-        let default_binder_mappable = DefaultBinder::new(
-            device.clone(),
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        );
         let main_tmp_alloc = Arena
             ::with_fallback(memory_layout.tmp_arena_size())
             .context("failed to create arena alloc")?;
@@ -269,11 +257,8 @@ impl Gpu {
             descriptor_pools: SwapLock::new(SlotMap::new()),
             images: RwLock::new(SlotMap::new()),
             buffers: RwLock::new(SlotMap::new()),
-            memory_binders: SwapLock::default(),
             timeline_semaphores: RwLock::new(SlotMap::new()),
             draw_commands: RwLock::new(SlotMap::new()),
-            default_binder,
-            default_binder_mappable,
             tmp_allocs: Arc::new(TmpAllocs {
                 fallback_alloc: Arc::new(main_tmp_alloc),
                 tmp_allocs,
@@ -369,17 +354,7 @@ impl Gpu {
     #[inline]
     pub fn any_device_queue(&self, flags: QueueFlags) -> Option<DeviceQueue> {
         self.inner.device.any_device_queue(flags)
-    }
-
-    #[inline]
-    pub fn default_memory_binder(&self) -> DefaultBinder {
-        self.inner.default_binder.clone()
-    }
-
-    #[inline]
-    pub fn default_memory_binder_mappable(&self) -> DefaultBinder {
-        self.inner.default_binder_mappable.clone()
-    }
+    } 
 
     pub fn get_image_format_properties(
         &self,
@@ -1109,7 +1084,6 @@ impl Gpu {
         let tmp_alloc = tmp_alloc.guard();
         let buffers = UnsafeCell::new(self.inner.buffers.write());
         let images = UnsafeCell::new(self.inner.images.write());
-        let binders = self.inner.memory_binders.load();
         let mut buffer_bind_infos = FixedVec32::with_capacity(
             buffer_create_infos.len() as u32, &tmp_alloc,
         )?;
@@ -1137,19 +1111,8 @@ impl Gpu {
         );
         for (i, create_info) in buffer_create_infos.enumerate() {
             let mut bind_info = Default::default();
-            let buffer_meta = match create_info.memory_binder.into_inner() {
-                ResourceBinderInner::Default => create_info.build(
-                    self.inner.device.clone(), &mut self.inner.default_binder.clone(), &mut bind_info,
-                ),
-                ResourceBinderInner::DefaultMappable => create_info.build(
-                    self.inner.device.clone(), &mut self.inner.default_binder_mappable.clone(), &mut bind_info
-                ),
-                ResourceBinderInner::Id(id) => binders
-                    .get(id.0).context_with(|| format_compact!("invalid memory binder id {id}"))
-                    .and_then(|binder| create_info.build(
-                        self.inner.device.clone(), &mut *binder.write(), &mut bind_info
-                    ))
-            }.context_with(|| format_compact!("failed to create buffer at index {i}"))?;
+            let buffer_meta = create_info.build(self.device().clone(), &mut bind_info)
+                .context_with(|| format_compact!("failed to create buffer at index {i}"))?;
             buffer_bind_infos.push(bind_info);
             let id = BufferId::new(
                 unsafe { &mut *buffers.get() }.insert(buffer_meta)
@@ -1159,22 +1122,8 @@ impl Gpu {
         }
         for (i, create_info) in image_create_infos.enumerate() {
             let mut bind_info = Default::default();
-            let image_meta = match create_info.memory_binder.into_inner() {
-                ResourceBinderInner::Default => create_info.build(
-                    self.inner.device.clone(), &mut self.inner.default_binder.clone(),
-                    &mut bind_info,
-                ),
-                ResourceBinderInner::DefaultMappable => create_info.build(
-                    self.inner.device.clone(), &mut self.inner.default_binder_mappable.clone(),
-                    &mut bind_info
-                ),
-                ResourceBinderInner::Id(id) => binders
-                    .get(id.0).context_with(|| format_compact!("invalid memory binder id {id}"))
-                    .and_then(|binder| create_info.build(
-                        self.inner.device.clone(), &mut *binder.write(), &mut bind_info
-                    ))
-                ,
-            }.context_with(|| format_compact!("failed to create image at index {i}"))?;
+            let image_meta = create_info.build(self.device().clone(), &mut bind_info)
+                .context_with(|| format_compact!("failed to create image at index {i}"))?;
             image_bind_infos.push(bind_info);
             let id = ImageId::new(
                 unsafe { &mut *images.get() }.insert(image_meta)
@@ -1264,7 +1213,7 @@ impl Gpu {
     pub fn map_buffer(
         &self,
         id: BufferId
-    ) -> Result<(*mut u8, usize)>
+    ) -> Result<memory_binder::MemoryMap>
     {
         self.inner.buffers
             .write()
@@ -1304,90 +1253,6 @@ impl Gpu {
     {
         ResourceGuard::new(self.inner.images.read())
     } 
-
-    pub fn create_memory_binder<Attr>(
-        &self,
-        attributes: Attr,
-    ) -> Result<MemoryBinderId>
-        where Attr: MemoryBinderAttributes,
-    {
-        self.inner.memory_binders.modify(|binders| {
-            Ok(MemoryBinderId(binders.insert(MemoryBinderResource::new(
-                attributes
-                    .build(self.inner.device.clone())
-                    .context_with(|| format_compact!(
-                        "failed to create {}", Attr::NAME,
-                    ))?
-            ))))
-        })
-    }
-
-    #[inline]
-    pub(crate) fn get_memory_binder(
-        &self,
-        id: MemoryBinderId,
-    ) -> Result<impl Deref<Target = MemoryBinderResource>>
-    {
-        self.inner.memory_binders
-            .load()
-            .try_map(|binders| {
-                binders.get(id.0)
-                .context_with(|| format_compact!(
-                    "invalid memory binder id {id}",
-                ))
-            }) 
-    }
-
-    #[inline]
-    pub fn get_memory_binder_info(
-        &self,
-        id: MemoryBinderId,
-    ) -> Result<MemoryBinderInfo> {
-        let binder = self.get_memory_binder(id)?;
-        let binder = binder.read();
-        Ok(MemoryBinderInfo {
-            max_alloc_size: binder.max_alloc_size(),
-            is_mappable: binder.is_mappable(),
-        })
-    }
-
-    /// This *may* release all allocations made by a [`MemoryBinder`] back to the [`MemoryBinder`].
-    ///
-    /// This *should* not free any [`vk::DeviceMemory`].
-    ///
-    /// # Valid usage
-    /// - `id` *must* be a valid [`MemoryBinderId`].
-    ///
-    /// # Safety
-    /// - Previous allocations *may* be overwritten by future allocations.
-    pub unsafe fn release_memory_binder_resources(
-        &self,
-        id: MemoryBinderId,
-    ) -> Result<()> {
-        let binder = self.get_memory_binder(id)?;
-        let mut binder = binder.write();
-        unsafe {
-            binder.release_resources();
-        }
-        Ok(())
-    }
-
-    /// Removes a memory binder from global resources.
-    ///
-    /// Memory allocated by the binder *should* still be valid even if it outlives the memory
-    /// binder.
-    ///
-    /// # Valid usage
-    /// - `id` *must* be a valid [`MemoryBinderId`].
-    pub fn destroy_memory_binder(&self, id: MemoryBinderId) -> Result<()> {
-        self.inner.memory_binders.modify(|binders| {
-            binders
-                .remove(id.0)
-                .context_with(|| format_compact!(
-                    "invalid memory binder id {id}"
-                )).map(|_| ())
-        })
-    }
 
     /// Creates timeline semaphores from an iterator over their initial values.
     pub fn create_timeline_semaphores<'a, I>(

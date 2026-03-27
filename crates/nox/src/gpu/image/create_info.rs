@@ -3,7 +3,7 @@ use super::*;
 /// The create info structure for images.
 pub struct ImageCreateInfo<'a> {
     pub(crate) out: &'a mut ImageId,
-    pub(crate) memory_binder: ResourceBinder,
+    pub(crate) memory_binder: &'a dyn MemoryBinder,
     pub(super) aspects: ImageAspects,
     pub(super) dimensions: Dimensions,
     pub(super) format: Format,
@@ -23,19 +23,17 @@ impl<'a> ImageCreateInfo<'a> {
     ///
     /// # Parameters
     /// - `out`: A mutable reference to where the [`ImageId`] of the created image will be stored.
-    /// # Memory binding
-    /// The default memory binder is [`ResourceBinder::default`], which always allocates a new
-    /// [`vk::DeviceMemory`] object and is *not* mappable.
+    /// - `memory_binder`: Specifies what will bind the image's memory.
     ///
     /// You can specify a different memory binder by [`ImageCreateInfo::with_memory_binder`].
     /// # Valid usage
     /// - The dimensions and format of the image *must* be specified with
     ///   [`ImageCreateInfo::with_dimensions`] and [`ImageCreateInfo::with_format`].
     #[inline(always)]
-    pub fn new(out: &'a mut ImageId) -> Self {
+    pub fn new(out: &'a mut ImageId, memory_binder: &'a dyn MemoryBinder) -> Self {
         Self {
             out,
-            memory_binder: Default::default(),
+            memory_binder,
             aspects: ImageAspects::empty(),
             dimensions: Dimensions::new(0, 0, 0),
             format: Format::Undefined,
@@ -48,15 +46,6 @@ impl<'a> ImageCreateInfo<'a> {
             resolve_modes: Default::default(),
             texel_block_size: 0,
         }
-    }
-
-    /// Specifies where the image gets its memory.
-    ///
-    /// The default is [`ResourceBinder::default`].
-    #[inline(always)]
-    pub fn with_memory_binder(mut self, binder: ResourceBinder) -> Self {
-        self.memory_binder = binder;
-        self
     }
 
     /// Specifies the images dimensions
@@ -135,10 +124,9 @@ impl<'a> ImageCreateInfo<'a> {
     pub(crate) fn build(
         &self,
         device: LogicalDevice,
-        alloc: &mut (impl MemoryBinder + ?Sized),
         bind_memory_info: &mut vk::BindImageMemoryInfo<'static>,
     ) -> Result<ImageMeta>
     {
-        ImageMeta::new(device, self, alloc, bind_memory_info)
+        ImageMeta::new(device, self, bind_memory_info)
     }
 }

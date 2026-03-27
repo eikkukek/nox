@@ -9,6 +9,9 @@ pub fn handle_struct(
     data: &syn::DataStruct,
 ) -> syn::Result<proc_macro2::TokenStream>
 {
+    let by_mut = input.attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("by_mut"));
     let mut any_default = false;
     let mut fields = vec![];
     fields.extend(data.fields
@@ -38,13 +41,25 @@ pub fn handle_struct(
                 .filter(|attr| attr.path().is_ident("doc"));
             let ident = &field.ident;
             let ty = &field.ty;
-            quote! {
-                #(#docs)*
-                #[must_use]
-                #[inline]
-                pub fn #ident(mut self, #ident: #ty) -> Self {
-                    self.#ident = #ident;
-                    self
+            if !by_mut {
+                quote! {
+                    #(#docs)*
+                    #[must_use]
+                    #[inline]
+                    pub fn #ident(mut self, #ident: #ty) -> Self {
+                        self.#ident = #ident;
+                        self
+                    }
+                }
+            } else {
+                quote! {
+                    #(#docs)*
+                    #[must_use]
+                    #[inline]
+                    pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                        self.#ident = #ident;
+                        self
+                    }
                 }
             }
         });

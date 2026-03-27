@@ -60,7 +60,7 @@ pub fn snake_case(item: TokenStream) -> TokenStream {
     snake_case::snake_case(item)
 }
 
-#[proc_macro_derive(BuildStructure, attributes(skip, default))]
+#[proc_macro_derive(BuildStructure, attributes(by_mut, skip, default))]
 pub fn build_structure(item: TokenStream) -> TokenStream {
     build_structure::build_structure(item)
 }

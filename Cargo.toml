@@ -1,17 +1,17 @@
 [workspace]
 resolver = "3"
 members = [
-	"crates/nox",
-	"crates/nox-font",
-	"crates/nox-mem",
-	"crates/nox-ser",
-	"crates/nox-alloc",
-	"crates/nox-geom",
-	"crates/nox-gui",
-	"crates/nox-log",
-	"crates/nox-error",
 	"crates/nox-proc",
-	"crates/nox-threads", "crates/nox-ash",
+	"crates/nox-mem",
+	"crates/nox-ash",
+	"crates/nox-error",
+	"crates/nox-alloc",
+	"crates/nox-threads",
+	"crates/nox-log",
+	"crates/nox",
+	"crates/nox-geom",
+	"crates/nox-font",
+	"crates/nox-gui",
 ]
 
 exclude = [

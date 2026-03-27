@@ -15,10 +15,10 @@ use crate::{
 /// The create info structure for buffers. See [`BufferCreateInfo::new`] for full description.
 pub struct BufferCreateInfo<'a> {
     pub(crate) out: &'a mut BufferId,
+    pub(crate) memory_binder: &'a dyn MemoryBinder,
     pub(crate) size: NonZeroU64,
     pub(crate) usage: BufferUsages,
     pub(crate) create_flags: vk::BufferCreateFlags,
-    pub(crate) memory_binder: ResourceBinder,
 }
 
 impl<'a> BufferCreateInfo<'a> {
@@ -29,43 +29,31 @@ impl<'a> BufferCreateInfo<'a> {
     /// - `out`: A mutable reference to where the [`BufferId`] of the created buffer will be stored.
     /// - `size`: The size of the created buffer, must be non-zero.
     /// - `usage`: Specifies what the buffer *can* be used for.
+    /// - `memory_binder`: Specifies what will bind the buffer's memory.
     ///
     /// Returns [`None`] if buffer size is `0`.
-    ///
-    /// # Memory binding
-    /// The default memory binder is [`ResourceBinder::default`], which always allocates a new
-    /// [`vk::DeviceMemory`] object and is *not* mappable.
     ///
     /// You can specify a different memory binder by [`BufferCreateInfo::with_memory_binder`].
     pub fn new(
         out: &'a mut BufferId,
         size: DeviceSize,
         usage: BufferUsages,
+        memory_binder: &'a dyn MemoryBinder,
     ) -> Option<Self> {
         Some(Self {
             out,
+            memory_binder,
             size: NonZeroU64::new(size)?,
             usage,
             create_flags: vk::BufferCreateFlags::empty(),
-            memory_binder: Default::default(),
         })
-    }
-
-    /// Specifies where the buffer gets its memory.
-    ///
-    /// The default is [`ResourceBinder::default`].
-    #[inline]
-    pub fn with_memory_binder(mut self, binder: ResourceBinder) -> Self {
-        self.memory_binder = binder;
-        self
     }
 
     pub(crate) fn build(
         &self,
         device: LogicalDevice,
-        alloc: &mut (impl MemoryBinder + ?Sized),
         bind_memory_info: &mut vk::BindBufferMemoryInfo<'static>,
     ) -> error::Result<BufferMeta> {
-        BufferMeta::new(device, self, alloc, bind_memory_info)
+        BufferMeta::new(device, self, bind_memory_info)
     }
 }

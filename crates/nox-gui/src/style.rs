@@ -4,8 +4,8 @@ use core::{
 
 use std::f32::consts::FRAC_PI_2;
 
-use nox::mem::vec_types::{ArrayVec, GlobalVec};
-
+use nox_proc::BuildStructure;
+use nox::mem::vec::{ArrayVec, Vec32};
 use nox_geom::*;
 
 use crate::*;
@@ -27,176 +27,183 @@ impl InteractVisuals {
     }
 }
 
-pub trait UiStyle {
+#[derive(Clone, BuildStructure)]
+#[by_mut]
+pub struct UiStyle {
+    pub regular_font: CompactString,
+    #[default(DEFAULT_WIDGET_BG_COL)]
+    pub window_bg_col: ColorSRGBA,
+    #[default(DEFAULT_WINDOW_TITLE_BAR_COL)]
+    pub window_title_bar_col: ColorSRGBA,
+    #[default(DEFAULT_WINDOW_STROKE_COL)]
+    pub window_stroke_col: ColorSRGBA,
+    #[default(DEFAULT_FOCUSED_WINDOW_STROKE_COL)]
+    pub focused_window_stroke_col: ColorSRGBA,
+    #[default(DEFAULT_WIDGET_BG_COL)]
+    pub widget_bg_col: ColorSRGBA,
+    #[default(DEFAULT_INACTIVE_TEXT_COL)]
+    pub inactive_widget_fg_col: ColorSRGBA,
+    #[default(DEFAULT_FOCUSED_TEXT_COL)]
+    pub focused_widget_fg_col: ColorSRGBA,
+    #[default(DEFAULT_ACTIVE_TEXT_COL)]
+    pub active_widget_fg_col: ColorSRGBA,
+    #[default(DEFAULT_FOCUSED_WIDGET_STROKE_COL)]
+    pub focused_widget_stroke_col: ColorSRGBA,
+    #[default(DEFAULT_ACTIVE_WIDGET_STROKE_COL)]
+    pub active_widget_stroke_col: ColorSRGBA,
+    #[default(DEFAULT_INACTIVE_TEXT_COL)]
+    pub inactive_text_col: ColorSRGBA,
+    #[default(DEFAULT_FOCUSED_TEXT_COL)]
+    pub focused_text_col: ColorSRGBA,
+    #[default(DEFAULT_ACTIVE_TEXT_COL)]
+    pub active_text_col: ColorSRGBA,
+    #[default(DEFAULT_SELECTION_COL)]
+    pub selection_col: ColorSRGBA,
+    #[default(DEFAULT_HOVER_WINDOW_BG_COL)]
+    pub hover_window_bg_col: ColorSRGBA,
+    #[default(DEFAULT_SCROLL_BAR_COL)]
+    pub scroll_bar_col: ColorSRGBA,
+    #[default(DEFAULT_SCROLL_BAR_HANDLE_COL)]
+    pub scroll_bar_handle_col: ColorSRGBA,
+    #[default(DEFAULT_INPUT_TEXT_BG_COL)]
+    pub input_text_bg_col: ColorSRGBA,
+    #[default(DEFAULT_INPUT_TEXT_ACTIVE_STROKE_COL)]
+    pub input_text_active_stroke_col: ColorSRGBA,
+    #[default(DEFAULT_INPUT_TEXT_SELECTION_BG_COL)]
+    pub input_text_selection_bg_col: ColorSRGBA,
+    #[default(DEFAULT_INACTIVE_TEXT_COL)]
+    pub input_text_empty_text_col: ColorSRGBA,
+    #[default(1300.0)]
+    pub pixels_per_unit: f32,
+    #[default(vec2(0.02, 0.02))]
+    pub item_pad_outer: Vec2,
+    #[default(vec2(0.007, 0.005))]
+    pub item_pad_inner: Vec2,
+    #[default(0.018)]
+    pub font_scale: f32,
+    #[default(1.2)]
+    pub title_add_scale: f32,
+    #[default(0.003)]
+    pub rounding: f32,
+    #[default(0.02)]
+    pub cursor_error_margin: f32,
+    #[default(2.0)]
+    pub scroll_speed: f32,
+    #[default(false)]
+    pub natural_scroll: bool,
+    #[default(0.01)]
+    pub scroll_bar_width: f32,
+    #[default(0.02)]
+    pub scroll_bar_fat_with: f32,
+    #[default(0.002)]
+    pub window_stroke_thickness: f32,
+    #[default(0.0035)]
+    pub focused_window_stroke_thickness: f32,
+    #[default(0.002)]
+    pub focused_widget_stroke_thickness: f32,
+    #[default(0.0026)]
+    pub active_widget_stroke_thickness: f32,
+    #[default(0.02)]
+    pub plot_line_width: f32,
+    #[default(0.01)]
+    pub default_handle_radius: f32,
+    #[default(0.01)]
+    pub collapse_symbol_scale: f32,
+    #[default(0.012)]
+    pub focused_collapse_symbol_scale: f32,
+    #[default(vec2(0.3, 0.3))]
+    pub color_picker_size: Vec2,
+    #[default(0.3 / 20.0)]
+    pub alpha_tile_width: f32,
+    #[default(0.003)]
+    pub input_text_cursor_width: f32,
+    #[default(0.5)]
+    pub input_text_cursor_switch_speed: f32,
+    #[default(3.0)]
+    pub input_text_selection_scroll_speed: f32,
+    #[default(0.5)]
+    pub double_click_secs: f32,
+    #[default(16.0)]
+    pub animation_speed: f32,
+    #[default(true)]
+    pub override_cursor: bool,
+    #[default(|value, to| write!(to, "{:.2}", value))]
+    pub f32_format: fn(value: f32, to: &mut dyn Write) -> core::fmt::Result,
+    #[default(|value, to| write!(to, "{:.2}", value))]
+    pub f64_format: fn(value: f64, to: &mut dyn Write) -> core::fmt::Result,
+    #[default(0.2)]
+    pub default_slider_width: f32,
+    #[default(0.1)]
+    pub slider_min_width: f32,
+    #[default(0.05)]
+    pub min_input_text_width: f32,
+    #[default(0.2)]
+    pub default_input_text_width: f32,
+}
 
-    fn font_regular(&self) -> &CompactString;
+impl UiStyle {
 
-    #[inline(always)]
-    fn window_bg_col(&self) -> ColorSRGBA {
-        DEFAULT_WINDOW_BG_COL
-    }
-
-    #[inline(always)]
-    fn window_title_bar_col(&self) -> ColorSRGBA {
-        DEFAULT_WINDOW_TITLE_BAR_COL
-    }
-
-    #[inline(always)]
-    fn window_stroke_col(&self) -> ColorSRGBA {
-        DEFAULT_WINDOW_STROKE_COL
-    }
-
-    #[inline(always)]
-    fn focused_window_stroke_col(&self) -> ColorSRGBA {
-        DEFAULT_FOCUSED_WINDOW_STROKE_COL
-    }
-
-    #[inline(always)]
-    fn widget_bg_col(&self) -> ColorSRGBA {
-        DEFAULT_WIDGET_BG_COL
-    }
-
-    #[inline(always)]
-    fn inactive_widget_fg_col(&self) -> ColorSRGBA {
-        DEFAULT_INACTIVE_TEXT_COL
-    }
-
-    #[inline(always)]
-    fn focused_widget_fg_col(&self) -> ColorSRGBA {
-        DEFAULT_FOCUSED_TEXT_COL
-    }
-
-    #[inline(always)]
-    fn active_widget_fg_col(&self) -> ColorSRGBA {
-        DEFAULT_ACTIVE_TEXT_COL
-    }
-
-    #[inline(always)]
-    fn focused_widget_stroke_col(&self) -> ColorSRGBA {
-        DEFAULT_FOCUSED_WIDGET_STROKE_COL
-    }
-
-    #[inline(always)]
-    fn active_widget_stroke_col(&self) -> ColorSRGBA {
-        DEFAULT_ACTIVE_WIDGET_STROKE_COL
-    }
-
-    #[inline(always)]
-    fn inactive_text_col(&self) -> ColorSRGBA {
-        DEFAULT_INACTIVE_TEXT_COL
-    }
-
-    #[inline(always)]
-    fn focused_text_col(&self) -> ColorSRGBA {
-        DEFAULT_FOCUSED_TEXT_COL
-    }
-
-    #[inline(always)]
-    fn active_text_col(&self) -> ColorSRGBA {
-        DEFAULT_ACTIVE_TEXT_COL
-    }
-
-    #[inline(always)]
-    fn selection_col(&self) -> ColorSRGBA {
-        DEFAULT_SELECTION_COL
-    }
-
-    #[inline(always)]
-    fn hover_window_bg_col(&self) -> ColorSRGBA {
-        DEFAULT_HOVER_WINDOW_BG_COL
-    }
-
-    #[inline(always)]
-    fn scroll_bar_col(&self) -> ColorSRGBA {
-        DEFAULT_SCROLL_BAR_COL
-    }
-
-    #[inline(always)]
-    fn scroll_bar_handle_col(&self) -> ColorSRGBA {
-        DEFAULT_SCROLL_BAR_HANDLE_COL
-    }
-
-    #[inline(always)]
-    fn input_text_bg_col(&self) -> ColorSRGBA {
-        DEFAULT_INPUT_TEXT_BG_COL
-    }
-
-    #[inline(always)]
-    fn input_text_active_stroke_col(&self) -> ColorSRGBA {
-        DEFAULT_INPUT_TEXT_ACTIVE_STROKE_COL
-    }
-
-    #[inline(always)]
-    fn input_text_selection_bg_col(&self) -> ColorSRGBA {
-        DEFAULT_INPUT_TEXT_SELECTION_BG_COL
-    }
-
-    #[inline(always)]
-    fn input_text_empty_text_color(&self) -> ColorSRGBA {
-        DEFAULT_INACTIVE_TEXT_COL.with_alpha(0.4)
-    }
-
-    #[inline(always)]
+    #[inline]
     fn interact_visuals(&self, reaction: &Reaction) -> InteractVisuals {
         let bg_strokes = ArrayVec::from([
             Stroke {
-                col: self.active_widget_stroke_col(),
-                thickness: self.active_widget_stroke_thickness(),
+                col: self.active_widget_stroke_col,
+                thickness: self.active_widget_stroke_thickness,
             },
             Stroke {
-                col: self.focused_widget_stroke_col(),
-                thickness: self.focused_widget_stroke_thickness(),
+                col: self.focused_widget_stroke_col,
+                thickness: self.focused_widget_stroke_thickness,
             },
         ].as_slice());
         let mut fg_strokes = ArrayVec::from([
             Stroke {
-                col: self.active_widget_fg_col(),
-                thickness: self.active_widget_stroke_thickness(),
+                col: self.active_widget_fg_col,
+                thickness: self.active_widget_stroke_thickness,
             },
             Stroke {
-                col: self.focused_widget_fg_col(),
-                thickness: self.focused_widget_stroke_thickness(),
+                col: self.focused_widget_fg_col,
+                thickness: self.focused_widget_stroke_thickness,
             },
         ].as_slice());
         if reaction.held() {
             InteractVisuals {
-                fill_col: self.widget_bg_col(),
+                fill_col: self.widget_bg_col,
                 bg_strokes,
                 bg_stroke_idx: 0,
                 fg_strokes,
                 fg_stroke_idx: 0,
-                rounding: self.rounding(),
+                rounding: self.rounding,
             }
         } else if reaction.hovered() {
             InteractVisuals {
-                fill_col: self.widget_bg_col(),
+                fill_col: self.widget_bg_col,
                 bg_strokes,
                 bg_stroke_idx: 1,
                 fg_strokes,
                 fg_stroke_idx: 1,
-                rounding: self.rounding(),
+                rounding: self.rounding,
             }
         } else {
-            fg_strokes[1].col = self.inactive_widget_fg_col();
+            fg_strokes[1].col = self.inactive_widget_fg_col;
             InteractVisuals {
-                fill_col: self.widget_bg_col(),
+                fill_col: self.widget_bg_col,
                 bg_strokes,
                 bg_stroke_idx: 2,
                 fg_strokes,
                 fg_stroke_idx: 1,
-                rounding: self.rounding(),
+                rounding: self.rounding,
             }
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn get_checkmark_points(
         &self,
         text_renderer: &mut TextRenderer, 
-        points: &mut GlobalVec<[f32; 2]>,
+        points: &mut Vec32<[f32; 2]>,
     )
     {
-        let scale = 1.0 / text_renderer.font_height(self.font_regular()).unwrap();
+        let scale = 1.0 / text_renderer.font_height(&self.regular_font).unwrap();
         let mut checkmark = [Vec2::default(); 6];
         checkmark[0] = vec2(0.5, -0.75);
         checkmark[1] = vec2(-0.2, 0.5);
@@ -209,242 +216,59 @@ pub trait UiStyle {
         checkmark[5] = checkmark[0] +
             (checkmark[0] - checkmark[1]).normalized().rotated(FRAC_PI_2) * 0.25;
         checkmark.reverse();
-        points.append_map(&checkmark, |&p| (p * self.font_scale() * scale * 0.7).into());
+        points.extend(checkmark.iter().map(|&p| (p * self.font_scale * scale * 0.7).into()));
     }
 
-    #[inline(always)]
-    fn pixels_per_unit(&self) -> f32 {
-        1300.0
-    }
-
-    #[inline(always)]
-    fn item_pad_outer(&self) -> Vec2 {
-        vec2(0.02, 0.02)
-    }
-
-    #[inline(always)]
-    fn item_pad_inner(&self) -> Vec2 {
-        vec2(0.007, 0.005)
-    }
-
-    #[inline(always)]
-    fn font_scale(&self) -> f32 {
-        0.018
-    }
-
-    #[inline(always)]
-    fn title_add_scale(&self) -> f32 {
-        1.2
-    }
-
-    #[inline(always)]
-    fn rounding(&self) -> f32 {
-        0.003
-    }
-
-    #[inline(always)]
-    fn cursor_error_margin(&self) -> f32 {
-        0.02
-    }
-
-    #[inline(always)]
-    fn scroll_speed(&self) -> f32 {
-        2.0
-    }
-
-    #[inline(always)]
-    fn natural_scroll(&self) -> bool {
-        false
-    }
-
-    #[inline(always)]
-    fn scroll_bar_width(&self) -> f32 {
-        0.01
-    }
-
-    #[inline(always)]
-    fn scroll_bar_fat_width(&self) -> f32 {
-        0.02
-    }
-
-    #[inline(always)]
-    fn window_stroke_thickness(&self) -> f32 {
-        0.002
-    }
-
-    #[inline(always)]
-    fn focused_window_stroke_thickness(&self) -> f32 {
-        0.0035
-    }
-
-    #[inline(always)]
-    fn focused_widget_stroke_thickness(&self) -> f32 {
-        0.002
-    }
-
-    #[inline(always)]
-    fn active_widget_stroke_thickness(&self) -> f32 {
-        0.0026
-    }
-
-    #[inline(always)]
-    fn plot_line_width(&self) -> f32 {
-        0.002
-    }
-
-    #[inline(always)]
-    fn default_handle_radius(&self) -> f32 {
-        0.01
-    }
-
-    #[inline(always)]
-    fn collapse_symbol_scale(&self) -> f32 {
-        0.01
-    }
-
-    #[inline(always)]
-    fn focused_collapse_symbol_scale(&self) -> f32 {
-        0.012
-    }
-
-    #[inline(always)]
-    fn color_picker_size(&self) -> Vec2 {
-        vec2(0.3, 0.3)
-    }
-
-    #[inline(always)]
-    fn alpha_tile_width(&self) -> f32 {
-        0.3 / 20.0
-    }
-
-    #[inline(always)]
-    fn input_text_cursor_width(&self) -> f32 {
-        0.003
-    }
-
-    #[inline(always)]
-    fn input_text_cursor_switch_speed(&self) -> f32 {
-        0.5
-    }
-
-    #[inline(always)]
-    fn input_text_selection_scroll_speed(&self) -> f32 {
-        3.0
-    }
-
-    #[inline(always)]
-    fn double_click_secs(&self) -> f32 {
-        0.5
-    }
-
-    #[inline(always)]
-    fn animation_speed(&self) -> f32 {
-        16.0
-    }
-
-    #[inline(always)]
-    fn override_cursor(&self) -> bool {
-        true
-    }
-
-    #[inline(always)]
-    fn f32_format(&self, value: f32, to: &mut impl Write) -> core::fmt::Result {
-        write!(to, "{:.2}", value)
-    }
-
-    #[inline(always)]
-    fn f64_format(&self, value: f64, to: &mut impl Write) -> core::fmt::Result {
-        write!(to, "{:.2}", value)
-    }
-
-    #[inline(always)]
-    fn default_slider_width(&self) -> f32 {
-        0.2
-    }
-
-    #[inline(always)]
-    fn slider_min_width(&self) -> f32 {
-        0.1
-    }
-
-    #[inline(always)]
-    fn min_input_text_width(&self) -> f32 {
-        0.05
-    }
-
-    #[inline(always)]
-    fn default_input_text_width(&self) -> f32 {
-        0.2
-    }
-
-    #[inline(always)]
+    #[inline]
     fn calc_font_height(&self, text_renderer: &mut TextRenderer) -> f32
     {
-        text_renderer.font_height(&self.font_regular()).unwrap_or_default() *
-            self.font_scale()
+        text_renderer.font_height(&self.regular_font).unwrap_or_default() *
+            self.font_scale
     }
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_size(&self, text: &font::RenderedText) -> Vec2 {
-        vec2(text.text_width, text.row_height * text.text_rows as f32) * self.font_scale()
+        vec2(text.text_width, text.row_height * text.text_rows as f32) * self.font_scale
     }
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_width(&self, text: &font::RenderedText) -> f32 {
-        text.text_width * self.font_scale()
+        text.text_width * self.font_scale
     }
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_height(&self, text: &font::RenderedText) -> f32 {
-        text.row_height * text.text_rows as f32 * self.font_scale()
+        text.row_height * text.text_rows as f32 * self.font_scale
     }
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_box_size(&self, text: &font::RenderedText) -> Vec2 {
-        self.item_pad_inner() + self.item_pad_inner() + self.calc_text_size(text)
+        self.item_pad_inner + self.item_pad_inner + self.calc_text_size(text)
     } 
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_box_width(&self, text: &font::RenderedText) -> f32 {
-        self.item_pad_inner().x + self.item_pad_inner().x +  self.calc_text_width(text)
+        self.item_pad_inner.x + self.item_pad_inner.x +  self.calc_text_width(text)
     }
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_box_height(&self, text: &font::RenderedText) -> f32 {
-        self.item_pad_inner().y + self.item_pad_inner().y + self.calc_text_height(text)
+        self.item_pad_inner.y + self.item_pad_inner.y + self.calc_text_height(text)
     }
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_box_size_from_text_size(&self, text_size: Vec2) -> Vec2 {
-        self.item_pad_inner() + self.item_pad_inner() +  text_size
+        self.item_pad_inner + self.item_pad_inner +  text_size
     }
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_box_width_from_text_width(&self, text_width: f32) -> f32 {
-        self.item_pad_inner().x + self.item_pad_inner().x +  text_width
+        self.item_pad_inner.x + self.item_pad_inner.x +  text_width
     }
 
-    #[inline(always)]
+    #[inline]
     fn calc_text_box_height_from_text_height(&self, text_height: f32) -> f32 {
-        self.item_pad_inner().y + self.item_pad_inner().y + text_height
-    }
-}
-
-pub struct DefaultStyle(pub CompactString);
-
-impl DefaultStyle {
-
-    #[inline(always)]
-    pub fn new(font_regular: &str) -> Self {
-        Self(font_regular.into())
-    }
-}
-
-impl UiStyle for DefaultStyle {
-
-    #[inline(always)]
-    fn font_regular(&self) -> &CompactString {
-        &self.0
+        self.item_pad_inner.y + self.item_pad_inner.y + text_height
     }
 }
 

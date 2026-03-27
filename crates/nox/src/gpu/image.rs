@@ -65,7 +65,6 @@ impl ImageMeta {
     fn new(
         device: LogicalDevice,
         create_info: &ImageCreateInfo<'_>,
-        alloc: &mut (impl MemoryBinder + ?Sized),
         bind_memory_info: &mut vk::BindImageMemoryInfo<'static>,
     ) -> Result<Self>
     {
@@ -210,7 +209,7 @@ impl ImageMeta {
             );
         };
         let memory = unsafe {
-            alloc.alloc(&mem_requirements)
+            create_info.memory_binder.alloc(&mem_requirements)
             .context("failed to allocate GPU memory for image")?
         };
         let handle = unsafe {
@@ -219,7 +218,7 @@ impl ImageMeta {
         };
         *bind_memory_info = vk::BindImageMemoryInfo {
             image: handle,
-            memory: memory.device_memory(),
+            memory: <_ as vk::Handle>::from_raw(memory.handle()),
             memory_offset: memory.offset(),
             ..Default::default()
         };

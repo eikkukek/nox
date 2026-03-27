@@ -1,19 +1,17 @@
-mod default;
+mod definitions;
+mod global;
 mod linear;
 
 use nox_ash::vk;
 
-use crate::sync::Arc;
-
 use crate::{
-    error::Error,
+    error::*,
     gpu::prelude::*,
 };
 
+pub use definitions::*;
 pub use linear::*;
-pub(crate) use default::*;
-
-pub type Result<T> = core::result::Result<T, MemoryBinderError>;
+pub use global::*;
 
 #[derive(Debug, Error)]
 pub enum MemoryBinderError {
@@ -23,12 +21,26 @@ pub enum MemoryBinderError {
     OutOfDeviceMemory { size: u64, align: u64, },
     #[display("allocated memory is unmappable")]
     UnmappableMemory,
-    #[display("allocation size was zero")]
+    #[display("allocation size is zero")]
     ZeroSizeAlloc,
     #[display("incompatible memory requirements")]
     IncompatibleMemoryRequirements,
-    #[display("{0}")]
-    Other(Error),
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum HostCoherency {
+    /// Specifies that the memory is not available for host reads/writes
+    None,
+    /// Specifies that the memory is mappable, but not host-coherent.
+    Mappable,
+    /// Specifies that the memory is mappable and host-coherent.
+    Coherent,
+}
+
+#[derive(Clone, Copy)]
+pub struct MappedMemoryRange {
+    pub offset: DeviceSize,
+    pub size: DeviceSize,
 }
 
 /// A trait for [`vk::DeviceMemory`] objects.
@@ -41,20 +53,41 @@ pub enum MemoryBinderError {
 /// - This *should* not try to remap already mapped [`vk::DeviceMemory`].
 pub unsafe trait DeviceMemory: 'static + Send + Sync {
 
-    /// Returns the inner [`vk::DeviceMemory`].
-    fn device_memory(&self) -> vk::DeviceMemory;
+    /// Returns the handle of the inner [`device memory`][1] object as an [`u64`] value.
+    ///
+    /// [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceMemory.html
+    fn handle(&self) -> u64;
 
-    /// Returns the offset in the inner [`vk::DeviceMemory`] of this allocation.
+    /// Returns the offset into the inner [`device memory`][1] of this allocation.
+    ///
+    /// [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceMemory.html
     fn offset(&self) -> vk::DeviceSize;
 
     /// Returns the size of this allocation.
     fn size(&self) -> vk::DeviceSize;
 
-    /// Tries to map the region of this allocation from the inner [`vk::DeviceMemory`].
+    /// Tries to map the region of this allocation from the inner [`device memory`][1].
     ///
-    /// If the inner [`vk::DeviceMemory`] is already mapped, this *should* return a slice to the
-    /// already mapped memory.
-    fn map_memory(&mut self) -> Result<(*mut u8, usize)>;
+    /// If the inner [`device memory`][1] is already mapped, this *should* either return a pointer
+    /// to the already mapped memory or remap the memory.
+    ///
+    /// [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceMemory.html
+    fn map_memory(&mut self) -> Result<MemoryMap>;
+
+    /// Unmaps the whole [`device memory`][1] object.
+    ///
+    /// [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceMemory.html
+    fn unmap_memory(&mut self) -> Result<()>;
+
+    fn flush_mapped_ranges(&self, memory_ranges: &[MappedMemoryRange]) -> Result<()>;
+
+    fn invalidate_mapped_ranges(&self, memory_ranges: &[MappedMemoryRange]) -> Result<()>;
+
+    /// Returns whether the memory allocated is optimal as defined when creating the
+    /// [`binder`][1] used to allocate this memory.
+    ///
+    /// [1]: MemoryBinder
+    fn is_optimal(&self) -> bool;
 }
 
 mod device_obj {
@@ -81,7 +114,7 @@ impl DeviceMemoryObj {
 
     #[inline(always)]
     pub fn overlaps(&self, other: &Self) -> bool {
-        if self.device_memory() == other.device_memory() {
+        if self.handle() == other.handle() {
             let src_off = self.offset();
             let dst_off = other.offset();
             src_off < dst_off + other.size() &&
@@ -92,27 +125,37 @@ impl DeviceMemoryObj {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct MemoryMap {
+    pub map: *mut u8,
+    pub size: usize,
+    pub coherent: bool,
+}
+
 /// A trait for [`vk::DeviceMemory`] allocators.
 ///
 /// # Safety
 /// - [`MemoryBinder::alloc`] *should* always allocate memory according to the
 ///   [`vk::MemoryRequirements2`] requirements.
-/// - Memory *should* never be mapped more than once per [`vk::DeviceMemory`] object.
+/// - Memory *should* never be mapped more than once at a time per [`DeviceMemory`] object.
 /// - Memory allocated by this trait *should* be valid even after dropping the [`MemoryBinder`].
 pub unsafe trait MemoryBinder: 'static + Send + Sync {
 
     /// Returns the maximum allocation size supported by this allocator.
     fn max_alloc_size(&self) -> vk::DeviceSize;
 
-    /// Returns whether the memory allocated by this allocator is mapped or mappable.
-    fn is_mappable(&self) -> bool;
+    /// Returns ['host coherency`][HostCoherency] of optimal allocations.
+    fn optimal_coherency(&self) -> HostCoherency;
+
+    /// Returns ['host coherency`][HostCoherency] of suboptimal allocations.
+    fn suboptimal_coherency(&self) -> HostCoherency;
 
     /// Allocates device memory.
     ///
     /// # Safety
     /// - `memory_requirements` *must* be a valid [`vk::MemoryRequirements2`] structure.
     unsafe fn alloc(
-        &mut self,
+        &self,
         memory_requirements: &vk::MemoryRequirements2,
     ) -> Result<DeviceMemoryObj>;
 
@@ -121,23 +164,5 @@ pub unsafe trait MemoryBinder: 'static + Send + Sync {
     /// # Safety
     /// - This *should* never free any [`vk::DeviceMemory`].
     /// - Previous allocations *may* be overwritten by future allocations.
-    unsafe fn release_resources(&mut self);
-}
-
-/// A simple trait for building [`MemoryBinder`]s.
-pub trait MemoryBinderAttributes {
-
-    /// The [`MemoryBinder`] these attributes belong to.
-    type Binder: MemoryBinder;
-
-    /// The type name of the allocator.
-    const NAME: &str;
-
-    /// Builds an allocator for a [`LogicalDevice`].
-    fn build(self, device: LogicalDevice) -> Result<Self::Binder>;
-}
-
-pub struct MemoryBinderInfo {
-    pub max_alloc_size: vk::DeviceSize,
-    pub is_mappable: bool,
+    unsafe fn release_resources(&self);
 }

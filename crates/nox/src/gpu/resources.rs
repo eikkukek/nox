@@ -13,10 +13,7 @@ use nox_mem::slot_map::*;
 
 use nox_ash::vk;
 
-use crate::gpu::prelude::{
-    memory_binder::MemoryBinder,
-    *,
-};
+use crate::gpu::prelude::*;
 
 use crate::{
     error::*,
@@ -164,117 +161,6 @@ pub(crate) type ResourceWriteGuard<'a, Meta, Id> =
 #[must_use]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)] #[display("{0}")]
 pub struct TimelineSemaphoreId(pub(super) SlotIndex<vk::Semaphore>);
-
-#[derive(Clone)]
-pub(crate) struct MemoryBinderResource {
-    binder: Arc<RwLock<dyn MemoryBinder>>,
-}
-
-impl MemoryBinderResource {
-
-    pub fn new<T: MemoryBinder>(binder: T) -> Self {
-        Self {
-            binder: Arc::new(RwLock::new(binder))
-        }
-    }
-
-    #[inline(always)]
-    pub fn write(&self) -> MemoryBinderResourceWriteGuard<'_> {
-        MemoryBinderResourceWriteGuard { guard: self.binder.write() }
-    }
-
-    #[inline(always)]
-    pub fn read(&self) -> MemoryBinderResourceReadGuard<'_> {
-        MemoryBinderResourceReadGuard { guard: self.binder.read() }
-    }
-}
-
-pub(crate) struct MemoryBinderResourceReadGuard<'a> {
-    guard: RwLockReadGuard<'a, dyn MemoryBinder>,
-}
-
-impl Deref for MemoryBinderResourceReadGuard<'_> {
-
-    type Target = dyn MemoryBinder;
-
-    #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        self.guard.deref()
-    }
-}
-
-pub(crate) struct MemoryBinderResourceWriteGuard<'a> {
-    guard: RwLockWriteGuard<'a, dyn MemoryBinder>,
-}
-
-impl Deref for MemoryBinderResourceWriteGuard<'_> {
-
-    type Target = dyn MemoryBinder;
-
-    #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        self.guard.deref()
-    }
-}
-
-impl DerefMut for MemoryBinderResourceWriteGuard<'_> {
-
-    #[inline(always)]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.guard.deref_mut()
-    }
-}
-
-#[must_use]
-#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)] #[display("{0}")]
-pub struct MemoryBinderId(pub(super) SlotIndex<MemoryBinderResource>);
-
-#[derive(Clone, Copy)]
-pub(crate) enum ResourceBinderInner {
-    Default,
-    DefaultMappable,
-    Id(MemoryBinderId),
-}
-
-impl Default for ResourceBinderInner {
-
-    #[inline(always)]
-    fn default() -> Self {
-        Self::Default
-    }
-}
-
-#[derive(Default, Clone, Copy)]
-pub struct ResourceBinder {
-    inner: ResourceBinderInner,
-}
-
-impl ResourceBinder {
-
-    #[inline(always)]
-    pub fn new(id: MemoryBinderId) -> Self {
-        Self {
-            inner: ResourceBinderInner::Id(id),
-        }
-    }
-    
-    #[inline(always)]
-    pub fn global() -> Self {
-        <Self as Default>::default()
-    }
-
-    #[inline(always)]
-    pub fn global_mappable() -> Self {
-        Self {
-            inner: ResourceBinderInner::DefaultMappable,
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn into_inner(self) -> ResourceBinderInner {
-        self.inner
-    }
-}
 
 pub trait Flags: 
     Copy +

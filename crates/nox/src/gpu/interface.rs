@@ -20,4 +20,9 @@ impl DeviceLimits<'_> {
     pub fn min_uniform_buffer_offset_alignment(&self) -> DeviceSize {
         self.limits.min_uniform_buffer_offset_alignment
     }
+
+    #[inline(always)]
+    pub fn non_coherent_atom_size(&self) -> DeviceSize {
+        self.limits.non_coherent_atom_size
+    }
 }

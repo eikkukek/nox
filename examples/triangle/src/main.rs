@@ -161,6 +161,12 @@ fn main() {
     });
     let buffer = globals.add(|event_loop| {
         let mut id = Default::default();
+        let memory_binder = gpu::memory_binder
+            ::GlobalBinder::new(
+                event_loop.gpu().clone(),
+                gpu::MemoryProperties::DEVICE_LOCAL,
+                gpu::MemoryProperties::HOST_VISIBLE
+            );
         event_loop
             .gpu()
             .create_resources(
@@ -168,7 +174,8 @@ fn main() {
                     &mut id, 
                     12.max(min_uniform_buffer_offset_alignment) * 3,
                     gpu::BufferUsages::UNIFORM_BUFFER |
-                    gpu::BufferUsages::TRANSFER_DST
+                    gpu::BufferUsages::TRANSFER_DST,
+                    &memory_binder,
                 ).unwrap()],
                 [],
             )?;
@@ -309,7 +316,7 @@ fn main() {
                 nox::Event::GpuEvent(event) => {
                     match event {
                         gpu::Event::SwapchainCreated {
-                            surface_id: _, new_format, new_size,
+                            surface_id: _, new_format, new_size, image_count: _
                         } => {
                             log::debug!("new surface format: {new_format}");
                             let mut extent = new_size.0 as u64;

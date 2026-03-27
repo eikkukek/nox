@@ -1,6 +1,5 @@
 #[macro_use]
 
-pub mod error;
 mod ring_buffer;
 mod shaders;
 mod color;

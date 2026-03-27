@@ -306,11 +306,12 @@ impl CommandRecorderInner<'_> {
             let data = surface
                 .acquire_next_image(CommandRecorder::new(self))
                 .context_with(|| format_compact!("failed to acquire surface {id} image"))?;
-            if data.recreated {
+            if let Some(image_count) = data.recreated_image_count {
                 (event_handler)(Event::SwapchainCreated {
                     surface_id: SurfaceId(id),
                     new_format: data.image_format,
-                    new_size: data.extent
+                    new_size: data.extent,
+                    image_count: image_count.get(),
                 }).context_from_tracked(|orig| format_compact!(
                     "swapchain create event error at {}", orig.or_this(),
                 ))?;

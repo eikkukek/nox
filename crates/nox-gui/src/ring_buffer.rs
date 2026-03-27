@@ -1,16 +1,16 @@
 use core::ptr::NonNull;
 
+use compact_str::format_compact;
+
 use nox::{
     mem::{
-        vec_types::{Vector, ArrayVec},
+        vec::Vec32,
         align_up,
-        align_of,
-        size_of,
+        vec32,
     },
     gpu,
+    error::*,
 };
-
-use crate::error::*;
 
 #[derive(Default, Clone, Copy, Debug)]
 struct RingBufReg {
@@ -23,11 +23,15 @@ fn ring_buf_reg(head: usize, tail: usize) -> RingBufReg {
 }
 
 pub struct RingBuf {
+    gpu: gpu::Gpu,
     buffer: gpu::BufferId,
-    map: NonNull<u8>,
-    current_reg: RingBufReg,
-    frame_regions: ArrayVec<RingBufReg, {gpu::MAX_BUFFERED_FRAMES as usize}>,
     size: usize,
+    map: NonNull<u8>,
+    desired_region_count: u32,
+    frame_regions: Vec32<RingBufReg>,
+    current_reg: RingBufReg,
+    semaphore: gpu::TimelineSemaphoreId,
+    semaphore_value: u64,
 }
 
 pub struct RingBufMem<T> {
@@ -38,19 +42,35 @@ pub struct RingBufMem<T> {
 impl RingBuf {
 
     pub fn new(
-        buffer: gpu::BufferId,
-        map: NonNull<u8>,
-        buffered_frames: u32,
+        gpu: gpu::Gpu,
         size: usize,
+        usage: gpu::BufferUsages,
+        desired_region_count: u32,
     ) -> Result<Self> {
+        let mut buffer = Default::default();
+        gpu.create_resources(
+            [gpu::BufferCreateInfo::new(
+                &mut buffer,
+                size as gpu::DeviceSize,
+                usage
+            )],
+            []
+        )?;
+        let mut semaphore = Default::default();
+        gpu.create_timeline_semaphores(
+            [(&mut semaphore, 0)]
+        )?;
+        let (map, size) = gpu.map_buffer(buffer)?;
         Ok(Self {
+            gpu,
             buffer,
-            map,
-            current_reg: Default::default(),
-            frame_regions: ArrayVec
-                ::with_len(Default::default(), buffered_frames as usize)
-                .context("vec error")?,
+            map: NonNull::new(map).unwrap(),
             size,
+            desired_region_count,
+            frame_regions: vec32![],
+            current_reg: Default::default(),
+            semaphore,
+            semaphore_value: 0,
         })
     }
 
@@ -59,15 +79,22 @@ impl RingBuf {
         self.buffer
     }
 
+    #[inline(always)]
+    pub fn swapchain_recreated(&mut self, image_count: u32) {
+        self.frame_regions.resize(
+            image_count.min(self.desired_region_count),
+            ring_buf_reg(0, 0),
+        );
+    }
+
     pub unsafe fn allocate<T>(
         &mut self,
-        render_commands: &mut gpu::RenderCommands,
         count: usize,
     ) -> Result<RingBufMem<T>>
     {
         let RingBufReg { head, tail } = self.current_reg;
-        let size = count * size_of!(T);
-        let mut offset = align_up(tail, align_of!(T));
+        let size = count * size_of::<T>();
+        let mut offset = align_up(tail, align_of::<T>());
         let mut new_tail = offset + size;
         // wrapped around to current head
         if tail < head && new_tail > head {
@@ -82,15 +109,18 @@ impl RingBuf {
         let oldest_region = self.frame_regions.last().unwrap();
         if tail < oldest_region.tail && tail > oldest_region.head
         {
-            if render_commands
-                .wait_for_previous_frame(1_000_000_000)
-                .context("failed to wait for previous frame")?
-            {
+            if self.gpu.wait_for_semaphores(
+                &[(self.semaphore, self.semaphore_value)],
+                self.gpu.device().frame_timeout(),
+            )? {
                 for reg in &mut self.frame_regions {
                     *reg = ring_buf_reg(0, 0);
                 }
             } else {
-                return Err(Error::just_context("frame timed out"))
+                return Err(Error::just_context(format_compact!(
+                    "frame timeout {} nanosecods at {}",
+                    self.gpu.device().frame_timeout(), location!(),
+                )))
             }
         }
         self.current_reg = ring_buf_reg(head, new_tail);
@@ -100,10 +130,15 @@ impl RingBuf {
         })
     }
 
-    pub fn finish_frame(&mut self) {
+    pub fn finish_frame(
+        &mut self,
+    ) -> (gpu::TimelineSemaphoreId, u64)
+    {
         self.frame_regions.pop();
-        self.frame_regions.insert(0, self.current_reg).unwrap();
+        self.frame_regions.insert(0, self.current_reg);
         self.current_reg = ring_buf_reg(self.current_reg.tail, self.current_reg.tail);
+        self.semaphore_value += 1;
+        (self.semaphore, self.semaphore_value)
     }
 }
 

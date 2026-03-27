@@ -198,10 +198,3 @@ pub fn load_rgba_image(path: &str) -> ::image::ImageResult<::image::ImageBuffer<
     let image = ::image::ImageReader::open(path)?.decode()?;
     Ok(image.to_rgba8())
 }
-
-#[macro_export]
-macro_rules! or_flag {
-    ($flags:expr, $flag:expr, $value:expr $(,)?) => {
-        $flags |= $flag & ($value as u32) << $flag.trailing_zeros();
-    };
-}

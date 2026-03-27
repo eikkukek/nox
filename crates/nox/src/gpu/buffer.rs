@@ -12,10 +12,7 @@ use nox_mem::{
 };
 
 use crate::gpu::prelude::{
-    memory_binder::{
-        DeviceMemoryObj,
-        MemoryBinder
-    },
+    memory_binder::DeviceMemoryObj,
     subresource_state::*,
     *,
 };
@@ -49,7 +46,6 @@ impl BufferMeta {
     fn new(
         device: LogicalDevice,
         create_info: &BufferCreateInfo<'_>,
-        alloc: &mut (impl MemoryBinder + ?Sized),
         bind_memory_info: &mut vk::BindBufferMemoryInfo<'static>,
     ) -> Result<Self>
     {
@@ -58,7 +54,7 @@ impl BufferMeta {
             usage: create_info.usage,
             create_flags: create_info.create_flags,
         };
-        let create_info = vk::BufferCreateInfo {
+        let vk_create_info = vk::BufferCreateInfo {
             s_type: vk::StructureType::BUFFER_CREATE_INFO,
             flags: properties.create_flags,
             size: properties.size,
@@ -68,7 +64,7 @@ impl BufferMeta {
         };
         let device_mem_requirements = vk::DeviceBufferMemoryRequirements {
             s_type: vk::StructureType::DEVICE_BUFFER_MEMORY_REQUIREMENTS,
-            p_create_info: &create_info,
+            p_create_info: &vk_create_info,
             ..Default::default()
         };
         let mut mem_requirements = Default::default();
@@ -76,16 +72,16 @@ impl BufferMeta {
             device
             .get_device_buffer_memory_requirements(&device_mem_requirements, &mut mem_requirements);
         }
-        let memory = unsafe { alloc.alloc(&mem_requirements)
+        let memory = unsafe { create_info.memory_binder.alloc(&mem_requirements)
             .context("failed to allocate GPU memory for buffer")?
         };
         let handle = unsafe {
-            device.create_buffer(&create_info, None)
+            device.create_buffer(&vk_create_info, None)
             .context("failed to create Vulkan buffer")?
         };
         *bind_memory_info = vk::BindBufferMemoryInfo {
              buffer: handle,
-             memory: memory.device_memory(),
+             memory: <_ as vk::Handle>::from_raw(memory.handle()),
              memory_offset: memory.offset(),
              ..Default::default()
         };

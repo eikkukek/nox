@@ -1,10 +1,17 @@
-use rustc_hash::FxHashMap;
+use ahash::AHashMap;
+
+use compact_str::format_compact;
 
 use nox::{
-    alloc::arena_alloc::{ArenaAlloc, ArenaGuard}, error::Context, mem::{
-        Allocator, vec_types::{GlobalVec, Vector}
-    }, *
+    alloc::arena::{Arena, ArenaGuard},
+    error::*,
+    mem::{
+        vec::Vec32,
+    },
+    *,
 };
+
+use gpu::ext::ConstName;
 
 use nox_font::{text_segment, Face};
 
@@ -13,126 +20,104 @@ use nox_geom::*;
 use crate::*;
 use crate::error::{Error, Result};
 
-pub(crate) const COLOR_PICKER_PIPELINE_HASH: &str = "nox_gui color picker";
-pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: &str = "nox_gui color picker hue";
-pub(crate) const COLOR_PICKER_ALPHA_PIPELINE_HASH: &str = "nox_gui color picker alpha";
+pub(crate) const COLOR_PICKER_PIPELINE_HASH: ConstName = ConstName::new("nox_gui color picker");
+pub(crate) const COLOR_PICKER_HUE_PIPELINE_HASH: ConstName = ConstName::new("nox_gui color picker hue");
+pub(crate) const COLOR_PICKER_ALPHA_PIPELINE_HASH: ConstName = ConstName::new("nox_gui color picker alpha");
 
 #[derive(Default)]
 struct BasePipelines {
-    base_pipeline_layout: Option<gpu::PipelineLayoutId>,
-    base_pipeline: gpu::GraphicsPipelineId,
-    text_pipeline_layout: Option<gpu::PipelineLayoutId>,
-    text_pipeline: gpu::GraphicsPipelineId,
-    texture_pipeline_layout: Option<gpu::PipelineLayoutId>,
-    texture_pipeline: gpu::GraphicsPipelineId,
-    base_shaders: Option<[gpu::ShaderId; 2]>,
-    text_shaders: Option<[gpu::ShaderId; 2]>,
-    texture_shaders: Option<[gpu::ShaderId; 2]>,
+    pub base_pipeline: gpu::GraphicsPipelineId,
+    pub text_pipeline: gpu::GraphicsPipelineId,
+    pub texture_pipeline: gpu::GraphicsPipelineId,
 }
 
 impl BasePipelines {
 
-    pub fn clean_up(&mut self, gpu: &mut gpu::GpuContext) -> Result<()> {
-        gpu.destroy_graphics_pipeline(self.base_pipeline);
-        gpu.destroy_graphics_pipeline(self.text_pipeline);
-        gpu.destroy_graphics_pipeline(self.texture_pipeline);
-        if let Some(layout) = self.base_pipeline_layout {
-            gpu.destroy_pipeline_layout(layout);
+    pub fn clean_up(&mut self, event_loop: &mut event_loop::ActiveEventLoop<'_>) -> Result<()> {
+        let gpu = event_loop.gpu();
+        gpu.destroy_pipeline_batch(self.base_pipeline.batch_id());
+        if let Some(layout) = self.base_shader_set {
+            gpu.delete_shader_set(layout);
         }
-        if let Some(layout) = self.text_pipeline_layout {
-            gpu.destroy_pipeline_layout(layout);
+        if let Some(layout) = self.text_shader_set {
+            gpu.delete_shader_set(layout);
         }
-        if let Some(layout) = self.texture_pipeline_layout {
-            gpu.destroy_pipeline_layout(layout);
-        }
-        if let Some(shaders) = self.base_shaders {
-            gpu.destroy_shader(shaders[0]);
-            gpu.destroy_shader(shaders[1]);
-        }
-        if let Some(shaders) = self.text_shaders {
-            gpu.destroy_shader(shaders[0]);
-            gpu.destroy_shader(shaders[1]);
-        }
-        if let Some(shaders) = self.texture_shaders {
-            gpu.destroy_shader(shaders[0]);
-            gpu.destroy_shader(shaders[1]);
+        if let Some(layout) = self.texture_shader_set {
+            gpu.delete_shader_set(layout);
         }
         Ok(())
     }
 }
 
 pub struct CustomPipelineInfo<'a> {
-    pub vertex_shader: gpu::ShaderId,
-    pub fragment_shader: gpu::ShaderId,
+    pub shader_set: gpu::ShaderSetId,
     pub vertex_input_bindings: &'a [gpu::VertexInputBinding],
 }
 
 impl<'a> CustomPipelineInfo<'a> {
 
     pub fn new(
-        vertex_shader: gpu::ShaderId,
-        fragment_shader: gpu::ShaderId,
+        shader_set: gpu::ShaderSetId,
         vertex_input_bindings: &'a [gpu::VertexInputBinding],
     ) -> Self
     {
         Self {
-            vertex_shader,
-            fragment_shader,
+            shader_set,
             vertex_input_bindings,
         }
     }
 }
 
 struct CustomPipeline {
-    pub vertex_shader: gpu::ShaderId,
-    fragment_shader: gpu::ShaderId,
-    pipeline_layout: gpu::PipelineLayoutId,
-    vertex_input_bindings: GlobalVec<gpu::VertexInputBinding>,
-    pipeline: gpu::GraphicsPipelineId,
+    shader_set: gpu::ShaderSetId,
+    vertex_input_bindings: Vec32<gpu::VertexInputBinding>,
+    pipelines: AHashMap<gpu::Format, gpu::GraphicsPipelineId>,
 }
 
 impl CustomPipeline {
 
-    fn clean_up(&self, r: &mut gpu::GlobalResources) {
-        r.destroy_shader(self.vertex_shader);
-        r.destroy_shader(self.fragment_shader);
-        r.destroy_pipeline_layout(self.pipeline_layout);
-        r.destroy_graphics_pipeline(self.pipeline);
+    fn clean_up(&self, event_loop: &mut event_loop::ActiveEventLoop<'_>) {
+        let gpu = event_loop.gpu();
+        gpu.delete_shader_set(self.shader_set);
+        for (_, &pipeline) in &self.pipelines {
+            gpu.destroy_pipelines(
+                pipeline.batch_id(),
+                &[pipeline],
+                &[]
+            );
+        }
     }
 }
 
-pub struct Workspace<'a, Style>
-    where
-        Style: UiStyle,
+pub struct Workspace<'a>
 {
+    gpu: gpu::Gpu,
+    surface_id: gpu::SurfaceId,
     text_renderer: TextRenderer<'a>,
-    style: Style,
-    windows: FxHashMap<u32, Window>,
-    active_windows: GlobalVec<u32>,
-    main_pass_id: gpu::PassId,
-    window_passes: FxHashMap<gpu::PassId, u32>,
-    vertex_buffer: Option<RingBuf>,
-    index_buffer: Option<RingBuf>,
-    tmp_alloc: ArenaAlloc,
+    style: UiStyle,
+    windows: AHashMap<u32, Window>,
+    active_windows: Vec32<u32>,
+    vertex_buffer: RingBuf,
+    index_buffer: RingBuf,
+    tmp_alloc: Arena,
     image_loader: ImageLoader,
-    device_alloc: Option<gpu::LinearDeviceAllocId>,
+    device_alloc: gpu::MemoryBinderId,
     device_alloc_block_size: u64,
-    base_pipelines: BasePipelines,
-    custom_pipelines: FxHashMap<CompactString, CustomPipeline>,
+    base_shader_set: Option<gpu::ShaderSetId>,
+    text_shader_set: Option<gpu::ShaderSetId>,
+    texture_shader_set: Option<gpu::ShaderSetId>,
+    base_pipelines: AHashMap<gpu::Format, BasePipelines>,
+    custom_pipelines: AHashMap<ConstName, CustomPipeline>,
     frame: u64,
-    ring_buffer_size: usize,
+    frame_semaphore: usize,
     prev_cursor_position: Vec2,
     inv_aspect_ratio: f32,
     unit_scale: f32,
     flags: u32,
     min_sample_shading: f32,
-    output_samples: gpu::MSAA,
-    output_format: gpu::ColorFormat,
 }
 
-impl<'a, Style> Workspace<'a, Style>
-    where
-        Style: UiStyle,
+impl<'a> Workspace<'a>
 {
 
     const BEGAN: u32 = 0x1;
@@ -148,29 +133,36 @@ impl<'a, Style> Workspace<'a, Style>
         alpha_blend_op: gpu::BlendOp::Add,
     };
 
-    pub fn init(
+    pub fn new(
+        event_loop: event_loop::ActiveEventLoop<'_>,
+        surface: gpu::SurfaceId,
         fonts: impl IntoIterator<Item = (impl Into<CompactString>, Face<'a>)>,
-        style: Style,
+        style: UiStyle,
         font_curve_tolerance: f32,
-        gpu: &mut gpu::GpuContext,
-        device_alloc_block_size: u64,
-        pipeline_cache: Option<gpu::PipelineCacheId>,
-        output_format: gpu::ColorFormat,
-        output_samples: gpu::MSAA,
-        tmp_alloc: &impl Allocator,
+        device_alloc_block_size: gpu::DeviceSize,
+        pipeline_cache: Option<gpu::PipelineCache>,
     ) -> Result<Self>
     {
         let mut text_renderer = TextRenderer::new(fonts, font_curve_tolerance);
-        text_renderer.render(&[text_segment("0123456789", style.font_regular())], false, 0.0);
+        text_renderer.render(&[text_segment("0123456789", &style.regular_font)], false, 0.0);
+        let ring_buffer_size = 1 << 23;
         let mut s = Self {
             text_renderer,
             style,
             windows: Default::default(),
             active_windows: Default::default(),
-            main_pass_id: Default::default(),
-            window_passes: FxHashMap::default(),
-            vertex_buffer: None,
-            index_buffer: None,
+            vertex_buffer: RingBuf::new(
+                event_loop.gpu().clone(),
+                buffered_frames,
+                ring_buffer_size,
+                gpu::BufferUsages::VERTEX_BUFFER,
+            )?,
+            index_buffer: RingBuf::new(
+                event_loop.gpu().clone(),
+                buffered_frames,
+                ring_buffer_size,
+                gpu::BufferUsages::INDEX_BUFFER,
+            )?,
             tmp_alloc: ArenaAlloc::new(1 << 16).unwrap(),
             image_loader: ImageLoader::new(),
             device_alloc: None,
@@ -795,11 +787,21 @@ impl<'a, Style> Workspace<'a, Style>
         if let Some(buf) = self.index_buffer.take() {
             gpu.destroy_buffer(buf.id());
         }
+        for pipeline in &mut self.base_pipelines {
+        }
         self.base_pipelines.clean_up(gpu)?;
         for pipeline in &self.custom_pipelines {
             pipeline.1.clean_up(gpu);
         }
         self.custom_pipelines.clear();
         Ok(())
+    }
+}
+
+impl<Style> Drop for Workspace<'_, Style>
+    where Style: UiStyle,
+{
+
+    fn drop(&mut self) {
     }
 }

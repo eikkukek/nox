@@ -46,7 +46,7 @@ pub(crate) struct AcquireImageData {
     pub _image_view: ImageViewId,
     pub image_format: Format,
     pub extent: (u32, u32),
-    pub recreated: bool,
+    pub recreated_image_count: Option<NonZeroU32>,
 }
 
 pub(crate) struct Surface {
@@ -140,11 +140,10 @@ impl Surface {
         &mut self,
         recorder: CommandRecorder<'_, '_>,
     ) -> Result<AcquireImageData> {
-        let mut recreated = false;
+        let mut recreated = None;
         let swapchain = match self.swapchain_state {
             SwapchainState::Valid => unsafe { self.swapchain.as_mut().unwrap_unchecked() },
             SwapchainState::OutOfDate { desired_image_count, size, } => {
-                recreated = true;
                 if let Some(mut swapchain) = self.swapchain.take() {
                     swapchain.destroy(
                         self.gpu.device(),
@@ -188,6 +187,7 @@ impl Surface {
                         &Default::default(), None
                     ).context("failed to create semaphore")
                 })?;
+                recreated = NonZeroU32::new(n_images);
                 swapchain
             },
         };
@@ -214,7 +214,7 @@ impl Surface {
                 _image_view: self.image_view_ids[data.image_index as usize],
                 image_format: data.image_format,
                 extent: data.extent,
-                recreated,
+                recreated_image_count: recreated,
             })
         }
     }

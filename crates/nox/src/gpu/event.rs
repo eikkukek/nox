@@ -6,5 +6,6 @@ pub enum Event {
         surface_id: SurfaceId,
         new_format: Format,
         new_size: (u32, u32),
+        image_count: u32,
     },
 }
