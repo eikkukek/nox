@@ -55,7 +55,7 @@ pub(super) trait StateRange: Clone + Copy {
                     StateOverwrite::Combine(Self::new(
                         self.state(),
                         src_offset,
-                        size
+                        size,
                     ))
                 } else {
                     let d = src_offset - dst_offset;
@@ -64,7 +64,7 @@ pub(super) trait StateRange: Clone + Copy {
                     StateOverwrite::Combine(Self::new(
                         self.state(),
                         dst_offset,
-                        size
+                        size,
                     ))
                 }
             } else if src_offset >= dst_offset && src_end <= dst_end {

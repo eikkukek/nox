@@ -1,28 +1,29 @@
-use std::sync::Arc;
-
-use core::ops::Deref;
+use core::hash::{self, Hash};
 
 use nox_ash::vk;
 
-use crate::gpu::prelude::*;
+use crate::{
+    gpu::prelude::*,
+    sync::Arc,
+};
 
 pub(super) struct Inner {
-    pub vk: Arc<Vulkan>,
+    pub device: LogicalDevice,
     pub handle: vk::Pipeline,
-    pub shader_set: Arc<ShaderSetInner>,
+    pub shader_set: ShaderSet,
 }
 
 impl Drop for Inner {
 
     fn drop(&mut self) {
         unsafe {
-            self.vk.device().destroy_pipeline(self.handle, None);
+            self.device.destroy_pipeline(self.handle, None);
         }
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct PipelineHandle {
+pub struct PipelineHandle {
     inner: Arc<Inner>,
 }
 
@@ -30,13 +31,13 @@ impl PipelineHandle {
 
     #[inline(always)]
     pub(super) unsafe fn new(
-        vk: Arc<Vulkan>,
+        device: LogicalDevice,
         handle: vk::Pipeline,
-        shader_set: Arc<ShaderSetInner>,
+        shader_set: ShaderSet,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
-                vk,
+                device,
                 handle,
                 shader_set,
             }),
@@ -45,20 +46,29 @@ impl PipelineHandle {
 
     #[inline(always)]
     pub fn handle(&self) -> vk::Pipeline {
-        self.handle
+        self.inner.handle
     }
 
     #[inline(always)]
-    pub fn shader_set(&self) -> &Arc<ShaderSetInner> {
-        &self.shader_set
+    pub fn shader_set(&self) -> &ShaderSet {
+        &self.inner.shader_set
     }
 }
 
-impl Deref for PipelineHandle {
+impl PartialEq for PipelineHandle {
 
-    type Target = Inner;
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> bool {
+        self.handle() == other.handle()
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+impl Eq for PipelineHandle {}
+
+impl Hash for PipelineHandle {
+
+    #[inline(always)]
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.handle().hash(state);
     }
 }

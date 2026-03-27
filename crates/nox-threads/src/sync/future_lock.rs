@@ -1,30 +1,30 @@
+use std::{
+    pin::Pin,
+};
+
 use core::{
-    mem::{ManuallyDrop, MaybeUninit},
+    mem::{MaybeUninit},
     sync::atomic::{self, AtomicBool},
     result,
     error,
 };
 
-use nox_error::Context;
-
 use crate::{
-    futures::{
-        future::Future,
-        executor::block_on,
-    },
+    futures::future::Future,
     error::{Result, Error},
+    executor::block_on,
 };
 
 use parking_lot::Mutex;
 
-union Inner<T, F, E = Error>
+struct Inner<T, F, E = Error>
     where 
         T: 'static,
         F: Future<Output = result::Result<T, E>>,
         E: error::Error + Send + Sync + 'static,
 {
-    pending: ManuallyDrop<F>,
-    ready: ManuallyDrop<T>,
+    pending: MaybeUninit<F>,
+    ready: MaybeUninit<T>,
 }
 
 /// A lock that waits for a future when it's first accessed.
@@ -49,26 +49,29 @@ union Inner<T, F, E = Error>
 /// ```
 pub struct FutureLock<T, F, E = Error>
     where
-        F: Future<Output = result::Result<T, E>>,
-        T: 'static,
+        F: Future<Output = result::Result<T, E>> + Send + Sync,
+        T: 'static + Send + Sync,
         E: error::Error + Send + Sync + 'static,
 {
-    inner: MaybeUninit<Inner<T, F, E>>,
+    inner: Inner<T, F, E>,
     is_ready: AtomicBool,
     mtx: Mutex<i8>,
 }
 
 impl<T, F, E> FutureLock<T, F, E>
     where
-        F: Future<Output = result::Result<T, E>>,
-        T: 'static,
+        F: Future<Output = result::Result<T, E>> + Send + Sync,
+        T: 'static + Send + Sync,
         E: error::Error + Send + Sync + 'static,
 {
     
     #[inline(always)]
     pub fn new(f: F) -> Self {
         Self {
-            inner: MaybeUninit::new(Inner { pending: ManuallyDrop::new(f) }),
+            inner: Inner {
+                pending: MaybeUninit::new(f),
+                ready: MaybeUninit::uninit(),
+            },
             is_ready: AtomicBool::new(false),
             mtx: Mutex::new(0),
         }
@@ -77,48 +80,64 @@ impl<T, F, E> FutureLock<T, F, E>
     /// Loads the inner value.
     ///
     /// No locking takes place if the future has finished.
-    pub fn load(&self) -> Result<&T> {
-        if self.is_ready.load(atomic::Ordering::Relaxed) {
-            unsafe {
-                Ok(&self.inner
-                    .assume_init_ref().ready
-                )
+    #[allow(clippy::await_holding_lock)]
+    pub fn load(&self) -> Pin<Box<dyn Future<Output = Result<&T>> + '_ + Send + Sync>> {
+        Box::pin(async move {
+            if self.is_ready.load(atomic::Ordering::Relaxed) {
+                unsafe {
+                    Ok(self.inner.ready.assume_init_ref())
+                }
+            } else {
+                let value = *self.mtx.lock();
+                match value {
+                    -1 => {
+                        Result::<&T>::Err(Error::just_context("lock poisoned"))
+                    },
+                    1 => unsafe {
+                        Result::<&T>::Ok(self.inner.ready.assume_init_ref())
+                    },
+                    2 => {
+                        self.load().await
+                    },
+                    0 => {
+                        let ready = {
+                            let mut guard = self.mtx.lock();
+                            (*guard == 0).then(|| {
+                                *guard = 2;
+                                unsafe { self.inner.pending.assume_init_read() }
+                            })
+                        };
+                        let Some(ready) = ready else {
+                            return self.load().await
+                        };
+                        match ready.await {
+                            Ok(ready) => unsafe {
+                                let mut lock = self.mtx.lock();
+                                self.inner.ready
+                                    .as_ptr().cast_mut()
+                                    .write(ready);
+                                *lock = 1;
+                                self.is_ready.store(true, atomic::Ordering::Relaxed);
+                                Ok(self.inner.ready.assume_init_ref())
+                            },
+                            Err(err) => {
+                                let mut lock = self.mtx.lock();
+                                *lock = -1;
+                                Err(Error::new(err, "future failed"))
+                            }
+                        }
+                    },
+                    _ => unreachable!()
+                }
             }
-        } else {
-            let mut lock = self.mtx.lock();
-            match *lock {
-                -1 => {
-                    Err(Error::just_context("lock poisoned"))
-                },
-                1 => unsafe {
-                    Ok(&self.inner
-                        .assume_init_ref().ready
-                    )
-                },
-                0 => unsafe {
-                    let ready = block_on(
-                        ManuallyDrop::into_inner(self.inner
-                            .assume_init_read().pending
-                        )
-                    ).inspect_err(|_| *lock = -1)
-                    .context("future failed")?;
-                    self.inner
-                        .as_ptr().cast_mut()
-                        .write(Inner { ready: ManuallyDrop::new(ready) });
-                    *lock = 1;
-                    self.is_ready.store(true, atomic::Ordering::Relaxed);
-                    Ok(&self.inner.assume_init_ref().ready)
-                },
-                _ => unreachable!()
-            }
-        }
+        }) 
     }
 }
 
 impl<T, F, E> Drop for FutureLock<T, F, E>
     where
-        F: Future<Output = result::Result<T, E>>,
-        T: 'static,
+        F: Future<Output = result::Result<T, E>> + Send + Sync,
+        T: 'static + Send + Sync,
         E: error::Error + Send + Sync + 'static,
 {
 
@@ -126,14 +145,10 @@ impl<T, F, E> Drop for FutureLock<T, F, E>
         let mut lock = self.mtx.lock();
         match *lock {
             1 => unsafe {
-                ManuallyDrop::into_inner(self.inner
-                    .assume_init_read().ready
-                );
+                self.inner.ready.assume_init_read();
             }
             0 => unsafe {
-                block_on(ManuallyDrop::into_inner(self.inner
-                    .assume_init_read().pending
-                )).ok();
+                block_on(self.inner.pending.assume_init_read()).ok();
             }
             _ => {}
         }

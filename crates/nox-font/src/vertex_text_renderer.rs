@@ -7,11 +7,9 @@ use core::{
     hash::Hash,
 };
 
-use rustc_hash::FxHashMap;
+use ahash::AHashMap;
 
 use unicode_segmentation::UnicodeSegmentation;
-
-use nox::mem::vec_types::{GlobalVec, Vector};
 
 use super::*;
 
@@ -29,14 +27,14 @@ pub struct TextOffset {
 }
 
 pub struct VertexTextRenderer<'a, H: Clone + PartialEq + Eq + Hash> {
-    faces: FxHashMap<H, FaceCache<'a>>,
+    faces: AHashMap<H, FaceCache<'a>>,
     curve_tolerance: f32,
 }
 
 impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
 
     pub fn new(fonts: impl IntoIterator<Item = (impl Into<H>, Face<'a>)>, curve_tolerance: f32) -> Self {
-        let mut faces = FxHashMap::default();
+        let mut faces = AHashMap::default();
         for face in fonts {
             faces.insert(face.0.into(), FaceCache { face: face.1, trigs: Default::default(), offsets: Default::default() });
         }
@@ -67,14 +65,14 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         let curve_depth = self.curve_tolerance;
         let width_div_2 = max_normalized_width / 2.0;
         let mut pen_x = pen_x_start;
-        let mut shapes = GlobalVec::<(Option<f32>, &str, H, harfbuzz_rs::GlyphBuffer)>::new();
+        let mut shapes = Vec::<(Option<f32>, &str, H, harfbuzz_rs::GlyphBuffer)>::new();
         let mut line_start = 0;
         let mut first_line = true;
         let mut height: f32 = 0.0;
         let mut text_width: f32 = 0.0;
         let mut skip_row = false;
         for segment in text {
-            let FaceCache { face, trigs: _, offsets: _ } = faces.get(&segment.font())?;
+            let FaceCache { face, trigs: _, offsets: _ } = faces.get(segment.font())?;
             let units_per_em = face.units_per_em() as f32;
             height = height.max((face.ascender() - face.descender() + face.line_gap()) as f32 / units_per_em);
             let space = face.glyph_hor_advance(face.glyph_index(' ')?)? as f32 / units_per_em;
@@ -122,7 +120,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
             }
         }
         text_width = text_width.max(pen_x);
-        if shapes.len() == 0 {
+        if shapes.is_empty() {
             return None
         }
         shapes[line_start].0 =
@@ -142,7 +140,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                 0
             };
         for (i, (start, word, font, shape)) in shapes.iter().enumerate() {
-            let FaceCache { face, trigs, offsets } = faces.get_mut(&font).unwrap();
+            let FaceCache { face, trigs, offsets } = faces.get_mut(font).unwrap();
             let units_per_em = face.units_per_em() as f32;
             if let Some(start) = start {
                 pen_x = *start;
@@ -152,10 +150,10 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
             let positions = shape.get_glyph_positions();
             for (j, c) in word.chars().enumerate() {
                 let trigs = trigs.entry(c).or_default();
-                if trigs.is_none() {
-                    if let Some(trig) = triangulate(c, face, curve_depth) {
-                        *trigs = Some(Arc::new(trig));
-                    }
+                if trigs.is_none() &&
+                    let Some(trig) = triangulate(c, face, curve_depth)
+                {
+                    *trigs = Some(Arc::new(trig));
                 }
                 let position = positions[j];
                 let glyph_x = pen_x + position.x_offset as f32 / units_per_em;
@@ -170,7 +168,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                 collect_offsets(TextOffset {
                     offset: [glyph_x, glyph_y],
                     char: c,
-                    row: rows - 1 as u32,
+                    row: rows - 1,
                     offset_index,
                     row_height: height,
                     x_advance,
@@ -179,7 +177,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
                 pen_x += x_advance;
             }
         }
-        let mut result = GlobalVec::new();
+        let mut result = vec![];
         for segment in text {
             let FaceCache { face: _, trigs, offsets } = faces.get_mut(segment.font()).unwrap();
             for (&c, off) in &mut *offsets {

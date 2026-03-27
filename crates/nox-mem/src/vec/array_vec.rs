@@ -10,15 +10,10 @@ use core::{
 
 use crate::{
     collections::TryReserveError,
-    impl_traits, num::{FromUsize, IntoUsize},
+    impl_traits,
 };
 
-use super::{
-    Vector,
-    FallibleVec,
-    Pointer,
-    alloc_vec::FixedPolicy,
-};
+use super::Pointer;
 
 pub struct ArrayVec<T, const N: usize>
 {
@@ -70,86 +65,131 @@ impl<T, const N: usize> ArrayVec<T, N>
         })
     }
 
-    pub fn mapped<U>(&self, f: impl FnMut(&T) -> U) -> ArrayVec<U, N>
+    pub fn map<U>(&self, f: impl FnMut(&T) -> U) -> ArrayVec<U, N>
     {
         let mut vec = ArrayVec::new();
-        vec.append_map(self, f);
+        vec.extend(self.into_iter().map(f));
         vec
     }
 }
 
-impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
+impl<T, const N: usize> ArrayVec<T, N>
 {
 
-    type Iter<'a> = slice::Iter<'a, T>
-        where T: 'a, Self: 'a;
-
-    type IterMut<'a> = slice::IterMut<'a, T>
-        where T: 'a, Self: 'a;
-
-    type ReservePol = FixedPolicy;
-
-    #[inline(always)]
-    fn len(&self) -> usize {
+    /// Returns the length of the vector.
+    #[inline]
+    pub fn len(&self) -> usize {
         self.len
     }
 
-    #[inline(always)]
-    fn capacity(&self) -> usize {
-        N
+    /// Returns whether the vector is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
-    #[inline(always)]
-    fn as_ptr(&self) -> *const T {
+    /// Gets the pointer to the vector's data.
+    #[inline]
+    pub fn as_ptr(&self) -> *const T {
         self.data.as_ptr() as *const T
     }
 
-    #[inline(always)]
-    fn as_mut_ptr(&mut self) -> *mut T {
+    /// Gets a mutable pointer to the vector's data.
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut T {
         self.data.as_mut_ptr() as *mut T
     }
 
-    #[inline(always)]
-    fn as_slice(&self) -> &[T] {
+    /// Returns a slice over the contents of the vector.
+    #[inline]
+    pub fn as_slice(&self) -> &[T] {
         unsafe { slice::from_raw_parts(self.data.as_ptr() as *const T, self.len) }
     }
 
-    #[inline(always)]
-    fn as_mut_slice(&mut self) -> &mut [T] {
+    /// Returns a mutable slice over the contents of the vector.
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { slice::from_raw_parts_mut(self.data.as_ptr() as *mut T, self.len) }
     }
 
-    #[inline(always)]
-    unsafe fn set_len(&mut self, len: usize) {
+    /// A low-level operation that forces the length of the vector to `new_len`.
+    ///
+    /// Panics if `new_len` exceeds `capacity` on debug builds.
+    ///
+    /// # Safety
+    /// If `new_len` > current length, elements with elements at indices greater than or equal to
+    /// the current length are left uninitialized and if `new_len` < current length, elements at
+    /// indices less than or equal to the current length are not dropped when the vector is
+    /// [`cleared`][1] or [`dropped`][Drop].
+    ///
+    /// [1]: Self::clear
+    #[inline]
+    pub unsafe fn set_len(&mut self, len: usize) {
+        #[cfg(debug_assertions)]
         if len > N { panic!("len was larger than capacity") }
         self.len = len;
-    }
+    } 
 
-    #[inline(always)]
-    fn reserve(&mut self, capacity: usize) { 
-        self.fallible_reserve(capacity).unwrap()
-    }
-
-    #[inline(always)]
-    fn reserve_exact(&mut self, capacity: usize) {
-        self.fallible_reserve_exact(capacity).unwrap()
-    }
-
-    fn resize(&mut self, len: usize, value: T)
+    /// Resizes the vector with a clonable value.
+    ///
+    /// If `len` is less than the current length, this shrinks the vector.
+    ///
+    /// This panics if `len` is larger than `N`.
+    pub fn resize(&mut self, len: usize, value: T)
         where
             T: Clone
     {
-        self.fallible_resize(len, value).unwrap();
+        if len > N {
+            panic!("maximum capacity {N} exceeded with len {len}")
+        };
+        let ptr = self.data.as_mut_ptr();
+        if len > self.len {
+            for i in self.len..len {
+                unsafe { (*ptr.add(i)).write(value.clone()) };
+            }
+        }
+        else if len < self.len {
+            for i in len..self.len {
+                unsafe { ptr::drop_in_place((*ptr.add(i)).as_mut_ptr()); }
+            }
+        }
+        self.len = len;
     }
 
-    fn resize_with<F>(&mut self, len: usize, f: F)
+    /// Resizes the vector with the given closure.
+    ///
+    /// If `len` is less than the current length, this shrinks the vector.
+    ///
+    /// This panics if `len` is larger than `N`.
+    pub fn resize_with<F>(&mut self, len: usize, mut f: F)
         where
             F: FnMut() -> T
     {
-        self.fallible_resize_with(len, f).unwrap();
+        if len > N {
+            panic!("maximum capacity {N} exceeded with len {len}")
+        }
+        let ptr = unsafe {
+            Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
+        };
+        if len > self.len {
+            for i in self.len..len {
+                unsafe { (*ptr.add(i)).write(f()) };
+            }
+        }
+        else if len < self.len {
+            unsafe {
+                ptr.add(len).drop_in_place(self.len - len);
+            }
+        }
+        self.len = len
     }
 
-    fn try_resize_with<F, E>(
+    /// Tries to resize the vector with the given closure that may return an error.
+    ///
+    /// If `len` is less than the current length, this shrinks the vector.
+    ///
+    /// This panics if `len` is larger than `N`.
+    pub fn try_resize_with<F, E>(
         &mut self,
         len: usize,
         mut f: F,
@@ -181,32 +221,146 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         Ok(())
     }
 
-    #[inline(always)]
-    fn push(&mut self, value: T) {
-        self.fallible_push(value).unwrap()
+    /// Appends an element to the end of the vector.
+    ///
+    /// This panics if the length of the vector exceeds `N`.
+    pub fn push(&mut self, value: T) {
+        if self.len >= N {
+            panic!("maximum capacity {N} exceeded")
+        }
+        let ptr = unsafe { self.as_mut_ptr().add(self.len) };
+        unsafe { ptr::write(ptr, value) };
+        self.len += 1;
     }
 
-    fn append(&mut self, slice: &[T])
+    /// Inserts an element to the specified index.
+    ///
+    /// Panics if `index` is greater than the length of the vector or if the length of the vector
+    /// exceeds `N`.
+    pub fn insert(&mut self, index: usize, value: T) {
+        if index >= self.len {
+            panic!("index {} was out of bounds with len {} when inserting", index, self.len)
+        }
+        if self.len >= N {
+            panic!("maximum capacity {N} exceeded")
+        }
+        unsafe {
+            Pointer
+                ::new(self.as_mut_ptr())
+                .unwrap_unchecked()
+                .insert_element(value, index, self.len);
+            self.len += 1;
+        }
+    }
+
+    /// Appends a slice to the end of the vector.
+    ///
+    /// If the type implements [`Copy`], consider using [`fast_append`][1]
+    ///
+    /// This panics if the length of the vector exceeds `N`.
+    ///
+    /// [1]: Self::fast_append
+    pub fn append(&mut self, slice: &[T])
         where
             T: Clone
     {
-        self.fallible_append(slice).unwrap()
+        let len = self.len + slice.len();
+        if len > N {
+            panic!("maximum capacity {N} exceeded with len {len}")
+        }
+        unsafe {
+            Pointer
+                ::new(slice.as_ptr().cast_mut())
+                .unwrap()
+                .clone_elements(
+                    Pointer::new(self.as_mut_ptr()).unwrap_unchecked().add(self.len),
+                    slice.len()
+                );
+        }
+        self.len = len;
     }
 
-    fn append_map<U, F>(&mut self, slice: &[U], f: F)
-        where
-            F: FnMut(&U) -> T
-    {
-        self.fallible_append_map(slice, f).unwrap()
-    }
-
-    fn fast_append(&mut self, slice: &[T])
+    /// Appends a slice to the end of the vector by [`copying`][1] the values.
+    ///
+    /// This may be faster than [`append`][2] for types implementing [`Copy`].
+    ///
+    /// This panics if the length of the vector exceeds `N`.
+    ///
+    /// [1]: Copy
+    /// [2]: Self::append
+    pub fn fast_append(&mut self, slice: &[T])
         where T: Copy
     {
-        self.fallible_fast_append(slice).unwrap()
+        let len = self.len + slice.len();
+        if len > N {
+            panic!("maximum capacity {N} exceeded with len {len}")
+        }
+        unsafe {
+            Pointer
+                ::new(slice.as_ptr().cast_mut())
+                .unwrap()
+                .fast_clone_elements(
+                    Pointer::new(self.as_mut_ptr()).unwrap_unchecked().add(self.len),
+                    slice.len()
+                );
+        }
+        self.len = len;
     }
 
-    fn remove(&mut self, index: usize) -> T {
+    /// Extends the vector with an iterator.
+    ///
+    /// This panics if the length of the vector exceeds `N`.
+    pub fn extend<I>(&mut self, iter: I)
+        where I: IntoIterator<Item = T>
+    {
+        for item in iter {
+            self.push(item);
+        }
+    }
+
+    /// Extends the vector with an iterator over [`Result`], returning an error if any item in the
+    /// iterator is [`Err`].
+    ///
+    /// This panics if the length of the vector exceeds `N`.
+    pub fn try_extend<I, E>(
+        &mut self,
+        iter: I,
+    ) -> Result<(), E>
+        where I: IntoIterator<Item = Result<T, E>>
+    {
+        for item in iter {
+            self.push(item?);
+        }
+        Ok(())
+    } 
+
+    /// Returns a reference to the last element of the vector, or [`None`] if the vector is empty.
+    #[inline]
+    pub fn last(&self) -> Option<&T> {
+        if self.len == 0 {
+            None
+        }
+        else {
+            unsafe { Some(self.data[self.len - 1].assume_init_ref()) }
+        }
+    }
+
+    /// Returns a mutable reference to the last element of the vector, or [`None`] if the vector is
+    /// empty.
+    #[inline]
+    pub fn last_mut(&mut self) -> Option<&mut T> {
+         if self.len == 0 {
+            None
+        }
+        else {
+            unsafe { Some(self.data[self.len - 1].assume_init_mut()) }
+        }       
+    }
+
+    /// Removes an element from the specified index.
+    ///
+    /// Panics if `index` is greater than or equal to the length of the vector.
+    pub fn remove(&mut self, index: usize) -> T {
         if index >= self.len {
             panic!("index {} was out of bounds with len {} when removing", index, self.len())
         }
@@ -219,40 +373,7 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         removed
     }
 
-    #[inline(always)]
-    fn pop(&mut self) -> Option<T> {
-        if self.len == 0 { return None }
-        self.len -= 1;
-        let ptr = unsafe { self.as_mut_ptr().add(self.len).cast::<T>() };
-        Some(unsafe { ptr.read() })
-    }
-
-    #[inline(always)]
-    fn last(&self) -> Option<&T> {
-        if self.len == 0 {
-            None
-        }
-        else {
-            unsafe { Some(self.data[self.len - 1].assume_init_ref()) }
-        }
-    }
-
-    #[inline(always)]
-    fn last_mut(&mut self) -> Option<&mut T> {
-         if self.len == 0 {
-            None
-        }
-        else {
-            unsafe { Some(self.data[self.len - 1].assume_init_mut()) }
-        }       
-    }
-
-    fn insert(&mut self, index: usize, value: T) {
-        self.fallible_insert(index, value).unwrap()
-    }
-
-    #[inline(always)]
-    fn swap_remove(&mut self, index: usize) -> T {
+    pub fn swap_remove(&mut self, index: usize) -> T {
         if index >= self.len { panic!("index {} was out of bounds with len {} when removing", index, self.len()) }
         let ptr = self.as_mut_ptr();
         let removed = unsafe { ptr::read(ptr.add(index)) };
@@ -263,278 +384,121 @@ impl<T, const N: usize> Vector<T> for ArrayVec<T, N>
         removed
     }
 
-    #[inline(always)]
-    fn clear(&mut self) {
+    /// Removes the last element of the vector and returns it, or [`None`] if the vector is empty.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.len == 0 { return None }
+        self.len -= 1;
+        let ptr = unsafe { self.as_mut_ptr().add(self.len).cast::<T>() };
+        Some(unsafe { ptr.read() })
+    }
+
+    /// Removes all elements from the vector.
+    pub fn clear(&mut self) {
         debug_assert!(self.len <= N);
         unsafe { Pointer::new(self.as_mut_ptr()).unwrap_unchecked().drop_in_place(self.len); }
         self.len = 0;
     }
 
-    fn move_from_vec<V, S>(&mut self, from: &mut V)
-        where
-            V: Vector<T, S>,
-            S: IntoUsize + FromUsize,
-    { 
-        self.fallible_move_from_vec(from).unwrap()
-    }
-
-    fn move_from_vec_map<U, V, S, F>(&mut self, from: &mut V, f: F)
-        where 
-            V: Vector<U, S>,
-            S: IntoUsize + FromUsize,
-            F: FnMut(U) -> T
+    /// Retains all elements that satisfy the predicate, preserving the order of elements.
+    ///
+    /// See [`retain_unordered`][1] for an unordered version.
+    ///
+    /// [1]: Self::retain_unordered
+    pub fn retain<F>(&mut self, mut p: F)
+        where F: FnMut(&T) -> bool
     {
-        self.fallible_move_from_vec_map(from, f).unwrap()
+        for i in (0..self.len).rev() {
+            if !p(&self[i]) {
+                self.remove(i);
+            }
+        }
     }
 
-    #[inline(always)]
-    fn iter(&self) -> Self::Iter<'_> {
+    /// Retains all elements that satisfy the predicate that takes a mutable reference, preserving
+    /// the order of elements
+    ///
+    /// See [`retain_unordered_mut`][1] for an unordered version.
+    ///
+    /// [1]: Self::retain_unordered_mut
+    pub fn retain_mut<F>(&mut self, mut p: F)
+        where F: FnMut(&mut T) -> bool
+    {
+        for i in (0..self.len).rev() {
+            if !p(&mut self[i]) {
+                self.remove(i);
+            }
+        }
+    }
+
+    /// Retains all elements that satisfy the predicate without preserving the order of elements.
+    pub fn retain_unordered<F>(&mut self, mut p: F)
+        where F: FnMut(&T) -> bool
+    {
+        for i in (0..self.len).rev() {
+            if !p(&self[i]) {
+                self.swap_remove(i);
+            }
+        }
+    }
+
+    /// Retains all elements that satisfy the predicate that takes a mutable reference without
+    /// preserving the order of elements
+    pub fn retain_unordered_mut<F>(&mut self, mut p: F)
+        where F: FnMut(&mut T) -> bool
+    {
+        for i in (0..self.len).rev() {
+            if !p(&mut self[i]) {
+                self.swap_remove(i);
+            }
+        }
+    }
+
+    /// Removes consecutive repeated elements from the vector according to [`PartialEq`]
+    pub fn dedup(&mut self)
+        where T: PartialEq
+    {
+        for i in (0..self.len.saturating_sub(1)).rev() {
+            if self[i] == self[i + 1] {
+                self.remove(i + 1);
+            }
+        }
+    }
+
+    /// Removes consecutive repeated elements from the vector according to a closure defined
+    /// equality.
+    pub fn dedup_by<F>(&mut self, mut p: F)
+        where F: FnMut(&T, &T) -> bool
+    {
+        for i in (0..self.len.saturating_sub(1)).rev() {
+            if p(&self[i], &self[i + 1]) {
+                self.remove(i + 1);
+            }
+        }
+    }
+
+    /// Removes consecutive repeated elements that resolve to a key implementing [`PartialEq`]. 
+    pub fn dedup_by_key<F, K>(&mut self, mut key: F)
+        where
+            F: FnMut(&T) -> K,
+            K: PartialEq,
+    {
+        for i in (0..self.len.saturating_sub(1)).rev() {
+            if key(&self[i]) == key(&self[i + 1]) {
+                self.remove(i + 1);
+            }
+        }
+    }
+
+    /// Returns an iterator over the elements of the vector.
+    #[inline]
+    pub fn iter(&self) -> slice::Iter<'_, T> {
         self.as_slice().iter()
     }
 
-    #[inline(always)]
-    fn iter_mut(&mut self) -> Self::IterMut<'_> {
+    /// Returns a mutable iterator over the elements of the vector.
+    #[inline]
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
         self.as_mut_slice().iter_mut()
-    }
-}
-
-impl<T, const N: usize> FallibleVec<T> for ArrayVec<T, N> {
-
-    fn fallible_reserve(&mut self, capacity: usize) -> Result<(), TryReserveError<()>> {
-        if capacity > N {
-            Err(TryReserveError::max_capacity_exceeded(N, capacity, ()))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn fallible_reserve_exact(&mut self, capacity: usize) -> Result<(), TryReserveError<()>> {
-        if capacity > N {
-            Err(TryReserveError::max_capacity_exceeded(N, capacity, ()))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn fallible_resize(&mut self, len: usize, value: T) -> Result<(), TryReserveError<()>>
-        where
-            T: Clone
-    {
-        if len > N {
-            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
-        };
-        let ptr = self.data.as_mut_ptr();
-        if len > self.len {
-            for i in self.len..len {
-                unsafe { (*ptr.add(i)).write(value.clone()) };
-            }
-        }
-        else if len < self.len {
-            for i in len..self.len {
-                unsafe { ptr::drop_in_place((*ptr.add(i)).as_mut_ptr()); }
-            }
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_resize_with<F>(&mut self, len: usize, mut f: F) -> Result<(), TryReserveError<()>>
-        where
-            F: FnMut() -> T
-    {
-        if len > N {
-            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
-        }
-        let ptr = unsafe {
-            Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
-        };
-        if len > self.len {
-            for i in self.len..len {
-                unsafe { (*ptr.add(i)).write(f()) };
-            }
-        }
-        else if len < self.len {
-            unsafe {
-                ptr.add(len).drop_in_place(self.len - len);
-            }
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_try_resize_with<F, E, MapE>(
-        &mut self,
-        len: usize,
-        mut f: F,
-        mut map_reserve_err: MapE,
-    ) -> Result<(), E>
-        where
-            F: FnMut() -> Result<T, E>,
-            MapE: FnMut(TryReserveError<()>) -> E
-    {
-        if len > N {
-            return Err(map_reserve_err(
-                TryReserveError::max_capacity_exceeded(N, len, ())
-            ))
-        }
-        let ptr = unsafe {
-            Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
-        };
-        if len > self.len {
-            for i in self.len..len {
-                unsafe { (*ptr.add(i))
-                    .write(f().inspect_err(|_| {
-                        self.len = i;
-                    })?)
-                };
-            }
-        }
-        else if len < self.len {
-            unsafe {
-                ptr.add(len).drop_in_place(self.len - len);
-            }
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_push(&mut self, value: T) -> Result<(), TryReserveError<T>> {
-        if self.len >= N {
-            return Err(TryReserveError::max_capacity_exceeded(N, N + 1, value))
-        }
-        let ptr = unsafe { self.as_mut_ptr().add(self.len) };
-        unsafe { ptr::write(ptr, value) };
-        self.len += 1;
-        Ok(())
-    }
-
-    fn fallible_append(&mut self, slice: &[T]) -> Result<(), TryReserveError<()>>
-        where
-            T: Clone
-    {
-        let len = self.len + slice.len();
-        if len > N {
-            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
-        }
-        unsafe {
-            Pointer
-                ::new(slice.as_ptr().cast_mut())
-                .unwrap()
-                .clone_elements(
-                    Pointer::new(self.as_mut_ptr()).unwrap_unchecked().add(self.len),
-                    slice.len()
-                );
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_append_map<U, F>(&mut self, slice: &[U], mut f: F) -> Result<(), TryReserveError<()>>
-        where
-            F: FnMut(&U) -> T
-    {
-        let len = self.len + slice.len();
-        if len > N {
-            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
-        }
-        let len = self.len;
-        let ptr = self.as_mut_ptr();
-        for (i, u) in slice.iter().enumerate() {
-            unsafe {
-                ptr.add(len + i).write(f(u));
-            }
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_fast_append(&mut self, slice: &[T]) -> Result<(), TryReserveError<()>>
-        where T: Copy
-    {
-        let len = self.len + slice.len();
-        if len > N {
-            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
-        }
-        unsafe {
-            Pointer
-                ::new(slice.as_ptr().cast_mut())
-                .unwrap()
-                .fast_clone_elements(
-                    Pointer::new(self.as_mut_ptr()).unwrap_unchecked().add(self.len),
-                    slice.len()
-                );
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_insert(&mut self, index: usize, value: T) -> Result<(), TryReserveError<T>> {
-        if index >= self.len {
-            panic!("index {} was out of bounds with len {} when inserting", index, self.len)
-        }
-        if self.len >= N {
-            return Err(TryReserveError::max_capacity_exceeded(N, N + 1, value))
-        }
-        unsafe {
-            Pointer
-                ::new(self.as_mut_ptr())
-                .unwrap_unchecked()
-                .insert_element(value, index, self.len);
-            self.len += 1;
-            Ok(())
-        }
-    }
-
-    fn fallible_move_from_vec<V, S>(&mut self, from: &mut V) -> Result<(), TryReserveError<()>>
-        where
-            V: Vector<T, S>,
-            S: IntoUsize + FromUsize,
-    {
-        let slice = from.as_mut_slice();
-        if N < slice.len() {
-            return Err(TryReserveError::max_capacity_exceeded(N, slice.len(), ()))
-        }
-        let ptr = unsafe {
-            Pointer::new(self.as_mut_ptr()).unwrap_unchecked()
-        };
-        unsafe { ptr.drop_in_place(self.len); }
-        self.len = 0;
-        unsafe { Pointer
-            ::new(slice.as_mut_ptr())
-            .unwrap()
-            .move_elements(ptr, slice.len());
-        }
-        self.len = slice.len();
-        unsafe { from.set_len(S::ZERO); }
-        Ok(())    
-    }
-
-    fn fallible_move_from_vec_map<U, V, S, F>(
-        &mut self,
-        from: &mut V,
-        mut f: F
-    ) -> Result<(), TryReserveError<()>>
-        where 
-            V: Vector<U, S>,
-            S: IntoUsize + FromUsize,
-            F: FnMut(U) -> T,
-    {
-        let len = from.len().into_usize();
-        if N > len {
-            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
-        }
-        self.clear();
-        let src = from.as_ptr();
-        let dst = self.as_mut_ptr();
-        unsafe {
-            for i in 0..len {
-                dst.add(i)
-                .write(f(src.add(i).read()))
-            }
-        }
-        self.len = len;
-        unsafe { from.set_len(S::ZERO); }
-        Ok(())
     }
 }
 
@@ -564,8 +528,10 @@ impl<T, const N: usize> Iterator for IterArrayVec<T, N> {
         }
     } 
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.start, Some(self.end))
+        let size = self.end - self.start;
+        (size, Some(size))
     }
 }
 
@@ -607,7 +573,6 @@ impl_traits! {
     for ArrayVec<T, N: [usize] [const]>
     Drop =>
 
-        #[inline(always)]
         fn drop(&mut self) -> () {
             debug_assert!(self.len <= N);
             unsafe { Pointer::new(self.as_mut_ptr()).unwrap_unchecked().drop_in_place(self.len); }
@@ -622,28 +587,28 @@ impl_traits! {
     ,
     AsRef<[T]> =>
 
-        #[inline(always)]
+        #[inline]
         fn as_ref(&self) -> &[T] {
             self.as_slice()
         }
     ,
     AsMut<[T]> =>
 
-        #[inline(always)]
+        #[inline]
         fn as_mut(&mut self) -> &mut [T] {
             self.as_mut_slice()
         }
     ,
     Borrow<[T]> =>
 
-        #[inline(always)]
+        #[inline]
         fn borrow(&self) -> &[T] {
             self.as_slice()
         }
     ,
     BorrowMut<[T]> =>
 
-        #[inline(always)]
+        #[inline]
         fn borrow_mut(&mut self) -> &mut [T] {
             self.as_mut_slice()
         }
@@ -660,14 +625,14 @@ impl_traits! {
 
         type Target = [T];
 
-        #[inline(always)]
+        #[inline]
         fn deref(&self) -> &Self::Target {
             self.as_ref()
         }
     ,
     DerefMut =>
 
-        #[inline(always)]
+        #[inline]
         fn deref_mut(&mut self) -> &mut Self::Target {
             self.as_mut()
         }
@@ -677,7 +642,7 @@ impl_traits! {
         type Item = &'vec T;
         type IntoIter = slice::Iter<'vec, T>;
 
-        #[inline(always)]
+        #[inline]
         fn into_iter(self) -> Self::IntoIter {
             self.iter()
         }
@@ -687,7 +652,7 @@ impl_traits! {
         type Item = &'vec mut T;
         type IntoIter = slice::IterMut<'vec, T>;
 
-        #[inline(always)]
+        #[inline]
         fn into_iter(self) -> Self::IntoIter {
             self.iter_mut()
         }
@@ -697,22 +662,22 @@ impl_traits! {
         type Item = T;
         type IntoIter = IterArrayVec<T, N>;
 
-        #[inline(always)]
+        #[inline]
         fn into_iter(self) -> Self::IntoIter {
             unsafe {
                 let s = MaybeUninit::new(self);
                 let data: *const [_; N] = &s.assume_init_ref().data;
                 IterArrayVec {
-                    end: s.assume_init_ref().len,
                     data: data.read(),
                     start: 0,
+                    end: s.assume_init_ref().len,
                 }
             }
         }
     ,
     Clone where T: Clone =>
     
-        #[inline(always)]
+        #[inline]
         fn clone(&self) -> Self {
             let mut vec = ArrayVec::new();
             vec.append(self);
@@ -744,7 +709,7 @@ impl_traits! {
     ,
     Hash where T: Hash =>
 
-        #[inline(always)]
+        #[inline]
         fn hash<H: Hasher>(&self, state: &mut H) {
             self.as_slice().hash(state)
         }
@@ -785,9 +750,17 @@ impl<const N: usize, T> From<[T; N]> for ArrayVec<T, N> {
     
     fn from(value: [T; N]) -> Self {
         let mut vec = ArrayVec::new();
-        for v in value {
-            vec.push(v);
-        }
+        vec.extend(value);
         vec
     }
 }
+
+impl<const N: usize, A> FromIterator<A> for ArrayVec<A, N> {
+
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+        let mut vec = ArrayVec::new();
+        vec.extend(iter);
+        vec
+    }
+} 

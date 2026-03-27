@@ -58,7 +58,7 @@ macro_rules! impl_as_raw_bit_op {
 
             type Output = <Self as AsRaw>::Repr;
 
-            #[inline(always)]
+            #[inline]
             fn bitand(self, rhs: Self) -> Self::Output {
                 self.as_raw() & rhs
             }
@@ -68,7 +68,7 @@ macro_rules! impl_as_raw_bit_op {
         {
             type Output = <Self as AsRaw>::Repr;
 
-            #[inline(always)]
+            #[inline]
             fn bitand(self, rhs: <$t as AsRaw>::Repr) -> Self::Output {
                 self.as_raw() & rhs
             }
@@ -78,7 +78,7 @@ macro_rules! impl_as_raw_bit_op {
         {
             type Output = Self;
 
-            #[inline(always)]
+            #[inline]
             fn bitand(self, rhs: $t) -> Self::Output {
                 self & rhs.as_raw()
             }
@@ -86,7 +86,7 @@ macro_rules! impl_as_raw_bit_op {
 
         impl core::ops::BitAndAssign<$t> for <$t as AsRaw>::Repr
         {
-            #[inline(always)]
+            #[inline]
             fn bitand_assign(&mut self, rhs: $t) {
                 *self &= rhs.as_raw()
             }
@@ -96,7 +96,7 @@ macro_rules! impl_as_raw_bit_op {
 
             type Output = <Self as AsRaw>::Repr;
 
-            #[inline(always)]
+            #[inline]
             fn bitor(self, rhs: Self) -> Self::Output {
                 self.as_raw() | rhs
             }
@@ -106,7 +106,7 @@ macro_rules! impl_as_raw_bit_op {
         {
             type Output = <Self as AsRaw>::Repr;
 
-            #[inline(always)]
+            #[inline]
             fn bitor(self, rhs: <$t as AsRaw>::Repr) -> Self::Output {
                 self.as_raw() | rhs
             }
@@ -116,7 +116,7 @@ macro_rules! impl_as_raw_bit_op {
         {
             type Output = Self;
 
-            #[inline(always)]
+            #[inline]
             fn bitor(self, rhs: $t) -> Self::Output {
                 self | rhs.as_raw()
             }
@@ -124,7 +124,7 @@ macro_rules! impl_as_raw_bit_op {
 
         impl core::ops::BitOrAssign<$t> for <$t as AsRaw>::Repr
         {
-            #[inline(always)]
+            #[inline]
             fn bitor_assign(&mut self, rhs: $t) {
                 *self |= rhs.as_raw()
             }

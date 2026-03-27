@@ -1,4 +1,4 @@
-//! Provided by Vulkan 1.4 or otherwise by VK_KHR_push_descriptor.
+//! Provided by VK_KHR_push_descriptor or Vulkan 1.4.
 
 use {
     ::core::ffi::{
@@ -8,16 +8,21 @@ use {
     nox_ash::{
         vk,
         load_fn,
+        khr,
     },
     crate::Version,
+    super::*,
 };
 
-use super::*;
 
-/// Attribute type `bool`.
-pub const IS_ENABLED_ATTRIBUTE_NAME: ConstName = ConstName::new("push_descriptor");
-/// Attribute type `u32`.
-pub const MAX_PUSH_DESCRIPTORS_ATTRIBUTE_NAME: ConstName = ConstName::new("max_push_descriptors");
+pub struct Attributes;
+
+impl Attributes {
+    /// Attribute type `bool`.
+    pub const IS_ENABLED: ConstName = ConstName::new("push_descriptor");
+    /// Attribute type `u32`.
+    pub const MAX_PUSH_DESCRIPTORS: ConstName = ConstName::new("max_push_descriptors");
+}
 
 /// The extension type.
 #[derive(Clone, Copy)]
@@ -25,14 +30,14 @@ pub struct Extension;
 
 unsafe impl DeviceExtension for Extension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
-            name: nox_ash::khr::push_descriptor::NAME,
+            name: khr::push_descriptor::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_4,
-            precondition: Precondition::new(|context| {
-                if context.api_version() >= Version::VULKAN_API_VERSION_1_4 {
+            precondition: Precondition::new(|ctx| {
+                if ctx.api_version() >= Version::VULKAN_API_VERSION_1_4 {
                     let mut features = vk::PhysicalDeviceVulkan14Features::default();
-                    context.get_features(&mut features);
+                    ctx.get_features(&mut features);
                     (features.push_descriptor == 0).then(|| MissingDeviceFeatureError::new(
                         "push descriptor"
                     ))
@@ -45,20 +50,20 @@ unsafe impl DeviceExtension for Extension {
 
     fn register(
         &self,
-        context: &mut PhysicalDeviceContext<'_>,
+        ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         let mut properties = vk::PhysicalDevicePushDescriptorProperties::default();
-        context.get_properties(&mut properties);
-        context.register_attribute(DeviceAttribute::new_u32(
-            MAX_PUSH_DESCRIPTORS_ATTRIBUTE_NAME,
+        ctx.get_properties(&mut properties);
+        ctx.register_attribute(DeviceAttribute::new_u32(
+            Attributes::MAX_PUSH_DESCRIPTORS,
             properties.max_push_descriptors,
         ));
-        context.register_attribute(DeviceAttribute::new_bool(
-            IS_ENABLED_ATTRIBUTE_NAME,
+        ctx.register_attribute(DeviceAttribute::new_bool(
+            Attributes::IS_ENABLED,
             true,
         ));
-        if context.api_version() >= Version::VULKAN_API_VERSION_1_4 {
-            context.vulkan_14_features().push_descriptor = vk::TRUE;
+        if ctx.api_version() >= Version::VULKAN_API_VERSION_1_4 {
+            ctx.vulkan_14_features().push_descriptor = vk::TRUE;
         }
         None
     }
@@ -204,7 +209,7 @@ impl Device {
     }
 }
 
-unsafe impl AnyExtensionDevice for Device {
+impl AnyExtensionDevice for Device {
 
     #[inline(always)]
     fn boxed(&self) -> Box<dyn AnyExtensionDevice> {
@@ -212,34 +217,29 @@ unsafe impl AnyExtensionDevice for Device {
     }
 }
 
-unsafe impl ExtensionDevice for Device {
+impl ExtensionDevice for Device {
 
     const NAME: ConstName = ConstName::new(
         "push descriptor device"
     );
 
     #[inline(always)]
-    fn precondition<F>(f: F) -> bool
-        where F: Fn(&ConstName) -> Option<&DeviceAttribute>
+    fn precondition<'a, F>(f: F) -> bool
+        where F: Fn(&ConstName) -> Option<&'a DeviceAttribute>
     {
-        f(&IS_ENABLED_ATTRIBUTE_NAME)
+        f(&Attributes::IS_ENABLED)
             .is_some_and(|value| value.bool().is_some_and(|value| value))
     }
 
     #[inline(always)]
-    fn new(
-        instance: &nox_ash::Instance,
-        device: &nox_ash::Device,
-        device_info: &PhysicalDeviceInfo<'_>,
-    ) -> Box<dyn AnyExtensionDevice>
+    fn new(device: &LogicalDevice) -> Box<Self>
     {
-        let handle = device.handle();
-        let fp = DeviceFn::load(device_info.api_version(), |name| unsafe {
-            ::core::mem::transmute(instance.get_device_proc_addr(handle, name.as_ptr()))
+        let fp = DeviceFn::load(device.api_version(), |name| unsafe {
+            ::core::mem::transmute(device.get_proc_addr(name))
         });
         Box::new(Self {
             fp,
-            handle,
+            handle: device.handle(),
         })
     }
 }

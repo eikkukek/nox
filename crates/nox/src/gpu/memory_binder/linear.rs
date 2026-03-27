@@ -1,48 +1,71 @@
-use std::sync::Arc;
-
-use core::{
-    ptr::NonNull,
-    slice,
-};
+use core::ptr::{self, NonNull};
 
 use nox_ash::vk::{self, ptr_chain_iter_const, TaggedStructure};
 
 use nox_mem::{
-    vec::{Vec32, Vector},
+    vec::Vec32,
     option::OptionExt,
 };
 
-use crate::dev::has_bits;
-
-use crate::gpu::Vulkan;
+use crate::{
+    gpu::prelude::LogicalDevice,
+    sync::RwLock,
+};
 
 use super::*;
 
 use MemoryBinderError::{self, *};
 
 struct Allocation {
-    vk: Arc<Vulkan>,
+    device: LogicalDevice,
     device_memory: vk::DeviceMemory,
+    mapped_pointer: Option<RwLock<*mut ()>>,
+}
+
+impl Allocation {
+
+    #[inline(always)]
+    fn get_mapped_ptr(&self) -> Result<Option<NonNull<u8>>> {
+        let Some(ptr) = &self.mapped_pointer else {
+            return Ok(None)
+        };
+        let mut ptr = ptr.upgradable_read();
+        if ptr.is_null() &&
+            let Some(err) = ptr.with_upgraded(|ptr| unsafe
+            {
+                match self.device.map_memory(
+                    self.device_memory,
+                    0, vk::WHOLE_SIZE,
+                    vk::MemoryMapFlags::empty()
+                ) {
+                    Ok(p) => { *ptr = p; None },
+                    Err(err) => Some(err)
+                }
+            })
+        {
+            return Err(err.into())
+        }
+        Ok(Some(NonNull::new(ptr.cast()).unwrap()))
+    }
 }
 
 impl Drop for Allocation {
 
     fn drop(&mut self) {
         unsafe {
-            self.vk.device()
+            self.device
                 .free_memory(self.device_memory, None);
         }
     }
 }
 
+unsafe impl Send for Allocation {}
+unsafe impl Sync for Allocation {}
+
 struct Block {
     allocation: Option<Arc<Allocation>>,
-    mapped_pointer: Option<NonNull<u8>>,
     used: vk::DeviceSize,
 }
-
-unsafe impl Send for Block {}
-unsafe impl Sync for Block {}
 
 impl Block {
 
@@ -50,7 +73,6 @@ impl Block {
     fn new() -> Self {
         Self {
             allocation: None,
-            mapped_pointer: None,
             used: 0,
         }
     }
@@ -58,11 +80,12 @@ impl Block {
     #[inline(always)]
     unsafe fn alloc(
         &mut self,
-        vk: &Arc<Vulkan>,
+        device: &LogicalDevice,
         memory_requirements: &vk::MemoryRequirements2,
         block_size: vk::DeviceSize,
         memory_type_index: u32,
         granularity: vk::DeviceSize,
+        is_mappable: bool,
     ) -> Result<Memory>
     {
         let allocation = self.allocation.get_or_try_insert_with::<MemoryBinderError, _>(|| {
@@ -73,10 +96,11 @@ impl Block {
                 ..Default::default()
             };
             Ok(Arc::new(Allocation {
-                vk: vk.clone(),
+                device: device.clone(),
+                mapped_pointer: (is_mappable).then(|| RwLock::new(ptr::null_mut())),
                 device_memory: unsafe {
-                    vk.device().allocate_memory(&allocate_info, None)?
-                }
+                    device.allocate_memory(&allocate_info, None)?
+                },
             }))
         })?;
         let used = self.used;
@@ -87,7 +111,7 @@ impl Block {
             return Err(OutOfDeviceMemory { size: memory_requirements.memory_requirements.size, align, } )
         }
         self.used = end;
-        Ok(Memory::new(allocation.clone(), None, offset, memory_requirements.memory_requirements.size))
+        Ok(Memory::new(allocation.clone(), offset, memory_requirements.memory_requirements.size))
     }
 
     #[inline(always)]
@@ -103,41 +127,40 @@ impl Block {
 }
 
 pub struct LinearBinder {
-    vk: Arc<Vulkan>,
+    device: LogicalDevice,
     blocks: Vec32<(Vec32<Block>, u32, usize)>,
     block_size: vk::DeviceSize,
-    map_memory: bool,
+    is_mappable: bool,
     fallback: DefaultBinder,
 }
 
 impl LinearBinder {
 
     pub(crate) fn new(
-        vk: Arc<Vulkan>,
+        device: LogicalDevice,
         block_size: vk::DeviceSize,
         required_properties: vk::MemoryPropertyFlags,
-        forbidden_properties: vk::MemoryPropertyFlags,
-        map_memory: bool,
+        is_mappable: bool,
     ) -> Result<Self>
     {
-        let physical_device_info = vk.physical_device_info();
-        let memory_properties = physical_device_info.memory_properties();
+        let physical_device = device.physical_device();
+        let memory_properties = physical_device.memory_properties();
         let mut blocks = Vec32::with_capacity(4);
         for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize]
             .iter()
             .enumerate()
         {
             let property_flags = memory_type.property_flags;
-            if has_bits!(property_flags, required_properties) && !property_flags.intersects(forbidden_properties) {
+            if property_flags.contains(required_properties) {
                 blocks.push((Vec32::with_len_with(1, |_| Block::new()), i as u32, 0));
             }
         }
         Ok(Self {
-            fallback: DefaultBinder::new(vk.clone(), required_properties, forbidden_properties),
-            vk,
+            fallback: DefaultBinder::new(device.clone(), required_properties),
+            device,
             blocks,
             block_size,
-            map_memory,
+            is_mappable,
         })
     }
     
@@ -147,11 +170,6 @@ impl LinearBinder {
             block_size,
             map_memory: false,
         }
-    }
-
-    #[inline(always)]
-    pub fn is_mappable(&self) -> bool {
-        self.map_memory
     }
 
     #[inline(always)]
@@ -173,7 +191,6 @@ impl LinearBinder {
 
 struct Memory {
     allocation: Arc<Allocation>,
-    map: Option<NonNull<u8>>,
     offset: vk::DeviceSize,
     size: vk::DeviceSize,
 }
@@ -185,30 +202,19 @@ impl Memory {
 
     fn new(
         allocation: Arc<Allocation>,
-        map: Option<NonNull<u8>>,
         offset: vk::DeviceSize,
         size: vk::DeviceSize,
     ) -> Self
     {
         Self {
             allocation,
-            map,
             offset,
             size,
         }
     }
-
-    fn get_mapped_memory(&mut self) -> Option<&mut [u8]> {
-        unsafe {
-            Some(slice::from_raw_parts_mut(
-                self.map?.add(self.offset as usize).as_ptr(),
-                self.size as usize,
-            ))
-        }
-    }
 }
 
-impl DeviceMemory for Memory {
+unsafe impl DeviceMemory for Memory {
 
     fn device_memory(&self) -> vk::DeviceMemory {
         self.allocation.device_memory
@@ -222,9 +228,13 @@ impl DeviceMemory for Memory {
         self.size
     }
 
-    fn map_memory(&mut self) -> Result<&mut [u8]> {
-        self.get_mapped_memory()
+    fn map_memory(&mut self) -> Result<(*mut u8, usize)> {
+        self.allocation
+            .get_mapped_ptr()?
             .ok_or(UnmappableMemory)
+            .map(|ptr| unsafe {
+                (ptr.add(self.offset as usize).as_ptr(), self.size as usize)
+            })
     }
 }
 
@@ -237,17 +247,17 @@ unsafe impl MemoryBinder for LinearBinder {
 
     #[inline(always)]
     fn is_mappable(&self) -> bool {
-        self.is_mappable()
+        self.is_mappable
     }
 
     unsafe fn alloc(
         &mut self,
         memory_requirements: &vk::MemoryRequirements2,
-    ) -> Result<Box<dyn DeviceMemory>> {
+    ) -> Result<DeviceMemoryObj> {
         let block_size = self.block_size;
-        let granularity = self.vk
-            .physical_device_info()
-            .properties().limits.buffer_image_granularity;
+        let granularity = self.device
+            .physical_device()
+            .limits().buffer_image_granularity;
         unsafe {
             if let Some(dedicated_requirements) = ptr_chain_iter_const(memory_requirements)
                 .find(|ptr| (**ptr).s_type == vk::MemoryDedicatedRequirements::STRUCTURE_TYPE)
@@ -260,6 +270,7 @@ unsafe impl MemoryBinder for LinearBinder {
                 }
             }
         }
+        let is_mappable = self.is_mappable();
         for (blocks, type_index, free_index) in self.blocks.iter_mut() {
             if memory_requirements.memory_requirements.memory_type_bits & (1 << *type_index) != 0 {
                 if block_size < memory_requirements.memory_requirements.size {
@@ -269,9 +280,10 @@ unsafe impl MemoryBinder for LinearBinder {
                 }
                 let mut res = unsafe { blocks[*free_index]
                     .alloc(
-                        &self.vk, memory_requirements,
+                        &self.device, memory_requirements,
                         self.block_size, *type_index,
                         granularity,
+                        is_mappable,
                     )
                 };
                 if let Err(err) = res {
@@ -281,14 +293,15 @@ unsafe impl MemoryBinder for LinearBinder {
                             blocks.push(Block::new());
                         }
                         res = unsafe { blocks[*free_index].alloc(
-                            &self.vk, memory_requirements, self.block_size,
+                            &self.device, memory_requirements, self.block_size,
                             *type_index, granularity,
+                            self.is_mappable,
                         ) };
                     } else {
                         return Err(err)
                     }
                 }
-                return Ok(Box::new(res.unwrap()))
+                return Ok(DeviceMemoryObj::new(res.unwrap()))
             }
         }
         Err(IncompatibleMemoryRequirements)
@@ -337,22 +350,20 @@ impl MemoryBinderAttributes for LinearBinderAttributes  {
     const NAME: &str = "Linear binder";
 
     #[inline(always)]
-    fn build(self, vulkan: Arc<Vulkan>) -> Result<Self::Binder> {
+    fn build(self, device: LogicalDevice) -> Result<Self::Binder> {
         if self.map_memory {
             LinearBinder::new(
-                vulkan,
+                device,
                 self.block_size,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL, 
                 true,
             )
         } else {
             LinearBinder::new(
-                vulkan,
+                device,
                 self.block_size,
                 vk::MemoryPropertyFlags::DEVICE_LOCAL,
-                vk::MemoryPropertyFlags::HOST_VISIBLE,
-                true,
+                false,
             )
         }
     }

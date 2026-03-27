@@ -9,7 +9,7 @@ use core::{
     fmt::Display,
 };
 
-use super::{Error, Tracked, BuildInternal, Result, Location};
+use super::{Tracked, build_error, Result, Location};
 
 pub trait Context<T, E>
     where
@@ -86,7 +86,7 @@ impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Resul
         where C: Display + Send + Sync + 'static,
     {
         self.map_err(|err| {
-            Error::new_internal(err, ctx, None)
+            build_error::new(err, ctx, None)
         })
     }
 
@@ -95,7 +95,7 @@ impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Resul
         where C: Display + Send + Sync + 'static,
     {
         self.map_err(|err| {
-            Error::new_internal(err, ctx, Some(caller!()))
+            build_error::new(err, ctx, Some(caller!()))
         })
     }
 
@@ -103,7 +103,7 @@ impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Resul
         where C: Display + Send + Sync + 'static,
     {
         self.map_err(|err| {
-            Error::new_internal(err, f(), None)
+            build_error::new(err, f(), None)
         })
     }
 
@@ -112,7 +112,7 @@ impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Resul
         where C: Display + Send + Sync + 'static
     {
         self.map_err(|err| {
-            Error::new_internal(err, f(), Some(caller!()))
+            build_error::new(err, f(), Some(caller!()))
         })
     }
 
@@ -123,7 +123,7 @@ impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Resul
     {
         self.map_err(|err| {
             let loc = err.location();
-            Error::new_internal(err, f(loc), None)
+            build_error::new(err, f(loc), None)
         })
     }
 
@@ -135,8 +135,7 @@ impl<T, E: error::Error + Send + Sync + 'static> Context<T, E> for result::Resul
     {
         self.map_err(|err| {
             let loc = err.location();
-            Error::new_internal(err, f(loc), Some(caller!()))
+            build_error::new(err, f(loc), Some(caller!()))
         })
     }
 }
-

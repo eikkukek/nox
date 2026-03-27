@@ -98,8 +98,8 @@ impl Vec2 {
 
     #[inline(always)]
     pub fn eq_epsilon(self, rhs: Self, epsilon: f32) -> bool {
-        return (self.x - rhs.x).abs() < epsilon &&
-                (self.y - rhs.y).abs() < epsilon
+        (self.x - rhs.x).abs() < epsilon &&
+            (self.y - rhs.y).abs() < epsilon
     }
 
     #[inline(always)]

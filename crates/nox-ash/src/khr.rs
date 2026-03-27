@@ -1,7 +1,6 @@
 pub use ash::khr::*;
 
 pub mod surface;
-pub mod swapchain;
 
 pub mod dynamic_rendering_local_read;
 pub mod present_id2;

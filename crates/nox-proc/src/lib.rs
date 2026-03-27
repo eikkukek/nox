@@ -5,8 +5,10 @@ mod as_raw;
 mod display;
 mod error;
 mod nox_ash_structure;
-mod feature_struct;
+mod build_structure;
 mod vertex_input;
+mod vk_to_rust_enum;
+mod snake_case;
 
 extern crate proc_macro;
 
@@ -42,14 +44,23 @@ pub fn nox_ash_structure(item: TokenStream) -> TokenStream {
     nox_ash_structure::nox_ash_structure(item)
 }
 
-/// Derive macro for Vulkan feature structs.
-#[proc_macro_derive(FeatureStruct, attributes(on))]
-pub fn feature_struct(item: TokenStream) -> TokenStream {
-    feature_struct::feature_struct(item)
-}
-
 /// Derive macro for [VertexInput]
 #[proc_macro_derive(VertexInput)]
 pub fn vertex_input(item: TokenStream) -> TokenStream {
     vertex_input::vertex_input(item)
+}
+
+#[proc_macro]
+pub fn vk_to_rust_enum(item: TokenStream) -> TokenStream {
+    vk_to_rust_enum::vk_to_rust_enum(item)
+}
+
+#[proc_macro]
+pub fn snake_case(item: TokenStream) -> TokenStream {
+    snake_case::snake_case(item)
+}
+
+#[proc_macro_derive(BuildStructure, attributes(skip, default))]
+pub fn build_structure(item: TokenStream) -> TokenStream {
+    build_structure::build_structure(item)
 }

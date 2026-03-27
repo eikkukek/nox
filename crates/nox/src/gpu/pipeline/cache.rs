@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use nox_ash::vk;
 
-use nox_mem::slice::AllocSlice;
+use nox_error::Context;
 
-use crate::dev::error::{Result, Error};
+use crate::error::Result;
 
-use crate::gpu::prelude::{Vulkan, TransientHandle};
+use crate::gpu::prelude::*;
 
 struct Inner {
-    vk: Arc<Vulkan>,
+    device: LogicalDevice,
     handle: vk::PipelineCache,
 }
 
@@ -20,45 +20,44 @@ pub struct PipelineCache {
 
 impl PipelineCache {
 
-    pub(crate) unsafe fn new(vk: Arc<Vulkan>, handle: vk::PipelineCache) -> Self {
-        Self {
-            inner: Arc::new(Inner { vk, handle })
-        }
+    pub fn new(
+        device: LogicalDevice,
+        initial_data: Option<&[u8]>,
+    ) -> Result<Self> {
+        let initial_data = initial_data.unwrap_or(&[]);
+        let info = vk::PipelineCacheCreateInfo {
+            s_type: vk::StructureType::PIPELINE_CACHE_CREATE_INFO,
+            initial_data_size: initial_data.len(),
+            p_initial_data: initial_data.as_ptr() as _,
+            ..Default::default()
+        };
+        let handle = unsafe {
+            device.create_pipeline_cache(&info, None)
+                .context("failed to create pipeline cache")?
+        };
+        Ok(Self {
+            inner: Arc::new(Inner { device, handle })
+        })
     }
 
-    pub(crate) fn handle(&self) -> TransientHandle<'_, vk::PipelineCache> {
+    #[inline]
+    pub fn handle(&self) -> TransientHandle<'_, vk::PipelineCache> {
         TransientHandle::new(self.inner.handle)
     }
 
-    #[inline(always)]
+    #[inline]
+    pub fn logical_device_id(&self) -> LogicalDeviceId {
+        self.inner.device.id()
+    }
+
+    #[inline]
     pub fn retrieve_data(
         &self,
     ) -> Result<Box<[u8]>>
     {
-        let device = self.inner.vk.device();
-        let handle = self.inner.handle;
         unsafe {
-            let mut cache_size = 0;
-            let result = (device.fp_v1_0().get_pipeline_cache_data)(
-                device.handle(),
-                handle,
-                &mut cache_size,
-                Default::default(),
-            );
-            if result != vk::Result::SUCCESS {
-                return Err(Error::new(result, "failed to get pipeline cache data"))
-            }
-            let mut data = Box::uninit_slice(cache_size);
-            let result = (device.fp_v1_0().get_pipeline_cache_data)(
-                device.handle(),
-                handle,
-                &mut cache_size,
-                data.as_mut_ptr() as *mut core::ffi::c_void,
-            );
-            if result != vk::Result::SUCCESS {
-                return Err(Error::new(result, "failed to get pipeline cache data"))
-            }
-            Ok(data)
+            self.inner.device.get_pipeline_cache_data(self.inner.handle)
+            .context("failed to get pipeline cache data")
         }
     }
 }
@@ -67,7 +66,7 @@ impl Drop for Inner {
     
     fn drop(&mut self) {
         unsafe {
-            self.vk.device().destroy_pipeline_cache(self.handle, None);
+            self.device.destroy_pipeline_cache(self.handle, None);
         }
     }
 }

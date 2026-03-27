@@ -9,7 +9,7 @@ pub trait ResultExt<T, E> {
 
 impl<T, E> ResultExt<T, E> for Result<T, E> {
 
-    #[inline(always)]
+    #[inline]
     fn filter_err<F>(self, f: F) -> Self
         where F: FnOnce(&E) -> Option<T>
     {

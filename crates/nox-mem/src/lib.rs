@@ -11,7 +11,6 @@ pub mod vec;
 pub mod string;
 pub mod slot_map;
 pub mod dynamic;
-pub mod cell;
 pub mod option;
 pub mod result;
 #[cfg(feature = "std")]
@@ -20,6 +19,8 @@ pub mod iter;
 pub mod bit;
 pub mod alloc;
 pub mod borrow;
+#[cfg(feature = "std")]
+pub mod smallbox;
 
 mod macros;
 mod as_raw;

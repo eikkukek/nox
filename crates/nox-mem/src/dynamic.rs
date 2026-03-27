@@ -1,6 +1,4 @@
 #[cfg(feature = "std")]
-mod owned;
-#[cfg(feature = "std")]
 mod pair;
 
 use core::{
@@ -8,8 +6,6 @@ use core::{
     mem::{self, MaybeUninit},
 };
 
-#[cfg(feature = "std")]
-pub use owned::{Owned, OwnedMaybeUninit};
 #[cfg(feature = "std")]
 pub use pair::Pair;
 
@@ -84,34 +80,3 @@ unsafe impl<T: 'static> Dyn<T> for NonDyn<T> {
         target.cast()
     }
 }
-
-unsafe impl<T> Dyn<[T]> for [T] {
-
-    type Target = T;
-
-    unsafe fn raw_parts(ptr: *const Self) -> DynRawParts<Self::Target> {
-        unsafe {
-            mem::transmute::<*const Self, DynRawParts<Self::Target>>(ptr)
-        }
-    }
-
-    unsafe fn from_raw_parts(raw_parts: DynRawParts<Self::Target>) -> *const [T] {
-        unsafe {
-            mem::transmute::<DynRawParts<Self::Target>, *const Self>(raw_parts)
-        }
-    }
-
-    unsafe fn get_self(target: *const [T]) -> *const Self {
-        target
-    }
-}
-
-/*
-pub trait DynFn: Dyn {
-
-    type Args<'a>;
-    type Output;
-
-    unsafe fn call_once<'a>(target: Owned<Self::Target>, args: Self::Args<'a>) -> Self::Output;
-}
-*/

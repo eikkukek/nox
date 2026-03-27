@@ -59,13 +59,13 @@ impl<Owned, Borrowed> BoxCowBase<Owned, Borrowed>
 {
 
     /// Returns whether the data is borrowed.
-    #[inline(always)]
+    #[inline]
     pub fn is_borrowed(&self) -> bool {
         matches!(self, Self::Borrowed(_))
     }
 
     /// Returns whether the data is owned.
-    #[inline(always)]
+    #[inline]
     pub fn is_owned(&self) -> bool {
         matches!(self, Self::Owned(_))
     }
@@ -75,7 +75,7 @@ impl<Owned, Borrowed> BoxCowBase<Owned, Borrowed>
     /// Equivalent to [`Cow::to_mut`].
     ///
     /// If the data is not already owned, this clones the data.
-    #[inline(always)]
+    #[inline]
     pub fn to_mut(&mut self) -> &mut Owned {
         match self {
             Self::Borrowed(b) => {
@@ -95,7 +95,7 @@ impl<Owned, Borrowed> BoxCowBase<Owned, Borrowed>
     /// data.
     ///
     /// Equivalent to [`Cow::into_owned`].
-    #[inline(always)]
+    #[inline]
     pub fn into_owned(self) -> Box<Owned>
     {
         match self {
@@ -112,7 +112,7 @@ impl<T, U> Deref for BoxCowBase<T, U>
 {
     type Target = T;
 
-    #[inline(always)]
+    #[inline]
     fn deref(&self) -> &Self::Target {
         match self {
             Self::Borrowed(b) => b.dyn_borrow(),
@@ -127,7 +127,7 @@ impl<T, U> DerefMut for BoxCowBase<T, U>
         U: DynBorrowMut<Cloned = T>
 {
 
-    #[inline(always)]
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
             Self::Borrowed(b) => b.dyn_borrow_mut(),
@@ -142,7 +142,7 @@ impl<T, U> Borrow<T> for BoxCowBase<T, U>
         U: DynBorrow<Cloned = T>
 {
 
-    #[inline(always)]
+    #[inline]
     fn borrow(&self) -> &T {
         match self {
             Self::Borrowed(b) => b.dyn_borrow(),
@@ -158,7 +158,7 @@ impl<A, T, U> PartialEq<T> for BoxCowBase<A, U>
         U: DynBorrow<Cloned = A>,
 {
 
-    #[inline(always)]
+    #[inline]
     fn eq(&self, other: &T) -> bool {
         self.deref() == other.deref()
     }
@@ -176,7 +176,6 @@ impl<T, U> Display for BoxCowBase<T, U>
         U: DynBorrow<Cloned = T>,
 {
 
-    #[inline(always)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Borrowed(b) => b.dyn_borrow().fmt(f),
@@ -190,7 +189,6 @@ impl<T, U> Debug for BoxCowBase<T, U>
         T: ?Sized + Debug,
         U: DynBorrow<Cloned = T>
 {
-    #[inline(always)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Borrowed(b) =>
@@ -210,7 +208,7 @@ impl<T: ?Sized> BoxClone for &dyn BoxClone<Cloned = T> {
 
     type Cloned = T;
 
-    #[inline(always)]
+    #[inline]
     fn box_clone(&self) -> Box<Self::Cloned> {
         (*self).box_clone()
     }
@@ -274,7 +272,7 @@ impl<T: ?Sized> DynBorrow for &dyn DynBorrow<Cloned = T>
     where Self: BoxClone<Cloned = T>
 {
 
-    #[inline(always)]
+    #[inline]
     fn dyn_borrow(&self) -> &Self::Cloned {
         (*self).dyn_borrow()
     }
@@ -284,7 +282,7 @@ impl<T: ?Sized> DynBorrow for &(dyn DynBorrow<Cloned = T> + Send + Sync)
     where Self: BoxClone<Cloned = T>
 {
 
-    #[inline(always)]
+    #[inline]
     fn dyn_borrow(&self) -> &Self::Cloned {
         (*self).dyn_borrow()
     }
@@ -294,7 +292,7 @@ impl<T: ?Sized> BoxClone for &mut dyn BoxClone<Cloned = T> {
 
     type Cloned = T;
 
-    #[inline(always)]
+    #[inline]
     fn box_clone(&self) -> Box<Self::Cloned> {
         (**self).box_clone()
     }
@@ -304,7 +302,7 @@ impl<T: ?Sized> DynBorrowMut for &mut dyn DynBorrowMut<Cloned = T>
     where Self: DynBorrow<Cloned = T>
 {
     
-    #[inline(always)]
+    #[inline]
     fn dyn_borrow_mut(&mut self) -> &mut Self::Cloned {
         (*self).dyn_borrow_mut()
     }

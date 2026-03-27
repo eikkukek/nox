@@ -1,237 +1,248 @@
+mod platform;
 pub mod win;
 pub mod event_loop;
 mod event;
-mod expand_error;
 
-pub mod error_util {
-    pub use super::expand_error::*;
-}
-
-use std::{
-    sync::OnceLock, time
-};
+use std::time;
 
 use winit::{
     event_loop::ControlFlow,
     application::ApplicationHandler,
     event::*,
-    window::WindowId,
 };
+
+use compact_str::format_compact;
 
 use ahash::AHashSet;
 
-use nox_mem::vec::Vector;
-use nox_error::Context;
-
 pub use event::Event;
+pub use platform::Platform;
 use event::RunEvent;
 use event_loop::{EventLoop, ActiveEventLoop, WinitActiveEventLoop};
 
 use crate::{
-    dev::error::{self, ErrorContext, Tracked},
+    error::*,
+    expand_error,
     log,
     Attributes,
     gpu,
-    expand_error,
-    OnInit,
+    Globals,
+    win::WindowId,
 };
 
-use super::interface::Interface;
-
-pub static ERROR_CAUSE_FMT: OnceLock<log::CustomFmt> = OnceLock::new();
+pub fn init() {
+    log::init();
+    log::info_fmt(|fmt| {
+        fmt.text("INFO:  ", |spec| spec.with_color_spec(|spec| {
+            spec.set_fg(Some(log::Color::Green)).set_bold(true);
+        })).message(|spec| spec);
+    });
+    log::warn_fmt(|fmt| {
+        fmt.text("WARN:  ", |spec| spec.with_color_spec(|spec| {
+            spec.set_fg(Some(log::Color::Yellow)).set_bold(true);
+        })).message(|spec| spec);
+    });
+    log::error_fmt(|fmt| {
+        fmt.text("ERROR: ", |spec| spec.with_color_spec(|spec| {
+            spec.set_fg(Some(log::Color::Red)).set_bold(true);
+        })).message(|spec| spec);
+    });
+    log::debug_fmt(|fmt| {
+        fmt.text("DEBUG: ", |spec| spec.with_color_spec(|spec| {
+            spec.set_fg(Some(log::Color::Blue)).set_bold(true);
+        })).message(|spec| spec);
+    });
+    log::trace_fmt(|fmt| {
+        fmt.text("TRACE: ", |spec| spec.with_color_spec(|spec| {
+            spec.set_fg(Some(log::Color::Rgb(130, 130, 130))).set_bold(true);
+        })).message(|spec| spec);
+    }); 
+    if expand::ERROR_CAUSE_FMT.get().is_none() {
+        let mut error_cause_fmt = log::LogFmt::default();
+        log::LogFmtBuilder::new(&mut error_cause_fmt)
+            .text("       caused by: ", |spec| spec.with_color_spec(|spec| {
+                spec.set_fg(Some(log::Color::Magenta)).set_bold(true);
+            })).message(|spec| spec);
+        expand::ERROR_CAUSE_FMT.set(log::custom_fmt(error_cause_fmt)).ok();
+    }
+}
 
 pub struct Nox;
 
+pub fn default_attributes() -> Attributes
+{
+    Attributes::new()
+}
+
+pub fn create_globals<'a>() -> Globals<'a> {
+    Globals::new()
+}
+
 impl Nox {
 
-    pub fn default_attributes() -> Attributes {
-        Attributes::new()
-    }
-
-    pub fn on_init<'a>() -> OnInit<'a> {
-        OnInit::new()
-    }
-
     #[allow(clippy::new_ret_no_self)]
-    pub fn new<'a, 'b, I: Interface>(
+    pub fn new<'a, 'b, F>(
+        platform: Platform,
+        logical_device: gpu::LogicalDevice,
         attributes: Attributes,
-        on_init: &'a OnInit<'b>,
-        interface: I,
-    ) -> error::Result<NoxRun<'a, 'b, I>>
+        globals: &'a Globals<'b>,
+        event_handler: F,
+    ) -> Result<NoxRun<'a, 'b, F>>
+        where F: FnMut(&ActiveEventLoop, Event) -> EventResult<()>,
     {
         let event_loop = EventLoop
-            ::new()
-            .context("failed to create event loop")?;
-        log::init();
-        log::info_fmt(|fmt| {
-            fmt.text("INFO:  ", |spec| spec.with_color_spec(|spec| {
-                spec.set_fg(Some(log::Color::Green)).set_bold(true);
-            })).message(|spec| spec);
-        });
-        log::warn_fmt(|fmt| {
-            fmt.text("WARN:  ", |spec| spec.with_color_spec(|spec| {
-                spec.set_fg(Some(log::Color::Yellow)).set_bold(true);
-            })).message(|spec| spec);
-        });
-        log::error_fmt(|fmt| {
-            fmt.text("ERROR: ", |spec| spec.with_color_spec(|spec| {
-                spec.set_fg(Some(log::Color::Red)).set_bold(true);
-            })).message(|spec| spec);
-        });
-        log::debug_fmt(|fmt| {
-            fmt.text("DEBUG: ", |spec| spec.with_color_spec(|spec| {
-                spec.set_fg(Some(log::Color::Blue)).set_bold(true);
-            })).message(|spec| spec);
-        });
-        log::trace_fmt(|fmt| {
-            fmt.text("TRACE: ", |spec| spec.with_color_spec(|spec| {
-                spec.set_fg(Some(log::Color::Rgb(130, 130, 130))).set_bold(true);
-            })).message(|spec| spec);
-        }); 
-        if ERROR_CAUSE_FMT.get().is_none() {
-            let mut error_cause_fmt = log::LogFmt::default();
-            log::LogFmtBuilder::new(&mut error_cause_fmt)
-                .text("       caused by: ", |spec| spec.with_color_spec(|spec| {
-                    spec.set_fg(Some(log::Color::Magenta)).set_bold(true);
-                })).message(|spec| spec);
-            ERROR_CAUSE_FMT.set(log::custom_fmt(error_cause_fmt)).ok();
-        }
+            ::new(platform)
+            .context("failed to create event loop")?; 
+        let (gpu, gpu_cache) = gpu::Gpu
+            ::new(&event_loop, logical_device, attributes)
+            .context("failed to create Gpu")?;
         Ok(NoxRun {
-            interface,
-            attributes,
+            event_handler,
             event_loop,
             redraws_requested: AHashSet::default(),
-            on_init,
-            gpu: None,
+            globals,
+            gpu,
+            gpu_cache,
         })
     }
 }
 
-pub struct NoxRun<'a, 'b, I>
+pub struct NoxRun<'a, 'b, F>
     where
-        I: Interface,
+        F: FnMut(&ActiveEventLoop, Event) -> EventResult<()>,
 {
-    interface: I,
-    attributes: Attributes,
+    event_handler: F,
     event_loop: EventLoop,
-    redraws_requested: AHashSet<WindowId>,
-    on_init: &'a OnInit<'b>,
-    gpu: Option<gpu::Gpu>,
+    redraws_requested: AHashSet<winit::window::WindowId>,
+    globals: &'a Globals<'b>,
+    gpu: gpu::Gpu,
+    gpu_cache: gpu::Cache,
 }
 
-impl<'a, 'b, I> NoxRun<'a, 'b, I>
+impl<'a, 'b, F> NoxRun<'a, 'b, F>
     where
-        I: Interface,
+        F: FnMut(&ActiveEventLoop, Event) -> EventResult<()>,
 {
 
     pub fn run(mut self) {
         self.event_loop
             .init()
+            .event_loop
             .run_app(&mut self)
             .expect("failed to run event loop");
     }
 }
 
-impl<'a, 'b, I: Interface> ApplicationHandler<RunEvent> for NoxRun<'a, 'b, I> {
+impl<'a, 'b, F> ApplicationHandler<RunEvent> for NoxRun<'a, 'b, F> 
+    where F: FnMut(&ActiveEventLoop, Event) -> EventResult<()>,
+{
 
     fn new_events(&mut self, event_loop: &WinitActiveEventLoop, cause: StartCause) {
         if cause == StartCause::Init {
-            let event_loop = ActiveEventLoop::new(&self.event_loop, event_loop);
             log::info!("event loop starting");
-            match gpu::Gpu::new(
+            let event_loop = ActiveEventLoop::new(
+                self.gpu.clone(),
+                &self.event_loop,
+                event_loop
+            );
+            if let Err(err) = self.globals.init(
                 &event_loop,
-                &self.attributes.gpu_attributes,
-            ).context("failed to init gpu") {
-                Ok(gpu) => {
-                    let gpu = self.gpu.insert(gpu);
-                    if let Err(err) = self.on_init.init(
-                        &event_loop,
-                        &mut gpu.context()
-                    ) {
-                        event_loop.exit();
-                        expand_error!(err);
-                        return
-                    }
-                    if let Err(err) = (self.interface)(Event::Initialized {
-                        event_loop: &event_loop,
-                        gpu: &mut gpu.context(),
-                    }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
-                    {
-                        event_loop.exit();
-                        expand_error!(err);
-                    }
-                },
-                Err(err) => {
-                    event_loop.exit();
-                    expand_error!(err);
-                },
-            };
+            ) {
+                event_loop.exit();
+                expand_error!(err);
+                return
+            }
+            if let Err(err) = (self.event_handler)(
+                &event_loop,
+                Event::Initialized,
+            ).context_from_tracked(|orig| format_compact!(
+                "init event error at {}", orig.or_this(),
+            ))
+            {
+                event_loop.exit();
+                expand_error!(err);
+            }
+            if let Err(err) = self.gpu
+                .tick(|event| {
+                    (self.event_handler)(&event_loop, Event::GpuEvent(event))
+                }, &mut self.gpu_cache)
+                .context("gpu error")
+            {
+                event_loop.exit();
+                expand_error!(err);
+                return
+            }
+            self.event_loop.tick();
         }
     }
 
-    fn exiting(&mut self, _event_loop: &WinitActiveEventLoop) {
+    fn exiting(&mut self, event_loop: &WinitActiveEventLoop) {
         log::info!("event loop exiting");
-        if let Some(mut gpu) = self.gpu.take() {
-            gpu.wait_idle();
-            (self.interface)(Event::CleanUp {
-                gpu: &mut gpu.context()
-            }).ok();
-            self.event_loop.clean_up();
-            gpu.clean_up();
+        let event_loop = ActiveEventLoop::new(
+            self.gpu.clone(),
+            &self.event_loop,
+            event_loop
+        );
+        if let Err(err) = (self.event_handler)(&event_loop, Event::CleanUp)
+            .context_from_tracked(|orig| format_compact!(
+                "clean up event error at {}", orig.or_this(),
+            ))
+        {
+            expand_error!(err);
         }
+        self.event_loop.clean_up();
     }
 
     fn user_event(&mut self, event_loop: &WinitActiveEventLoop, event: RunEvent) {
         match event {
             RunEvent::Tick => {
-                if let Some(gpu) = &mut self.gpu {
-                    self.event_loop.delta_time = self.event_loop.delta_counter.elapsed();
-                    self.event_loop.delta_counter = time::Instant::now();
-                    if let Err(err) = (self.interface)(Event::Update {
-                        event_loop: &ActiveEventLoop::new(
-                            &self.event_loop, event_loop,
-                        ),
-                        gpu: &mut gpu.context(),
-                    }).context_from_tracked(|orig| ErrorContext::EventError(orig.or_this()))
+                self.event_loop.delta_time = self.event_loop.delta_counter.elapsed();
+                self.event_loop.delta_counter = time::Instant::now();
+                let event_loop = ActiveEventLoop::new(
+                    self.gpu.clone(),
+                    &self.event_loop,
+                    event_loop
+                );
+                if let Err(err) = (self.event_handler)(
+                    &event_loop,
+                    Event::Update
+                ).context_from_tracked(|orig| format_compact!(
+                    "update event error at {}", orig.or_this()
+                ))
+                {
+                    event_loop.exit();
+                    expand_error!(err);
+                    return
+                }
+                if !event_loop.winit().exiting() {
+                    for (_, win) in self.event_loop.window_iter() {
+                        if win.cursor_set() {
+                            win.handle.set_cursor(win.current_cursor);
+                        }
+                        win.flags &= !(
+                            win::Window::CURSOR_SET | win::Window::CURSOR_MOVED
+                        );
+                        win.input_text.clear();
+                        win.handle.request_redraw();
+                        if win.transparent_set() {
+                            let is = win.is_transparent();
+                            win.handle.set_transparent(is);
+                            win.flags &= !win::Window::TRANSPARENT_SET;
+                        }
+                    }
+                    if let Err(err) = self.gpu
+                        .tick(|event| {
+                            (self.event_handler)(&event_loop, Event::GpuEvent(event))
+                        }, &mut self.gpu_cache)
+                        .context("gpu error")
                     {
                         event_loop.exit();
                         expand_error!(err);
                         return
                     }
-                    if !event_loop.exiting() {
-                        for (_, win) in self.event_loop.window_iter() {
-                            if win.cursor_set() {
-                                win.handle.set_cursor(win.current_cursor);
-                            }
-                            win.flags &= !(
-                                win::Window::CURSOR_SET | win::Window::CURSOR_MOVED
-                            );
-                            win.input_text.clear();
-                            win.handle.request_redraw();
-                            if win.transparent_set() {
-                                let is = win.is_transparent();
-                                win.handle.set_transparent(is);
-                                win.flags &= !win::Window::TRANSPARENT_SET;
-                            }
-                        }
-                        let event_loop = ActiveEventLoop::new(
-                            &self.event_loop,
-                            event_loop,
-                        );
-                        if let Err(err) = gpu 
-                            .render(&event_loop, &mut self.interface)
-                            .context("failed to render")
-                        {
-                            event_loop.exit();
-                            expand_error!(err);
-                            return
-                        }
-                    } 
-                }
+                } 
                 self.event_loop.update();
-                if self.event_loop.no_active_windows() {
-                    self.event_loop.tick();
-                }
+                self.event_loop.tick();
             },
         }
     }
@@ -241,7 +252,7 @@ impl<'a, 'b, I: Interface> ApplicationHandler<RunEvent> for NoxRun<'a, 'b, I> {
     fn window_event(
         &mut self,
         event_loop: &WinitActiveEventLoop,
-        window_id: WindowId,
+        window_id: winit::window::WindowId,
         event: WindowEvent
     ) {
         if event_loop.exiting() {
@@ -255,15 +266,12 @@ impl<'a, 'b, I: Interface> ApplicationHandler<RunEvent> for NoxRun<'a, 'b, I> {
                 event => window.process_event(event),
             }
         }
-        let mut redraw = true;
-        for id in self.event_loop.active_ids.get_mut() {
-            if !self.redraws_requested.contains(id) {
-                redraw = false;
-            }
-        }
+        let redraw = !self.event_loop.active_ids
+            .get_mut()
+            .iter()
+            .any(|id| !self.redraws_requested.contains(&id.0));
         if redraw {
             self.redraws_requested.clear();
-            self.event_loop.tick();
         }
     } 
 }

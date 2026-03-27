@@ -16,7 +16,7 @@ impl Version {
     pub const VULKAN_API_VERSION_1_3: Version = Version(vk::API_VERSION_1_3);
     pub const VULKAN_API_VERSION_1_4: Version = Version(vk::API_VERSION_1_4);
 
-    #[inline(always)]
+    #[inline]
     pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
         let value =
             (major << 22) |
@@ -25,32 +25,32 @@ impl Version {
         Self(value)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn as_u32(self) -> u32 {
         self.0
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn from_u32(value: u32) -> Self {
         Self(value)
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn major(self) -> u32 {
         self.0 >> 22
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn minor(self) -> u32 {
         (self.0 >> 12) & 0x3FF
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn patch(self) -> u32 {
         self.0 & 0xFFF
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn default() -> Self {
         Self::new(1, 0, 0)
     }
@@ -58,7 +58,7 @@ impl Version {
 
 impl From<Version> for u32 {
 
-    #[inline(always)]
+    #[inline]
     fn from(value: Version) -> u32 {
         value.0
     }
@@ -66,7 +66,7 @@ impl From<Version> for u32 {
 
 impl From<u32> for Version {
 
-    #[inline(always)]
+    #[inline]
     fn from(value: u32) -> Self {
         Self(value)
     }
@@ -74,7 +74,7 @@ impl From<u32> for Version {
 
 impl Default for Version {
 
-    #[inline(always)]
+    #[inline]
     fn default() -> Self {
         Self::new(1, 0, 0)
     }
@@ -82,7 +82,7 @@ impl Default for Version {
 
 impl PartialEq<u32> for Version {
 
-    #[inline(always)]
+    #[inline]
     fn eq(&self, other: &u32) -> bool {
         self.0 == *other
     }
@@ -97,7 +97,6 @@ impl PartialOrd<u32> for Version {
 
 impl Display for Version {
 
-    #[inline(always)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}.{}",
             self.major(),

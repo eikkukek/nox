@@ -1,69 +1,73 @@
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ImageProperties {
+pub struct ImageProperties {
     pub dimensions: Dimensions,
-    pub aspect_mask: ImageAspect,
-    pub format: vk::Format,
-    pub usage: vk::ImageUsageFlags,
-    pub samples: MSAA,
+    pub aspect_mask: ImageAspects,
+    pub format: Format,
+    pub usage: ImageUsages,
+    pub samples: MsaaSamples,
     pub array_layers: u32,
     pub mip_levels: u32,
     pub create_flags: vk::ImageCreateFlags,
     pub format_resolve_modes: FormatResolveModes,
+    pub format_features: FormatFeatures,
 }
 
 impl ImageProperties {
 
-    #[inline(always)]
-    pub fn view_type(&self) -> vk::ImageViewType {
-        if self.dimensions.depth > 1 {
-            vk::ImageViewType::TYPE_3D
-        } else if self.array_layers > 1 {
-            vk::ImageViewType::TYPE_2D_ARRAY
-        } else {
-            vk::ImageViewType::TYPE_2D
+    pub fn validate_subresource_range(&self, range: &ImageSubresourceRange) -> Result<u32> {
+        if self.aspect_mask & range.aspect_mask != range.aspect_mask {
+            return Err(Error::just_context(MissingFlagsError::new(
+                range.aspect_mask,
+                self.aspect_mask,
+            )))
         }
+        let level_count = range.level_count
+            .unwrap_or_sentinel(self.mip_levels.wrapping_sub(range.base_mip_level));
+        let layer_count = range.layer_count
+            .unwrap_or_sentinel(self.array_layers.wrapping_sub(range.base_array_layer));
+        if range.base_mip_level.saturating_add(level_count) > self.mip_levels ||
+            range.base_array_layer.saturating_add(layer_count) > self.array_layers
+        {
+            return Err(Error::just_context(ImageSubresourceOutOfRangeError {
+                image_mip_levels: self.mip_levels,
+                base_level: range.base_mip_level,
+                level_count,
+                image_array_layers: self.array_layers,
+                base_layer: range.base_array_layer,
+                layer_count,
+            }))
+        }
+        Ok(layer_count)
     }
 
-    pub fn validate_range(&self, range: &ImageRange) -> Result<vk::ImageViewType, ImageError> {
+    pub fn validate_range(&self, range: &ImageRange) -> Result<vk::ImageViewType> {
         if let Some(component_info) = range.component_info &&
-            !self.has_mutable_format() && self.format != component_info.format
+            self.format != component_info.format
         {
-            return Err(ImageError::ImmutableFormat {
-                image_format: self.format,
-                requested_format: component_info.format,
-            })
+            if !self.has_mutable_format() {
+                return Err(Error::just_context(format_compact!(
+                    "image has immutable format {}, requested format is {}",
+                    self.format, component_info.format,
+                )))
+            }
+            if !self.format.is_compatible_with(component_info.format) {
+                return Err(Error::just_context(format_compact!(
+                    "image format {} is not compatbile with requested format {}",
+                    self.format, component_info.format,
+                )))
+            }
         }
-        let subresource_info = range.subresource_range;
-        if has_not_bits!(self.aspect_mask, subresource_info.aspect_mask) {
-            return Err(ImageError::AspectMismatch(
-                subresource_info.aspect_mask ^ self.aspect_mask & subresource_info.aspect_mask
-            ))
-        }
-        if subresource_info.base_mip_level + subresource_info.level_count.get() > self.mip_levels ||
-            subresource_info.base_array_layer + subresource_info.layer_count.get() > self.array_layers
-        {
-            return Err(ImageError::SubresourceOutOfRange {
-                image_mip_levels: self.mip_levels,
-                base_level: subresource_info.base_mip_level,
-                level_count: subresource_info.level_count.get(),
-                image_array_layers: self.array_layers,
-                base_layer: subresource_info.base_array_layer,
-                layer_count: subresource_info.layer_count.get(),
-            })
-        }
-        if range.cube_map {
+        let layer_count = self.validate_subresource_range(&range.subresource_range)?;
+        if range.is_cube_map {
             if !self.create_flags.contains(vk::ImageCreateFlags::CUBE_COMPATIBLE) {
-                Err(ImageError::ValidationError(format_compact!(
-                    "image is not cube compatible"
+                Err(Error::just_context("image is not cube compatible"))
+            } else if !layer_count.is_multiple_of(6) {
+                Err(Error::just_context(format_compact!(
+                    "view layer count {layer_count} must be a multiple of 6 if used as a cube map",
                 )))
-            } else if !range.subresource_range.layer_count.get().is_multiple_of(6) {
-                Err(ImageError::ValidationError(format_compact!(
-                    "cube subview layer count {} must be multiple of 6",
-                    range.subresource_range.layer_count,
-                )))
-            } else if range.subresource_range.layer_count.get() > 6 {
+            } else if layer_count > 6 {
                 Ok(vk::ImageViewType::CUBE_ARRAY)
             } else {
                 Ok(vk::ImageViewType::CUBE)
@@ -71,7 +75,7 @@ impl ImageProperties {
         } else {
             Ok(if self.dimensions.depth > 1 {
                 vk::ImageViewType::TYPE_3D
-            } else if range.subresource_range.layer_count.get() > 1 {
+            } else if layer_count > 1 {
                 vk::ImageViewType::TYPE_2D_ARRAY
             } else {
                 vk::ImageViewType::TYPE_2D
@@ -81,25 +85,6 @@ impl ImageProperties {
 
     #[inline(always)]
     pub fn has_mutable_format(&self) -> bool {
-        has_bits!(self.create_flags, vk::ImageCreateFlags::MUTABLE_FORMAT)
-    }
-
-    #[inline(always)]
-    pub fn whole_subresource(&self) -> ImageSubresourceRange {
-        ImageSubresourceRange::new(
-            self.aspect_mask,
-            0, self.mip_levels,
-            0, self.array_layers
-        ).unwrap()
-    }
-
-    #[inline(always)]
-    pub fn all_layers(&self, mip_level: u32) -> ImageSubresourceLayers {
-        ImageSubresourceLayers::new(
-            self.aspect_mask,
-            mip_level,
-            0,
-            self.array_layers,
-        ).unwrap()
+        self.create_flags.contains(vk::ImageCreateFlags::MUTABLE_FORMAT)
     }
 }

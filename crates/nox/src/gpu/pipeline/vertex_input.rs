@@ -2,8 +2,19 @@ use nox_ash::vk;
 
 use nox_mem::AsRaw;
 
-use crate::gpu::VkFormat;
+use crate::gpu::prelude::*;
 
+/// Specifies what the input rate of a vertex input is.
+///
+/// [`Vertex rate`][1] means that the inputs are consumed per *vertex*.
+///
+/// [`Instance rate`][2] means that the inputs are consumed per *instance*.
+///
+/// # Vulkan docs
+/// <https://docs.vulkan.org/refpages/latest/refpages/source/VkVertexInputRate.html>
+///
+/// [1]: Self::Vertex
+/// [2]: Self::Instance
 #[repr(i32)]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum VertexInputRate {
@@ -19,10 +30,22 @@ impl From<VertexInputRate> for vk::VertexInputRate {
     }
 }
 
+/// Describes the [`location`][1], [`format`][2] and [`offset`][3] of a vertex input attribute.
+///
+/// This is used when creating a [`graphics pipeline`][4] and can be derived for a custom struct
+/// with the [`VertexInput`] derive macro.
+///
+/// # Vulkan docs
+/// <https://docs.vulkan.org/refpages/latest/refpages/source/VkVertexInputAttributeDescription.html>
+///
+/// [1]: Self::location
+/// [2]: Self::format
+/// [3]: Self::offset
+/// [4]: GraphicsPipeline
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VertexInputAttribute {
     pub location: u32,
-    pub format: VkFormat,
+    pub format: Format,
     pub offset: u32,
 }
 
@@ -42,7 +65,7 @@ impl VertexInputAttribute {
 pub(crate) struct VertexInputAttributeInternal {
     pub location: u32,
     pub binding: u32,
-    pub format: vk::Format,
+    pub format: Format,
     pub offset: u32,
 }
 
@@ -52,7 +75,7 @@ impl From<VertexInputAttributeInternal> for vk::VertexInputAttributeDescription 
         Self {
             location: value.location,
             binding: value.binding,
-            format: value.format,
+            format: value.format.into(),
             offset: value.offset,
         }
     }
@@ -66,27 +89,21 @@ pub trait VertexInput<const N_ATTRIBUTES: usize> {
     fn get_attributes(first_location: u32) -> [VertexInputAttribute; N_ATTRIBUTES];
 }
 
+/// Desribes a vertex input in a [`graphics pipeline`][1].
+///
+/// The [`stride`][2] of a vertex inpute *can* be [`dynamic`][3] when creating the pipeline.
+///
+/// # Vulkan docs
+/// <https://docs.vulkan.org/refpages/latest/refpages/source/VkVertexInputBindingDescription.html>
+///
+/// [1]: GraphicsPipeline
+/// [2]: Self::stride
+/// [3]: DynamicState::VertexInputBindingStride
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct VertexInputBinding {
+pub struct VertexInputBinding {
     pub binding: u32,
     pub input_rate: VertexInputRate,
     pub stride: u32,
-}
-
-impl VertexInputBinding {
-
-    pub fn new(
-        binding: u32,
-        input_rate: VertexInputRate,
-        stride: u32
-    ) -> Self
-    {
-        Self {
-            binding,
-            input_rate,
-            stride,
-        }
-    }
 }
 
 impl From<VertexInputBinding> for vk::VertexInputBindingDescription {

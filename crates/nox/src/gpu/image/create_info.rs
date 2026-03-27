@@ -4,24 +4,22 @@ use super::*;
 pub struct ImageCreateInfo<'a> {
     pub(crate) out: &'a mut ImageId,
     pub(crate) memory_binder: ResourceBinder,
-    pub(super) aspects: ImageAspectFlags,
+    pub(super) aspects: ImageAspects,
     pub(super) dimensions: Dimensions,
-    pub(super) format: vk::Format,
-    pub(super) usage: ImageUsageFlags,
+    pub(super) format: Format,
+    pub(super) usage: ImageUsages,
     pub(super) samples: MsaaSamples,
     pub(super) array_layers: u32,
     pub(super) mip_levels: u32,
     pub(super) cube_map: bool,
     pub(super) mutable_format: bool,
     pub(super) resolve_modes: FormatResolveModes,
+    pub(super) texel_block_size: DeviceSize,
 }
 
 impl<'a> ImageCreateInfo<'a> {
 
     /// Creates new [`ImageCreateInfo`].
-    ///
-    /// Note that the create info isn't valid until you set image dimensions and format with
-    /// [`ImageCreateInfo::with_dimensions`] and [`ImageCreateInfo::with_format`].
     ///
     /// # Parameters
     /// - `out`: A mutable reference to where the [`ImageId`] of the created image will be stored.
@@ -30,14 +28,17 @@ impl<'a> ImageCreateInfo<'a> {
     /// [`vk::DeviceMemory`] object and is *not* mappable.
     ///
     /// You can specify a different memory binder by [`ImageCreateInfo::with_memory_binder`].
+    /// # Valid usage
+    /// - The dimensions and format of the image *must* be specified with
+    ///   [`ImageCreateInfo::with_dimensions`] and [`ImageCreateInfo::with_format`].
     #[inline(always)]
     pub fn new(out: &'a mut ImageId) -> Self {
         Self {
             out,
             memory_binder: Default::default(),
-            aspects: ImageAspectFlags::empty(),
+            aspects: ImageAspects::empty(),
             dimensions: Dimensions::new(0, 0, 0),
-            format: vk::Format::UNDEFINED,
+            format: Format::Undefined,
             usage: Default::default(),
             samples: MsaaSamples::X1,
             array_layers: 1,
@@ -45,6 +46,7 @@ impl<'a> ImageCreateInfo<'a> {
             cube_map: false,
             mutable_format: false,
             resolve_modes: Default::default(),
+            texel_block_size: 0,
         }
     }
 
@@ -64,24 +66,27 @@ impl<'a> ImageCreateInfo<'a> {
     /// Setting the depth to a value other than one makes the image a 3D image, which requires the
     /// images array layers to be one.
     #[inline(always)]
-    pub fn with_dimensions(mut self, dimensions: Dimensions) -> Self {
-        self.dimensions = dimensions;
+    pub fn with_dimensions<D>(mut self, dimensions: D) -> Self
+        where D: Into<Dimensions>
+    {
+        self.dimensions = dimensions.into();
         self
     }
 
     /// Specifies the images format and whether it can be mutated when creating an image subview.
     #[inline(always)]
-    pub fn with_format<F: Format>(mut self, format: F, mutable: bool) -> Self {
-        self.format = format.as_vk_format();
+    pub fn with_format(mut self, format: Format, mutable: bool) -> Self {
+        self.format = format;
         self.aspects = format.aspects();
         self.resolve_modes = format.resolve_modes();
+        self.texel_block_size = format.texel_block_size();
         self.mutable_format = mutable;
         self
     }
 
     /// Specifies what the image *can* be used for.
     #[inline(always)]
-    pub fn with_usage(mut self, usage: ImageUsageFlags) -> Self {
+    pub fn with_usage(mut self, usage: ImageUsages) -> Self {
         self.usage |= usage;
         self
     }
@@ -104,8 +109,8 @@ impl<'a> ImageCreateInfo<'a> {
 
     /// Specifies that the image can be used as a cube map.
     ///
-    /// Requires that the width and height of the image are the same, depth is one and array layers
-    /// is a multiple of six.
+    /// Requires that the width and height of the image are the same, depth is one and that array
+    /// layer count is greater than or equal to 6.
     ///
     /// To unset this, pass [`None`].
     #[inline(always)]
@@ -113,7 +118,6 @@ impl<'a> ImageCreateInfo<'a> {
         if let Some(dim) = cube_dimensions {
             self.cube_map = true;
             self.dimensions = Dimensions::new(dim, dim, 1);
-            self.array_layers = self.array_layers.next_multiple_of(6);
         } else {
             self.cube_map = false;
         }
@@ -130,11 +134,11 @@ impl<'a> ImageCreateInfo<'a> {
     #[inline(always)]
     pub(crate) fn build(
         &self,
-        vk: Arc<Vulkan>,
+        device: LogicalDevice,
         alloc: &mut (impl MemoryBinder + ?Sized),
         bind_memory_info: &mut vk::BindImageMemoryInfo<'static>,
-    ) -> Result<ImageMeta, dev_error::Error>
+    ) -> Result<ImageMeta>
     {
-        ImageMeta::new(vk, self, alloc, bind_memory_info)
+        ImageMeta::new(device, self, alloc, bind_memory_info)
     }
 }

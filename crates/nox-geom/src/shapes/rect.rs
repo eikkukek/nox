@@ -259,9 +259,8 @@ impl Rect {
 
     #[inline(always)]
     pub fn eq_epsilon(&self, rhs: &Rect, epsilon: f32) -> bool {
-        return
-            self.min.eq_epsilon(rhs.min, epsilon) &&
-            self.max.eq_epsilon(rhs.max, epsilon) &&
-            (self.rounding - rhs.rounding).abs() < epsilon
+        self.min.eq_epsilon(rhs.min, epsilon) &&
+        self.max.eq_epsilon(rhs.max, epsilon) &&
+        (self.rounding - rhs.rounding).abs() < epsilon
     }
 }

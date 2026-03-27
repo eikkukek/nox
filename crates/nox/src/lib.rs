@@ -1,37 +1,29 @@
+//#![warn(missing_docs)]
+
 mod version;
 mod attributes;
+mod nox;
 
 pub mod error;
 pub mod sync;
-mod nox;
 pub mod gpu;
-mod interface;
 
 mod clipboard;
 
-pub mod dev;
+mod globals;
+pub use globals::Globals;
 
-mod on_init;
-pub use on_init::OnInit;
+mod misc;
 
-pub mod misc;
+pub use nox_mem as mem;
+pub use nox_alloc as alloc;
+pub use nox_log as log;
+pub use nox_threads as threads;
+pub use nox_ash as ash;
 
-mod prelude {
+pub use version::Version;
+pub use attributes::*;
+pub use nox::*;
+pub use mem::array_string;
 
-    use super::*;
-
-    pub use nox_mem as mem;
-    pub use nox_alloc as alloc;
-    pub use nox_log as log;
-    pub use nox_threads as threads;
-    pub use nox_ash;
-
-    pub use version::Version;
-    pub use attributes::*;
-    pub use nox::*;
-    pub use interface::Interface;
-    pub use mem::array_string;
-}
-
-pub use prelude::*;
-pub use error::{Error, Result};
+pub use error::{Error, Result, EventError, EventResult};

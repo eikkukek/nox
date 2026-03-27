@@ -10,7 +10,7 @@ macro_rules! load_fn {
             unsafe extern "system" fn $rname(
                 $(_: $arg),*
             ) -> $ret {
-                panic!(concat!("Unable to load ", stringify!($rname)))
+                panic!(concat!("unable to load ", stringify!($rname)))
             }
             let val = $load($cname);
             if val.is_null() {
@@ -58,9 +58,15 @@ macro_rules! ash_style_enum {
                 Self(0)
             }
 
+            /// Clears all flags.
+            #[inline(always)]
+            pub const fn clear(&mut self) {
+                self.0 = 0;
+            }
+
             /// Returns the underlying value of `self`.
             #[inline(always)]
-            pub const fn as_raw(&self) -> $repr {
+            pub const fn as_raw(self) -> $repr {
                 self.0
             }
 
@@ -88,20 +94,24 @@ macro_rules! ash_style_enum {
                 self.0 & other.0 == other.0
             }
 
-            const DEBUG_LOOK_UP: [&str; <$repr>::BITS as usize + 1] = {
-                let mut names = [""; <$repr>::BITS as usize + 1];
+            const DEBUG_LOOK_UP: [Option<&str>; <$repr>::BITS as usize + 1] = {
+                let mut names = [None; <$repr>::BITS as usize + 1];
                 $(
-                    names[Self::$field.0.trailing_zeros() as usize]
-                        = stringify!($field);
+                    if Self::$field.0.count_ones() == 1 {
+                        names[Self::$field.0.trailing_zeros() as usize]
+                            = Some(stringify!($field));
+                    }
                 )*
                 names
             };
 
-            const DISPLAY_LOOK_UP: [&str; <$repr>::BITS as usize + 1] = {
-                let mut names = [""; <$repr>::BITS as usize + 1];
+            const DISPLAY_LOOK_UP: [Option<&str>; <$repr>::BITS as usize + 1] = {
+                let mut names = [None; <$repr>::BITS as usize + 1];
                 $(
-                    names[Self::$field.0.trailing_zeros() as usize]
-                        = $display;
+                    if Self::$field.0.count_ones() == 1 {
+                        names[Self::$field.0.trailing_zeros() as usize]
+                            = Some($display);
+                    }
                 )*
                 names
             };
@@ -191,9 +201,23 @@ macro_rules! ash_style_enum {
                     let bit = unsafe {
                         iter.next().unwrap_unchecked()
                     };
-                    write!(f, "[{}", Self::DEBUG_LOOK_UP[bit.trailing_zeros() as usize])?;
+                    match Self::DEBUG_LOOK_UP[bit.trailing_zeros() as usize] {
+                        Some(look_up) => {
+                            write!(f, "[{}", look_up)?;
+                        },
+                        None => {
+                            write!(f, "[{:#x}", bit)?;
+                        }
+                    };
                     for bit in iter {
-                        write!(f, " | {}", Self::DEBUG_LOOK_UP[bit.trailing_zeros() as usize])?;
+                        match Self::DEBUG_LOOK_UP[bit.trailing_zeros() as usize] {
+                            Some(look_up) => {
+                                write!(f, " | {}", look_up)?;
+                            },
+                            None => {
+                                write!(f, " | {:#x}", bit)?;
+                            }
+                        };
                     }
                     write!(f, "]")
                 }
@@ -204,15 +228,29 @@ macro_rules! ash_style_enum {
 
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 if self.is_empty() {
-                    write!(f, "[None]")
+                    write!(f, "[none]")
                 } else {
                     let mut iter = <$repr as $crate::mem::num::Integer>::bit_iter(self.0);
                     let bit = unsafe {
                         iter.next().unwrap_unchecked()
                     };
-                    write!(f, "[{}", Self::DISPLAY_LOOK_UP[bit.trailing_zeros() as usize])?;
+                    match Self::DISPLAY_LOOK_UP[bit.trailing_zeros() as usize] {
+                        Some(look_up) => {
+                            write!(f, "[{}", look_up)?;
+                        },
+                        None => {
+                            write!(f, "[{:#x}", bit)?;
+                        }
+                    };
                     for bit in iter {
-                        write!(f, " | {}", Self::DISPLAY_LOOK_UP[bit.trailing_zeros() as usize])?;
+                        match Self::DISPLAY_LOOK_UP[bit.trailing_zeros() as usize] {
+                            Some(look_up) => {
+                                write!(f, " | {}", look_up)?;
+                            },
+                            None => {
+                                write!(f, " | {:#x}", bit)?;
+                            }
+                        };
                     }
                     write!(f, "]")
                 }

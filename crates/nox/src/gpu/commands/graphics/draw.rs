@@ -1,79 +1,67 @@
-use core::ops::{Deref, DerefMut};
-use std::fs::create_dir_all;
-
-use nox_ash::vk;
+use core::{
+    ops::{Deref, DerefMut},
+    marker::PhantomData,
+    num::NonZeroU64,
+};
 
 use compact_str::format_compact;
 
+use nox_proc::BuildStructure;
 use nox_mem::{
-    vec::{NonNullVec32, Vec32, ArrayVec, Vector},
-    alloc::LocalAlloc,
-    borrow::SizedCowMut,
+    alloc::LocalAlloc, conditional::True, option::OptionExt, slice, slot_map::SlotIndex, vec::{FixedVec32, NonNullVec32, Vec32}
 };
-
+use nox_ash::vk;
 use nox_alloc::arena::*;
 
 use crate::{
     gpu::{
         prelude::*,
-        commands::prelude::ShaderResourceBindCall,
+        command_cache::PipelineCommandCache,
+        ext::push_descriptor,
     },
-    dev::error::*,
+    error::*,
+    threads::executor::block_on,
 };
 
-#[derive(Clone, Copy, Debug)]
-pub struct IndexedDrawInfo {
-    first_index: u32,
-    index_count: u32,
-    index_type: IndexType,
-    first_instance: u32,
-    instance_count: u32,
-    vertex_offset: i32,
+#[derive(Clone, Copy, BuildStructure)]
+pub struct DrawInfo {
+    #[default(0)]
+    pub first_vertex: u32,
+    #[default(1)]
+    pub vertex_count: u32,
+    #[default(0)]
+    pub first_instance: u32,
+    #[default(1)]
+    pub instance_count: u32,
 }
 
-impl IndexedDrawInfo {
-    
-    #[inline(always)]
-    pub fn new(
-        first_index: u32,
-        index_count: u32,
-        index_type: IndexType,
-    ) -> Self {
-        Self {
-            first_index,
-            index_count,
-            index_type,
-            first_instance: 0,
-            instance_count: 1,
-            vertex_offset: 0,
-        }
-    }
-
-    #[inline(always)]
-    pub fn with_instances(mut self, first_instance: u32, instance_count: u32) -> Self {
-        self.first_instance = first_instance;
-        self.instance_count = instance_count;
-        self
-    }
-
-    #[inline(always)]
-    pub fn with_vertex_offset(mut self, offset: i32) -> Self {
-        self.vertex_offset = offset;
-        self
-    }
+#[derive(Clone, Copy, BuildStructure)]
+pub struct IndexedDrawInfo {
+    #[default(0)]
+    pub first_index: u32,
+    #[default(1)]
+    pub index_count: u32,
+    #[default(IndexType::U32)]
+    pub index_type: IndexType,
+    #[default(0)]
+    pub first_instance: u32,
+    #[default(1)]
+    pub instance_count: u32,
+    #[default(0)]
+    pub vertex_offset: i32,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct DrawBufferRange {
     pub id: BufferId,
     pub offset: u64,
-    pub size: u64
+    pub size: Option<NonZeroU64>,
 }
 
 impl DrawBufferRange {
 
     #[inline(always)]
-    pub fn new(id: BufferId, offset: u64, size: u64) -> Self {
+    pub fn new(id: BufferId, offset: u64, size: Option<NonZeroU64>) -> Self {
         Self {
             id,
             offset,
@@ -104,142 +92,184 @@ pub(super) struct DrawCall {
     pub vertex_buffers: NonNullVec32<'static, DrawBufferRange>,
 }
 
-#[derive(Default)]
-pub(crate) struct DrawCommandCache {
+pub(crate) struct DrawCommandStorage {
     pub(super) pipelines: Vec32<PipelineHandle>,
-    pub(super) shader_resource_binds: Vec32<ShaderResourceBindCall>,
+    pub(super) pipeline_cache: PipelineCommandCache,
     pub(super) draw_calls: Vec32<DrawCall>,
+    pub command_buffer: vk::CommandBuffer,
+    pub(super) wait_scope: vk::PipelineStageFlags2,
+    pub(super) color_formats: NonNullVec32<'static, Format>,
+    pub(super) depth_format: Format,
+    pub(super) stencil_format: Format,
+    pub(super) sample_count: MsaaSamples,
 }
 
-unsafe impl Send for DrawCommandCache {}
-unsafe impl Sync for DrawCommandCache {}
-
-impl DrawCommandCache {
-
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[inline(always)]
-    pub fn clear(&mut self) {
-        self.pipelines.clear();
-        self.shader_resource_binds.clear();
-        self.draw_calls.clear();
-    }
+#[derive(Default, Clone, Copy, BuildStructure)]
+pub struct DrawCommandInfo<'a> {
+    pub color_formats: &'a [Format],
+    pub depth_format: Format,
+    pub stencil_format: Format,
+    pub sample_count: MsaaSamples,
 }
 
-pub(crate) enum DrawCommandAlloc<'a> {
-    Borrowed(&'a (dyn LocalAlloc<Error = Error> + 'a)),
-    Owned(Box<dyn LocalAlloc<Error = Error> + 'a>),
-}
-
-impl<'a> Deref for DrawCommandAlloc<'a> {
-
-    type Target = dyn LocalAlloc<Error = Error> + 'a;
+impl DrawCommandStorage {
 
     #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Self::Borrowed(b) => b,
-            Self::Owned(o) => o.deref(),
+    pub fn new(
+        push_descriptor_device: Option<push_descriptor::Device>,
+    ) -> Self {
+        Self {
+            pipelines: Default::default(),
+            pipeline_cache: PipelineCommandCache::new(push_descriptor_device),
+            draw_calls: Default::default(),
+            command_buffer: Default::default(),
+            wait_scope: Default::default(),
+            color_formats: NonNullVec32::default(),
+            depth_format: Format::Undefined,
+            stencil_format: Format::Undefined,
+            sample_count: MsaaSamples::X1,
         }
     }
-}
-
-pub(crate) struct DrawCommandStorage<'a> {
-    pub(super) command_buffer: vk::CommandBuffer,
-    color_formats: NonNullVec32<'a, vk::Format>,
-    depth_format: vk::Format,
-    stencil_format: vk::Format,
-    sample_count: MSAA,
-    pub(super) cache: SizedCowMut<'a, DrawCommandCache>,
-    pub(super) wait_scope: vk::PipelineStageFlags2,
-    alloc: DrawCommandAlloc<'a>,
-}
-
-impl<'a> DrawCommandStorage<'a> {
 
     #[inline(always)]
-    pub unsafe fn new(
+    pub fn reinit<Alloc>(
+        &mut self,
         command_buffer: vk::CommandBuffer,
-        color_formats: &[vk::Format],
-        depth_format: vk::Format,
-        stencil_format: vk::Format,
-        sample_count: MSAA,
-        cache: SizedCowMut<'a, DrawCommandCache>,
-        alloc: DrawCommandAlloc<'a>,
-    ) -> Result<Self> {
-        let mut color_f = NonNullVec32::with_capacity(
-            color_formats.len() as u32,
-            &*alloc,
-        )?.into_static();
-        color_f.append(&color_formats);
-        Ok(Self {
-            command_buffer,
-            color_formats: color_f,
-            depth_format,
-            stencil_format,
-            sample_count,
-            cache,
-            wait_scope: vk::PipelineStageFlags2::NONE,
-            alloc,
-        })
+        color_formats: &[Format],
+        depth_format: Format,
+        stencil_format: Format,
+        sample_count: MsaaSamples,
+        alloc: &Alloc,
+    ) -> Result<()>
+        where Alloc: LocalAlloc<Error = Error>
+    {
+        self.command_buffer = command_buffer;
+        self.wait_scope = vk::PipelineStageFlags2::NONE;
+        self.color_formats = NonNullVec32
+            ::with_capacity(color_formats.len() as u32, alloc)?
+            .into_static();
+        self.color_formats.fast_append(color_formats);
+        self.depth_format = depth_format;
+        self.stencil_format = stencil_format;
+        self.sample_count= sample_count;
+        Ok(())
     }
-}
 
-impl<'a> Drop for DrawCommandStorage<'a> {
-
-    #[inline(always)]
-    fn drop(&mut self) {
+    pub unsafe fn reset<Alloc>(
+        &mut self,
+        alloc: &Alloc
+    ) where Alloc: LocalAlloc<Error = Error>,
+    {
         unsafe {
-            let alloc = &*self.alloc;
-            self.color_formats.drop_and_free(alloc);
-            let cache = self.cache.deref_mut();
-            for call in &mut cache.shader_resource_binds {
-                call.sets.drop_and_free(alloc);
-                call.barriers.drop_and_free(alloc);
-            }
-            for call in &mut cache.draw_calls {
+            self.pipeline_cache.reset(alloc);
+            for call in &mut self.draw_calls {
                 call.vertex_buffers.drop_and_free(alloc);
             }
-            cache.clear();
+            self.color_formats.drop_and_free(alloc);
+            self.draw_calls.clear();
+            self.pipelines.clear();
         }
     }
 }
 
-pub struct DrawCommands<'a, 'b> {
-    pub(super) gpu: &'a Gpu,
-    pub(super) storage: &'a mut DrawCommandStorage<'b>,
-    pub(super) buffers: DynResourceReadGuard<'a, BufferMeta, BufferId>,
-    pub(super) images: DynResourceReadGuard<'a, ImageMeta, ImageId>,
-    pub(super) last_pipeline: Option<GraphicsPipeline>,
+pub(crate) struct DrawCommandResource {
+    pub queue: DeviceQueue,
+    pub storage: DrawCommandStorage,
+    pub alloc: Arena<True>,
+    pub _pool_handle: CommandPoolHandle,
 }
 
-impl<'a, 'b> DrawCommands<'a, 'b> {
+impl Drop for DrawCommandResource {
+
+    fn drop(&mut self) {
+        unsafe {
+            self.storage.reset(&self.alloc);
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
+#[display("{0}")]
+pub struct DrawCommandId(pub(crate) SlotIndex<DrawCommandResource>);
+
+mod state {
+
+    pub trait CanBeginDraw {}
+    pub trait CanDraw {}
+    pub trait CanDrawIndexed {}
+
+    pub struct Base {}
+    impl CanBeginDraw for Base {}
+
+    pub struct Draw {}
+    impl CanDraw for Draw {}
+
+    pub struct DrawIndexed {}
+    impl CanDrawIndexed for DrawIndexed {}
+}
+
+pub struct DrawPipelineCommands<'a, 'b, State = state::Base> {
+    general: PipelineCommands<'a, 'b>,
+    pipeline: &'a GraphicsPipeline,
+    wait_scope: &'a mut vk::PipelineStageFlags2,
+    draw_calls: &'a mut Vec32<DrawCall>,
+    draw_info: Option<DrawInfo>,
+    indexed_draw_info: Option<IndexedDrawInfo>,
+    _marker: PhantomData<State>,
+}
+
+pub struct DrawCommands<'a> {
+    gpu: Gpu,
+    storage: &'a mut DrawCommandStorage,
+    buffers: ResourceReadGuard<'a, BufferMeta, BufferId>,
+    images: ResourceReadGuard<'a, ImageMeta, ImageIndex>,
+    last_pipeline: Option<GraphicsPipeline>,
+    alloc: &'a dyn LocalAlloc<Error = Error>
+}
+
+impl<'a> DrawCommands<'a> {
+
+    pub(crate) fn new(
+        gpu: Gpu,
+        storage: &'a mut DrawCommandStorage,
+        alloc: &'a dyn LocalAlloc<Error = Error>,
+        buffers: ResourceReadGuard<'a, BufferMeta, BufferId>,
+        images: ResourceReadGuard<'a, ImageMeta, ImageIndex>,
+    ) -> Self {
+        Self {
+            gpu,
+            storage,
+            buffers,
+            images,
+            last_pipeline: None,
+            alloc,
+        }
+    }
 
     /// Binds a graphics pipeline used for all subsequent draw commands.
     ///
     /// # Valid usage
     /// - `id` *must* be a valid [`GraphicsPipelineId`].
     /// - The bound pipeline's sample count *must* match the sample counts defined when creating
-    /// [`self`].
+    ///   the [`draw commands`][1].
     /// - The bound pipeline's color output formats *must* match the color output formats defined
-    /// when creating [`self`].
+    ///   when creating the [`draw commands`][1].
     /// - The bound pipeline's depth and stencil formats *must* match the respective formats
-    /// defined when creating [`self`].
+    ///   defined when creating the [`draw commands`][1].
     /// - The valid usage section of [`DrawCommands::set_multi_viewport`] apply when the number of
-    /// viewports and scissors is not one.
+    ///   viewports and scissors is not one.
+    ///
+    /// [1]: DrawCommands
     ///
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindPipeline.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindPipeline.html>
     pub fn bind_pipeline(
         &mut self,
         id: GraphicsPipelineId,
         viewports: &[Viewport],
         scissors: &[Scissor],
-    ) -> Result<()> {
-        let pipeline = self.gpu.get_graphics_pipeline(id)?;
+    ) -> Result<DrawPipelineCommands<'_, 'a>> {
+        let pipeline = block_on(self.gpu.get_graphics_pipeline(id))?;
         if pipeline.samples() != self.storage.sample_count {
             return Err(Error::just_context(format_compact!(
                 "pipeline sample count {} must match pass sample count {}",
@@ -253,39 +283,98 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
         }
         if pipeline.depth_output_format() != self.storage.depth_format {
             return Err(Error::just_context(format_compact!(
-                "pipeline depth output format {:?} doesn't match with pass depth format {:?}",
+                "pipeline depth output format {} doesn't match with pass depth format {}",
                 pipeline.depth_output_format(), self.storage.depth_format,
             )))
         }
         if pipeline.stencil_output_format() != self.storage.stencil_format {
             return Err(Error::just_context(format_compact!(
-                "pipeline stencil output format {:?} doesn't match with pass stencil format {:?}",
+                "pipeline stencil output format {} doesn't match with pass stencil format {}",
                 pipeline.stencil_output_format(), self.storage.stencil_format,
             )))
         }
         let handle = pipeline.handle().clone();
         unsafe {
-            self.gpu.vk().device().cmd_bind_pipeline(
+            self.gpu.device().cmd_bind_pipeline(
                 self.storage.command_buffer, vk::PipelineBindPoint::GRAPHICS, handle.handle()
             );
         }
-        self.storage.cache.pipelines.push(handle);
+        self.storage.pipelines.push(handle);
         self.last_pipeline = Some(pipeline.clone());
+        let mut p = self.pipeline_commands().unwrap();
         if viewports.len() != 1 {
-            self.set_multi_viewport(viewports, scissors)?;
+            p.set_multi_viewport(viewports, scissors)?;
         } else {
-            self.set_viewport(viewports[0], scissors[0])?;
+            p.set_viewport(viewports[0], scissors[0])?;
         }
-        Ok(())
+        Ok(p)
     }
 
-    pub fn check_dynamic_state(&self, dynamic_state: DynamicState) -> Result<()> {
+    /// Gets the [`pipeline commands`][1] for the last [`pipeline`][2] [`bound`][3].
+    ///
+    /// You can [`bind`][4] and [`push`][5] descriptor sets, [`push constants`][6] and set
+    /// the [`dynamic state`][7] of the [`pipeline`][2]
+    ///
+    /// Returns an error if no pipeline is bound.
+    ///
+    /// [1]: DrawPipelineCommands
+    /// [2]: GraphicsPipeline
+    /// [3]: Self::bind_pipeline
+    /// [4]: PipelineCommands::bind_descriptor_sets
+    /// [5]: PipelineCommands::push_descriptor_bindings
+    /// [6]: PipelineCommands::push_constants
+    /// [7]: DynamicState
+    #[inline(always)]
+    pub fn pipeline_commands(&mut self) -> Result<DrawPipelineCommands<'_, 'a>> {
         let Some(pipeline) = &self.last_pipeline else {
             return Err(Error::just_context(format_compact!(
-                "attempting to set {dynamic_state} with no pipeline bound"
+                "no pipeline bound"
             )))
         };
-        if !pipeline.has_dynamic_state(dynamic_state) {
+        unsafe {
+            Ok(DrawPipelineCommands {
+                general: PipelineCommands::new(
+                    self.gpu.clone(),
+                    self.storage.command_buffer,
+                    pipeline.handle().clone(),
+                    &mut self.storage.pipeline_cache,
+                    self.alloc,
+                    &self.buffers,
+                    &self.images,
+                ),
+                pipeline,
+                wait_scope: &mut self.storage.wait_scope,
+                draw_calls: &mut self.storage.draw_calls,
+                draw_info: None,
+                indexed_draw_info: None,
+                _marker: PhantomData,
+            })
+        }
+    } 
+}
+
+impl<'a, 'b, T> Deref for DrawPipelineCommands<'a, 'b, T> {
+
+    type Target = PipelineCommands<'a, 'b>;
+    
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.general
+    }
+}
+
+impl<'a, 'b, T> DerefMut for DrawPipelineCommands<'a, 'b, T> {
+
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.general
+    }
+}
+
+impl<'a, 'b, State> DrawPipelineCommands<'a, 'b, State> {
+
+    fn check_dynamic_state(&self, dynamic_state: DynamicState) -> Result<()> {
+        if !self.pipeline.has_dynamic_state(dynamic_state) {
             return Err(Error::just_context(format_compact!(
                 "current pipeline's dynamic state doesn't include {dynamic_state}"
             )))
@@ -296,11 +385,18 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets the line width for subsequent drawing commands.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic state 
-    /// includes [`DynamicState::LineWidth`] and if subsequent drawing commands generate line primitives.
-    /// - If [`Gpu::enabled_base_features`] `wide_lines` is set to `false`, `line_width` *must* be 1.0.
-    /// # Vulkan docs link
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetLineWidth.html>**
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic state 
+    ///   includes [`line width`][2] and if subsequent drawing commands generate line primitives.
+    /// - If the [`wide lines`][3] feature of [`enabled base features`][4] is set to `false`, `line_width`
+    ///   *must* be 1.0.
+    ///
+    /// # Vulkan docs
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetLineWidth.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::LineWidth
+    /// [3]: BaseDeviceFeatures::wide_lines
+    /// [4]: Gpu::enabled_base_features
     pub fn set_line_width(
         &mut self,
         line_width: f32,
@@ -312,8 +408,8 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
             )))
         }
         unsafe {
-            self.gpu.vk().device().cmd_set_line_width(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_line_width(
+                self.command_buffer,
                 line_width
             );
         }
@@ -326,14 +422,19 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// - `depth_bias_constant_factor`: controls the constant value added to each fragment
     /// - `depth_bias_clamp`: is the maximum (or minimum) depth bias of the fragment
     /// - `depth_bias_slope_factor`: a scalar applied to a fragment's slope in depth bias
-    /// calculations
+    ///   calculations
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic state
-    /// includes [`DynamicState::DepthBias`] and if subsequent drawing commands have depth bias enabled.
-    /// - If [`Gpu::enabled_base_features`] `depth_bias_clamp` is set to `false`, `depth_bias_clamp` *must*
-    /// be 0.0.
-    /// # Vulkan docs link
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthBias.html>**
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic state
+    ///   includes [`depth bias`][2] and if subsequent drawing commands have depth bias enabled.
+    /// - If the [`depth bias clamp`][3] feature of [`enabled base features`][4] is set to `false`,
+    ///   `depth_bias_clamp` *must* be 0.0.
+    /// # Vulkan docs
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthBias.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::DepthBias
+    /// [3]: BaseDeviceFeatures::depth_bias_clamp
+    /// [4]: Gpu::enabled_base_features
     pub fn set_depth_bias(
         &mut self,
         depth_bias_constant_factor: f32,
@@ -348,8 +449,8 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
             )))
         }
         unsafe {
-            self.gpu.vk().device().cmd_set_depth_bias(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_depth_bias(
+                self.command_buffer,
                 depth_bias_constant_factor, 
                 depth_bias_clamp,
                 depth_bias_slope_factor
@@ -362,21 +463,25 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     ///
     /// # Parameters
     /// - `blend_constants`: specifies the `[R, G, B, A]` color components of the blend constant
-    /// color used in blending, depending on the [`BlendFactor`].
+    ///   color used in blending, depending on the [`blend factor`][1].
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic state
-    /// includes [`DynamicState::BlendConstants`] and if subsequent drawing commands have blending
-    /// enabled with blend functions using a constant blend constant.
-    /// # Vulkan docs link
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetBlendConstants.html>**
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][2] dynamic state
+    ///   includes [`blend constants`][3] and if subsequent drawing commands have blending
+    ///   enabled with blend functions using a blend constant.
+    ///
+    /// [1]: BlendFactor
+    /// [2]: GraphicsPipeline
+    /// [3]: DynamicState::BlendConstants
+    /// # Vulkan docs
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetBlendConstants.html>
     pub fn set_blend_constants(
         &self,
         blend_constants: [f32; 4],
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::BlendConstants)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_blend_constants(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_blend_constants(
+                self.command_buffer,
                 &blend_constants
             );
         }
@@ -386,13 +491,17 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets the depth bounds range.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic state
-    /// includes [`DynamicState::DepthBounds`] and if subsequent drawing commands have depth
-    /// bounds test enabled.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic state
+    ///   includes [`depth bounds`][2] and if subsequent drawing commands have depth
+    ///   bounds test enabled.
     /// - `min_depth_bounds` must be less than or equal to `max_depth_bounds` and both bounds need to be
-    /// between `0.0` and `1.0` (inclusively).
+    ///   between `0.0` and `1.0` inclusively.
+    ///
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthBounds.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthBounds.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::DepthBounds
     pub fn set_depth_bounds(
         &mut self,
         min_depth_bounds: f32,
@@ -415,8 +524,8 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
             )))
         }
         unsafe {
-            self.gpu.vk().device().cmd_set_depth_bounds(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_depth_bounds(
+                self.command_buffer,
                 min_depth_bounds,
                 max_depth_bounds
             );
@@ -427,18 +536,22 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets the stencil compare mask.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state inludes [`DynamicState::StencilCompareMask`] and if subsequent drawing commands
-    /// have stencil test enabled.
-    /// - Both [`StencilFaceFlags::FRONT`] and [`StencilFaceFlags::BACK`] *must* be set (either together or
-    /// separately) if stencil test is enabled.
-    /// - `face_mask` *must* not be [`StencilFaceFlags::empty`] and *must* be a valid bitmask of
-    /// [`StencilFaceFlags`] bits.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state inludes [`stencil compare mask`][2] and if subsequent drawing commands
+    ///   have stencil test enabled.
+    /// - Both [`front and back faces`][3] *must* be set (either together or separately) if
+    ///   stencil test is enabled.
+    /// - `face_mask` *must* not be empty and *must* be a valid [`stencil face`][3] bitmask.
+    ///
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilCompareMask.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilCompareMask.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::StencilCompareMask
+    /// [3]: StencilFaces
     pub fn set_stencil_compare_mask(
         &mut self,
-        face_mask: StencilFaceFlags,
+        face_mask: StencilFaces,
         compare_mask: u32
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::StencilCompareMask)?;
@@ -448,8 +561,8 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
             ))
         }
         unsafe {
-            self.gpu.vk().device().cmd_set_stencil_compare_mask(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_stencil_compare_mask(
+                self.command_buffer,
                 face_mask.into(),
                 compare_mask
             );
@@ -460,18 +573,21 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets stencil write mask.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::StencilWriteMask`] and if subsequent drawing commands have
-    /// stencil test enabled.
-    /// - Both [`StencilFaceFlags::FRONT`] and [`StencilFaceFlags::BACK`] *must* be set (either
-    /// together or separately) if stencil test is enabled.
-    /// - `face_mask` *must* not be [`StencilFaceFlags::empty`] and *must* be a valid bitmask of
-    /// [`StencilFaceFlags`] bits.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`stencil write mask`][2] and if subsequent drawing commands have
+    ///   stencil test enabled.
+    /// - Both [`front and back faces`][3] *must* be set (either together or separately) if
+    ///   stencil test is enabled.
+    /// - `face_mask` *must* not be empty and *must* be a valid [`stencil face`][3] bitmask.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilWriteMask.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilWriteMask.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::StencilWriteMask
+    /// [3]: StencilFaces
     pub fn set_stencil_write_mask(
         &mut self,
-        face_mask: StencilFaceFlags,
+        face_mask: StencilFaces,
         write_mask: u32,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::StencilWriteMask)?;
@@ -481,8 +597,8 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
             ))
         }
         unsafe {
-            self.gpu.vk().device().cmd_set_stencil_write_mask(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_stencil_write_mask(
+                self.command_buffer,
                 face_mask.into(),
                 write_mask
             );
@@ -493,18 +609,21 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets stencil reference.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::StencilReference`] and if subsequent drawing commands have
-    /// stencil test enabled.
-    /// - Both [`StencilFaceFlags::FRONT`] and [`StencilFaceFlags::BACK`] *must* be set (either
-    /// together or separately) if stencil test is enabled.
-    /// - `face_mask` *must* not be [`StencilFaceFlags::empty`] and *must* be a valid bitmask of
-    /// [`StencilFaceFlags`] bits.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`stencil reference`][3] and if subsequent drawing commands have
+    ///   stencil test enabled.
+    /// - Both [`front and back faces`][3] *must* be set (either together or separately) if
+    ///   stencil test is enabled.
+    /// - `face_mask` *must* not be empty and *must* be a valid [`stencil face`][3] bitmask.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilReference.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilReference.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::StencilReference
+    /// [3]: StencilFaces
     pub fn set_stencil_reference(
         &mut self,
-        face_mask: StencilFaceFlags,
+        face_mask: StencilFaces,
         reference: u32,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::StencilReference)?;
@@ -514,8 +633,8 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
             ))
         }
         unsafe {
-            self.gpu.vk().device().cmd_set_stencil_reference(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_stencil_reference(
+                self.command_buffer,
                 face_mask.into(),
                 reference
             );
@@ -526,20 +645,24 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets cull mode.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::CullMode`] and if there are *any* subsequent drawing
-    /// commands using the pipeline.
-    /// - `cull_mode` *must* be a valid bitmask of [`CullModeFlags`] bits.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`cull mode`][2] and if there are *any* subsequent drawing commands
+    ///   using the pipeline.
+    /// - `cull_mode` *must* be a valid [`cull mode`][3] bitmask.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetCullMode.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetCullMode.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::CullMode
+    /// [3]: CullModes
     pub fn set_cull_mode(
         &mut self,
-        cull_mode: CullModeFlags,
+        cull_mode: CullModes,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::CullMode)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_cull_mode(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_cull_mode(
+                self.command_buffer,
                 vk::CullModeFlags::from_raw(cull_mode.as_raw()),
             );
         }
@@ -549,21 +672,23 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets front face orientation.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::FrontFace`] and if there are *any* subsequent drawing
-    /// commands using the pipeline.
-    /// - `front_face` *must* be a valid [`FrontFace`] value.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`front face`][2] and if there are *any* subsequent drawing commands
+    ///   using the pipeline.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetFrontFace.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetFrontFace.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::FrontFace
     pub fn set_front_face(
         &mut self,
         front_face: FrontFace,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::FrontFace)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_front_face(
-                self.storage.command_buffer,
-                vk::FrontFace::from_raw(front_face.as_raw()),
+            self.gpu.device().cmd_set_front_face(
+                self.command_buffer,
+                front_face.into(),
             );
         }
         Ok(())
@@ -572,20 +697,23 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets primitive topology.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::PrimitiveTopology`] and if there are *any* subsequent drawing
-    /// commands using the pipeline.
-    /// - `primitive_topology` *must* be a valid [`PrimitiveTopology`] value.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`primitive topology`][2] and if there are *any* subsequent drawing
+    ///   commands using the pipeline.
+    ///
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetPrimitiveTopology.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetPrimitiveTopology.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::PrimitiveTopology
     pub fn set_primitive_topology(
         &mut self,
         primitive_topology: PrimitiveTopology,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::PrimitiveTopology)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_primitive_topology(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_primitive_topology(
+                self.command_buffer,
                 primitive_topology.into(),
             );
         }
@@ -594,24 +722,22 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
 
     /// Dynamically sets viewport.
     ///
-    /// This is equivalent to (and more efficient than) calling
-    /// [`DrawCommands::set_multi_viewport`] with just one viewport.
+    /// This is equivalent to (and more efficient than) calling [`set_multi_viewport`][1] with just
+    /// one viewport
     ///
-    /// This is automatically called when binding a pipeline with a viewport count of 1.
+    /// This is automatically called when binding a [`pipeline`][2] with a viewport count of one.
     ///
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetViewportWithCount.html>**
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetScissorWithCount.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetViewportWithCount.html>
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetScissorWithCount.html>
+    ///
+    /// [1]: DrawCommands::set_multi_viewport
+    /// [2]: GraphicsPipeline
     pub fn set_viewport(
         &mut self,
         viewport: Viewport,
         scissor: Scissor,
     ) -> Result<()> {
-        if self.last_pipeline.is_none() {
-            return Err(Error::just_context(
-                "attempting to set viewport with no pipeline bound"
-            ))
-        }
         let scissor = vk::Rect2D {
             offset: vk::Offset2D {
                 x: scissor.x as i32,
@@ -623,12 +749,12 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
             },
         };
         unsafe {
-            self.gpu.vk().device().cmd_set_viewport_with_count(
-                self.storage.command_buffer,
-                &[viewport],
+            self.gpu.device().cmd_set_viewport_with_count(
+                self.command_buffer,
+                &[viewport.into()],
             );
-            self.gpu.vk().device().cmd_set_scissor_with_count(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_scissor_with_count(
+                self.command_buffer,
                 &[scissor],
             );
         }
@@ -637,31 +763,34 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
 
     /// Dynamically sets multi viewport.
     ///
-    /// This combines `vkCmdSetViewportWithCount` and `vkCmdSetScissorWithCount`.
+    /// This combines [`vkCmdSetViewportWithCount`][1] and [`vkCmdSetScissorWithCount`][2].
     ///
-    /// If you only have one viewport, consider using [`DrawCommands::set_viewport`] for
-    /// efficiency.
+    /// If you only have one viewport, consider using [`set_viewport`][3] for efficiency.
     ///
-    /// This is automatically called when binding a pipeline with more than one viewports.
+    /// This is automatically called when binding a [`pipeline`][4] with more than one viewports.
     ///
     /// # Valid usage
     /// - The number of viewports and scissors *must* match.
-    /// - If [`Gpu::enabled_base_features`] `multi_viewport` is set to `false`, the number of viewports
-    /// *must* be 1. Otherwise the number of viewports *must* be between 1 and [`DeviceLimits::max_viewports`].
-    /// You can get [`DeviceLimits`] with [`Gpu::device_limits`].
+    /// - If [`multi viewport`][5] feature of [`enabled base features`][6] is set to `false`,
+    ///   the number of viewports *must* be 1. Otherwise the number of viewports *must* be
+    ///   between 1 and [`the maximum supported viewports`][7].
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetViewportWithCount.html>**
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetScissorWithCount.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetViewportWithCount.html>
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetScissorWithCount.html>
+    ///
+    /// [1]: <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetViewportWithCount.html>
+    /// [2]: <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetScissorWithCount.html>
+    /// [3]: DrawCommands::set_viewport
+    /// [4]: GraphicsPipeline
+    /// [5]: BaseDeviceFeatures::multi_viewport
+    /// [6]: Gpu::enabled_base_features
+    /// [7]: DeviceLimits::max_viewports
+    /// [8]: DeviceLimits
     pub fn set_multi_viewport(
         &mut self,
         viewports: &[Viewport],
         scissors: &[Scissor],
     ) -> Result<()> {
-        if self.last_pipeline.is_none() {
-            return Err(Error::just_context(
-                "attempting to set multi viewport with no pipeline bound"
-            ))
-        }
         let n = viewports.len() as u32;
         if scissors.len() as u32 != n {
             return Err(Error::just_context(format_compact!(
@@ -681,8 +810,8 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
         }
         let tmp_alloc = self.gpu.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
-        let mut vk_scissors = NonNullVec32::with_capacity(n, &tmp_alloc)?;
-        vk_scissors.append_map(scissors, |scissor| {
+        let mut vk_scissors = FixedVec32::with_capacity(n, &tmp_alloc)?;
+        vk_scissors.extend(scissors.iter().map(|scissor|
             vk::Rect2D {
                 offset: vk::Offset2D {
                     x: scissor.x as i32,
@@ -693,14 +822,14 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
                     height: scissor.height,
                 },
             }
-        });
+        ));
         unsafe {
-            self.gpu.vk().device().cmd_set_viewport_with_count(
-                self.storage.command_buffer,
-                viewports
+            self.gpu.device().cmd_set_viewport_with_count(
+                self.command_buffer,
+                slice::cast(viewports).unwrap_unchecked(),
             );
-            self.gpu.vk().device().cmd_set_scissor_with_count(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_scissor_with_count(
+                self.command_buffer,
                 &vk_scissors
             );
         }
@@ -710,19 +839,22 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically enables depth test.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::DepthTestEnable`] and if there are *any* subsequent drawing
-    /// commands using the pipeline.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`depth test enable`][2] and if there are *any* subsequent drawing
+    ///   commands using the pipeline.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthTestEnable.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthTestEnable.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::DepthTestEnable
     pub fn set_depth_test_enable(
         &mut self,
         enabled: bool
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::DepthTestEnable)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_depth_test_enable(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_depth_test_enable(
+                self.command_buffer,
                 enabled
             );
         }
@@ -732,19 +864,22 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically enables depth write.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::DepthWriteEnable`] and if there are *any* subsequent drawing
-    /// commands using the pipeline.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`depth write enable`][2] and if there are *any* subsequent drawing
+    ///   commands using the pipeline.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthWriteEnable.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthWriteEnable.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::DepthWriteEnable
     pub fn set_depth_write_enable(
         &mut self,
         enabled: bool,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::DepthWriteEnable)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_depth_write_enable(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_depth_write_enable(
+                self.command_buffer,
                 enabled
             );
         }
@@ -754,19 +889,22 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically sets the depth compare operation.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::DepthCompareOp`] and if there are *any* subsequent drawing
-    /// commands using the pipeline.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`depth compare op`][2] and if there are *any* subsequent drawing
+    ///   commands using the pipeline.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthCompareOp.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthCompareOp.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::DepthCompareOp
     pub fn set_depth_compare_op(
         &mut self,
         compare_op: CompareOp,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::DepthCompareOp)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_depth_compare_op(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_depth_compare_op(
+                self.command_buffer,
                 compare_op.into()
             );
         }
@@ -776,19 +914,22 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically enables depth bounds test.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::DepthBoundsTestEnable`] and if there are *any* subsequent drawing
-    /// commands using the pipeline.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`depth bounds test enable`][2] and if there are *any* subsequent drawing
+    ///   commands using the pipeline.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthBoundsTestEnable.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetDepthBoundsTestEnable.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::DepthBoundsTestEnable
     pub fn set_depth_bounds_test_enable(
         &mut self,
         enabled: bool,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::DepthBoundsTestEnable)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_depth_bounds_test_enable(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_depth_bounds_test_enable(
+                self.command_buffer,
                 enabled
             );
         }
@@ -798,19 +939,22 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     /// Dynamically enables stencil test.
     ///
     /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::StencilTestEnable`] and if there are *any* subsequent drawing
-    /// commands using the pipeline.
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`stencil test enable`][2] and if there are *any* subsequent drawing
+    ///   commands using the pipeline.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilTestEnable.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilTestEnable.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::StencilTestEnable
     pub fn set_stencil_test_enable(
         &mut self,
         enabled: bool,
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::StencilTestEnable)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_stencil_test_enable(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_stencil_test_enable(
+                self.command_buffer,
                 enabled
             );
         }
@@ -818,19 +962,22 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     }
 
     /// Dynamically sets the stencil operation.
-    ///    /// # Valid usage
-    /// - This *must* be set if and only if the currently bound [`GraphicsPipeline`]'s dynamic
-    /// state includes [`DynamicState::StencilOp`] and if there are *any* subsequent drawing
-    /// commands using the pipeline with stencil test enabled.
-    /// - Both [`StencilFaceFlags::FRONT`] and [`StencilFaceFlags::BACK`] *must* be set (either together or
-    /// separately) if stencil test is enabled.
-    /// - `face_mask` *must* not be [`StencilFaceFlags::empty`] and *must* be a valid bitmask of
-    /// [`StencilFaceFlags`] bits.
+    /// # Valid usage
+    /// - This *must* be set if and only if the currently bound [`pipeline's`][1] dynamic
+    ///   state includes [`stencil op`][2] and if there are *any* subsequent drawing
+    ///   commands using the pipeline with stencil test enabled.
+    /// - Both [`front and back faces`][3] *must* be set (either together or separately) if
+    ///   stencil test is enabled.
+    /// - `face_mask` *must* not be empty and *must* be a valid [`stencil face`][3] bitmask.
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilOp.html>**
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdSetStencilOp.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::StencilOp
+    /// [3]: StencilFaces
     pub fn set_stencil_op(
         &mut self,
-        face_mask: StencilFaceFlags,
+        face_mask: StencilFaces,
         fail_op: StencilOp,
         pass_op: StencilOp,
         depth_fail_op: StencilOp,
@@ -838,8 +985,8 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
     ) -> Result<()> {
         self.check_dynamic_state(DynamicState::StencilOp)?;
         unsafe {
-            self.gpu.vk().device().cmd_set_stencil_op(
-                self.storage.command_buffer,
+            self.gpu.device().cmd_set_stencil_op(
+                self.command_buffer,
                 face_mask.into(),
                 fail_op.into(),
                 pass_op.into(),
@@ -850,157 +997,226 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
         Ok(())
     }
 
-    pub fn bind_shader_resources<F>(
+    /// Binds vertex buffers and allows performing draw calls within the closure.
+    ///
+    /// # Valid usage
+    /// - Each vertex binding's buffer id *must* be a valid [`BufferId`].
+    /// - Each vertex buffer *must* have been created with [`BufferUsages::VERTEX_BUFFER`] bit
+    ///   set.
+    /// - Each vertex binding's offset + size *must* be less than or equal to the buffer's size.
+    /// - If and only if currently bound [`pipeline's`][1] dynamic state includes
+    ///   [`vertex input binding stride`][2], `vertex_strides` needs to be [`Some`] and
+    ///   the number of vertex strides *must* be equal to the number of vertex bindings.
+    /// - If [`robust buffer access`][3] or [`robust buffer access 2`][4] are not enabled and the
+    ///   [`pipeline`][1] was not created with [`vertex input behavior`][5] value other than
+    ///   [`disabled`][6] then, for a given vertex buffer binding, any attribute data fetched *must*
+    ///   be entirely contained within the corresponding vertex buffer binding.
+    ///
+    /// # Vulkan docs
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindVertexBuffers2.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: DynamicState::VertexInputBindingStride
+    /// [3]: BaseDeviceFeatures::robust_buffer_access
+    /// [4]: ext::robustness2::Attributes::IS_ROBUST_BUFFER_ACCESS_2_ENABLED
+    /// [5]: PipelineRobustnessInfo::vertex_input_behavior
+    /// [6]: PipelineRobustnessBufferBehavior::Disabled
+    pub fn begin_drawing<F>(
         &mut self,
-        barrier_info: &[BindingBarrierInfo],
-        mut f: F,
+        draw_info: DrawInfo,
+        vertex_bindings: &[DrawBufferRange],
+        vertex_strides: Option<&[DeviceSize]>,
+        f: F,
     ) -> Result<()>
         where
-            F: FnMut(u32) -> Option<ShaderResourceId>,
+            State: state::CanBeginDraw,
+            F: FnOnce(&mut DrawPipelineCommands<state::Draw>) -> EventResult<()>,
     {
-        let cache = self.storage.cache.deref_mut();
-        let Some(pipeline) = cache.pipelines.last() else {
-            return Err(Error::just_context("attempting to bind shader resources with no pipeline bound"))
+        *self.wait_scope |= vk::PipelineStageFlags2::VERTEX_INPUT;
+        let n_bindings = vertex_bindings.len() as u32;
+        let mut call = DrawCall {
+            index_buffer: None,
+            vertex_buffers: NonNullVec32::with_capacity(
+                n_bindings,
+                self.alloc,
+            )?.into_static(),
         };
         let tmp_alloc = self.gpu.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
-        let mut barriers = NonNullVec32
-            ::with_capacity(barrier_info.len() as u32, &*self.storage.alloc)?
-            .into_static();
-        barriers.append(barrier_info);
-        let mut bind_call = ShaderResourceBindCall {
-            sets: NonNullVec32::with_capacity(
-                pipeline.shader_set().descriptor_set_layouts().len() as u32,
-                &*self.storage.alloc,
-            )?.into_static(),
-            barriers,
-        };
-        let sets = self.gpu.get_shader_set_resources(
-            pipeline.shader_set(),
-            &tmp_alloc,
-            |index| {
-                let id = f(index);
-                bind_call.sets.push(id);
-                id
-            },
-        )?;
-        if sets.is_empty() {
-            return Ok(())
-        }
-        cache.shader_resource_binds.push(bind_call);
         unsafe {
-            self.gpu.vk().device().cmd_bind_descriptor_sets(
-                self.storage.command_buffer,
-                vk::PipelineBindPoint::GRAPHICS,
-                pipeline.shader_set().pipeline_layout(),
-                0, &sets, &[]
+            let mut vert = FixedVec32::with_capacity(n_bindings, &tmp_alloc)?;
+            let mut vert_offsets = FixedVec32::with_capacity(n_bindings, &tmp_alloc)?;
+            let mut vert_sizes = FixedVec32::with_capacity(n_bindings, &tmp_alloc)?;
+            for (i, buf_info) in vertex_bindings.iter().copied().enumerate() {
+                let buf = self.buffers.get(buf_info.id)?;
+                let size = buf_info.size.unwrap_or_sentinel(
+                    buf.properties().size.wrapping_sub(buf_info.offset)
+                );
+                if buf_info.offset + size > buf.properties().size {
+                    return Err(Error::just_context(format_compact!(
+                        "{}{}",
+                        format_args!("vertex buffer offset {} + size {} is out of",
+                            buf_info.offset, size,
+                        ),
+                        format_args!("range of vertex buffer size {} at vertex binding index {i}",
+                            buf.properties().size,
+                        ),
+                    )))
+                }
+                if let Some(err) = buf.validate_usage(BufferUsages::VERTEX_BUFFER) {
+                    return Err(Error::new(err, format_compact!("vertex buffer has incompatible usage")))
+                }
+                vert.push(buf.handle());
+                vert_offsets.push(buf_info.offset);
+                vert_sizes.push(size);
+                call.vertex_buffers.push(DrawBufferRange {
+                    id: buf_info.id,
+                    offset: buf_info.offset,
+                    size: NonZeroU64::new(size)
+                });
+            }
+            if let Some(strides) = vertex_strides {
+                self.check_dynamic_state(DynamicState::VertexInputBindingStride)?;
+                if strides.len() as u32 != n_bindings {
+                    return Err(Error::just_context(format_compact!(
+                        "the number of vertex strides {} must match the number of vertex bindings {n_bindings}",
+                        strides.len(),
+                    )))
+                }
+            } else if self.check_dynamic_state(DynamicState::VertexInputBindingStride).is_ok() {
+                return Err(Error::just_context(format_compact!(
+                    "{}{}",
+                    "the dynamic state of currently bound pipeline includes vertex input binding stride, ",
+                    "but no strides were given",
+                )))
+            }
+            let command_buffer = self.command_buffer;
+            let device = self.gpu.device();
+            device.cmd_bind_vertex_buffers2(
+                command_buffer,
+                0,
+                &vert, &vert_offsets,
+                Some(&vert_sizes), None
+            );
+        }
+        self.draw_info = Some(draw_info);
+        let cmd = unsafe {
+            &mut *(self as *mut Self).cast::<DrawPipelineCommands<state::Draw>>()
+        };
+        f(cmd).context_from_tracked(|orig| format_compact!(
+            "failed to record draw commands at {}", orig.or_this(),
+        ))?;
+        self.draw_info = None;
+        self.draw_calls.push(call);
+        Ok(())
+    }
+
+    /// Performs a draw call.
+    ///
+    /// This is only usable in a closure passed to [`begin_drawing`][1].
+    ///
+    /// # Valid usage
+    /// - All [`dynamic states`][2] of the currently bound [`pipeline`][3] *must* be defined before
+    ///   performing any draw calls.
+    ///
+    /// # Vulkan docs
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdDraw.html>
+    ///
+    /// [1]: Self::begin_drawing
+    /// [2]: DynamicState
+    /// [3]: GraphicsPipeline
+    pub fn draw(&self) -> Result<()>
+        where State: state::CanDraw
+    {
+        let draw_info = self.draw_info.unwrap();
+        unsafe {
+            self.gpu.device().cmd_draw(
+                self.command_buffer,
+                draw_info.vertex_count,
+                draw_info.instance_count,
+                draw_info.first_vertex,
+                draw_info.first_instance,
             );
         }
         Ok(())
     }
 
-    pub fn push_constants<'c, F>(
-        &self,
-        f: F,
-    ) -> Result<()>
-        where
-            F: FnMut(PushConstantRange) -> &'c [u8],
-    {
-        let Some(pipeline) = self.storage.cache.pipelines.last() else {
-            return Err(Error::just_context("attempting to push constants with no pipeline bound"))
-        };
-        let tmp_alloc = self.gpu.tmp_alloc();
-        let tmp_alloc = tmp_alloc.guard();
-        let push_constants = self.gpu.get_shader_set_push_constant_ranges(
-            pipeline.shader_set(),
-            &tmp_alloc,
-            f
-        )?;
-        for (pc, bytes) in &push_constants {
-            unsafe {
-                self.gpu.vk().device().cmd_push_constants(
-                    self.storage.command_buffer,
-                    pipeline.shader_set().pipeline_layout(),
-                    pc.stage.into(),
-                    pc.offset,
-                    bytes,
-                );
-            }
-        }
-        Ok(())
-    }
-   
-    /// Binds index buffer and vertex buffers and performs an indexed draw call.
+    /// Binds an index buffer and vertex buffers and allows performing draw calls within the
+    /// closure.
     ///
     /// # Valid usage
-    /// - A [`GraphicsPipeline`] needs to be bound.
-    /// - The index type of `draw_info` *must* be a valid [`IndexType`] value.
-    /// - If the index type of `draw_info` is [`IndexType::U8`], the [`index_type_uint8`] device
-    /// extension *must* be enabled.
+    /// - If the [`index type uint8`][2] device extension is not enabled, [`index type`][3] *must*
+    ///   not be [`IndexType::U8`].
     /// - Index buffer id *must* be a valid [`BufferId`].
-    /// - The index buffer *must* have been created with [`BufferUsageFlags::INDEX_BUFFER`] bit
-    /// set.
-    /// - Index buffer offset + [`IndexType::index_size`] * (first_index + index_count) *must* be
-    /// less than or equal to the index buffer's size.
-    /// - Each vertex binding's buffer id *must* be  a valid [`BufferId`].
-    /// - Each vertex buffer *must* have been created with [`BufferUsageFlags::VERTEX_BUFFER`] bit
-    /// set.
+    /// - The index buffer *must* have been created with [`BufferUsages::INDEX_BUFFER`] bit
+    ///   set.
+    /// - Index buffer offset + [`index size`][4] * ([`first index`][5] + [`index count`][6]) *must*
+    ///   be less than or equal to the index buffer's size.
+    /// - Each vertex binding's buffer id *must* be a valid [`BufferId`].
+    /// - Each vertex buffer *must* have been created with [`BufferUsages::VERTEX_BUFFER`] bit
+    ///   set.
     /// - Each vertex binding's offset + size *must* be less than or equal to the buffer's size.
-    /// - If and only if currently bound [`GraphicsPipeline`]'s dynamic state includes
-    /// [`DynamicState::VERTEX_INPUT_BINDING_STRIDE`], `vertex_strides` needs to be [`Some`] and
-    /// the number of vertex strides *must* be equal to the number of vertex bindings.
-    /// - If [`ext::robustness2`] robust buffer access 2 or [`Gpu::enabled_base_features`] robust
-    /// buffer access are not enabled, and the graphics pipeline was not created with
-    /// [`PipelineRobustnessInfo`] vertex input behavior with a value other than
-    /// [`PipelineRobustnessBufferBehavior::DISABLED`], then for a given vertex buffer binding, any
-    /// attribute data fetched *must* be entirely contained within the corresponding vertex buffer
-    /// binding.
-    ///
+    /// - If and only if currently bound [`pipeline's`][1] dynamic state includes
+    ///   [`vertex input binding stride`][7], `vertex_strides` needs to be [`Some`] and
+    ///   the number of vertex strides *must* be equal to the number of vertex bindings.
+    /// - If [`robust buffer access`][8] or [`robust buffer access 2`][9] are not enabled and the
+    ///   [`pipeline`][1] was not created with [`vertex input behavior`][10] value other than
+    ///   [`disabled`][11] then, for a given vertex buffer binding, any attribute data fetched *must*
+    ///   be entirely contained within the corresponding vertex buffer binding.
+    /// 
     /// # Vulkan docs
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindVertexBuffers2.html>**
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindIndexBuffer2.html>**
-    /// **<https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdDrawIndexed.html>**
-    pub fn draw_indexed(
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindVertexBuffers2.html>
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdBindIndexBuffer2.html>
+    ///
+    /// [1]: GraphicsPipeline
+    /// [2]: ext::index_type_uint8
+    /// [3]: IndexedDrawInfo::index_type
+    /// [4]: IndexType::index_size
+    /// [5]: IndexedDrawInfo::first_index
+    /// [6]: IndexedDrawInfo::index_count
+    /// [7]: DynamicState::VertexInputBindingStride
+    /// [8]: BaseDeviceFeatures::robust_buffer_access
+    /// [9]: ext::robustness2::Attributes::IS_ROBUST_BUFFER_ACCESS_2_ENABLED
+    /// [10]: PipelineRobustnessInfo::vertex_input_behavior
+    /// [11]: PipelineRobustnessBufferBehavior::Disabled
+    pub fn begin_drawing_indexed<F>(
         &mut self,
         draw_info: IndexedDrawInfo,
         index_buffer: IndexBufferInfo,
         vertex_bindings: &[DrawBufferRange],
         vertex_strides: Option<&[DeviceSize]>,
+        f: F,
     ) -> Result<()>
+        where
+            State: state::CanBeginDraw,
+            F: FnOnce(&mut DrawPipelineCommands<state::DrawIndexed>) -> EventResult<()>,
     {
-        let cache = self.storage.cache.deref_mut();
-        if cache.pipelines.is_empty() {
-            return Err(Error::just_context("attempting to draw with no pipeline bound"))
-        }
-        self.storage.wait_scope = vk::PipelineStageFlags2::VERTEX_INPUT;
-        let index_buf_size = (draw_info.first_index + draw_info.index_count) as vk::DeviceSize * draw_info.index_type.index_size();
+        *self.wait_scope |= vk::PipelineStageFlags2::VERTEX_INPUT;
+        let index_buf_size = (draw_info.first_index + draw_info.index_count) as vk::DeviceSize
+            * draw_info.index_type.index_size();
         let n_bindings = vertex_bindings.len() as u32;
         let mut call = DrawCall {
             index_buffer: Some(DrawBufferRange::new(
                 index_buffer.id,
                 index_buffer.offset,
-                index_buf_size,
+                NonZeroU64::new(index_buf_size),
             )),
             vertex_buffers: NonNullVec32::with_capacity(
                 n_bindings,
-                &*self.storage.alloc,
-            )?,
+                self.alloc,
+            )?.into_static(),
         };
         unsafe {
-            let command_buffer = self.storage.command_buffer;
+            let command_buffer = self.command_buffer;
             let index_buf = self.buffers.get(index_buffer.id)?;
             if index_buffer.offset + index_buf_size > index_buf.properties().size
             {
-                return Err(Error::new(
-                    BufferError::OutOfRange {
-                        buffer_size: index_buf.properties().size,
-                        requested_offset: index_buffer.offset,
-                        requested_size: index_buf_size,
-                    },
-                    "given buffer size and offset are out of range of index buffer",
-                ))
+                return Err(Error::just_context(format_compact!(
+                    "given buffer offset {} + size {} is out of range of index buffer size {}",
+                    index_buffer.offset, index_buf_size, index_buf.properties().size,
+                )))
             }
-            if let Some(err) = index_buf.validate_usage(vk::BufferUsageFlags::INDEX_BUFFER) {
+            if let Some(err) = index_buf.validate_usage(BufferUsages::INDEX_BUFFER) {
                 return Err(Error::new(err, "index buffer has incompatible usage"))
             }
             let tmp_alloc = self.gpu.tmp_alloc();
@@ -1008,130 +1224,101 @@ impl<'a, 'b> DrawCommands<'a, 'b> {
             let mut vert_bufs = NonNullVec32::with_capacity(n_bindings, &tmp_alloc)?;
             let mut vert_offsets = NonNullVec32::with_capacity(n_bindings, &tmp_alloc)?;
             let mut vert_sizes = NonNullVec32::with_capacity(n_bindings, &tmp_alloc)?;
-            for buf_info in vertex_bindings.iter().copied() {
+            for (i, buf_info) in vertex_bindings.iter().copied().enumerate() {
                 let buf = self.buffers.get(buf_info.id)?;
-                if buf_info.offset + buf_info.size > buf.properties().size {
-                    return Err(Error::new(
-                        BufferError::OutOfRange {
-                            buffer_size: buf.properties().size,
-                            requested_offset: buf_info.offset, requested_size: buf_info.size,
-                        },
-                        "given buffer size and offset are out of range of vertex buffer",
-                    ))
+                let size = buf_info.size.unwrap_or_sentinel(
+                    buf.properties().size.wrapping_sub(buf_info.offset)
+                );
+                if buf_info.offset + size > buf.properties().size {
+                    return Err(Error::just_context(format_compact!(
+                        "vertex buffer offset {} + size {} is out of range of vertex buffer size {} at vertex binding index {i}",
+                        buf_info.offset, size, buf.properties().size,
+                    )))
                 }
-                if let Some(err) = buf.validate_usage(vk::BufferUsageFlags::VERTEX_BUFFER) {
+                if let Some(err) = buf.validate_usage(BufferUsages::VERTEX_BUFFER) {
                     return Err(Error::new(err, format_compact!("vertex buffer has incompatible usage")))
                 }
                 vert_bufs.push(buf.handle());
                 vert_offsets.push(buf_info.offset);
-                vert_sizes.push(buf_info.size);
-                call.vertex_buffers.push(buf_info);
+                vert_sizes.push(size);
+                call.vertex_buffers.push(DrawBufferRange {
+                    id: buf_info.id,
+                    offset: buf_info.offset,
+                    size: NonZeroU64::new(size),
+                });
             }
             if let Some(strides) = vertex_strides {
-                self.check_dynamic_state(DynamicState::VERTEX_INPUT_BINDING_STRIDE)?;
+                self.check_dynamic_state(DynamicState::VertexInputBindingStride)?;
                 if strides.len() as u32 != n_bindings {
-                    return Err(Error::just_context(
-                        "the number of vertex strides must match the number of vertex bindings"
-                    ))
+                    return Err(Error::just_context(format_compact!(
+                        "the number of vertex strides {} must match the number of vertex bindings {n_bindings}",
+                        strides.len(),
+                    )))
                 }
+            } else if self.check_dynamic_state(DynamicState::VertexInputBindingStride).is_ok() {
+                return Err(Error::just_context(format_compact!(
+                    "{}{}",
+                    "the dynamic state of currently bound pipeline includes vertex input binding stride, ",
+                    "but no strides were given",
+                )))
             }
-            let vk = self.gpu.vk();
-            vk.device().cmd_bind_vertex_buffers2(
+            let device = self.gpu.device();
+            device.cmd_bind_vertex_buffers2(
                 command_buffer,
                 0,
                 &vert_bufs, &vert_offsets, Some(&vert_sizes),
                 vertex_strides,
             );
-            vk.device().cmd_bind_index_buffer2(
+            device.cmd_bind_index_buffer2(
                 command_buffer, index_buf.handle(),
                 index_buffer.offset, index_buf_size, draw_info.index_type.into()
             );
-            vk.device().cmd_draw_indexed(
-                command_buffer,
-                draw_info.index_count, draw_info.instance_count,
-                draw_info.first_index, draw_info.vertex_offset,
-                draw_info.first_instance,
-            );
+            
             vert_bufs.drop_and_free(&tmp_alloc);
             vert_offsets.drop_and_free(&tmp_alloc);
             vert_sizes.drop_and_free(&tmp_alloc);
         }
-        cache.draw_calls.push(call);
+        self.indexed_draw_info = Some(draw_info);
+        let cmd = unsafe {
+            &mut *(self as *mut Self).cast::<DrawPipelineCommands<state::DrawIndexed>>()
+        };
+        f(cmd).context_from_tracked(|orig| format_compact!(
+            "failed to record draw commands at {}", orig.or_this(),
+        ))?;
+        self.indexed_draw_info = None;
+        self.draw_calls.push(call);
         Ok(())
     }
 
-    pub fn draw<const VERTEX_BINDING_COUNT: usize>(
-        &mut self,
-        first_vertex: u32,
-        vertex_count: u32,
-        first_instance: u32,
-        instance_count: u32,
-        vertex_bindings: [VertexBufferInfo; VERTEX_BINDING_COUNT],
-    ) -> Result<()>
-    {
-        let cache = self.storage.cache.deref_mut();
-        if cache.pipelines.is_empty() {
-            return Err(Error::just_context("attempting to draw with no pipeline bound"))
-        };
-        self.storage.wait_scope = vk::PipelineStageFlags2::VERTEX_INPUT;
-        let mut call = DrawCall {
-            index_buffer: None,
-            vertex_buffers: NonNullVec32::with_capacity(
-                VERTEX_BINDING_COUNT as u32,
-                &*self.storage.alloc,
-            )?,
-        };
-        unsafe {
-            let mut vert = ArrayVec::<vk::Buffer, VERTEX_BINDING_COUNT>::new();
-            let mut vert_offsets = ArrayVec::<vk::DeviceSize, VERTEX_BINDING_COUNT>::new();
-            let mut vert_sizes = ArrayVec::<vk::DeviceSize, VERTEX_BINDING_COUNT>::new();
-            for buf_info in vertex_bindings.iter().copied() {
-                let buf = self.buffers.get(buf_info.id)?;
-                if buf_info.offset + buf_info.size > buf.properties().size {
-                    return Err(Error::new(
-                        BufferError::OutOfRange {
-                            buffer_size: buf.properties().size,
-                            requested_offset: buf_info.size, requested_size: buf_info.size,
-                        },
-                        format_compact!("given buffer size and offset are out of range of vertex buffer"),
-                    ))
-                }
-                if let Some(err) = buf.validate_usage(vk::BufferUsageFlags::VERTEX_BUFFER) {
-                    return Err(Error::new(err, format_compact!("vertex buffer has incompatible usage")))
-                }
-                vert.push(buf.handle());
-                vert_offsets.push(buf_info.offset);
-                vert_sizes.push(buf_info.size);
-                call.vertex_buffers.push(buf_info);
-            }
-            let command_buffer = self.storage.command_buffer;
-            let vk = self.gpu.vk();
-            vk.device().cmd_bind_vertex_buffers2(
-                command_buffer,
-                0,
-                &vert, &vert_offsets,
-                Some(&vert_sizes), None
-            );
-            vk.device().cmd_draw(
-                command_buffer,
-                vertex_count,
-                instance_count,
-                first_vertex,
-                first_instance
-            );
-        }
-        cache.draw_calls.push(call);
-        Ok(())
-    }
-
+    /// Performs an indexed draw call.
+    ///
+    /// This is only usable in a closure passed to [`begin_drawing_indexed`][1].
+    ///
+    /// # Valid usage
+    /// - All [`dynamic states`][2] of the currently bound [`pipeline`][3] *must* be defined before
+    ///   performing any draw calls.
+    ///
+    /// # Vulkan docs
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdDrawIndexed.html>
+    ///
+    /// [1]: Self::begin_drawing_indexed
+    /// [2]: DynamicState
+    /// [3]: GraphicsPipeline
     #[inline(always)]
-    pub fn draw_bufferless(&self, vertex_count: u32, instance_count: u32) -> Result<()> {
-        if self.storage.cache.pipelines.is_empty() {
-            return Err(Error::just_context("attempting to draw with no pipeline bound"))
-        };
+    pub fn draw_indexed(
+        &mut self,
+    ) -> Result<()>
+        where State: state::CanDrawIndexed
+    {
+        let draw_info = self.indexed_draw_info.unwrap();
         unsafe {
-            self.gpu.vk().device().cmd_draw(self.storage.command_buffer, vertex_count, instance_count, 0, 0);
+            self.gpu.device().cmd_draw_indexed(
+                self.command_buffer,
+                draw_info.index_count, draw_info.instance_count,
+                draw_info.first_index, draw_info.vertex_offset,
+                draw_info.first_instance,
+            );
         }
         Ok(())
-    }
+    } 
 }

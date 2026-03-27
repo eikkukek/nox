@@ -36,37 +36,40 @@ pub fn vertex_input(item: TokenStream) -> TokenStream {
             let ty = f.ty.to_token_stream();
             let str = ty.to_string();
             let format = match str.as_str() {
-                "u32" => quote!(nox::gpu::VkFormat::R32_UINT),
-                "[u32; 2]" => quote!(nox::gpu::VkFormat::R32G32_UINT),
-                "[u32; 3]" => quote!(nox::gpu::VkFormat::R32G32B32_UINT),
-                "[u32; 4]" => quote!(nox::gpu::VkFormat::R32G32B32A32_UINT),
-                "i32" => quote!(nox::gpu::VkFormat::R32_SINT),
-                "[i32; 2]" => quote!(nox::gpu::VkFormat::R32G32_SINT),
-                "[i32; 3]" => quote!(nox::gpu::VkFormat::R32G32B32_SINT),
-                "[i32; 4]" => quote!(nox::gpu::VkFormat::R32G32B32A32_SINT),
-                "f32" => quote!(nox::gpu::VkFormat::R32_SFLOAT),
-                "[f32; 2]" => quote!(nox::gpu::VkFormat::R32G32_SFLOAT),
-                "[f32; 3]" => quote!(nox::gpu::VkFormat::R32G32B32_SFLOAT),
-                "[f32; 4]" => quote!(nox::gpu::VkFormat::R32G32B32A32_SFLOAT),
-                _ if str.ends_with("Vec2") => quote!(nox::gpu::VkFormat::R32G32_SFLOAT),
-                _ if str.ends_with("Vec3") => quote!(nox::gpu::VkFormat::R32G32B32_SFLOAT),
-                _ if str.ends_with("Vec4") => quote!(nox::gpu::VkFormat::R32G32B32A32_SFLOAT),
-                _ => quote!(#ty::VK_FORMAT),
+                "u32" => quote!(nox::gpu::Format::R32Uint),
+                "[u32; 2]" => quote!(nox::gpu::Format::R32g32Uint),
+                "[u32; 3]" => quote!(nox::gpu::Format::R32g32b32Uint),
+                "[u32; 4]" => quote!(nox::gpu::Format::R32g32b32a32Uint),
+                "i32" => quote!(nox::gpu::Format::R32_SINT),
+                "[i32; 2]" => quote!(nox::gpu::Format::R32g32Sint),
+                "[i32; 3]" => quote!(nox::gpu::Format::R32g32b32Sint),
+                "[i32; 4]" => quote!(nox::gpu::Format::R32g32b32a32Sint),
+                "f32" => quote!(nox::gpu::Format::R32Sfloat),
+                "[f32; 2]" => quote!(nox::gpu::Format::R32g32Sfloat),
+                "[f32; 3]" => quote!(nox::gpu::Format::R32g32b32Sfloat),
+                "[f32; 4]" => quote!(nox::gpu::Format::R32g32b32a32Sfloat),
+                _ if str.ends_with("Vec2") => quote!(nox::gpu::Format::R32g32Sfloat),
+                _ if str.ends_with("Vec3") => quote!(nox::gpu::Format::R32g32b32Sfloat),
+                _ if str.ends_with("Vec4") => quote!(nox::gpu::Format::R32g32b32a32Sfloat),
+                _ => quote!(#ty::FORMAT),
             };
             quote! {
                 nox::gpu::VertexInputAttribute {
-                    location: FIRST_LOCATION + #i,
+                    location: first_location + #i,
                     format: #format,
                     offset: core::mem::offset_of!(#name, #n) as u32,
                 }
             }
         })
         .collect();
+    let n = inputs.len();
     let expanded = quote! {
-        impl nox::gpu::VertexInput for #name {
+        impl<> nox::gpu::VertexInput<#n> for #name {
 
-            fn get_attributes<const FIRST_LOCATION: u32>() -> &'static [nox::gpu::VertexInputAttribute] {
-                &[ #( #inputs ),*
+            fn get_attributes(
+                first_location: u32,
+            ) -> [nox::gpu::VertexInputAttribute; #n] {
+                [ #( #inputs ),*
                 ]
             }
         }

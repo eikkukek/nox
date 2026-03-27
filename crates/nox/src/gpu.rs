@@ -1,8 +1,11 @@
 pub mod ext;
 pub mod memory_binder;
-pub mod vulkan;
-
+pub mod device;
 pub mod extendable;
+
+mod instance;
+mod queue;
+mod physical_device;
 mod interface;
 mod definitions;
 mod enums;
@@ -10,11 +13,9 @@ mod memory_layout;
 mod handle;
 mod shader;
 mod shader_set;
-mod shader_resource;
-mod context;
+mod descriptor;
 mod attributes;
 mod subresource_state;
-mod physical_device;
 mod pipeline;
 mod surface;
 mod sampler;
@@ -23,6 +24,7 @@ mod buffer;
 mod swapchain;
 mod resources;
 mod commands;
+mod event;
 
 use core::{
     ops::Deref,
@@ -31,43 +33,41 @@ use core::{
 
 use compact_str::format_compact;
 
-use raw_window_handle::HasDisplayHandle;
-
 use ahash::AHashMap;
-
-use nox_ash::vk;
 
 use nox_mem::{
     string::*,
-    vec::{FixedVec32, Vector},
+    vec::{FixedVec32, Vec32},
     slot_map::SlotMap,
     conditional::True,
     collections::EntryExt,
-    alloc::LocalAlloc,
+    vec32,
+};
+use nox_ash::vk;
+use nox_alloc::arena::Arena;
+
+use nox_threads::{
+    executor::{ThreadPool, SpawnExt, block_on},
 };
 
-use nox_alloc::arena::{RwArena, Arena, ImmutArena};
-
-use nox_threads::executor::{ThreadPool, SpawnExt};
-
-use crate::sync::{Arc, OnceLock, SwapLock, RwLock};
-
-use crate::dev::{
-    error::{Error, Result, Context, location},
-    has_bits,
-    prelude::*,
+use crate::{
+    error::*,
+    sync::{atomic::AtomicU64, *},
+    log,
+    Version,
 };
-
-use crate::win;
 
 pub(crate) mod prelude {
 
     use super::*;
 
     pub use {
+        device::*,
+        instance::*,
         super::Gpu,
+        super::LogicalDeviceId,
+        super::queue::*,
         attributes::*,
-        context::GpuContext,
         definitions::*,
         enums::*,
         memory_layout::MemoryLayout,
@@ -82,48 +82,46 @@ pub(crate) mod prelude {
         nox_proc::VertexInput,
         shader::*,
         super::shader_set::*,
-        super::shader_resource::*,
+        super::descriptor::*,
         pipeline::vertex_input::*,
         super::memory_binder,
-        super::extendable,
         interface::*,
         super::ext,
+        surface::VulkanWindow,
+        super::event::Event,
     };
 
-    pub(crate) use crate::dev::error as dev_error;
+    pub type DeviceName = ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 
-    pub(crate) use super::Vulkan;
+    pub const MIN_BUFFERED_FRAMES: u32 = 2;
+    pub const MAX_BUFFERED_FRAMES: u32 = 8;
+
     pub(crate) use surface::Surface;
 
     pub(super) use swapchain::Swapchain;
+    pub(super) use super::swapchain;
     pub(super) use super::commands;
     pub(super) use super::subresource_state;
 
     pub(crate) const COMMAND_INDEX_IGNORED: u32 = u32::MAX;
 }
-pub(crate) use vulkan::Vulkan;
 use commands::scheduler::QueueScheduler;
 
-use memory_binder::{DefaultBinder, MemoryBinderAttributes};
+use memory_binder::{DefaultBinder, MemoryBinderAttributes, MemoryBinderInfo};
 
 pub use prelude::*;
 
-pub type DeviceName = ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
-
-pub const MIN_BUFFERED_FRAMES: u32 = 2;
-pub const MAX_BUFFERED_FRAMES: u32 = 8;
-
 pub struct TmpAllocs {
-    fallback_alloc: Arc<RwArena<True>>,
-    tmp_allocs: AHashMap<std::thread::ThreadId, Arc<RwArena<True>>>,
+    fallback_alloc: Arc<Arena<True>>,
+    tmp_allocs: AHashMap<std::thread::ThreadId, Arc<Arena<True>>>,
 }
 
 impl TmpAllocs {
 
-    #[inline(always)]
+    #[inline]
     pub fn tmp_alloc(
         &self
-    ) -> impl Arena<True> + ImmutArena + 'static
+    ) -> Arc<Arena<True>>
     {
         self.tmp_allocs
             .get(&std::thread::current().id())
@@ -132,24 +130,92 @@ impl TmpAllocs {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct CacheAttributes {
+    pub arena_size: usize,
+}
+
+impl Default for CacheAttributes {
+
+    #[inline]
+    fn default() -> Self {
+        Self {
+            arena_size: 1 << 16,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
+#[display("{0}")]
+pub struct LogicalDeviceId(u64);
+
+static DEVICE_ID: AtomicU64 = AtomicU64::new(0);
+
+pub struct Cache {
+    command_cache: UnsafeCell<CommandRecorderCache>,
+    arena: Arena<True>,
+    id: Option<LogicalDeviceId>,
+    submit_cache: Box<[Vec32<vk::SubmitInfo2<'static>>]>,
+}
+
+impl Cache {
+
+    fn init(
+        &mut self,
+        gpu: &Gpu,
+    ) -> Result<()> {
+        if let Some(id) = self.id {
+            if id != gpu.device().id() {
+                return Err(Error::just_context(
+                    "gpu cache cannot be reused between different Gpu instances"
+                ))
+            }
+        } else {
+            self.id = Some(gpu.device().id());
+            self.command_cache.get_mut().init(gpu);
+            self.submit_cache = (0..gpu.device().device_queues().len())
+                .map(|_| vec32![])
+                .collect();
+        }
+        Ok(())
+    }
+}
+
+/// Creates [`Cache`], which is needed for recording commands with the [`Gpu`] via [`Gpu::tick`].
+///
+/// [`Cache`] is *not* [`Send`] or [`Sync`] and should only be used on the main thread.
+pub fn create_cache(
+    attributes: CacheAttributes,
+) -> Cache
+{
+    Cache {
+        command_cache: Default::default(),
+        arena: Arena
+            ::with_fallback(attributes.arena_size)
+            .expect("global alloc failed"),
+        id: None,
+        submit_cache: Default::default(),
+    }
+}
+
 struct GpuInner {
-    vk: Arc<Vulkan>,
-    attributes: GpuAttributes,
     thread_pool: ThreadPool,
+    memory_layout: MemoryLayout,
     queue_scheduler: OnceLock<QueueScheduler>,
-    shader_cache: ShaderCache,
+    shader_cache: RwLock<ShaderCache>,
     pipeline_batches: SwapLock<SlotMap<OnceLock<PipelineBatch>>>,
-    shader_resource_pools: SwapLock<SlotMap<ShaderResourcePool>>,
+    descriptor_pools: SwapLock<SlotMap<DescriptorPool>>,
     surfaces: RwLock<SlotMap<Surface>>,
     buffers: RwLock<SlotMap<BufferMeta>>,
     images: RwLock<SlotMap<ImageMeta>>,
     memory_binders: SwapLock<SlotMap<MemoryBinderResource>>,
     timeline_semaphores: RwLock<SlotMap<vk::Semaphore>>,
+    draw_commands: RwLock<SlotMap<DrawCommandResource>>,
     default_binder: DefaultBinder,
     default_binder_mappable: DefaultBinder,
     tmp_allocs: Arc<TmpAllocs>,
     buffered_frames: u32,
-    current_frame_index: u32,
+    device: LogicalDevice,
 }
 
 /// The GPU interface of Nox.
@@ -160,325 +226,559 @@ pub struct Gpu {
     inner: Arc<GpuInner>,
 }
 
-impl Deref for Gpu {
-
-    type Target = GpuInner;
-
-    #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
 impl Gpu {
 
-    fn new_internal<H: HasDisplayHandle>(
-        attributes: GpuAttributes,
-        display_handle: &H,
+    pub fn standalone(
+        device: LogicalDevice,
         thread_pool: ThreadPool,
+        memory_layout: MemoryLayout,
+        buffered_frames: u32,
     ) -> Result<Self> {
-        let vk = Arc::new(Vulkan
-            ::new(
-                display_handle,
-                &attributes,
-            ).context("failed to create vulkan backend")?);
         let default_binder = DefaultBinder::new(
-            vk.clone(),
+            device.clone(),
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            vk::MemoryPropertyFlags::from_raw(0),
         );
         let default_binder_mappable = DefaultBinder::new(
-            vk.clone(),
+            device.clone(),
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            vk::MemoryPropertyFlags::from_raw(0),
         );
-        let main_tmp_alloc = RwArena
-            ::with_fallback(attributes.memory_layout.tmp_arena_size())
+        let main_tmp_alloc = Arena
+            ::with_fallback(memory_layout.tmp_arena_size())
             .context("failed to create arena alloc")?;
         let mut tmp_allocs = AHashMap::default();
         tmp_allocs.insert(
             std::thread::current().id(),
-            Arc::new(RwArena::with_fallback(attributes.memory_layout.tmp_arena_size())
+            Arc::new(Arena::with_fallback(memory_layout.tmp_arena_size())
                 .context("failed to create arena alloc")?)
         );
         for id in thread_pool.worker_threads() {
             tmp_allocs
                 .entry(id)
-                .or_try_insert_with(|| Ok(Arc::new(RwArena::with_fallback(attributes.memory_layout.tmp_arena_size())
+                .or_try_insert_with(|| Ok(Arc::new(Arena::with_fallback(memory_layout.tmp_arena_size())
                     .context("failed to create arena alloc")?
                 )))?;
         }
-        let command_workers = attributes.command_workers;
+        let command_workers = device.command_workers();
         let s = Self{inner:Arc::new(GpuInner {
             thread_pool,
             queue_scheduler: OnceLock::new(),
-            shader_cache: ShaderCache::new(vk.clone()),
+            shader_cache: RwLock::new(ShaderCache::new(device.clone())),
             surfaces: RwLock::new(SlotMap::new()),
-            vk,
+            device,
             pipeline_batches: SwapLock::default(),
-            shader_resource_pools: SwapLock::new(SlotMap::new()),
+            descriptor_pools: SwapLock::new(SlotMap::new()),
             images: RwLock::new(SlotMap::new()),
             buffers: RwLock::new(SlotMap::new()),
             memory_binders: SwapLock::default(),
             timeline_semaphores: RwLock::new(SlotMap::new()),
+            draw_commands: RwLock::new(SlotMap::new()),
             default_binder,
             default_binder_mappable,
             tmp_allocs: Arc::new(TmpAllocs {
                 fallback_alloc: Arc::new(main_tmp_alloc),
                 tmp_allocs,
             }),
-            current_frame_index: 0,
-            buffered_frames: attributes.buffered_frames,
-            attributes,
+            buffered_frames: buffered_frames.clamp(MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES),
+            memory_layout,
         })};
         let queue_scheduler = QueueScheduler::new(s.clone(), command_workers)
             .context_with(|| format_compact!("failed to create queue scheduler"))?;
-        s.queue_scheduler.get_or_init(|| {
+        s.inner.queue_scheduler.get_or_init(|| {
             queue_scheduler
         });
         Ok(s)
     }
 
-    pub fn standalone<H: HasDisplayHandle>(
-        attributes: GpuAttributes,
-        display_handle: &H,
-    ) -> Result<Self> {
-        Self::new_internal(
-            attributes,
-            display_handle,
-            ThreadPool::new()?,
-        )
-    }
-
-    #[inline(always)]
     pub(crate) fn new(
-        event_loop: &event_loop::ActiveEventLoop,
-        attributes: GpuAttributes,
-    ) -> Result<Self>
+        event_loop: &crate::event_loop::EventLoop,
+        device: LogicalDevice,
+        attributes: crate::Attributes,
+    ) -> Result<(Self, Cache)>
     {
-        Self::new_internal(
-            attributes,
-            event_loop.winit(),
-            event_loop.thread_pool()
-        )
+        Ok((Self::standalone(
+            device,
+            event_loop.thread_pool(),
+            attributes.gpu_memory_layout,
+            attributes.buffered_frames,
+        )?, create_cache(attributes.gpu_cache_attributes)))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn device_limits(&self) -> DeviceLimits<'_> {
         DeviceLimits {
-            limits: self.vk.physical_device_info().limits(),
+            limits: self.inner.device.physical_device().limits(),
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn enabled_base_features(&self) -> &BaseDeviceFeatures {
-        self.vk().base_device_features()
+        self.inner.device.base_device_features()
     }
 
-    #[inline(always)]
+    #[inline]
+    pub fn get_extension_device<T: ext::ExtensionDevice>(&self) -> Option<T> {
+        self.inner.device.get_extension_device()
+    }
+
+    #[inline]
     pub fn get_device_attribute(&self, name: ext::ConstName) -> &ext::DeviceAttribute {
-        self.vk.enabled_device_extensions().get_attribute(name)
+        self.inner.device.get_device_attribute(name)
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn memory_layout(&self) -> MemoryLayout {
-        self.attributes.memory_layout
+        self.inner.memory_layout
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn thread_pool(&self) -> ThreadPool {
-        self.thread_pool.clone()
+        self.inner.thread_pool.clone()
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn tmp_alloc(
         &self,
-    ) -> impl Arena<True> + ImmutArena + 'static
+    ) -> Arc<Arena<True>>
     {
-        self.tmp_allocs.tmp_alloc()
+        self.inner.tmp_allocs.tmp_alloc()
     }
 
-    #[inline(always)]
-    pub(crate) fn vk(&self) -> &Arc<Vulkan> {
-        &self.vk
+    /// Gets the [`LogicalDevice`] used to create this [`Gpu`] instance.
+    #[inline]
+    pub fn device(&self) -> &LogicalDevice {
+        &self.inner.device
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn queue_scheduler(&self) -> &QueueScheduler {
         unsafe {
-            self.queue_scheduler.get().unwrap_unchecked()
+            self.inner.queue_scheduler.get().unwrap_unchecked()
         }
     }
 
-    #[inline(always)]
-    pub fn physical_device_info(&self) -> &PhysicalDeviceInfo {
-        self.vk.physical_device_info()
-    }
-
-    #[inline(always)]
-    pub(crate) fn shader_cache(&self) -> &ShaderCache {
-        &self.shader_cache
-    }
-
-    #[inline(always)]
-    pub fn default_memory_binder(&self) -> DefaultBinder {
-        self.default_binder.clone()
-    }
-
-    #[inline(always)]
-    pub fn default_memory_binder_mappable(&self) -> DefaultBinder {
-        self.default_binder_mappable.clone()
-    }
-
-    #[inline(always)]
-    pub fn supported_image_format<F: Format>(
-        &self,
-        formats: &[F],
-        required_features: &[FormatFeature],
-    ) -> Option<F>
-    {
-        let mut features = 0;
-        required_features
-            .iter()
-            .map(|&f| features |= f)
-            .count();
-        for format in formats {
-            let properties = unsafe {
-                self.vk.instance()
-                    .get_physical_device_format_properties(
-                        self.vk.physical_device(), format.as_vk_format())
-            };
-            if has_bits!(
-                properties.optimal_tiling_features,
-                vk::FormatFeatureFlags::from_raw(features)
-            ) {
-                return Some(*format)
-            }
-        } 
-        None
-    }
-
-    #[inline(always)]
+    #[inline]
     pub fn api_version(&self) -> Version {
-        self.vk.physical_device_info().api_version()
+        self.inner.device.physical_device().api_version()
     }
 
-    #[inline(always)]
-    pub(crate) fn add_surface(
-        self: Arc<Self>,
-        surface: Surface,
-    ) -> SurfaceId {
-        let mut surfaces = self.surfaces.write();
-        let id = SurfaceId(surfaces.insert(surface));
-        unsafe {
-            surfaces.get_unchecked_mut(id.0)
-            .set_id(id);
+    #[inline]
+    pub fn physical_device(&self) -> &PhysicalDevice {
+        self.inner.device.physical_device()
+    }
+
+    #[inline]
+    pub fn any_device_queue(&self, flags: QueueFlags) -> Option<DeviceQueue> {
+        self.inner.device.any_device_queue(flags)
+    }
+
+    #[inline]
+    pub fn default_memory_binder(&self) -> DefaultBinder {
+        self.inner.default_binder.clone()
+    }
+
+    #[inline]
+    pub fn default_memory_binder_mappable(&self) -> DefaultBinder {
+        self.inner.default_binder_mappable.clone()
+    }
+
+    pub fn get_image_format_properties(
+        &self,
+        format: Format,
+        usage: ImageUsages,
+        is_3d: bool,
+        has_mutable_format: bool,
+        is_cube_map_compatible: bool,
+    ) -> Result<ImageFormatProperties>
+    {
+        let vk_format: vk::Format = format.into();
+        let mut flags = vk::ImageCreateFlags::empty();
+        if has_mutable_format {
+            flags |= vk::ImageCreateFlags::MUTABLE_FORMAT;
         }
-        id
+        if is_cube_map_compatible {
+            flags |= vk::ImageCreateFlags::CUBE_COMPATIBLE;
+        }
+        let format_info = vk::PhysicalDeviceImageFormatInfo2 {
+            format: vk_format,
+            ty: if is_3d {
+                    vk::ImageType::TYPE_3D
+                } else {
+                    vk::ImageType::TYPE_2D
+                },
+            tiling: vk::ImageTiling::OPTIMAL,
+            usage: usage.into(),
+            flags,
+            ..Default::default()
+        };
+        let mut image_format_prop = vk::ImageFormatProperties2::default();
+        unsafe {
+            self.inner.device.instance().ash().get_physical_device_image_format_properties2(
+                self.inner.device.physical_device().handle(),
+                &format_info, &mut image_format_prop
+            ).context("failed to get image format properties")?;
+        }
+        let image_format_prop = image_format_prop.image_format_properties;
+        let mut format_properties3 = vk::FormatProperties3::default();
+        let mut format_properties = vk::FormatProperties2
+            ::default().push_next(&mut format_properties3);
+        unsafe {
+            self.inner.device.instance().ash().get_physical_device_format_properties2(
+                self.inner.device.physical_device().handle(),
+                vk_format, &mut format_properties,
+            );
+        }
+        let format_features = FormatFeatures::from_raw(
+            format_properties3.optimal_tiling_features.as_raw()
+        );
+        let mut max_dimensions: Dimensions = image_format_prop.max_extent.into();
+        if usage.intersects(
+            ImageUsages::COLOR_ATTACHMENT |
+            ImageUsages::DEPTH_STENCIL_ATTACHMENT |
+            ImageUsages::INPUT_ATTACHMENT
+        ) {
+            let limits = self.inner.device.physical_device().limits();
+            max_dimensions.width = max_dimensions.width.min(limits.max_framebuffer_width);
+            max_dimensions.height = max_dimensions.width.min(limits.max_framebuffer_height);
+            max_dimensions.depth = 1;
+        }
+        Ok(ImageFormatProperties {
+            max_dimensions,
+            max_mip_levels: image_format_prop.max_mip_levels,
+            max_array_layers: image_format_prop.max_array_layers,
+            sample_counts: image_format_prop.sample_counts.into(),
+            format_features,
+        })
     }
 
-    #[inline(always)]
+    pub fn create_surface<H: VulkanWindow>(
+        &self,
+        window: Arc<H>,
+    ) -> Result<SurfaceId> {
+        let mut surfaces = self.inner.surfaces.write();
+        Ok(SurfaceId(surfaces.insert(Surface::new(
+            window,
+            self.clone(),
+            self.inner.buffered_frames,
+        )?)))
+    }
+
+    pub fn request_swapchain_update(
+        &self,
+        surface_id: SurfaceId,
+        framebuffer_size: (u32, u32)
+    ) -> Result<()> {
+        self.inner.surfaces
+            .write()
+            .get_mut(surface_id.slot_index())
+            .context_with(|| format_compact!(
+                "invalid surface id {surface_id}"
+            ))?.request_swapchain_update(self.inner.buffered_frames, framebuffer_size);
+        Ok(())
+    }
+
+    #[inline]
+    pub fn schedule_commands(&self) -> CommandScheduler<'_> {
+        unsafe {
+            self.inner.queue_scheduler
+            .get()
+            .unwrap_unchecked()
+        }.schedule()
+    }
+
+    pub fn create_draw_commands<F>(
+        &self,
+        command_pool: &mut CommandPool,
+        info: DrawCommandInfo,
+        arena_size: usize,
+        f: F,
+    ) -> Result<DrawCommandId>
+        where F: FnOnce(&mut DrawCommands) -> EventResult<()>,
+    {
+        let alloc = Arena::with_fallback(arena_size)?;
+        let command_buffer = command_pool
+            .allocate_primaries(1)?[0];
+        let mut rendering_inheritance_info = vk::CommandBufferInheritanceRenderingInfo {
+            s_type: vk::StructureType::COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+            color_attachment_count: info.color_formats.len() as u32,
+            p_color_attachment_formats: info.color_formats.as_ptr().cast(),
+            depth_attachment_format: info.depth_format.into(),
+            stencil_attachment_format: info.stencil_format.into(),
+            rasterization_samples: info.sample_count.into(),
+            ..Default::default()
+        };
+        let inheritance_info = vk::CommandBufferInheritanceInfo {
+            s_type: vk::StructureType::COMMAND_BUFFER_INHERITANCE_INFO,
+            ..Default::default()
+        }.push_next(&mut rendering_inheritance_info);
+        let begin_info = vk::CommandBufferBeginInfo {
+            s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
+            flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+            p_inheritance_info: &inheritance_info,
+            ..Default::default()
+        };
+        unsafe {
+            self.device()
+                .begin_command_buffer(command_buffer, &begin_info)
+                .context("failed to command buffer")?;
+        }
+        let mut storage = DrawCommandStorage::new(
+            self.get_extension_device()
+        );
+        storage.reinit(
+            command_buffer,
+            info.color_formats,
+            info.depth_format, info.stencil_format, info.sample_count,
+            &alloc
+        )?;
+        {
+            let mut commands = DrawCommands::new(
+                self.clone(),
+                &mut storage,
+                &alloc,
+                self.read_buffers(),
+                self.read_images(),
+            );
+            f(&mut commands).context_from_tracked(|orig| format_compact!(
+                "failed to record draw commands {}", orig.or_this(),
+            ))?;
+        }
+        unsafe {
+            self.device()
+                .end_command_buffer(command_buffer)
+                .context("failed to end command buffer")?;
+        }
+        let resource = DrawCommandResource {
+            queue: command_pool.queue().clone(),
+            storage,
+            alloc,
+            _pool_handle: command_pool.handle().clone(),
+        };
+        let mut commands = self.inner.draw_commands.write();
+        Ok(DrawCommandId(commands.insert(resource)))
+    }
+
+    #[inline]
+    pub fn destroy_draw_commands(
+        &self,
+        id: DrawCommandId
+    ) -> Result<CommandBuffer>
+    {
+        self.inner.draw_commands
+            .write()
+            .remove(id.0)
+            .context_with(|| format_compact!(
+                "invalid draw commands id {id}"
+            )).map(|d| d.storage.command_buffer)
+    }
+
+    #[inline]
+    pub(crate) fn get_draw_commands(
+        &self,
+        id: DrawCommandId,
+    ) -> Result<impl Deref<Target = DrawCommandResource>>
+    {
+        RwLockReadGuard::try_map(self.inner.draw_commands.read(), |d| {
+            d.get(id.0).ok()
+        }).map_err(|_| Error::just_context(format_compact!(
+            "invalid draw command id {id}"
+        )))
+    }
+
+    pub fn tick<F>(
+        &self,
+        mut event_handler: F,
+        cache: &mut Cache,
+    ) -> Result<()>
+        where F: FnMut(Event) -> EventResult<()>
+    {
+        cache.init(self).context("failed to init cache")?;
+        let pools = self.inner.descriptor_pools.load();
+        for pool in pools.values_mut() {
+            pool.update(self);
+        }
+        unsafe {
+            cache.arena.clear();
+        }
+        let submits = self.queue_scheduler().record(
+            &mut cache.command_cache, &mut event_handler, &cache.arena,
+        ).context("failed to record commands")?;
+        for submit in &submits.submits {
+            let submit_info = vk::SubmitInfo2 {
+                wait_semaphore_info_count: submit.wait_semaphore_infos.len(),
+                p_wait_semaphore_infos: submit.wait_semaphore_infos.as_ptr(),
+                command_buffer_info_count: submit.command_buffer_infos.len(),
+                p_command_buffer_infos: submit.command_buffer_infos.as_ptr(),
+                signal_semaphore_info_count: submit.signal_semaphore_infos.len(),
+                p_signal_semaphore_infos: submit.signal_semaphore_infos.as_ptr(),
+                ..Default::default()
+            };
+            cache.submit_cache[submit.device_queue_index as usize]
+                .push(submit_info);
+        }
+        for (i, submits) in cache.submit_cache.iter_mut().enumerate() {
+            if submits.is_empty() {
+                continue
+            }
+            let queue = &self.inner.device.device_queues()[i];
+            unsafe {
+                self.inner.device.queue_submit2(
+                    queue.handle(),
+                    submits,
+                    vk::Fence::null(),
+                )
+            }.context_with(|| format_compact!(
+                "failed to submit to queue {queue:?}"
+            ))?;
+            submits.clear();
+        }
+        for present_submit in &submits.present_submits {
+            let mut present_id2 = vk::PresentId2KHR {
+                swapchain_count: present_submit.swapchains.len(),
+                p_present_ids: present_submit.present_id2.as_ptr(),
+                ..Default::default()
+            };
+            let present_info = vk::PresentInfoKHR {
+                wait_semaphore_count: present_submit.wait_semaphores.len(),
+                p_wait_semaphores: present_submit.wait_semaphores.as_ptr(),
+                swapchain_count: present_submit.swapchains.len(),
+                p_swapchains: present_submit.swapchains.as_ptr(),
+                p_image_indices: present_submit.image_indices.as_ptr(),
+                ..Default::default()
+            }.push_next(&mut present_id2);
+            unsafe {
+                self.inner.device.queue_present(
+                    present_submit.queue,
+                    &present_info
+                )
+            }.context("queue present failed")?;
+        }
+        Ok(())
+    }
+
+    pub fn destroy_surface(
+        &self,
+        surface_id: SurfaceId,
+    ) -> Result<()> {
+        self.inner.surfaces
+            .write()
+            .remove(surface_id.slot_index())
+            .context_with(|| format_compact!(
+                "invalid surface id {surface_id}"
+            ))?;
+        Ok(())
+    }
+
+    #[inline]
     pub(crate) fn write_surfaces(&self) -> ResourceWriteGuard<'_, Surface, SurfaceId> {
-        ResourceWriteGuard::new(self.surfaces.write())
+        ResourceWriteGuard::new(self.inner.surfaces.write())
     }
 
-    #[inline(always)]
     pub fn create_shader(
-        &mut self,
+        &self,
         attributes: ShaderAttributes,
     ) -> Result<Shader> {
-        Ok(Shader::Pending(self.thread_pool.spawn_with_handle(Shader::new(
+        Ok(Shader::Pending(self.inner.thread_pool.spawn_with_handle(Shader::async_new(
             attributes.to_owned(), self.api_version(),
         )).context("spawn error")?))
     }
 
     pub fn create_shader_set<const N_SHADERS: usize>(
-        &mut self,
+        &self,
         shaders: [Shader; N_SHADERS],
         attributes: ShaderSetAttributes,
     ) -> Result<ShaderSetId>
     {
-        self.shader_cache.create_shader_set(
+        self.inner.shader_cache.write().create_shader_set(
             shaders,
             attributes,
-            self.thread_pool.clone(),
-            self.tmp_allocs.clone(),
+            self.inner.thread_pool.clone(),
+            self.inner.tmp_allocs.clone(),
         )
     }
 
-    #[inline(always)]
-    pub fn delete_shader_set(&mut self, id: ShaderSetId) { 
-        self.shader_cache.delete_shader_set(id)
+    #[inline]
+    pub fn get_shader_set<'a>(
+        &self,
+        id: ShaderSetId
+    ) -> impl Future<Output = Result<ShaderSet>> + Send + Sync + use<'a> 
+    {
+        self.inner.shader_cache
+            .read()
+            .get_shader_set(id)
     }
 
-    #[inline(always)]
-    pub fn create_shader_resource_pool(
+    #[inline]
+    pub fn delete_shader_set(&self, id: ShaderSetId) { 
+        self.inner.shader_cache.write().delete_shader_set(id)
+    }
+
+    pub fn create_descriptor_pool(
         &self,
         pool_sizes: impl IntoIterator<Item = (DescriptorType, u32)>,
-        max_sets:u32,
-    ) -> Result<ShaderResourcePoolId>
+        max_sets: u32,
+        max_inline_uniform_block_bindings: u32,
+    ) -> Result<DescriptorPoolId>
     {
-        self.shader_resource_pools.modify(|pools| {
-            Ok(ShaderResourcePoolId::new(pools.insert(ShaderResourcePool::new(
-                self.vk.clone(),
-                pool_sizes, max_sets
-            ).context("failed to create shader resource pool")?)))
+        self.inner.descriptor_pools.modify(|pools| {
+            Ok(DescriptorPoolId::new(pools.insert(DescriptorPool::new(
+                self.inner.device.clone(),
+                pool_sizes, max_sets, max_inline_uniform_block_bindings,
+            ).context("failed to create descriptor pool")?)))
         })
     }
 
-    #[inline(always)]
-    pub fn destroy_shader_resource_pool(
-        &mut self,
-        id: ShaderResourcePoolId,
+    #[inline]
+    pub fn destroy_descriptor_pool(
+        &self,
+        id: DescriptorPoolId,
     ) {
-        self.shader_resource_pools.modify(|pools| {
+        self.inner.descriptor_pools.modify(|pools| {
             pools.remove(id.slot_index()).ok();
         });
     }
 
-    #[inline(always)]
-    pub(crate) fn get_shader_resource_pools(
+    #[inline]
+    pub(crate) fn get_descriptor_pools(
         &self
-    ) -> impl Deref<Target = Arc<SlotMap<ShaderResourcePool>>>
+    ) -> impl Deref<Target = SlotMap<DescriptorPool>>
     {
-        self.shader_resource_pools.load()
+        self.inner.descriptor_pools.load()
     }
 
-    #[inline(always)]
-    pub fn allocate_shader_resources<F>(
+    pub fn allocate_descriptor_sets(
         &self,
-        pool_id: ShaderResourcePoolId,
-        set_infos: &[ShaderDescriptorSetInfo],
-        collect: F,
-    ) -> Result<()>
-        where
-            F: FnMut(usize, ShaderResourceId)
+        pool_id: DescriptorPoolId,
+        set_infos: &mut [DescriptorSetInfo<'_>],
+    ) -> impl Future<Output = Result<()>>
     {
-        let tmp_alloc = self.tmp_alloc();
-        let tmp_alloc = tmp_alloc.guard();
-        let pools = self.shader_resource_pools.load();
+        let pools = self.inner.descriptor_pools.load();
         let pool = pools
             .get(pool_id.slot_index())
-            .context("failed find pool")?;
-        pool.allocate(set_infos, pool_id, &self.shader_cache, &tmp_alloc, collect)
-            .context("failed to allocate shader resources")
+            .context("failed find pool")
+            .cloned();
+        async move {
+            let tmp_alloc = self.tmp_alloc();
+            let tmp_alloc = tmp_alloc.guard();
+            pool?.allocate(set_infos, pool_id, &self.inner.shader_cache, &tmp_alloc)
+                .await
+                .context("failed to allocate descriptor sets")
+        }
     }
 
-    #[inline(always)]
-    pub fn free_shader_resources(
+    pub fn free_descriptor_sets(
         &self,
-        pool_id: ShaderResourcePoolId,
-        resource_ids: &[ShaderResourceId],
+        pool_id: DescriptorPoolId,
+        set_ids: &[DescriptorSetId],
     ) -> Result<()>
     {
         let queue_scheduler = self.queue_scheduler().read();
         let tmp_alloc = self.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
-        let pools = self.shader_resource_pools.load();
+        let pools = self.inner.descriptor_pools.load();
         #[cfg(debug_assertions)]
-        if let Some(id) = resource_ids.iter().find(|id| id.pool_id() != pool_id) {
+        if let Some(id) = set_ids.iter().find(|id| id.pool_id() != pool_id) {
             return Err(Error::just_context(format_compact!(
-                "attempting to free shader resource {id} that was allocated from a different pool, expected pool {pool_id}",
+                "attempting to free descriptor sets {id} that was allocated from a different pool, expected pool {pool_id}",
             )))
         }
         let pool = pools
@@ -488,153 +788,123 @@ impl Gpu {
             pool.free(
                 self,
                 &queue_scheduler,
-                resource_ids,
+                set_ids,
                 &tmp_alloc,
             )
         }
     }
 
-    #[inline(always)]
-    pub fn update_shader_resources(
-        &mut self,
-        pool_id: ShaderResourcePoolId,
-        image_updates: &[ShaderResourceImageUpdate],
-        buffer_updates: &[ShaderResourceBufferUpdate],
-        copies: &[ShaderResourceCopy],
+    pub fn update_descriptor_sets(
+        &self,
+        pool_id: DescriptorPoolId,
+        writes: &[WriteDescriptorSet],
+        copies: &[CopyDescriptorSet],
     ) -> Result<()>
     {
         let tmp_alloc = self.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
         let queue_scheduler = self.queue_scheduler().read();
-        let pools = self.shader_resource_pools.load();
+        let pools = self.inner.descriptor_pools.load();
         let pool = pools
             .get(pool_id.slot_index())
             .context_with(|| format_compact!(
                 "invalid pool id {pool_id}"
             ))?;
         let mut pool = pool.write();
-        let mut writes = FixedVec32
-            ::with_capacity(image_updates.len() as u32 + buffer_updates.len() as u32, &tmp_alloc)
-            .context("vec error")?; 
         let mut unpoison = FixedVec32::with_capacity(
-            writes.capacity() + copies.len() as u32,
+            writes.len() as u32 + copies.len() as u32,
             &tmp_alloc,
         ).context("vec error")?;
-        let mut buffer_infos = FixedVec32
-            ::with_capacity(buffer_updates.len() as u32, &tmp_alloc)
+        let mut descriptor_infos = FixedVec32
+            ::with_capacity(writes.len() as u32, &tmp_alloc)
             .context("vec error")?;
+        let mut vk_writes = FixedVec32
+            ::with_capacity(writes.len() as u32, &tmp_alloc)
+            .context("vec error")?; 
         let finished_frame = self.get_semaphore_counter_value(
             queue_scheduler.get_frame_semaphore_id()
         )?;
-        for update in buffer_updates {
-            #[cfg(debug_assertions)]
-            if update.resource_id.pool_id() != pool_id {
+        for write in writes {
+            if write.set_id.pool_id() != pool_id {
                 return Err(Error::just_context(format_compact!(
-                    "buffer update shader resource {} was allocated from a different pool, expected pool {pool_id}",
-                    update.resource_id,
+                    "buffer update descriptor set {} was allocated from a different pool, expected pool {pool_id}",
+                    write.set_id,
                 )))
             }
-            let mut resource = pool
-                .get_shader_resource_for_update(
-                    update.resource_id,
+            let mut set = pool
+                .get_descriptor_set_for_update(
+                    write.set_id,
                     finished_frame,
                 )
                 .context_with(|| format_compact!(
-                    "failed to get shader resource {:?}",
-                    update.resource_id,
+                    "failed to get descriptor set {}",
+                    write.set_id,
                 ))?;
-            let (ty, vk_infos) = resource
-                .update_buffer(self, update, &tmp_alloc)
+            let (ty, infos) = set 
+                .update(self, write, &tmp_alloc)
                 .context_with(|| format_compact!(
-                    "failed to update buffer shader resource {}",
-                    update.resource_id,
+                    "failed to update descriptor set {}",
+                    write.set_id,
                 ))?;
-            buffer_infos.push(vk_infos);
-            let vk_infos = buffer_infos.last().unwrap();
-            let write = vk::WriteDescriptorSet {
+            descriptor_infos.push(infos);
+            let last = unsafe {
+                descriptor_infos.last_mut().unwrap_unchecked()
+            };
+            let mut write = vk::WriteDescriptorSet {
                 s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                dst_set: resource.descriptor_set(),
-                dst_binding: update.binding,
-                dst_array_element: update.starting_index,
-                descriptor_count: vk_infos.len() as u32,
+                dst_set: set.descriptor_set(),
+                dst_binding: write.binding,
+                dst_array_element: write.starting_index,
                 descriptor_type: ty,
-                p_buffer_info: vk_infos.as_ptr(),
                 ..Default::default()
             };
-            unpoison.push(resource.into_inner());
-            writes.push(write);
-        }
-        let mut image_infos = FixedVec32
-            ::with_capacity(image_updates.len() as u32, &tmp_alloc)
-            .context("vec error")?;
-        for update in image_updates {
-            #[cfg(debug_assertions)]
-            if update.resource_id.pool_id() != pool_id {
-                return Err(Error::just_context(format_compact!(
-                    "image update shader resource {} was allocated from a different pool, expected pool {pool_id}",
-                    update.resource_id,
-                )))
+            match last {
+                DescriptorUpdateInfos::Buffer(buffers) => {
+                    write.descriptor_count = buffers.len();
+                    write.p_buffer_info = buffers.as_ptr();
+                },
+                DescriptorUpdateInfos::Image(images) => {
+                    write.descriptor_count = images.len();
+                    write.p_image_info = images.as_ptr();
+                },
+                DescriptorUpdateInfos::InlineUniformBlock(info) => {
+                    write.descriptor_count = info.data_size;
+                    // Safe because FixedVec doesn't reallocate
+                    write.p_next = info as *const _ as *const core::ffi::c_void;
+                },
             }
-            let mut resource = pool
-                .get_shader_resource_for_update(
-                    update.resource_id,
-                    finished_frame,
-                ).context_with(|| format_compact!(
-                    "failed to get shader resource {}",
-                    update.resource_id,
-                ))?;
-            let (ty, vk_infos) = resource
-                .update_image(self, update, &tmp_alloc)
-                .context_with(|| format_compact!(
-                    "failed to update image shader resource {}",
-                    update.resource_id,
-                ))?;
-            image_infos.push(vk_infos);
-            let vk_infos = image_infos.last().unwrap();
-            let write = vk::WriteDescriptorSet {
-                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                dst_set: resource.descriptor_set(),
-                dst_binding: update.binding,
-                dst_array_element: update.starting_index,
-                descriptor_count: vk_infos.len() as u32,
-                descriptor_type: ty,
-                p_image_info: vk_infos.as_ptr(),
-                ..Default::default()
-            };
-            unpoison.push(resource.into_inner());
-            writes.push(write);
+            unpoison.push(set.into_inner());
+            vk_writes.push(write);
         }
         let mut vk_copies = FixedVec32
             ::with_capacity(copies.len() as u32, &tmp_alloc)
             .context("vec error")?;
         for copy in copies {
-            #[cfg(debug_assertions)]
-            if copy.src_resource_id.pool_id() != pool_id {
+            if copy.src_set_id.pool_id() != pool_id {
                 return Err(Error::just_context(format_compact!(
-                    "shader resource copy source {} was allocated from a different pool, expected pool {pool_id}",
-                    copy.src_resource_id,
+                    "descriptor set copy source {} was allocated from a different pool, expected pool {pool_id}",
+                    copy.src_set_id,
                 )))
             }
-            #[cfg(debug_assertions)]
-            if copy.dst_resource_id.pool_id() != pool_id {
+            if copy.dst_set_id.pool_id() != pool_id {
                 return Err(Error::just_context(format_compact!(
-                    "shader resource copy destination {} was allocated from a different pool, expected pool {pool_id}",
-                    copy.dst_resource_id,
+                    "descriptor set copy destination {} was allocated from a different pool, expected pool {pool_id}",
+                    copy.dst_set_id,
                 )))
             }
             let src = pool 
-                .get_shader_resource_handle(copy.src_resource_id.inner_id())
+                .get_descriptor_set_handle(copy.src_set_id)
                 .context_with(|| format_compact!(
-                    "failed to get source shader resource {} for copy",
-                    copy.src_resource_id,
+                    "failed to get source descriptor set {} for copy",
+                    copy.src_set_id,
                 ))?;
             let mut dst = pool
-                .get_shader_resource_for_update(
-                    copy.dst_resource_id,
+                .get_descriptor_set_for_update(
+                    copy.dst_set_id,
                     finished_frame,
                 ).context_with(|| format_compact!(
-                    "failed to get destination shader resource {} for copy",
-                    copy.dst_resource_id,
+                    "failed to get destination descriptor set {} for copy",
+                    copy.dst_set_id,
                 ))?;
             let vk_copy = unsafe { dst.copy_from(
                 src,
@@ -644,59 +914,35 @@ impl Gpu {
                 copy.dst_starting_index,
                 copy.array_count,
             ) }.context_with(|| format_compact!(
-                "failed to copy source shader resource {} to destination shader resource {}",
-                copy.src_resource_id, copy.dst_resource_id,
+                "failed to copy source descriptor set {} to destination descriptor set resource {}",
+                copy.src_set_id, copy.dst_set_id,
             ))?; 
             unpoison.push(dst.into_inner());
             vk_copies.push(vk_copy);
         }
         unsafe {
-            self.vk.device().update_descriptor_sets(&writes, &vk_copies);
+            self.inner.device.update_descriptor_sets(&vk_writes, &vk_copies);
             for mut handle in unpoison {
                 handle.unpoison();
             }
         }
         Ok(())
-    }
-
-    #[inline(always)]
-    pub fn create_pipeline_cache(
-        &mut self,
-        initial_data: Option<&[u8]>,
-    ) -> Result<PipelineCache>
-    {
-        let initial_data = initial_data.unwrap_or(&[]);
-        let info = vk::PipelineCacheCreateInfo {
-            s_type: vk::StructureType::PIPELINE_CACHE_CREATE_INFO,
-            initial_data_size: initial_data.len(),
-            p_initial_data: initial_data.as_ptr() as _,
-            ..Default::default()
-        };
-        let device = self.vk.device();
-        let handle = unsafe {
-            device.create_pipeline_cache(&info, None)
-                .context("failed to create pipeline cache")?
-        };
-        unsafe {
-            Ok(PipelineCache::new(self.vk.clone(), handle))
-        }
     } 
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn reserve_pipeline_batch_slot(&self) -> PipelineBatchId {
-        PipelineBatchId::new(self.pipeline_batches.modify(|data| {
-            let idx = data.insert(OnceLock::new());
-            idx
+        PipelineBatchId::new(self.inner.pipeline_batches.modify(|data| {
+            data.insert(OnceLock::new())
         }))
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn init_pipeline_batch(
         &self,
         id: PipelineBatchId,
         batch: PipelineBatch,
     ) {
-        if let Ok(b) = self.pipeline_batches.load().get(id.slot_index()) {
+        if let Ok(b) = self.inner.pipeline_batches.load().get(id.slot_index()) {
             b.get_or_init(|| batch);
         }
     }
@@ -706,15 +952,26 @@ impl Gpu {
     /// # Valid usage
     /// - `cache` *must* either be [`None`] or a valid [`PipelineCache`] handle.
     /// - You should always call [`PipelineBatchBuilder::build`] when you are finished with the
-    /// batch and you should *not* rely on automatic builds.
-    #[inline(always)]
-    pub fn create_pipeline_batch(
+    ///   batch and you should *not* rely on automatic builds.
+    #[inline]
+    pub fn create_pipeline_batch<Cache>(
         &self,
-        cache: Option<PipelineCache>,
-    ) -> PipelineBatchBuilder {
-        PipelineBatchBuilder::new(
+        cache: Cache,
+    ) -> Result<PipelineBatchBuilder>
+        where Cache: Into<Option<PipelineCache>>
+    {
+        let cache = cache.into();
+        if let Some(cache) = &cache &&
+            cache.logical_device_id() != self.device().id()
+        {
+            return Err(Error::just_context(format_compact!(
+                "cache logical device id {} is different from this Gpu instance device id {}",
+                cache.logical_device_id(), self.device().id(),
+            )))
+        }
+        Ok(PipelineBatchBuilder::new(
             self.clone(), cache
-        )
+        ))
     }
 
     /// Destroys an entire pipeline batch.
@@ -725,7 +982,7 @@ impl Gpu {
         &self,
         batch_id: PipelineBatchId,
     ) -> Result<()> {
-        self.pipeline_batches.modify(|batches| {
+        self.inner.pipeline_batches.modify(|batches| {
             batches.remove(batch_id.slot_index())
             .context_with(|| format_compact!(
                 "invalid pipeline batch id {batch_id}"
@@ -739,120 +996,92 @@ impl Gpu {
     /// [`Gpu::destroy_pipeline_batch`] for efficiency.
     ///
     /// # Valid usage
+    /// - This *should* only be called from the main thread.
     /// - `batch_id` *must* be a valid [`PipelineBatchId`].
     /// - Each id in `graphics_pipeline_ids` *must* be a valid [`GraphicsPipelineId`] and *must*
-    /// have originated from the specified batch.
+    ///   have originated from the specified batch.
     /// - Each id in `compute_pipeline_ids` *must* be a valid [`ComputePipelineId`] and *must*
-    /// have originated from the specified batch.
+    ///   have originated from the specified batch.
     pub fn destroy_pipelines(
         &self,
         batch_id: PipelineBatchId,
         graphics_pipeline_ids: &[GraphicsPipelineId],
         compute_pipeline_ids: &[ComputePipelineId],
-    ) -> Result<()> {
-        self.pipeline_batches.modify(|batches| {
+    ) -> Result<()>
+    {
+        self.inner.pipeline_batches.modify(|batches| {
             let batch = batches
                 .get_mut(batch_id.slot_index())
                 .context_with(|| format_compact!(
                     "invalid pipeline batch id {batch_id}"
                 ))?.get().unwrap();
-            batch.destroy_graphics_pipelines(graphics_pipeline_ids)?;
-            batch.destroy_compute_pipelines(compute_pipeline_ids)?;
+            block_on(batch.destroy_graphics_pipelines(graphics_pipeline_ids))?;
+            block_on(batch.destroy_compute_pipelines(compute_pipeline_ids))?;
             Ok(())
         })
-    }
+    } 
 
-    pub(crate) fn get_shader_set_resources<'a, F, Alloc>(
+    #[inline]
+    pub fn get_pipeline_batch(
         &self,
-        shader_set: &ShaderSetInner,
-        tmp_alloc: &'a Alloc,
-        mut f: F,
-    ) -> Result<FixedVec32<'a, vk::DescriptorSet, Alloc>>
-        where
-            Alloc: LocalAlloc,
-            F: FnMut(u32) -> Option<ShaderResourceId>,
+        id: PipelineBatchId,
+    ) -> Result<impl Deref<Target = PipelineBatch>>
     {
-        let sets = shader_set.descriptor_set_layouts();
-        let mut res = FixedVec32
-            ::with_capacity(sets.len() as u32, tmp_alloc)
-            .context("alloc failure")?;
-        let pools = self.shader_resource_pools.load();
-        for (i, set) in sets.iter().enumerate() {
-            let id = f(i as u32);
-            if let Some(id) = id &&
-                !set.bindings.is_empty()
-            {
-                let pool = pools
-                    .get(id.pool_id().slot_index())
-                    .context("failed to find resource pool")?;
-                let descriptor_set = pool
-                    .get_descriptor_set(id.inner_id())
+        self.inner.pipeline_batches
+            .load()
+           .try_map(|batches| {
+                Ok(batches
+                    .get(id.slot_index())
                     .context_with(|| format_compact!(
-                        "failed to get shader resource from shader resource pool {:?}",
-                        id.pool_id(),
-                    ))?;
-                res.push(descriptor_set);
-            }
-            else {
-                res.push(vk::DescriptorSet::null());
-            }
-        }
-        Ok(res)
+                        "invalid pipeline batch id {id}"
+                    ))?
+                    .get().unwrap()
+                )
+            })
     }
 
-    pub(crate) fn get_shader_set_push_constant_ranges<'a, 'b, Alloc, F>(
+    pub async fn get_graphics_pipeline<'a>(
         &self,
-        shader_set: &ShaderSetInner,
-        tmp_alloc: &'a Alloc,
-        mut f: F,
-    ) -> Result<FixedVec32<'a, (PushConstantRange, &'b [u8]), Alloc>>
-        where
-            Alloc: LocalAlloc,
-            F: FnMut(PushConstantRange) -> &'b [u8],
+        id: GraphicsPipelineId,
+    ) -> Result<impl Deref<Target = GraphicsPipeline> + use<'a>>
     {
-        let push_constant_ranges = shader_set.push_constant_ranges();
-        let mut res = FixedVec32
-            ::with_capacity(push_constant_ranges.len() as u32, tmp_alloc)
-            .context("alloc failure")?;
-        for &pc in push_constant_ranges.iter() {
-            res.push((pc, f(pc)));
-        }
-        Ok(res)
+        self.inner.pipeline_batches
+            .load()
+            .try_map(|batches| {
+                batches
+                    .get(id.batch_id().slot_index())
+                    .context_with(|| format_compact!(
+                        "invalid pipeline batch id {}", id.batch_id(),
+                    ))
+            })?.get().unwrap()
+            .get_graphics_pipeline(id.pipeline_id()).await
+            .context_with(|| format_compact!(
+                "invalid graphics pipeline id {id}"
+            ))
     }
 
-    #[inline(always)]
-    pub(crate) fn get_graphics_pipeline(&self, id: GraphicsPipelineId) -> Result<&GraphicsPipeline> {
-        self.graphics_pipelines
-            .get(id.0)
-            .context("failed to find graphics pipeline")
+    pub async fn get_compute_pipeline<'a>(
+        &self,
+        id: ComputePipelineId,
+    ) -> Result<impl Deref<Target = ComputePipeline> + use<'a>>
+    {
+        self.inner.pipeline_batches
+            .load()
+            .try_map(|batches| {
+                batches
+                    .get(id.batch_id().slot_index())
+            }).context_with(|| format_compact!(
+                "invalid pipeline batch id {}", id.batch_id()
+            ))?.get().unwrap()
+            .get_compute_pipeline(id.pipeline_id()).await
+            .context_with(|| format_compact!(
+                "invalid graphics pipeline id {id}"
+            ))
     }
 
-    #[inline(always)]
-    pub(crate) fn get_compute_pipeline(&self, id: ComputePipelineId) -> Result<&ComputePipeline> {
-        self.compute_pipelines
-            .get(id.0)
-            .context("failed to find compute pipeline")
-    }
-
-    #[inline(always)]
+    #[inline]
     pub fn is_buffer_valid(&self, id: BufferId) -> bool {
-        self.buffers.read().contains(id.0)
-    }
-
-    #[inline(always)]
-    pub(crate) fn read_buffer(&self, id: BufferId) -> Result<BufferReadGuard<'_>> {
-        BufferReadGuard::new(id, self.buffers.read())
-        .ok_or_else(|| Error::just_context(format_compact!(
-            "invalid buffer id {id}"
-        )))
-    }
-
-    #[inline(always)]
-    pub(crate) fn write_buffer(&self, id: BufferId) -> Result<BufferWriteGuard<'_>> {
-        BufferWriteGuard::new(id, self.buffers.write())
-        .ok_or_else(|| Error::just_context(format_compact!(
-            "invalid buffer id {id}"
-        )))
+        self.inner.buffers.read().contains(id.0)
     }
 
     /// Creates buffers and images in a batch.
@@ -861,249 +1090,231 @@ impl Gpu {
     ///
     /// [`BufferId`]s and [`ImageId`]s are returned to their respective [`BufferCreateInfo`]s and
     /// [`ImageCreateInfo`]s.
-    pub fn create_resources(
+    ///
+    /// # Valid usage
+    /// - The valid usage of buffer and image create infos are described in [`ImageCreateInfo`] and
+    ///   [`BufferCreateInfo`] respectively.
+    pub fn create_resources<'a, B, I>(
         &self,
-        buffer_create_infos: &mut [BufferCreateInfo<'_>],
-        image_create_infos: &mut [ImageCreateInfo<'_>],
-    ) -> Result<()> {
-        let mut buffer_create_infos = UnsafeCell::new(buffer_create_infos);
-        let mut image_create_infos = UnsafeCell::new(image_create_infos);
-        let mut buffers = self.buffers.write();
-        let mut images = self.images.write();
-        let mut binders = self.memory_binders.load();
+        buffer_create_infos: impl IntoIterator<IntoIter = B>,
+        image_create_infos: impl IntoIterator<IntoIter = I>,
+    ) -> Result<()>
+        where
+            B: ExactSizeIterator<Item = BufferCreateInfo<'a>>,
+            I: ExactSizeIterator<Item = ImageCreateInfo<'a>>,
+    {
+        let buffer_create_infos = buffer_create_infos.into_iter();
+        let image_create_infos = image_create_infos.into_iter();
         let tmp_alloc = self.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
+        let buffers = UnsafeCell::new(self.inner.buffers.write());
+        let images = UnsafeCell::new(self.inner.images.write());
+        let binders = self.inner.memory_binders.load();
         let mut buffer_bind_infos = FixedVec32::with_capacity(
-            buffer_create_infos.get_mut().len() as u32, &tmp_alloc,
+            buffer_create_infos.len() as u32, &tmp_alloc,
         )?;
         let mut image_bind_infos = FixedVec32::with_capacity(
-            image_create_infos.get_mut().len() as u32, &tmp_alloc,
+            image_create_infos.len() as u32, &tmp_alloc,
         )?;
-        let mut guard = RaiiHandle::new((0usize, 0usize), |(bufs, imgs)| unsafe {
-            for create_info in &mut (**buffer_create_infos.get())[0..bufs] {
-                buffers.remove(create_info.out.slot_index());
-                *create_info.out = Default::default();
+        let mut guard = RaiiHandle::new((
+                FixedVec32::<BufferId, _>::with_capacity(
+                    buffer_create_infos.len() as u32,
+                    &tmp_alloc,
+                )?,
+                FixedVec32::<ImageId, _>::with_capacity(
+                    image_create_infos.len() as u32,
+                    &tmp_alloc,
+                )?,
+            ),
+            |(bufs, imgs)| unsafe {
+                for &id in &bufs {
+                    (&mut *buffers.get()).remove(id.slot_index()).ok();
+                }
+                for &id in &imgs {
+                    (&mut *images.get()).remove(id.slot_index()).ok();
+                }
             }
-            for create_info in &mut (**image_create_infos.get())[0..imgs] {
-                images.remove(create_info.out.slot_index());
-                *create_info.out = Default::default();
-            }
-        });
-        let buffer_create_infos = unsafe {
-            &mut **buffer_create_infos.get()
-        };
-        for (i, create_info) in buffer_create_infos.iter_mut().enumerate() {
+        );
+        for (i, create_info) in buffer_create_infos.enumerate() {
             let mut bind_info = Default::default();
             let buffer_meta = match create_info.memory_binder.into_inner() {
                 ResourceBinderInner::Default => create_info.build(
-                    self.vk.clone(), &mut self.default_binder.clone(), &mut bind_info,
+                    self.inner.device.clone(), &mut self.inner.default_binder.clone(), &mut bind_info,
                 ),
                 ResourceBinderInner::DefaultMappable => create_info.build(
-                    self.vk.clone(), &mut self.default_binder_mappable.clone(), &mut bind_info
+                    self.inner.device.clone(), &mut self.inner.default_binder_mappable.clone(), &mut bind_info
                 ),
                 ResourceBinderInner::Id(id) => binders
                     .get(id.0).context_with(|| format_compact!("invalid memory binder id {id}"))
                     .and_then(|binder| create_info.build(
-                        self.vk.clone(), &mut *binder.write(), &mut bind_info
+                        self.inner.device.clone(), &mut *binder.write(), &mut bind_info
                     ))
             }.context_with(|| format_compact!("failed to create buffer at index {i}"))?;
             buffer_bind_infos.push(bind_info);
             let id = BufferId::new(
-                buffers.insert(buffer_meta)
+                unsafe { &mut *buffers.get() }.insert(buffer_meta)
             );
             *create_info.out = id;
-            guard.0 += 1;
+            guard.0.push(id);
         }
-        let image_create_infos = unsafe {
-            &mut **image_create_infos.get()
-        };
-        for (i, create_info) in image_create_infos.iter_mut().enumerate() {
+        for (i, create_info) in image_create_infos.enumerate() {
             let mut bind_info = Default::default();
             let image_meta = match create_info.memory_binder.into_inner() {
                 ResourceBinderInner::Default => create_info.build(
-                    self.vk.clone(), &mut self.default_binder.clone(),
+                    self.inner.device.clone(), &mut self.inner.default_binder.clone(),
                     &mut bind_info,
                 ),
                 ResourceBinderInner::DefaultMappable => create_info.build(
-                    self.vk.clone(), &mut self.default_binder_mappable.clone(),
+                    self.inner.device.clone(), &mut self.inner.default_binder_mappable.clone(),
                     &mut bind_info
                 ),
                 ResourceBinderInner::Id(id) => binders
                     .get(id.0).context_with(|| format_compact!("invalid memory binder id {id}"))
                     .and_then(|binder| create_info.build(
-                        self.vk.clone(), &mut *binder.write(), &mut bind_info
+                        self.inner.device.clone(), &mut *binder.write(), &mut bind_info
                     ))
                 ,
             }.context_with(|| format_compact!("failed to create image at index {i}"))?;
             image_bind_infos.push(bind_info);
             let id = ImageId::new(
-                images.insert(image_meta)
+                unsafe { &mut *images.get() }.insert(image_meta)
             );
             *create_info.out = id;
-            guard.1 += 1;
+            guard.1.push(id);
         }
         unsafe {
-            self.vk.device().bind_buffer_memory2(&buffer_bind_infos)
-            .context("failed to bind the memory of buffers")?;
-            self.vk.device().bind_image_memory2(&image_bind_infos)
-            .context("failed to bind the memory of images")?;
+            if !buffer_bind_infos.is_empty() {
+                self.inner.device.bind_buffer_memory2(&buffer_bind_infos)
+                    .context("failed to bind the memory of buffers")?;
+            }
+            if !image_bind_infos.is_empty() {
+                self.inner.device.bind_image_memory2(&image_bind_infos)
+                    .context("failed to bind the memory of images")?;
+            }
+            
         }
         guard.into_inner();
         Ok(())
     }
 
-    #[inline(always)]
+    pub(crate) fn write_buffers<Id>(&self) -> ResourceWriteGuard<'_, BufferMeta, Id>
+        where Id: ResourceId<BufferMeta>
+    {
+        ResourceWriteGuard::new(self.inner.buffers.write())
+    }
+
+    pub(crate) fn write_images<Id>(&self) -> ResourceWriteGuard<'_, ImageMeta, Id>
+        where Id: ResourceId<ImageMeta>
+    {
+        ResourceWriteGuard::new(self.inner.images.write())
+    }
+
     pub fn destroy_resources(
-        &mut self,
-        buffers: &[BufferId],
-        images: &[ImageId]
+        &self,
+        buffers: impl IntoIterator<Item = BufferId>,
+        images: impl IntoIterator<Item = ImageId>,
     ) -> Result<()>
     {
-        if buffers.is_empty() && images.is_empty() {
-            return Ok(())
-        }
-        let mut all_buffers = self.buffers.write();
-        let mut all_images = self.images.write();
-        let tmp_alloc = self.tmp_alloc();
-        let tmp_alloc = tmp_alloc.guard();
-        let mut cached_buffers = FixedVec32::with_capacity(
-            buffers.len() as u32,
-            &tmp_alloc,
-        )?;
-        let mut cached_images = FixedVec32::with_capacity(
-            images.len() as u32,
-            &tmp_alloc,
-        )?;
-        let mut max_frame = 0;
-        let pools = self.shader_resource_pools.load();
-        for &id in buffers {
-            let buffer = all_buffers
+        let buffers = buffers.into_iter();
+        let images = images.into_iter();
+        let mut all_buffers = self.inner.buffers.write();
+        let mut all_images = self.inner.images.write();
+        let pools = self.inner.descriptor_pools.load();
+        for id in buffers {
+            all_buffers
                 .remove(id.0)
                 .context_with(|| format_compact!(
                     "invalid buffer id {id}",
                 ))?;
-            max_frame = max_frame.max(buffer.get_last_used_frame());
-            cached_buffers.push(buffer);
             for pool in pools.values() {
                 pool.buffer_delete(id);
             }
         }
-        for &id in images {
+        for id in images {
             let image = all_images
                 .remove(id.slot_index())
                 .context_with(|| format_compact!(
                     "invalid image id {id}"
                 ))?;
-            max_frame = max_frame.max(image.get_last_used_frame());
-            cached_images.push(image);
             for pool in pools.values() {
-                pool.image_delete(id);
-            }
-        }
-        let semaphore = self.get_timeline_semaphore(self
-            .queue_scheduler()
-            .read()
-            .get_frame_semaphore_id()
-        ).unwrap();
-        let wait_info = vk::SemaphoreWaitInfo {
-            s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
-            semaphore_count: 1,
-            p_semaphores: &semaphore,
-            p_values: &max_frame,
-            ..Default::default()
-        };
-        unsafe {
-            if let Err(res) = self.vk.device().wait_semaphores(
-                &wait_info,
-                self.vk.frame_timeout(),
-            ) {
-                if res == vk::Result::TIMEOUT {
-                    return Err(Error::just_context(format_compact!(
-                        "frame timeout {} nanoseconds reached at {}", self.vk.frame_timeout(),
-                        location!(),
-                    )))
-                } else {
-                    return Err(Error::new(res, "unexpected vulkan error"))
+                for id in image.view_index_iter(id) {
+                    pool.image_view_delete(id);
                 }
             }
         }
         Ok(())
     }
 
-    #[inline(always)]
-    pub fn create_sampler(
-        &mut self,
-        attributes: SamplerAttributes,
-    ) -> Result<Sampler>
-    {
-        Ok(attributes
-            .build(self.vk.device())
-            .context("failed to create sampler")?
-        )
+    pub fn create_image_view(
+        &self,
+        image_id: ImageId,
+        range: ImageRange,
+    ) -> Result<ImageViewId> {
+        self.inner.images
+            .write()
+            .get_mut(image_id.slot_index())
+            .context_with(|| format_compact!(
+                "invalid image id {image_id}"
+            ))?
+            .create_view(range)
+            .map(|idx| ImageViewId::new(image_id, idx))
     }
 
-    #[inline(always)]
-    pub(crate) unsafe fn create_swapchain_images(
+    #[inline]
+    pub fn map_buffer(
         &self,
-        images: &swapchain::SwapchainImages<'_>,
-        out: &mut [ImageId],
-        alloc: &impl LocalAlloc<Error = Error>
-    ) -> Result<()> {
-        let mut all_images = self.images.write();
-        let dimensions = images.extent.into();
-        for (i, &handle) in images.handles.iter().enumerate() {
-            out[i] = ImageId::new(all_images.insert(unsafe { ImageMeta::from_swapchain_image(
-                self.vk.clone(),
-                handle,
-                dimensions,
-                images.format,
-                images.usage,
-                alloc,
-            )?}))
+        id: BufferId
+    ) -> Result<(*mut u8, usize)>
+    {
+        self.inner.buffers
+            .write()
+            .get_mut(id.0)
+            .context_with(|| format_compact!(
+                "invalid buffer id {id}"
+            ))?.memory().map_memory()
+            .context("failed to map memory")
+    }
+
+    #[inline]
+    pub fn is_image_valid(&self, id: ImageId) -> bool {
+        self.inner.images.read().contains(id.slot_index())
+    }
+
+    #[inline]
+    pub fn is_image_view_valid(&self, id: ImageViewId) -> bool {
+        if let Ok(img) = self.inner.images.read().get(id.image_id().slot_index()) {
+            img.get_view(id).is_ok()
+        } else {
+            false
         }
-        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn read_buffers<Id: ResourceId<BufferMeta>>(
+        &self
+    ) -> ResourceReadGuard<'_, BufferMeta, Id>
+    {
+        ResourceGuard::new(self.inner.buffers.read())
     } 
 
-    #[inline(always)]
-    pub fn is_image_valid(&self, id: ImageId) -> bool {
-        self.images.read().contains(id.slot_index())
-    }
-
-    #[inline(always)]
-    pub(crate) fn read_buffers(&self) -> ResourceReadGuard<'_, BufferMeta, BufferId>
+    #[inline]
+    pub(crate) fn read_images<Id: ResourceId<ImageMeta>>(
+        &self
+    ) -> ResourceReadGuard<'_, ImageMeta, Id>
     {
-        ResourceGuard::new(self.buffers.read())
-    }
+        ResourceGuard::new(self.inner.images.read())
+    } 
 
-    #[inline(always)]
-    pub(crate) fn write_buffers(&self) -> ResourceWriteGuard<'_, BufferMeta, BufferId>
-    {
-        ResourceGuard::new(self.buffers.write())
-    }
-
-    #[inline(always)]
-    pub(crate) fn read_images(&self) -> ResourceReadGuard<'_, ImageMeta, ImageId>
-    {
-        ResourceGuard::new(self.images.read())
-    }
-
-    #[inline(always)]
-    pub(crate) fn write_images(&self) -> ResourceWriteGuard<'_, ImageMeta, ImageId>
-    {
-        ResourceGuard::new(self.images.write())
-    }
-
-    #[inline(always)]
     pub fn create_memory_binder<Attr>(
         &self,
         attributes: Attr,
     ) -> Result<MemoryBinderId>
         where Attr: MemoryBinderAttributes,
     {
-        self.memory_binders.modify(|binders| {
+        self.inner.memory_binders.modify(|binders| {
             Ok(MemoryBinderId(binders.insert(MemoryBinderResource::new(
                 attributes
-                    .build(self.vk.clone())
+                    .build(self.inner.device.clone())
                     .context_with(|| format_compact!(
                         "failed to create {}", Attr::NAME,
                     ))?
@@ -1111,51 +1322,94 @@ impl Gpu {
         })
     }
 
-    #[inline(always)]
-    pub fn destroy_memory_binder(&self, id: MemoryBinderId) {
-        self.memory_binders.modify(|binders| {
-            binders.remove(id.0).ok()
-        });
+    #[inline]
+    pub(crate) fn get_memory_binder(
+        &self,
+        id: MemoryBinderId,
+    ) -> Result<impl Deref<Target = MemoryBinderResource>>
+    {
+        self.inner.memory_binders
+            .load()
+            .try_map(|binders| {
+                binders.get(id.0)
+                .context_with(|| format_compact!(
+                    "invalid memory binder id {id}",
+                ))
+            }) 
     }
 
-    #[inline(always)]
-    pub fn get_memory_binder(
+    #[inline]
+    pub fn get_memory_binder_info(
         &self,
-        id: MemoryBinderId
-    ) -> Result<MemoryBinderResource>
-    {
-        Ok(self.memory_binders
-            .load()
-            .get(id.0)
-            .context_with(|| format_compact!(
-                "invalid memory binder id {id}"
-            ))?.clone()
-        )
+        id: MemoryBinderId,
+    ) -> Result<MemoryBinderInfo> {
+        let binder = self.get_memory_binder(id)?;
+        let binder = binder.read();
+        Ok(MemoryBinderInfo {
+            max_alloc_size: binder.max_alloc_size(),
+            is_mappable: binder.is_mappable(),
+        })
+    }
+
+    /// This *may* release all allocations made by a [`MemoryBinder`] back to the [`MemoryBinder`].
+    ///
+    /// This *should* not free any [`vk::DeviceMemory`].
+    ///
+    /// # Valid usage
+    /// - `id` *must* be a valid [`MemoryBinderId`].
+    ///
+    /// # Safety
+    /// - Previous allocations *may* be overwritten by future allocations.
+    pub unsafe fn release_memory_binder_resources(
+        &self,
+        id: MemoryBinderId,
+    ) -> Result<()> {
+        let binder = self.get_memory_binder(id)?;
+        let mut binder = binder.write();
+        unsafe {
+            binder.release_resources();
+        }
+        Ok(())
+    }
+
+    /// Removes a memory binder from global resources.
+    ///
+    /// Memory allocated by the binder *should* still be valid even if it outlives the memory
+    /// binder.
+    ///
+    /// # Valid usage
+    /// - `id` *must* be a valid [`MemoryBinderId`].
+    pub fn destroy_memory_binder(&self, id: MemoryBinderId) -> Result<()> {
+        self.inner.memory_binders.modify(|binders| {
+            binders
+                .remove(id.0)
+                .context_with(|| format_compact!(
+                    "invalid memory binder id {id}"
+                )).map(|_| ())
+        })
     }
 
     /// Creates timeline semaphores from an iterator over their initial values.
-    #[inline(always)]
-    pub fn create_timeline_semaphores<I, F>(
+    pub fn create_timeline_semaphores<'a, I>(
         &self,
-        initial_values: I,
-        mut collect: F,
+        create_infos: impl IntoIterator<IntoIter = I>,
     ) -> Result<()>
         where
-            F: FnMut(u32, TimelineSemaphoreId),
-            I: ExactSizeIterator<Item = u64>,
+            I: ExactSizeIterator<Item = (&'a mut TimelineSemaphoreId, u64)>,
     {
-        if initial_values.len() == 0 {
+        let create_infos = create_infos.into_iter();
+        if create_infos.len() == 0 {
             return Ok(())
         }
         let tmp_alloc = self.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
         let mut indices = FixedVec32::with_capacity(
-            initial_values.len().try_into().unwrap(),
+            create_infos.len() as u32,
             &tmp_alloc,
         )?;
         let mut err = None;
-        let mut semaphores = self.timeline_semaphores.write();
-        for initial_value in initial_values {
+        let mut semaphores = self.inner.timeline_semaphores.write();
+        for (out_id, initial_value) in create_infos {
             if err.is_some() {
                 break;
             }
@@ -1170,34 +1424,35 @@ impl Gpu {
                 ..Default::default()
             }.push_next(&mut type_info);
             match unsafe {
-                self.vk.device()
+                self.inner.device
                     .create_semaphore(&semaphore_info, None)
             } {
                 Ok(handle) => {
                     let index = semaphores.insert(handle);
                     indices.push(index);
+                    *out_id = TimelineSemaphoreId(index);
                 },
                 Err(e) => { err = Some(e); }
             }
         }
         if let Some(err) = err {
-            return Err(err).context("failed to create timeline semaphore")
-        }
-        for (i, index) in indices.into_iter().enumerate() {
-            collect(i as u32, TimelineSemaphoreId(index))
+            for index in indices {
+                semaphores.remove(index).ok();
+            }
+            return Err(Error::new(err, "failed to create timeline semaphore"))
         }
         Ok(())
     }
 
     /// Gets the counter value of a timeline semaphore.
-    #[inline(always)]
+    #[inline]
     pub fn get_semaphore_counter_value(&self, id: TimelineSemaphoreId) -> Result<u64> {
-        let &handle = self.timeline_semaphores
+        let &handle = self.inner.timeline_semaphores
             .read()
             .get(id.0)
             .context_with(|| format_compact!("failed to find timeline semaphore {id}"))?;
         unsafe {
-            self.vk.device()
+            self.inner.device
                 .get_semaphore_counter_value(handle)
                 .context("failed to get timeline semaphore value")
         }
@@ -1206,7 +1461,6 @@ impl Gpu {
     /// Waits for previous semaphores until `timeout` where `timeout` is in nanoseconds.
     ///
     /// Returns Ok(true) on success, Ok(false) on timeout and Err(err) if there's another error.
-    #[inline(always)]
     pub fn wait_for_semaphores(
         &self,
         semaphores: &[(TimelineSemaphoreId, u64)],
@@ -1219,7 +1473,7 @@ impl Gpu {
             ::with_capacity(n_semaphores, &tmp_alloc)?;
         let mut values = FixedVec32
             ::with_capacity(n_semaphores, &tmp_alloc)?;
-        let read = self.timeline_semaphores.read();
+        let read = self.inner.timeline_semaphores.read();
         for &(id, value) in semaphores {
             let &semaphore = read
                 .get(id.0)
@@ -1235,7 +1489,7 @@ impl Gpu {
             ..Default::default()
         };
         let res = unsafe {
-            self.vk.device().wait_semaphores(
+            self.inner.device.wait_semaphores(
                 &wait_info,
                 timeout,
             )
@@ -1243,44 +1497,33 @@ impl Gpu {
         Ok(res == vk::Result::SUCCESS)
     }
 
-    #[inline(always)]
     pub fn destroy_timeline_semaphores(&self, ids: &[TimelineSemaphoreId]) {
-        let mut semaphores = self.timeline_semaphores.write();
+        let mut semaphores = self.inner.timeline_semaphores.write();
         for id in ids {
             if let Ok(handle) = semaphores.remove(id.0) {
                 unsafe {
-                    self.vk.device().destroy_semaphore(handle, None);
+                    self.inner.device.destroy_semaphore(handle, None);
                 }
             }
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub(crate) fn get_timeline_semaphore(&self, id: TimelineSemaphoreId) -> Result<vk::Semaphore> {
-        self.timeline_semaphores
+        self.inner.timeline_semaphores
             .read()
             .get(id.0).copied()
             .context("failed to find timeline semaphore")
     }
-
-    #[inline(always)]
-    pub(crate) fn update(&mut self) -> Result<()> {
-        let pools = self.shader_resource_pools.load();
-        for pool in pools.values_mut() {
-            pool.update(self);
-        }
-        Ok(())
-    }
 }
 
-impl Drop for Gpu {
+impl Drop for GpuInner {
 
     fn drop(&mut self) {
         unsafe {
             log::info!("cleaning up GPU");
-            let device = self.vk.device();
             for &handle in self.timeline_semaphores.write().values() {
-                device.destroy_semaphore(handle, None);
+                self.device.destroy_semaphore(handle, None);
             }
         }
     }

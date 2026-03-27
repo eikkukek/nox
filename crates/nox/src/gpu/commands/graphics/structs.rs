@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub struct RenderArea {
     pub width: u32,
     pub height: u32,
@@ -120,31 +120,29 @@ impl From<ClearValue> for vk::ClearValue {
 
 #[derive(Clone, Copy)]
 pub struct ResolveInfo {
-    pub image_id: ImageId,
+    pub image_view: BareImageViewId,
     pub mode: ResolveMode,
-    pub range: Option<ImageRange>,
 }
 
 impl ResolveInfo {
 
     #[inline(always)]
-    pub fn new(
-        image_id: ImageId,
+    pub fn new<Id>(
+        image_view: Id,
         mode: ResolveMode,
-        range: impl Into<Option<ImageRange>>,
     ) -> Self
+        where Id: Into<BareImageViewId>
     {
         Self {
-            image_id,
+            image_view: image_view.into(),
             mode,
-            range: range.into(),
         }
     }
 }
 
 #[derive(Clone, Copy)]
 pub struct PassAttachment {
-    pub range: Option<ImageRange>,
+    pub image_view: BareImageViewId,
     pub resolve: Option<ResolveInfo>,
     pub load_op: AttachmentLoadOp,
     pub store_op: AttachmentStoreOp,
@@ -155,22 +153,17 @@ pub struct PassAttachment {
 impl PassAttachment {
 
     #[inline(always)]
-    pub fn new() -> PassAttachment<'static>
+    pub fn new<Id>(image_view: Id) -> PassAttachment
+        where Id: Into<BareImageViewId>
     {
         Self {
-            range: None,
+            image_view: image_view.into(),
             resolve: None,
             load_op: Default::default(),
             store_op: Default::default(),
             clear_value: Default::default(),
             preserve_contents: true,
         }
-    }
-
-    #[inline(always)]
-    pub fn with_range(mut self, range: impl Into<Option<ImageRange>>) -> Self {
-        self.range = range.into();
-        self
     }
 
     #[inline(always)]
@@ -204,8 +197,9 @@ impl PassAttachment {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub enum DepthStencilAttachment {
+    #[default]
     None,
     Depth(PassAttachment),
     Stencil(PassAttachment),
@@ -213,13 +207,6 @@ pub enum DepthStencilAttachment {
         depth: PassAttachment,
         stencil: PassAttachment,
     },
-}
-
-impl Default for DepthStencilAttachment {
-
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl DepthStencilAttachment {
@@ -239,6 +226,6 @@ impl DepthStencilAttachment {
     #[inline(always)]
     pub fn depth_stencil(depth: PassAttachment, stencil: PassAttachment) -> Self
     {
-        Self::DepthStencil { depth: depth, stencil: stencil, }
+        Self::DepthStencil { depth, stencil, }
     }
 }

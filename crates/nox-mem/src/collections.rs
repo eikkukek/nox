@@ -31,7 +31,7 @@ mod no_std {
 
     impl<T> TryReserveError<T> {
 
-        #[inline(always)]
+        #[inline]
         pub fn new(error: TryReserveErrorKind, value: T) -> Self {
             Self {
                 error,
@@ -39,7 +39,7 @@ mod no_std {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn alloc_error<E>(_error: E, value: T) -> Self
             where E: Error + Send + Sync + 'static
         {
@@ -49,7 +49,7 @@ mod no_std {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn max_capacity_exceeded<SizeType: IntoUsize>(
             max_capacity: SizeType,
             requested_capacity: usize,
@@ -64,7 +64,7 @@ mod no_std {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn with_value<U>(self, value: U) -> TryReserveError<U> {
             TryReserveError {
                 error: self.error,
@@ -72,7 +72,7 @@ mod no_std {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn recover_value(self) -> (T, TryReserveErrorKind) {
             (self.value, self.error)
         }
@@ -92,10 +92,11 @@ pub use no_std::*;
 #[cfg(feature = "std")]
 mod std_features {
 
-    use std::{
-        collections::hash_map::{Entry, VacantEntry},
-        boxed::Box,
-    }; 
+    use std::boxed::Box; 
+
+    pub use std::collections::*;
+
+    use hash_map::{Entry, VacantEntry};
 
     use core::{
         error::Error,
@@ -129,7 +130,7 @@ mod std_features {
 
     impl<T> TryReserveError<T> {
 
-        #[inline(always)]
+        #[inline]
         pub fn new(error: TryReserveErrorKind, value: T) -> Self {
             Self {
                 error,
@@ -137,7 +138,7 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn alloc_error<E>(error: E, value: T) -> Self
             where E: Error + Send + Sync + 'static
         {
@@ -147,7 +148,7 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn max_capacity_exceeded<SizeType: IntoUsize>(
             max_capacity: SizeType,
             requested_capacity: usize,
@@ -162,7 +163,7 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn with_value<U>(self, value: U) -> TryReserveError<U> {
             TryReserveError {
                 error: self.error,
@@ -170,7 +171,7 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn recover_value(self) -> (T, TryReserveErrorKind) {
             (self.value, self.error)
         }
@@ -198,7 +199,7 @@ mod std_features {
 
     impl<'a, K, V> EntryExt<'a, K, V> for Entry<'a, K, V> {
 
-        #[inline(always)]
+        #[inline]
         fn or_try_insert_with<F, E>(self, f: F) -> Result<&'a mut V, E>
             where
                 F: FnOnce() -> Result<V, E>
@@ -214,7 +215,7 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         fn or_try_insert_with_key<F, E>(self, f: F) -> Result<&'a mut V, E>
             where
                 F: FnOnce(&K) -> Result<V, E>
@@ -230,7 +231,7 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
+        #[inline]
         fn vacant(self) -> Option<VacantEntry<'a, K, V>> {
             match self {
                 Self::Occupied(_) => {

@@ -1,11 +1,8 @@
-use std::collections::hash_map;
-
 use core::marker::PhantomData;
 
-use rustc_hash::FxHashMap;
+use ahash::AHashMap;
 use compact_str::CompactString;
 
-use nox::mem::vec_types::VecError;
 use nox_geom::Vec2;
 
 use super::*;
@@ -62,12 +59,12 @@ impl<H> TextSegment<H> for TextSegmentOwned<H> {
 #[derive(Clone)]
 pub struct InstancedText {
     pub trigs: Arc<GlyphTriangles>,
-    pub offsets: GlobalVec<VertexOffset>,
+    pub offsets: Vec<VertexOffset>,
 }
 
 #[derive(Default, Clone)]
 pub struct RenderedText {
-    pub text: GlobalVec<(char, InstancedText)>,
+    pub text: Vec<(char, InstancedText)>,
     pub text_width: f32,
     pub row_height: f32,
     pub text_rows: u32,
@@ -79,38 +76,40 @@ impl RenderedText {
     pub fn get_offset_mut(&mut self, text_offset: TextOffset) -> Option<&mut VertexOffset> {
         for (c, text) in &mut self.text {
             if *c == text_offset.char {
-                return Some(text.offsets.get_mut(text_offset.offset_index? as usize)?)
+                return text.offsets.get_mut(text_offset.offset_index? as usize)
             }
         }
-        return None
+        None
     }
 
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.text.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    #[inline]
     pub fn iter(&self) -> slice::Iter<'_, (char, InstancedText)> {
-        self.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a RenderedText {
-    
-    type Item = &'a (char, InstancedText);
-    type IntoIter = slice::Iter<'a, (char, InstancedText)>;
-
-    fn into_iter(self) -> Self::IntoIter {
         self.text.iter()
     }
 }
 
-pub struct CombinedRenderedText<UserInstanceData, V: Vector<UserInstanceData>> {
-    pub text: FxHashMap<char, (InstancedText, V)>,
+#[derive(Default)]
+pub struct CombinedRenderedText<UserInstanceData> {
+    pub text: AHashMap<char, (InstancedText, Vec<UserInstanceData>)>,
     _marker: PhantomData<UserInstanceData>,
 }
 
-impl<UserInstanceData, V: Default + Vector<UserInstanceData>> CombinedRenderedText<UserInstanceData, V> {
+impl<UserInstanceData> CombinedRenderedText<UserInstanceData> {
 
     #[inline(always)]
     pub fn new() -> Self {
         Self {
-            text: FxHashMap::default(),
+            text: AHashMap::default(),
             _marker: PhantomData,
         }
     }
@@ -120,7 +119,7 @@ impl<UserInstanceData, V: Default + Vector<UserInstanceData>> CombinedRenderedTe
         text: &RenderedText,
         offset: impl Into<Vec2>,
         user_data: UserInstanceData,
-    ) -> Result<(), VecError>
+    )
         where 
             UserInstanceData: Copy
     {
@@ -135,16 +134,15 @@ impl<UserInstanceData, V: Default + Vector<UserInstanceData>> CombinedRenderedTe
             for off in &t.offsets {
                 instanced.offsets.push(VertexOffset { offset: (offset + off.offset.into()).into() });
                 if size_of::<UserInstanceData>() != 0 {
-                    data.push(user_data)?;
+                    data.push(user_data);
                 }
             }
         }
-        Ok(())
     }
 
     #[inline(always)]
-    pub fn iter<'a>(&'a self) -> hash_map::Iter<'a, char, (InstancedText, V)> {
-        self.text.iter()
+    pub fn iter(&self) -> impl Iterator<Item = (char, &InstancedText, &[UserInstanceData])> {
+        self.text.iter().map(|(c, (t, u))| (*c, t, u.as_ref()))
     }
 
     #[inline(always)]
@@ -153,29 +151,8 @@ impl<UserInstanceData, V: Default + Vector<UserInstanceData>> CombinedRenderedTe
     }
 }
 
-impl<'a, UserInstanceData, V: Vector<UserInstanceData>> IntoIterator for &'a CombinedRenderedText<UserInstanceData, V> {
-    
-    type Item = (&'a char, &'a (InstancedText, V));
-    type IntoIter = hash_map::Iter<'a, char, (InstancedText, V)>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.text.iter()
-    }
-}
-
-impl<UserInstanceData, V: Vector<UserInstanceData>> Default for CombinedRenderedText<UserInstanceData, V> {
-
-    #[inline(always)]
-    fn default() -> Self {
-        Self {
-            text: FxHashMap::default(),
-            _marker: PhantomData,
-        }
-    }
-}
-
 pub(super) struct FaceCache<'a> {
     pub face: Face<'a>,
-    pub trigs: FxHashMap<char, Option<Arc<GlyphTriangles>>>,
-    pub offsets: FxHashMap<char, Option<GlobalVec<VertexOffset>>>,
+    pub trigs: AHashMap<char, Option<Arc<GlyphTriangles>>>,
+    pub offsets: AHashMap<char, Option<Vec<VertexOffset>>>,
 }

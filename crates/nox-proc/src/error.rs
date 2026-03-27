@@ -7,7 +7,6 @@ use quote::{quote};
 
 use crate::display;
 
-#[inline(always)]
 fn handle_enum(input: &syn::DeriveInput, e: &syn::DataEnum) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = &input.generics.split_for_impl();
@@ -137,7 +136,6 @@ fn handle_enum(input: &syn::DeriveInput, e: &syn::DataEnum) -> syn::Result<Token
     Ok(TokenStream::from(expanded))
 }
 
-#[inline(always)]
 fn handle_struct(input: &syn::DeriveInput, s: &syn::DataStruct) -> syn::Result<TokenStream> {
     let mut impl_display = Default::default();
     let name = &input.ident;

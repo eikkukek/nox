@@ -9,8 +9,7 @@ use syn::{
 use crate::util::find_attr;
 
 pub fn nox_ash_structure(item: TokenStream) -> TokenStream {
-    let input = &parse_macro_input!(item as DeriveInput);
-    let Data::Struct(data) = &input.data else {
+    let input = &parse_macro_input!(item as DeriveInput); let Data::Struct(data) = &input.data else {
         return syn::Error
             ::new(find_attr(input, "Structure").span(), "Expected struct")
             .to_compile_error()
@@ -53,7 +52,7 @@ pub fn nox_ash_structure(item: TokenStream) -> TokenStream {
     let impl_default = quote! {
         impl #impl_generics Default for #name #ty_generics #where_clause {
 
-            #[inline(always)]
+            #[inline]
             fn default() -> Self {
                 Self {
                     #(#default),*
@@ -73,7 +72,7 @@ pub fn nox_ash_structure(item: TokenStream) -> TokenStream {
                 match ty {
                     syn::Type::Path(p) if p.path.is_ident("Bool32") => {
                         quote! {
-                            #[inline(always)]
+                            #[inline]
                             pub fn #ident(mut self, #ident: bool) -> Self {
                                 self.#ident = #ident as Bool32;
                                 self
@@ -82,7 +81,7 @@ pub fn nox_ash_structure(item: TokenStream) -> TokenStream {
                     },
                     _ => {
                         quote! {
-                            #[inline(always)]
+                            #[inline]
                             pub fn #ident(mut self, #ident: #ty) -> Self {
                                 self.#ident = #ident;
                                 self

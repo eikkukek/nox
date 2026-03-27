@@ -1,70 +1,160 @@
-use core::{
-    ops::{Deref, DerefMut},
-    ffi::c_void,
-    ptr,
-};
-
 use nox_mem::vec::NonNullVec32;
 
 use crate::gpu::ext;
 
 use super::*;
 
-#[derive(Clone)]
-pub struct GraphicsPipelineCreateTemplate {
-    pub(crate) dynamic_states: Vec32<DynamicState>,
-    pub(crate) color_output_formats: Vec32<vk::Format>,
-    pub(super) vertex_input_bindings: Vec32<VertexInputBinding>,
-    pub(super) vertex_input_attributes: Vec32<VertexInputAttributeInternal>,
-    pub(super) polygon_mode: PolygonMode,
-    pub(super) cull_mode: CullModeFlags,
-    pub(super) front_face: FrontFace,
-    pub(super) depth_bias_info: Option<DepthBiasInfo>,
-    pub(super) primitive_topology: (PrimitiveTopology, bool),
-    pub(crate) sample_shading_info: Option<SampleShadingInfo>,
-    pub(super) depth_stencil_info: Option<DepthStencilInfo>,
-    pub(super) color_blend_info: ColorBlendInfo,
-    pub(crate) depth_output_format: vk::Format,
-    pub(crate) stencil_output_format: vk::Format,
-    pub(crate) shader_set_id: ShaderSetId,
-    pub(super) line_width: f32,
-    pub(super) depth_clamp: bool,
-    pub(super) rasterizer_discard: bool,
-    pub(super) robustness_info: PipelineRobustnessInfo,
+mod base {
+
+    use super::*;
+
+    #[derive(Clone)]
+    pub struct Template<Meta: Send + Sync> {
+        pub(crate) meta: Meta,
+        pub(crate) dynamic_states: Vec32<DynamicState>,
+        pub(crate) vertex_input_bindings: Vec32<VertexInputBinding>,
+        pub(crate) vertex_input_attributes: Vec32<VertexInputAttributeInternal>,
+        pub(crate) polygon_mode: PolygonMode,
+        pub(crate) cull_mode: CullModes,
+        pub(crate) front_face: FrontFace,
+        pub(crate) depth_bias_info: Option<DepthBiasInfo>,
+        pub(crate) primitive_topology: (PrimitiveTopology, bool),
+        pub(crate) sample_shading_info: Option<SampleShadingInfo>,
+        pub(crate) depth_stencil_info: Option<DepthStencilInfo>,
+        pub(crate) color_blend_info: ColorBlendInfo,
+        pub(crate) color_outputs: Vec32<(Format, ColorOutputState)>,
+        pub(crate) depth_output_format: Format,
+        pub(crate) stencil_output_format: Format,
+        pub(crate) shader_set_id: Option<ShaderSetId>,
+        pub(crate) line_width: f32,
+        pub(crate) depth_clamp: bool,
+        pub(crate) rasterizer_discard: bool,
+        pub(crate) robustness_info: PipelineRobustnessInfo,
+    } 
 }
 
-pub struct GraphicsPipelineCreateInfo<'a> {
-    out: &'a mut GraphicsPipelineId,
-    inner: GraphicsPipelineCreateInfo,
+/// A clonable [`GraphicsPipelineCreateInfo`] template.
+pub type GraphicsPipelineCreateTemplate = base::Template<()>;
+
+impl GraphicsPipelineCreateTemplate {
+    
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self::_new(())
+    }
 }
 
-impl Deref for GraphicsPipelineCreateInfo<'a> {
+/// Structure describing [`GraphicsPipeline`] creation.
+pub type GraphicsPipelineCreateInfo<'a> = base::Template<&'a mut GraphicsPipelineId>;
+
+impl<'a> GraphicsPipelineCreateInfo<'a> {
+
+    /// Creates a new [`GraphicsPipelineCreateInfo`].
+    ///
+    /// When added to a [`PipelineBatch`] with [`PipelineBatchBuilder::with_graphics_pipelines`],
+    /// the id of the to be created [`GraphicsPipeline`] is returned to `out_id`.
+    ///
+    /// # Valid usage
+    /// - Before adding the pipeline to a batch, a valid [`ShaderSetId`] *must* be set via
+    ///   [`GraphicsPipelineCreateInfo::with_shader_set`], and it *must* be compatible as described
+    ///   in the method.
+    #[inline(always)]
+    pub fn new(out_id: &'a mut GraphicsPipelineId) -> Self {
+        Self::_new(out_id)
+    }
+
+    /// Creates a new [`GraphicsPipelineCreateInfo`] from a [`GraphicsPipelineCreateTemplate`].
+    ///
+    /// When added to a [`PipelineBatch`] with [`PipelineBatchBuilder::with_graphics_pipelines`],
+    /// the id of the to be created [`GraphicsPipeline`] is returned to `out_id`.
+    ///
+    /// # Valid usage
+    /// - If not specified in the template, a valid [`ShaderSetId`] *must* be set via
+    ///   [`GraphicsPipelineCreateInfo::with_shader_set`], and it *must* be compatible as described
+    ///   in the method.
+    #[inline(always)]
+    pub fn from_template(
+        out_id: &'a mut GraphicsPipelineId,
+        template: GraphicsPipelineCreateTemplate,
+    ) -> Self {
+        template.cast(out_id)
+    }
+
+    /// Turns the create info into [`GraphicsPipelineCreateTemplate`].
+    #[inline(always)]
+    pub fn into_template(
+        self
+    ) -> GraphicsPipelineCreateTemplate {
+        self.cast(())
+    }
 }
 
-impl GraphicsPipelineCreateInfo {
+impl<Meta: Send + Sync> base::Template<Meta> {
 
-    pub fn new(shader_set_id: ShaderSetId) -> Self {
+    fn cast<T: Send + Sync>(self, meta: T) -> base::Template<T> {
+        base::Template {
+            meta,
+            dynamic_states: self.dynamic_states,
+            vertex_input_bindings: self.vertex_input_bindings,
+            vertex_input_attributes: self.vertex_input_attributes,
+            polygon_mode: self.polygon_mode,
+            cull_mode: self.cull_mode,
+            front_face: self.front_face,
+            depth_bias_info: self.depth_bias_info,
+            primitive_topology: self.primitive_topology,
+            sample_shading_info: self.sample_shading_info,
+            depth_stencil_info: self.depth_stencil_info,
+            color_blend_info: self.color_blend_info,
+            color_outputs: self.color_outputs,
+            depth_output_format: self.depth_output_format,
+            stencil_output_format: self.stencil_output_format,
+            shader_set_id: self.shader_set_id,
+            line_width: self.line_width,
+            depth_clamp: self.depth_clamp,
+            rasterizer_discard: self.rasterizer_discard,
+            robustness_info: self.robustness_info,
+        }
+    }
+
+    fn _new(meta: Meta) -> Self {
         Self {
+            meta,
             dynamic_states: vec32![],
-            color_output_formats: Default::default(),
-            vertex_input_bindings: Default::default(),
-            vertex_input_attributes: Default::default(),
-            polygon_mode: Default::default(),
-            cull_mode: Default::default(),
-            front_face: Default::default(),
+            color_outputs: vec32![],
+            vertex_input_bindings: vec32![],
+            vertex_input_attributes: vec32![],
+            polygon_mode: PolygonMode::default(),
+            cull_mode: CullModes::default(),
+            front_face: FrontFace::default(),
             depth_bias_info: None,
             primitive_topology: Default::default(),
             sample_shading_info: None,
             depth_stencil_info: None,
-            color_blend_info: Default::default(),
-            depth_output_format: Default::default(),
-            stencil_output_format: Default::default(),
-            shader_set_id,
+            color_blend_info: ColorBlendInfo::default(),
+            depth_output_format: Format::Undefined,
+            stencil_output_format: Format::Undefined,
+            shader_set_id: None,
             line_width: 1.0,
             depth_clamp: false,
             rasterizer_discard: false,
-            robustness_info: Default::default(),
+            robustness_info: PipelineRobustnessInfo::default(),
         }
+    }
+
+    /// Sets the shader set the pipeline will build its shader stages with.
+    ///
+    /// This *must* be specified before creating the pipeline.
+    ///
+    /// # Valid usage
+    /// - `id` *must* be a valid [`ShaderSetId`].
+    /// - The shader set *must* contain a shader with [`ShaderStage::Vertex`].
+    /// - If [`GraphicsPipelineCreateInfo::rasterizer_discard`] is false or the dynamic state
+    ///   includes [`DynamicState::RasterizerDiscardEnable`], the shader set *must* contain a shader
+    ///   with [`ShaderStage::Fragment`].
+    #[inline(always)]
+    pub fn with_shader_set(mut self, id: ShaderSetId) -> Self {
+        self.shader_set_id = Some(id);
+        self
     }
 
     /// Adds vertex input to the pipeline.
@@ -102,10 +192,10 @@ impl GraphicsPipelineCreateInfo {
             }
         }
         self.vertex_input_attributes
-            .append_map(&attributes, |attr| attr.into_internal(binding));
-        self.vertex_input_bindings.push(VertexInputBinding::new(
-            binding, input_rate, size_of::<I>() as u32
-        ));
+            .extend(attributes.iter().map(|attr| attr.into_internal(binding)));
+        self.vertex_input_bindings.push(VertexInputBinding {
+            binding, input_rate, stride: size_of::<I>() as u32,
+        });
         Ok(self)
     }
 
@@ -120,7 +210,7 @@ impl GraphicsPipelineCreateInfo {
     /// This *must* be left as the default value `1.0`, if [`BaseDeviceFeatures`] `wide_lines` is
     /// set to `false`.
     ///
-    /// If dynamic states contain [`DynamicState::LINE_WIDTH`], this value is ignored and *must* be
+    /// If dynamic states contain [`DynamicState::LineWidth`], this value is ignored and *must* be
     /// set with [`DrawCommands`]
     #[inline(always)]
     pub fn with_line_width(mut self, width: f32) -> Self {
@@ -153,8 +243,8 @@ impl GraphicsPipelineCreateInfo {
     }
 
     #[inline(always)]
-    pub fn with_cull_mode(mut self, cull_mode: CullModeFlags) -> Self {
-        self.cull_mode = cull_mode;
+    pub fn with_cull_mode(mut self, cull_modes: CullModes) -> Self {
+        self.cull_mode = cull_modes;
         self
     }
 
@@ -191,65 +281,84 @@ impl GraphicsPipelineCreateInfo {
     }
 
     /// Appends a color output to the pipeline.
+    ///
     /// The number of color outputs of a pipeline must match exactly with the number of outputs in the fragment shader.
     #[inline(always)]
     pub fn with_color_output(
         mut self,
-        format: impl Format,
-        write_mask: WriteMask,
+        format: Format,
+        write_mask: ColorComponents,
         blend_state: Option<ColorOutputBlendState>,
     ) -> Self
     {
-        self.color_output_formats.push(format.as_vk_format());
-        self.color_blend_info.add_attachment(write_mask, blend_state);
+        self.color_outputs.push((format, ColorOutputState(
+            write_mask,
+            blend_state,
+        )));
         self
     } 
 
+    /// Sets the depth output format of the pipeline.
     #[inline(always)]
-    pub fn with_depth_output(mut self, format: impl Format) -> Self {
-        self.depth_output_format = format.as_vk_format();
+    pub fn with_depth_output(mut self, format: Format) -> Self {
+        self.depth_output_format = format;
         self
     }
 
+    /// Sets the stencil output format of the pipeline.
     #[inline(always)]
-    pub fn with_stencil_output(mut self, format: impl Format) -> Self {
-        self.stencil_output_format = format.as_vk_format();
+    pub fn with_stencil_output(mut self, format: Format) -> Self {
+        self.stencil_output_format = format;
         self
     }
 
-    /// Sets robustness info of the pipeline.
+    /// Sets the robustness info of the pipeline.
     ///
     /// # Valid usage
-    /// - If [`ext::pipeline_robustness`] is not enabled, the robustness info *must* be
-    /// [`PipelineRobustnessInfo::default`].
-    /// - If [`ext::robust_image_access`] is not supported, image behavior *must* not be
-    /// [`PipelineRobustnessImageBehavior::ROBUST_IMAGE_ACCESS`].
-    /// - If [`ext::robustness2`] 'robust_buffer_access2` is not supported, buffer behaviors *must*
-    /// not be [`PipelineRobustnessBufferBehavior::ROBUST_BUFFER_ACCESS_2`].
-    /// - If [`ext::robustness2`] `robust_image_access2` is not supported, image behavior *must* not
-    /// [`PipelineRobustnessImageBehavior::ROBUST_IMAGE_ACCESS_2`].
+    /// - If [`pipeline_robustness`][1] is not enabled, each [`buffer behavior`][2] and
+    ///   [`image behavior`][3] *must* be device default.
+    /// - If [`robust_image_access`][4] is not supported, image behavior *must* not be
+    ///   [`robust image access`][5].
+    /// - If [`robustness2`][6] is not enabled or [`robust buffer access 2`][7] is not supported,
+    ///   buffer behavior *must* not be [`robust buffer access 2`][8].
+    /// - If [`robustness2`][6] is not enabled or [`robust image access 2`][9] is not supported,
+    ///   image behavior *must* not be [`robust image access 2`][10]
+    ///
+    /// [1]: ext::pipeline_robustness
+    /// [2]: PipelineRobustnessBufferBehavior
+    /// [3]: PipelineRobustnessImageBehavior
+    /// [4]: ext::robust_image_access::Attributes::IS_SUPPORTED
+    /// [5]: PipelineRobustnessImageBehavior::RobustImageAccess
+    /// [6]: ext::robustness2
+    /// [7]: ext::robustness2::Attributes::IS_ROBUST_BUFFER_ACCESS_2_SUPPORTED
+    /// [8]: PipelineRobustnessBufferBehavior::RobustBufferAccess2
+    /// [9]: ext::robustness2::Attributes::IS_ROBUST_IMAGE_ACCESS_2_SUPPORTED
+    /// [10]: PipelineRobustnessImageBehavior::RobustImageAccess2
     #[inline(always)]
     pub fn with_robustness_info(mut self, info: PipelineRobustnessInfo) -> Self {
         self.robustness_info = info;
         self
     }
 
-    pub(crate) fn prepare<'a, Alloc>(
+    pub(crate) async fn prepare<'a, Alloc>(
         &self,
         gpu: &Gpu,
         alloc: &'a Alloc,
-    ) -> Result<(PreparedCreateInfos<'a, Alloc>, Arc<ShaderSetInner>)>
+    ) -> Result<(PreparedCreateInfos<'a, Alloc>, ShaderSet)>
         where 
-            Alloc: LocalAlloc<Error = Error>,
+            Alloc: LocalAlloc<Error = Error> + Sync,
     {
-
+        let Some(shader_set_id) = self.shader_set_id else {
+            return Err(Error::just_context(
+                "a shader set must be specified for a graphics pipeline"
+            ))
+        };
         let shader_set = gpu
-            .shader_cache()
-            .get_shader_set(self.shader_set_id)
+            .get_shader_set(shader_set_id)
+            .await
             .context_with(|| format_compact!(
-                "failed to get shader set {:?}",
-                self.shader_set_id,
-            ))?.clone();
+                "invalid shader set id {shader_set_id}",
+            ))?;
 
         let shaders = shader_set.shaders();
         let mut shader_stage_infos = NonNullVec32
@@ -258,8 +367,8 @@ impl GraphicsPipelineCreateInfo {
         let mut vertex_shader_included = false;
         let mut fragment_shader_included = false;
 
-        for (shader, entry, module) in shaders {
-            match shader.stage() {
+        for module in shaders {
+            match module.stage() {
                 ShaderStage::Vertex => {
                     if vertex_shader_included {
                         return Err(Error::just_context("vertex shader included twice in pipeline"))
@@ -274,16 +383,17 @@ impl GraphicsPipelineCreateInfo {
                 },
                 _ => {
                     return Err(Error::just_context(format_compact!(
-                        "unsupported shader stage {}, only vertex and fragment shaders are supported for graphics pipelines",
-                        shader.stage(),
+                        "{}{}",
+                        format_args!("unsupported shader stage {}, only vertex and fragment shaders", module.stage()),
+                        "are supported for graphics pipelines",
                     )))
                 }
             }
             shader_stage_infos.push(vk::PipelineShaderStageCreateInfo {
                 s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-                stage: shader.stage().into(),
-                p_name: entry.as_ptr(),
-                module: *module,
+                stage: module.stage().into(),
+                p_name: module.entry_point().as_ptr(),
+                module: module.handle(),
                 ..Default::default()
             });
         }
@@ -354,49 +464,62 @@ impl GraphicsPipelineCreateInfo {
             ..Default::default()
         };
 
-        let color_blend_attachment_states = self.color_blend_info.attachments();
+        let mut color_blend_attachment_states = NonNullVec32::with_capacity(
+            self.color_outputs.len(), alloc
+        )?;
+
+        color_blend_attachment_states.extend(self.color_outputs
+            .iter().map(|(_, info)| (*info).into())
+        );
 
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
             s_type: vk::StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             logic_op_enable: self.color_blend_info.logic_op.is_some().into(),
             logic_op: self.color_blend_info.logic_op.unwrap_or_default(),
-            attachment_count: color_blend_attachment_states.len() as u32,
+            attachment_count: color_blend_attachment_states.len(),
             p_attachments: color_blend_attachment_states.as_ptr(),
             blend_constants: self.color_blend_info.blend_constants.into(),
             ..Default::default()
         };
 
         let mut dynamic_states = NonNullVec32::with_capacity(
-            4 + self.dynamic_states.len(),
+            2 + self.dynamic_states.len(),
             alloc
         )?;
 
         dynamic_states.append(&[
-            vk::DynamicState::VIEWPORT,
-            vk::DynamicState::SCISSOR,
             vk::DynamicState::VIEWPORT_WITH_COUNT,
             vk::DynamicState::SCISSOR_WITH_COUNT,
         ]);
 
-        dynamic_states.append_map(
-            &self.dynamic_states,
-            |state| state.into(),
+        dynamic_states.extend(
+            self.dynamic_states
+            .iter()
+            .map(|&state| state.into()),
         );
 
         let dynamic_state = vk::PipelineDynamicStateCreateInfo {
             s_type: vk::StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-            dynamic_state_count: dynamic_states.len() as u32,
+            dynamic_state_count: dynamic_states.len(),
             p_dynamic_states: dynamic_states.as_ptr(),
             ..Default::default()
         };
 
+        let mut color_output_formats = NonNullVec32::<vk::Format>::with_capacity(
+            self.color_outputs.len(), alloc
+        )?;
+
+        color_output_formats.extend(self.color_outputs
+            .iter().map(|(format, _)| (*format).into())
+        );
+
         let rendering_info = vk::PipelineRenderingCreateInfo {
             s_type: vk::StructureType::PIPELINE_RENDERING_CREATE_INFO,
             view_mask: 0,
-            color_attachment_count: self.color_output_formats.len() as u32,
-            p_color_attachment_formats: self.color_output_formats.as_ptr(),
-            depth_attachment_format: self.depth_output_format,
-            stencil_attachment_format: self.stencil_output_format,
+            color_attachment_count: color_output_formats.len(),
+            p_color_attachment_formats: color_output_formats.as_ptr(),
+            depth_attachment_format: self.depth_output_format.into(),
+            stencil_attachment_format: self.stencil_output_format.into(),
             ..Default::default()
         };
 
@@ -416,15 +539,15 @@ impl GraphicsPipelineCreateInfo {
 
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo {
             s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            vertex_binding_description_count: vertex_input_bindings.len() as u32,
+            vertex_binding_description_count: vertex_input_bindings.len(),
             p_vertex_binding_descriptions: vertex_input_bindings.as_ptr(),
-            vertex_attribute_description_count: vertex_input_attributes.len() as u32,
+            vertex_attribute_description_count: vertex_input_attributes.len(),
             p_vertex_attribute_descriptions: vertex_input_attributes.as_ptr(),
             ..Default::default()
         };
 
         if !gpu
-            .get_device_attribute(ext::pipeline_robustness::IS_ENABLED_ATTRIBUTE_NAME)
+            .get_device_attribute(ext::pipeline_robustness::Attributes::IS_ENABLED)
             .bool().unwrap_or_default() &&
             self.robustness_info != PipelineRobustnessInfo::default()
         {
@@ -436,7 +559,7 @@ impl GraphicsPipelineCreateInfo {
         match self.robustness_info.image_behavior {
             PipelineRobustnessImageBehavior::RobustImageAccess => {
                 if !gpu
-                    .get_device_attribute(ext::robust_image_access::IS_SUPPORTED_ATTRIBUTE_NAME)
+                    .get_device_attribute(ext::robust_image_access::Attributes::IS_SUPPORTED)
                     .bool().unwrap_or_default()
                 {
                     return Err(Error::just_context(
@@ -446,7 +569,7 @@ impl GraphicsPipelineCreateInfo {
             },
             PipelineRobustnessImageBehavior::RobustImageAccess2 => {
                 if !gpu
-                    .get_device_attribute(ext::robustness2::IS_ROBUST_IMAGE_ACCESS_2_SUPPORTED_ATTRIBUTE_NAME)
+                    .get_device_attribute(ext::robustness2::Attributes::IS_ROBUST_IMAGE_ACCESS_2_SUPPORTED)
                     .bool().unwrap_or_default()
                 {
                     return Err(Error::just_context(
@@ -463,28 +586,23 @@ impl GraphicsPipelineCreateInfo {
                 self.robustness_info.vertex_input_behavior,
             ]
         {
-            match behavior {
-                PipelineRobustnessBufferBehavior::RobustBufferAccess2 => {
-                    if !gpu
-                        .get_device_attribute(ext::robustness2::IS_ROBUST_BUFFER_ACCESS_2_SUPPORTED_ATTRIBUTE_NAME)
-                        .bool().unwrap_or_default()
-                    {
-                        return Err(Error::just_context(
-                            "pipeline robustness buffer behavior must not be robust buffer access 2 if its not supported"
-                        ))
-                    }
-                },
-                _ => {},
+            if behavior == PipelineRobustnessBufferBehavior::RobustBufferAccess2 &&
+                !gpu.get_device_attribute(ext::robustness2::Attributes::IS_ROBUST_BUFFER_ACCESS_2_SUPPORTED)
+                    .bool().unwrap_or_default()
+            {
+                return Err(Error::just_context(
+                    "pipeline robustness buffer behavior must not be robust buffer access 2 if its not supported"
+                ))
             }
         }
 
-        let mut s = (PreparedCreateInfos {
-            p_next: ptr::null(),
+        Ok((PreparedCreateInfos {
             shader_stage_infos,
             vertex_input_state,
             input_assembly_state,
             tesellation_state,
             rasterization_state,
+            viewport_state: Default::default(),
             multisample_state,
             depth_stencil_state,
             color_blend_state,
@@ -492,54 +610,62 @@ impl GraphicsPipelineCreateInfo {
             rendering_info,
             layout: shader_set.pipeline_layout(),
             robustness_info: self.robustness_info.into(),
+            _color_output_formats: color_output_formats,
+            _color_blend_attachment_state: color_blend_attachment_states,
             _vertex_input_bindings: vertex_input_bindings,
             _vertex_input_attributes: vertex_input_attributes,
             _dynamic_states: dynamic_states,
             alloc,
-        }, shader_set);
-        s.0.rendering_info.p_next = &s.0.robustness_info as *const _ as *const c_void;
-        s.0.p_next = &s.0.rendering_info as *const _ as *const c_void;
-        Ok(s)
+        }, shader_set))
     }
 }
 
 pub(crate) struct PreparedCreateInfos<'a, Alloc>
     where Alloc: LocalAlloc,
 {
-    pub p_next: *const c_void,
     pub shader_stage_infos: NonNullVec32<'a, vk::PipelineShaderStageCreateInfo<'static>>,
     pub vertex_input_state: vk::PipelineVertexInputStateCreateInfo<'static>,
-    pub input_assembly_state: vk::PipelineInputAssemblyStateCreateInfo<'a>,
-    pub tesellation_state: vk::PipelineTessellationStateCreateInfo<'a>,
-    pub rasterization_state: vk::PipelineRasterizationStateCreateInfo<'a>,
-    pub multisample_state: vk::PipelineMultisampleStateCreateInfo<'a>,
-    pub depth_stencil_state: vk::PipelineDepthStencilStateCreateInfo<'a>,
-    pub color_blend_state: vk::PipelineColorBlendStateCreateInfo<'a>,
-    pub dynamic_state: vk::PipelineDynamicStateCreateInfo<'a>,
-    pub rendering_info: vk::PipelineRenderingCreateInfo<'a>,
+    pub input_assembly_state: vk::PipelineInputAssemblyStateCreateInfo<'static>,
+    pub tesellation_state: vk::PipelineTessellationStateCreateInfo<'static>,
+    pub viewport_state: vk::PipelineViewportStateCreateInfo<'static>,
+    pub rasterization_state: vk::PipelineRasterizationStateCreateInfo<'static>,
+    pub multisample_state: vk::PipelineMultisampleStateCreateInfo<'static>,
+    pub depth_stencil_state: vk::PipelineDepthStencilStateCreateInfo<'static>,
+    pub color_blend_state: vk::PipelineColorBlendStateCreateInfo<'static>,
+    pub dynamic_state: vk::PipelineDynamicStateCreateInfo<'static>,
+    pub rendering_info: vk::PipelineRenderingCreateInfo<'static>,
     pub layout: vk::PipelineLayout,
     pub robustness_info: vk::PipelineRobustnessCreateInfo<'static>,
+    pub _color_blend_attachment_state: NonNullVec32<'a, vk::PipelineColorBlendAttachmentState>,
     pub _vertex_input_bindings: NonNullVec32<'a, vk::VertexInputBindingDescription>,
     pub _vertex_input_attributes: NonNullVec32<'a, vk::VertexInputAttributeDescription>,
     pub _dynamic_states: NonNullVec32<'a, vk::DynamicState>,
+    pub _color_output_formats: NonNullVec32<'a, vk::Format>,
     pub alloc: &'a Alloc,
 }
+
+unsafe impl<Alloc> Send for PreparedCreateInfos<'_, Alloc>
+    where Alloc: LocalAlloc,
+{}
+
+unsafe impl<Alloc> Sync for PreparedCreateInfos<'_, Alloc>
+    where Alloc: LocalAlloc,
+{}
 
 impl<'a, Alloc> PreparedCreateInfos<'a, Alloc>
     where Alloc: LocalAlloc,
 {
 
     #[inline(always)]
-    pub fn as_create_info(&self) -> vk::GraphicsPipelineCreateInfo<'_> {
+    pub fn as_create_info(&self) -> vk::GraphicsPipelineCreateInfo<'static> {
         vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-            p_next: self.p_next,
-            stage_count: self.shader_stage_infos.len() as u32,
+            stage_count: self.shader_stage_infos.len(),
             p_stages: self.shader_stage_infos.as_ptr(),
             p_vertex_input_state: &self.vertex_input_state,
             p_input_assembly_state: &self.input_assembly_state,
             p_tessellation_state: &self.tesellation_state,
-            p_viewport_state: ptr::null(),
+            p_viewport_state: &self.viewport_state,
             p_rasterization_state: &self.rasterization_state,
             p_multisample_state: &self.multisample_state,
             p_depth_stencil_state: &self.depth_stencil_state,
@@ -559,9 +685,11 @@ impl<Alloc> Drop for PreparedCreateInfos<'_, Alloc>
     fn drop(&mut self) {
         unsafe {
             self.shader_stage_infos.drop_and_free(self.alloc);
+            self._color_blend_attachment_state.drop_and_free(self.alloc);
             self._vertex_input_bindings.drop_and_free(self.alloc);
             self._vertex_input_attributes.drop_and_free(self.alloc);
             self._dynamic_states.drop_and_free(self.alloc);
+            self._color_output_formats.drop_and_free(self.alloc);
         }
     }
 }

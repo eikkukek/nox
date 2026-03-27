@@ -1,26 +1,26 @@
 use std::time;
 
-use core::ops::{Deref, DerefMut};
+use core::{
+    ops::{Deref, DerefMut},
+    hash::{self, Hash},
+    borrow::Borrow,
+};
 
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::keyboard::{PhysicalKey, Key};
-
-pub(crate) use winit::window::Window as WinitWindow;
-
 use ahash::AHashMap;
-
 use compact_str::CompactString;
-
 use nox_mem::vec::Vec32;
 
 use crate::{
     clipboard::Clipboard,
-    dev::or_flag,
-    sync::Arc,
+    or_flag,
+    sync::{Arc, atomic::{self, AtomicU32}},
+    error::*,
 };
 
 use super::*;
 
-pub use winit::window::WindowId;
 pub use winit::window::WindowButtons;
 pub use winit::window::Icon as WindowIcon;
 pub use winit::keyboard::KeyCode;
@@ -28,9 +28,97 @@ pub use winit::event::MouseButton;
 pub use winit::window::CursorIcon;
 pub use winit::monitor::MonitorHandle;
 
-use winit::dpi::LogicalSize;
+#[derive(Clone, Copy, Display, Debug)]
+#[display("(window id: {0:?}, surface_id {1})")]
+pub struct WindowId(pub(super) winit::window::WindowId, pub(super) gpu::SurfaceId);
 
-use crate::dev::error::Result;
+impl WindowId {
+
+    /// Gets the [`surface id`][1] of the [`window`][2].
+    ///
+    /// [1]: gpu::SurfaceId
+    /// [2]: Window
+    #[inline]
+    pub fn surface_id(&self) -> gpu::SurfaceId {
+        self.1
+    }
+}
+
+impl PartialEq for WindowId {
+
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for WindowId {}
+
+impl Hash for WindowId {
+
+    #[inline]
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl Borrow<winit::window::WindowId> for WindowId {
+
+    #[inline]
+    fn borrow(&self) -> &winit::window::WindowId {
+        &self.0
+    }
+}
+
+use winit::window::Window as WinitWindow;
+
+pub(super) struct WinitHandle {
+    window: WinitWindow,
+    width: AtomicU32,
+    height: AtomicU32,
+}
+
+impl HasDisplayHandle for WinitHandle {
+
+    fn display_handle(&self) -> std::result::Result<
+        raw_window_handle::DisplayHandle<'_>,
+        raw_window_handle::HandleError
+    > {
+        self.window.display_handle()
+    }
+}
+
+
+impl HasWindowHandle for WinitHandle {
+
+    fn window_handle(&self) -> core::result::Result<
+        raw_window_handle::WindowHandle<'_>,
+        raw_window_handle::HandleError
+    > {
+        self.window.window_handle()
+    }
+}
+
+unsafe impl gpu::VulkanWindow for WinitHandle {
+    
+    fn inner_size(&self) -> (u32, u32) {
+        (
+            self.width.load(atomic::Ordering::Acquire),
+            self.height.load(atomic::Ordering::Acquire),
+        )
+    }
+}
+
+impl Deref for WinitHandle {
+
+    type Target = WinitWindow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.window
+    }
+}
+
+use winit::dpi::LogicalSize;
 
 #[derive(Clone)]
 pub struct WindowAttributes {
@@ -39,6 +127,11 @@ pub struct WindowAttributes {
     enabled_buttons: win::WindowButtons,
     icon: Option<win::WindowIcon>,
     attr: u32,
+}
+
+/// Creates default [`WindowAttributes`].
+pub fn default_attributes() -> WindowAttributes {
+    WindowAttributes::new()
 }
 
 impl WindowAttributes {
@@ -240,9 +333,9 @@ impl InputState {
 
 pub struct Window {
     clipboard: Clipboard,
-    surface: gpu::Surface,
-    pub(super) handle: Arc<WinitWindow>,
-    buffered_frames: u32,
+    gpu: gpu::Gpu,
+    pub(super) surface_id: gpu::SurfaceId,
+    pub(super) handle: Arc<WinitHandle>,
     physical_keys: AHashMap<PhysicalKey, InputState>,
     logical_keys: AHashMap<Key, InputState>,
     mouse_buttons: AHashMap<MouseButton, InputState>,
@@ -263,13 +356,8 @@ impl Window {
     pub(super) const TRANSPARENT_SET: u32 = 0x8;
     pub(super) const SHOULD_CLOSE: u32 = 0x10;
 
-    /// Creates default [`WindowAttributes`].
-    pub fn default_attributes() -> WindowAttributes {
-        WindowAttributes::new()
-    }
-
     pub(super) fn new(
-        gpu: &mut gpu::GpuContext,
+        gpu: gpu::Gpu,
         window: WinitWindow,
         is_transparent: bool,
     ) -> Result<Self>
@@ -277,15 +365,19 @@ impl Window {
         let clipboard = Clipboard
             ::new(&window)
             .context("failed to create clipboard")?;
-        let surface = gpu.create_surface(&window)?;
         let size = window.inner_size();
+        let window = Arc::new(WinitHandle {
+            window,
+            width: AtomicU32::new(size.width),
+            height: AtomicU32::new(size.height),
+        });
         let mut flags = 0;
         or_flag!(flags, Self::TRANSPARENT, is_transparent);
         Ok(Self {
             clipboard,
+            surface_id: gpu.create_surface(window.clone())?,
             handle: window,
-            buffered_frames: gpu.buffered_frames(),
-            surface,
+            gpu,
             physical_keys: AHashMap::default(),
             logical_keys: AHashMap::default(),
             mouse_buttons: AHashMap::default(),
@@ -295,7 +387,6 @@ impl Window {
             mouse_scroll_pixel_delta: (0.0, 0.0),
             mouse_scroll_line_delta: (0.0, 0.0),
             current_cursor: CursorIcon::Default,
-            last_frame_data: Default::default(),
             flags,
         })
     }
@@ -303,22 +394,7 @@ impl Window {
     #[inline(always)]
     pub(super) fn should_close(&self) -> bool {
         self.flags & Self::SHOULD_CLOSE == Self::SHOULD_CLOSE
-    }
-
-    #[inline(always)]
-    pub(crate) fn surface(&mut self) -> &mut gpu::Surface {
-        &mut self.surface
-    }
-    
-    #[inline(always)]
-    pub(crate) fn update_frame_data(&mut self, frame_data: gpu::FrameData) {
-        self.last_frame_data = frame_data;
-    }
-
-    #[inline(always)]
-    pub(crate) fn last_frame_data(&self) -> gpu::FrameData {
-        self.last_frame_data
-    }
+    } 
 
     /// Closes the window.
     ///
@@ -443,7 +519,7 @@ impl Window {
     #[inline(always)]
     pub fn get_input_text(&self) -> (usize, impl Iterator<Item = (KeyCode, &str)>) {
         (
-            self.input_text.len(),
+            self.input_text.len() as usize,
             self.input_text
                 .iter()
                 .map(|(key, text)| (*key, text.as_str()))
@@ -522,10 +598,12 @@ impl Window {
             },
             WindowEvent::Resized(size) => {
                 self.size = (size.width, size.height);
-                self.surface.request_swapchain_update(
-                    self.buffered_frames,
-                    size,
-                );
+                self.handle.width.store(size.width, atomic::Ordering::Release);
+                self.handle.height.store(size.height, atomic::Ordering::Release);
+                self.gpu.request_swapchain_update(
+                    self.surface_id,
+                    self.size,
+                ).ok();
             },
             _ => {},
         }
@@ -555,7 +633,7 @@ impl Window {
 impl Drop for Window {
 
     fn drop(&mut self) {
-        self.surface.clean_up();
+        self.gpu.destroy_surface(self.surface_id).ok();
     }
 }
 

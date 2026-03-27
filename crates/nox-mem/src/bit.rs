@@ -4,7 +4,7 @@ use core::{
 };
 
 use crate::{
-    vec::{Vec32, Vector},
+    vec::Vec32,
     slice,
 };
 
@@ -21,7 +21,7 @@ impl BitField {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn clear(&mut self) {
         unsafe {
             ptr::write_bytes(
@@ -32,7 +32,6 @@ impl BitField {
         }
     }
 
-    #[inline(always)]
     pub fn set_bit(&mut self, bit: u64, value: bool) {
         let div = bit / 8;
         let r = (bit - div * 8) as u8;
@@ -41,7 +40,6 @@ impl BitField {
         *byte = new | ((value as u8) << r);
     }
 
-    #[inline(always)]
     pub fn any_bit_set(
         &self,
         range: Range<u64>,
@@ -74,7 +72,6 @@ impl BitField {
         }
     }
 
-    #[inline(always)]
     pub fn set_bit_range(
         &mut self,
         range: Range<u64>,
@@ -143,19 +140,19 @@ impl BitField {
         }
     }
     
-    #[inline(always)]
+    #[inline]
     pub fn get(&self, bit: u64) -> bool {
         let div = bit / 8;
         let r = (bit - div * 8) as u8;
         (self.data[div as usize] & (1 << r)) != 0
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_byte(&self, byte: u32) -> u8 {
         self.data[byte as usize]
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn iter(&self) -> Iter<'_> {
         Iter {
             slice_iter: self.data.iter(),
@@ -176,6 +173,7 @@ impl<'a> IntoIterator for &'a BitField {
     type Item = bool;
     type IntoIter = Iter<'a>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }

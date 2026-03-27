@@ -1,120 +1,133 @@
 mod structs;
-mod cache;
 mod draw;
 
-use core::cell::UnsafeCell;
-
-use nox_ash::vk;
 use compact_str::format_compact;
-use ahash::{AHashMap, AHashSet};
 
+use nox_proc::BuildStructure;
 use nox_mem::{
     AsRaw,
     alloc::LocalAlloc,
-    vec::{NonNullVec32, FixedVec32, Vec32, Vector},
-    borrow::SizedCowMut,
+    vec::{NonNullVec32, FixedVec32, Vec32},
     option::OptionExt,
     conditional::True,
 };
-use nox_alloc::arena::{Arena, Guard};
+use nox_ash::vk;
+use nox_alloc::arena::ArenaGuard;
 
-use crate::dev::error::*;
-use crate::gpu::prelude::*;
-use crate::misc::ToRef;
+use crate::{
+    error::*,
+    gpu::prelude::*,
+};
 
-use super::{scheduler, prelude::CommandResult};
+use super::prelude::CommandResult;
 
 pub use structs::*;
 pub use draw::*;
 
-#[derive(Default, Clone)]
-pub struct RenderPassTemplate {
-    color_attachments: Vec32<PassAttachment<'static>>,
-    depth_stencil_attachment: DepthStencilAttachment<'static>,
-    render_area: Option<RenderArea>,
-    msaa_samples: MsaaSamples,
-    layer_count: u32,
+#[derive(Default)]
+pub(crate) struct GraphicsCommandCache {
+    draw_ids: Vec32<DrawCommandId>,
+    draw_storages: Vec32<DrawCommandStorage>,
+    next_draw_command_storage: u32,
 }
 
-impl RenderPassTemplate {
+/// Rendering parameters used in dynamic rendering.
+#[derive(Clone, Copy, PartialEq, Eq, BuildStructure)]
+pub struct RenderingInfo {
+    #[skip]
+    pub render_area: Option<RenderArea>,
+    /// Specifies the number of layers rendered to.
+    ///
+    /// The default value is one.
+    ///
+    /// # Valid usage
+    /// - `layer_count` *must* not be zero if [`RenderingInfo::view_mask`] is zero.
+    /// - each attachment's image view *must* contain at least `layer_count` layers if
+    ///   [`RenderingInfo::view_mask`] is zero.
+    #[default(1)]
+    pub layer_count: u32,
+    /// If this is not zero, this specifies a bitfield of view indices describing which views are
+    /// active during rendering.
+    ///
+    /// [`RenderingInfo::layer_count`] is ignored if this is not zero.
+    ///
+    /// The default value is zero.
+    ///
+    /// # Valid usage
+    /// - If `view_mask` is not zero, each attachment's image view *must* contain at least a number
+    ///   of layers greater than the index of the most significant bit of `view_mask`.
+    pub view_mask: u32,
+    /// Specifies how many multisample anti-aliasing samples attachments have.
+    ///
+    /// The default value is [`one sample`][1].
+    ///
+    /// # Valid usage
+    /// - `msaa_samples` *must* have exactly one bit set.
+    ///
+    /// [1]: MsaaSamples::X1
+    #[default(MsaaSamples::X1)]
+    pub msaa_samples: MsaaSamples,
+}
 
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self::default()
-    }
+impl RenderingInfo {
 
-    #[inline(always)]
-    pub fn with_color_attachment(mut self, attachment: PassAttachment<'static>) -> Self
+    #[inline]
+    pub fn render_area<T>(mut self, render_area: T) -> Self
+        where T: Into<Option<RenderArea>>
     {
-        self.color_attachments.push(attachment);
+        self.render_area = render_area.into();
         self
     }
+}
 
-    #[inline(always)]
-    pub fn with_depth_stencil_attachment(
-        mut self,
-        attachment: DepthStencilAttachment<'static>,
-    ) -> Self
-    {
-        self.depth_stencil_attachment = attachment;
-        self
-    }
-
-    #[inline(always)]
-    pub fn with_render_area(mut self, area: RenderArea) -> Self {
-        self.render_area = Some(area);
-        self
-    }
-
-    #[inline(always)]
-    pub fn with_msaa_samples(mut self, samples: MSAA) -> Self {
-        self.msaa_samples = samples;
-        self
-    }
-
-    #[inline(always)]
-    pub fn with_layer_count(mut self, count: u32) -> Self {
-        self.layer_count = count;
-        self
-    }
+impl RenderingInfo {
 }
 
 pub struct GraphicsCommands<'a, 'b> {
     gpu: Gpu,
-    recorder: &'a mut CommandRecorder<'b>,
+    queue: DeviceQueue,
+    recorder: CommandRecorder<'a, 'b>,
     primary_command_buffer: vk::CommandBuffer,
+    command_id: CommandId,
     wait_scope: vk::PipelineStageFlags2,
     signal_scope: vk::PipelineStageFlags2,
-    command_id: CommandId,
-    first_timeline_value: u64,
-    command_timeline_value: u64,
 }
 
-pub struct ActiveRenderPass<'a, 'b, 'c, Alloc>
-    where
-        Alloc: Guard<True>,
+pub struct ActiveRenderPass<'a, 'b, 'c>
 {
     cmd: &'a mut GraphicsCommands<'b, 'c>,
-    current_pipeline_id: Option<GraphicsPipelineId>,
-    sample_count: MSAA,
-    color_formats: NonNullVec32<'static, vk::Format, True>,
-    depth_format: vk::Format,
-    stencil_format: vk::Format,
-    tmp_alloc: Alloc,
+    sample_count: MsaaSamples,
+    color_attachments: &'a [PassAttachment],
+    depth_stencil_attachment: &'a DepthStencilAttachment,
+    color_formats: NonNullVec32<'static, Format>,
+    depth_format: Format,
+    stencil_format: Format,
+    alloc: ArenaGuard<'a, True>,
 }
 
-impl<'a, 'b> GraphicsCommands<'a, 'b> {
+pub struct NewGraphicsCommands;
 
-    #[inline(always)]
-    pub(crate) unsafe fn new(
-        recorder: &'a mut CommandRecorder<'b>,
+impl NewCommands for NewGraphicsCommands {
+
+    const NAME: &'static str = "graphics commands";
+
+    type Target<'a, 'b> = GraphicsCommands<'a, 'b>;
+
+    fn new<'a, 'b>(
+        mut recorder: CommandRecorder<'a, 'b>,
         command_id: CommandId,
-        command_timeline_value: u64,
-    ) -> Result<Self>
+        queue: DeviceQueue,
+    ) -> Result<Self::Target<'a, 'b>>
+        where Self::Target<'a, 'b>: Commands<'a, 'b>,
     {
+        if !queue.queue_flags().contains(QueueFlags::GRAPHICS) {
+            return Err(Error::just_context(format_compact!(
+                "queue {queue} doesn't support graphics operations",
+            )))
+        }
         let command_buffer = recorder
             .get_current_worker()
-            .allocate_primaries(scheduler::CommandBufferKind::Graphics, 1)?[0];
+            .allocate_primaries(&queue, 1)?[0];
         let begin_info = vk::CommandBufferBeginInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
             flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
@@ -122,611 +135,355 @@ impl<'a, 'b> GraphicsCommands<'a, 'b> {
         };
         let gpu = recorder.gpu().clone();
         unsafe {
-            gpu.vk().device()
+            gpu.device()
                 .begin_command_buffer(command_buffer, &begin_info)
                 .context("failed to begin primary command buffer")?;
         }
-        Ok(Self {
+        Ok(GraphicsCommands {
             gpu,
+            queue,
             recorder,
             primary_command_buffer: command_buffer,
+            command_id,
             wait_scope: vk::PipelineStageFlags2::NONE,
             signal_scope: vk::PipelineStageFlags2::NONE,
-            command_id,
-            first_timeline_value: command_timeline_value,
-            command_timeline_value,
         })
     }
+}
 
-    pub fn begin_rendering<F>(
-        &mut self,
-        template: &RenderPassTemplate,
-    ) -> Result<ActiveRenderPass<'_, 'a, 'b, impl Guard<True>>>
+unsafe impl<'a, 'b> Commands<'a, 'b> for GraphicsCommands<'a, 'b> {
+
+    fn finish<'c, Alloc>(self, alloc: &'c Alloc) -> Result<CommandResult<'c, Alloc>>
+        where Alloc: ?Sized + LocalAlloc<Error = Error> 
     {
-        self.command_timeline_value += 1;
-        let command_timeline_value = self.command_timeline_value;
+        unsafe {
+            self.gpu.device()
+                .end_command_buffer(self.primary_command_buffer)
+                .context("failed to end command buffer")?;
+        }
+        let mut primary_command_buffers = FixedVec32::with_capacity(1, alloc)?;
+        primary_command_buffers.push(self.primary_command_buffer);
+        Ok(CommandResult {
+            primary_command_buffers,
+            wait_scope: self.wait_scope,
+            signal_scope: self.signal_scope,
+            queue: self.queue,
+        })
+    }
+}
+
+impl<'a, 'b> GraphicsCommands<'a, 'b> { 
+
+    pub fn swapchain_image_view(
+        &self,
+        surface_id: SurfaceId
+    ) -> Result<(SwapchainImageViewId<'_>, Format)> {
+        self.recorder.swapchain_image_view(surface_id)
+    }
+
+    pub fn render<F>(
+        &mut self,
+        rendering_info: RenderingInfo,
+        color_attachments: &[PassAttachment],
+        depth_stencil_attachment: &DepthStencilAttachment,
+        f: F,
+    ) -> Result<()>
+        where F: FnOnce(&mut ActiveRenderPass) -> EventResult<()>
+    {
         let command_id = self.command_id;
-        let command_buffer = self.primary_command_buffer;
-        let tmp_alloc = self.gpu.tmp_alloc();
-        let tmp_alloc = tmp_alloc.guard();
-        let msaa_samples = template.msaa_samples;
+        let msaa_samples = rendering_info.msaa_samples;
+        let stack = self.recorder.stack().clone();
         let mut vk_color_attachments = NonNullVec32
-            ::with_capacity(template.color_attachments.len() as u32, &tmp_alloc)?;
-        let queue_family_index = self.gpu.vk().queue_family_indices().graphics_index(); 
+            ::with_capacity(color_attachments.len() as u32, &stack)?;
         let mut min_extent = vk::Extent2D {
             width: u32::MAX,
             height: u32::MAX,
         };
-        let mut min_extent = vk::Extent2D { width: u32::MAX, height: u32::MAX, };
+        let stack = self.recorder.stack().clone();
         let mut process_attachment = |
             attachment: &PassAttachment,
-            dst_state: ImageSubresourceState,
             resolve_aspect: ResolveAspect,
-            usage: vk::ImageUsageFlags,
-        |
+            usage: ImageUsages,
+        | -> Result<(vk::RenderingAttachmentInfo, Format)>
         {
-            let image = self.recorder.register_image(attachment.image_id)?;
-            if let Some(err) = image.validate_usage(usage) {
-                return Err(Error::new(err, format_compact!(
-                    "image {} can't be used as a {} attachment",
-                    attachment.image_id, resolve_aspect,
-                )))
-            }
-            let handle = image.handle();
-            let properties = image.properties();
-            let format = properties.format;
-            if msaa_samples != properties.samples {
-                return Err(Error::just_context(format_compact!(
-                "image sample counts must match, image (id {}) had sample count {} while pass sample count was {}",
-                    attachment.image_id, properties.samples, msaa_samples,
-                )))
-            }
-            let dimensions = properties.dimensions;
-            min_extent.width = min_extent.width.min(dimensions.width);
-            min_extent.height = min_extent.height.min(dimensions.height);
-            let mut layer_count = properties.array_layers;
-            let view = if let Some(range) = attachment.range {
-                layer_count = range.subresource.layer_count.get();
-                if range.subresource.level_count.get() != 1 {
-                    return Err(Error::just_context(format_compact!(
-                        "image (id: {}) subresource range mip levels {} must be 1 when used as a rendering attachment",
-                        attachment.image_id, range.subresource.level_count,
-                    )))
-                }
-                image.get_subview(range).context_with(|| format_compact!(
-                    "failed to get image (id: {}) subview", attachment.image_id,
-                ))?
-            } else {
-                if properties.mip_levels > 1 {
-                    let mut subresource = properties.whole_subresource();
-                    subresource.level_count = 1.into();
-                    image.get_subview(ImageRange::new(subresource, None)).context_with(|| format_compact!(
-                        "failed to get image (id: {}) subview", attachment.image_id,
-                    ))?
-                } else {
-                    image.get_view()
-                }
-            };
-            if layer_count < pass.layer_count {
-                return Err(Error::just_context(format_compact!(
-                    "image subresource layer count {} was less than pass layer count {}",
-                    layer_count, pass.layer_count,
-                )))
-            }
-            let memory_barriers = image.memory_barrier(
-                dst_state,
-                attachment.range.map(|range| range.subresource),
-                attachment.preserve_contents,
-                &mut self.recorder.cache.graphics_command_cache.image_memory_barrier_cache,
-            ).context_with(|| format_compact!(
-                "image (id: {}) memory barrier failed",
-                attachment.image_id,
-            ))?;
-            unsafe {
-                scheduler::cmd_pipeline_barrier(
-                    self.recorder.gpu().vk(),
-                    command_buffer,
-                    &[],
-                    &[(handle, &memory_barriers)],
+            self.recorder.write_resources(|guard| {
+                let image_view = attachment.image_view;
+                let image_id = image_view.image_id();
+                let image = guard.register_image(
+                    image_id.slot_index(),
                     command_id.index(),
-                    command_timeline_value,
-                    &tmp_alloc,
-                ).context_with(|| format_compact!(
-                    "image (id: {}) memory barrier failed", attachment.image_id,
-                ))?;
-            }
-            let mut attachment_info = vk::RenderingAttachmentInfo {
-                s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
-                image_view: view,
-                image_layout: dst_state.layout,
-                load_op: attachment.load_op.into(),
-                store_op: attachment.store_op.into(),
-                clear_value: attachment.clear_value.into(),
-                ..Default::default()
-            };
-            if let Some(resolve) = attachment.resolve {
-                let image = self.recorder.register_image(resolve.image_id)?;
+                )?;
+                if let Some(err) = image.validate_usage(usage) {
+                    return Err(Error::new(err, format_compact!(
+                        "image {} can't be used as a {} attachment",
+                        image_id, resolve_aspect,
+                    )))
+                }
                 let properties = image.properties();
-                if properties.format != format {
+                if msaa_samples != properties.samples {
                     return Err(Error::just_context(format_compact!(
-                        "resolve image (id: {}) format {:?} must match the source format {:?} (this may change in the future)",
-                        resolve.image_id, properties.format, format,
+                    "image sample counts must match, image (id {}) had sample count {} while pass sample count was {}",
+                        image_id, properties.samples, msaa_samples,
                     )))
                 }
-                if properties.dimensions != dimensions {
+                let dimensions = properties.dimensions;
+                min_extent.width = min_extent.width.min(dimensions.width);
+                min_extent.height = min_extent.height.min(dimensions.height);
+                let view = *image.get_view(image_view)?;
+                let effective_range = view.subresource_range.effective(
+                    properties.mip_levels,
+                    properties.array_layers
+                );
+                let layer_count = effective_range.layer_count;
+                let mip_levels = effective_range.layer_count;
+                let format = view.component_info.format;
+                if mip_levels != 1 {
                     return Err(Error::just_context(format_compact!(
-                        "resolve image (id: {}) dimensions {} must match source dimensions {}",
-                        resolve.image_id, properties.dimensions, dimensions,
+                        "image view {} mip levels {} must be 1 when used as a rendering attachment",
+                        image_view, mip_levels,
                     )))
                 }
-                if properties.samples != MSAA::X1 {
+                if layer_count < rendering_info.layer_count {
                     return Err(Error::just_context(format_compact!(
-                        "resolve image (id: {}) sample count must be one but given sample count was {}",
-                        resolve.image_id, properties.samples,
+                        "image view {} layer count {} was less than pass layer count {}",
+                        image_view, layer_count, rendering_info.layer_count,
                     )))
                 }
-                let mode_bit = resolve.mode.as_raw();
-                if properties.format_resolve_modes.resolve_modes(resolve_aspect).as_raw() & mode_bit != mode_bit {
-                    return Err(Error::just_context(format_compact!(
-                        "image format {:?} doesn't support resolve mode {} for resolve aspect {}",
-                        format, resolve.mode, resolve_aspect,
-                    )))
-                }
-                let view = if let Some(range) = resolve.range {
-                    if range.subresource.level_count.get() > 1 {
-                        return Err(Error::just_context(format_compact!(
-                            "resolve image (id: {}) subresource range mip levels {} must be 1 when used as a rendering attachment",
-                            resolve.image_id, range.subresource.level_count,
-                        )))
-                    }
-                    if range.subresource.layer_count.get() != layer_count {
-                        return Err(Error::just_context(format_compact!(
-                            "resolve image (id: {}) subresource layer count {} must match source subresource layer count {}",
-                            resolve.image_id, range.subresource.layer_count, layer_count,
-                        )))
-                    }
-                    image.get_subview(range).context_with(|| format_compact!(
-                        "failed to get image (id: {}) subview", resolve.image_id,
-                    ))?
-                } else {
-                    if properties.array_layers != layer_count {
-                        return Err(Error::just_context(format_compact!(
-                            "resolve image (id: {}) layer count {} must match source layer count {} if no image range was provided",
-                            resolve.image_id, properties.array_layers, layer_count,
-                        )))
-                    }
-                    if properties.mip_levels > 1 {
-                        let mut subresource = properties.whole_subresource();
-                        subresource.level_count = 1.into();
-                        image.get_subview(ImageRange::new(subresource, None)).context_with(|| format_compact!(
-                            "failed to get image (id: {}) subview", attachment.image_id,
-                        ))?
-                    } else {
-                        image.get_view()
-                    }
+                let mut attachment_info = vk::RenderingAttachmentInfo {
+                    s_type: vk::StructureType::RENDERING_ATTACHMENT_INFO,
+                    image_view: view.handle,
+                    image_layout: vk::ImageLayout::UNDEFINED,
+                    load_op: attachment.load_op.into(),
+                    store_op: attachment.store_op.into(),
+                    clear_value: attachment.clear_value.into(),
+                    ..Default::default()
                 };
-                let memory_barriers = image.memory_barrier(
-                    dst_state,
-                    resolve.range.map(|range| range.subresource),
-                    attachment.preserve_contents,
-                    &mut self.recorder.cache.graphics_command_cache.image_memory_barrier_cache
-                ).context_with(|| format_compact!(
-                    "image (id: {}) memory barrier failed",
-                    resolve.image_id,
-                ))?;
-                unsafe {
-                    scheduler::cmd_pipeline_barrier(
-                        self.recorder.gpu().vk(),
-                        command_buffer,
-                        &[],
-                        &[(handle, &memory_barriers)],
+                if let Some(resolve) = attachment.resolve {
+                    let image_view = resolve.image_view;
+                    let image_id = image_view.image_id();
+                    let image = guard.register_image(
+                        image_id.slot_index(),
                         command_id.index(),
-                        command_timeline_value,
-                        &tmp_alloc,
-                    ).context_with(|| format_compact!(
-                        "image (id: {}) memory barrier failed", attachment.image_id,
-                    ))?;
+                    )?;
+                    let properties = image.properties();
+                    if properties.dimensions != dimensions {
+                        return Err(Error::just_context(format_compact!(
+                            "resolve image {} dimensions {} must match source dimensions {}",
+                            image_id, properties.dimensions, dimensions,
+                        )))
+                    }
+                    if properties.samples != MsaaSamples::X1 {
+                        return Err(Error::just_context(format_compact!(
+                            "resolve image {} sample count must be one but given sample count was {}",
+                            image_id, properties.samples,
+                        )))
+                    }
+                    let view = *image.get_view(image_view)?;
+                    if !view.component_info.format.is_compatible_with(format) {
+                        return Err(Error::just_context(format_compact!(
+                            "resolve image view {} format {} is not compatible from source image view {} format {}",
+                            image_view, view.component_info.format, attachment.image_view, format,
+                        )))
+                    }
+                    let mode_bit = resolve.mode.as_raw();
+                    if mode_bit.count_ones() != 1 {
+                        return Err(Error::just_context(format_compact!(
+                            "attempting to specify more than or less than one resolve mode with mask {}",
+                            mode_bit
+                        )))
+                    }
+                    if view.component_info.format.resolve_modes().by_aspect(resolve_aspect).as_raw() & mode_bit != mode_bit {
+                        return Err(Error::just_context(format_compact!(
+                            "image format {} doesn't support resolve mode {} for resolve aspect {}",
+                            format, resolve.mode, resolve_aspect,
+                        )))
+                    }
+                    match resolve_aspect {
+                        ResolveAspect::Depth => {
+                            if self.gpu.device().supported_depth_resolve_modes().as_raw() & mode_bit != mode_bit {
+                                return Err(Error::just_context(format_compact!(
+                                    "resolve mode {} is not supported for depth attachments", resolve.mode,
+                                )))
+                            }
+                        },
+                        ResolveAspect::Stencil => {
+                            if self.gpu.device().supported_stencil_resolve_modes().as_raw() & mode_bit != mode_bit {
+                                return Err(Error::just_context(format_compact!(
+                                    "resolve mode {} is not supported for stencil attachments", resolve.mode,
+                                )))
+                            }
+                        },
+                        _ => {},
+                    };
+                    let effective_range = view.subresource_range.effective(
+                        properties.mip_levels,
+                        properties.array_layers
+                    );
+                    if effective_range.level_count != 1 {
+                        return Err(Error::just_context(format_compact!(
+                            "resolve image view {} subresource range mip levels {} must be 1 when used as a rendering attachment",
+                            image_view, effective_range.level_count,
+                        )))
+                    }
+                    if effective_range.layer_count != layer_count {
+                        return Err(Error::just_context(format_compact!(
+                            "resolve image view {} subresource layer count {} must match source subresource layer count {}",
+                            image_view, effective_range.layer_count, layer_count,
+                        )))
+                    }
+                    attachment_info.resolve_image_view = view.handle;
+                    attachment_info.resolve_image_layout = vk::ImageLayout::UNDEFINED;
+                    attachment_info.resolve_mode = resolve.mode.into();
                 }
-                attachment_info.resolve_image_view = view;
-                attachment_info.resolve_image_layout = dst_state.layout;
-                attachment_info.resolve_mode = resolve.mode.into();
-            }
-            Ok((attachment_info, properties.format))
+                Ok((attachment_info, view.component_info.format))
+            })
         };
-        let color_attachment_state = ImageSubresourceState {
-            stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-            access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            queue_family_index,
-            command_index: command_id.index(),
-            command_timeline_value,
-        };
-        let mut color_formats = unsafe { NonNullVec32
-            ::with_capacity(pass.color_attachments.len(), &tmp_alloc)?
-            .into_static()
-            .into_clonable()
-        };
-        for attachment in &pass.color_attachments { 
+        let mut color_formats = NonNullVec32
+            ::with_capacity(color_attachments.len() as u32, &*stack)?
+            .into_static();
+        for attachment in color_attachments { 
             let (attachment, format) = process_attachment(
-                attachment, color_attachment_state,
+                attachment,
                 ResolveAspect::Color,
-                vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                ImageUsages::COLOR_ATTACHMENT,
             )?;
             color_formats.push(format);
             vk_color_attachments.push(attachment);
         }
         let mut depth_attachment = None;
-        let mut depth_format = vk::Format::UNDEFINED;
+        let mut depth_format = Format::Undefined;
         let mut stencil_attachment = None;
-        let mut stencil_format = vk::Format::UNDEFINED;
-        match pass.depth_stencil_attachment {
+        let mut stencil_format = Format::Undefined;
+        match depth_stencil_attachment {
             DepthStencilAttachment::None => {},
             DepthStencilAttachment::Depth(attachment) => {
                 let (depth, format) = process_attachment(
-                    &attachment,
-                    ImageSubresourceState {
-                        stage_mask:
-                            vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS | 
-                            vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
-                        access_mask:
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ |
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                        layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
-                        queue_family_index,
-                        command_index: command_id.index(),
-                        command_timeline_value
-                    },
+                    attachment,
                     ResolveAspect::Depth,
-                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    ImageUsages::DEPTH_STENCIL_ATTACHMENT,
                 )?;
+                depth_format = format;
                 depth_attachment = Some(depth);
             },
             DepthStencilAttachment::Stencil(attachment) => {
                 let (stencil, format) = process_attachment(
-                    &attachment,
-                    ImageSubresourceState {
-                        stage_mask:
-                            vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS |
-                            vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
-                        access_mask:
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ |
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                        layout: vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL,
-                        queue_family_index,
-                        command_index: command_id.index(),
-                        command_timeline_value
-                    },
+                    attachment,
                     ResolveAspect::Stencil,
-                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    ImageUsages::DEPTH_STENCIL_ATTACHMENT,
                 )?;
                 stencil_format = format;
                 stencil_attachment = Some(stencil);
             },
             DepthStencilAttachment::DepthStencil { depth, stencil } => {
-                let (depth_layout, stencil_layout) = if depth.image_id == stencil.image_id {
-                    (vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-                } else {
-                    (vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL, vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL)
-                };
+                if depth.image_view != stencil.image_view {
+                    return Err(Error::just_context(
+                        "depth and stencil attachment image views are not the same"
+                    ))
+                }
                 let (depth, format) = process_attachment(
-                    &depth,
-                    ImageSubresourceState {
-                        stage_mask:
-                            vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS | 
-                            vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
-                        access_mask:
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ |
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                        layout: depth_layout,
-                        queue_family_index,
-                        command_index: command_id.index(),
-                        command_timeline_value
-                    },
+                    depth,
                     ResolveAspect::Depth,
-                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    ImageUsages::DEPTH_STENCIL_ATTACHMENT,
                 )?;
-                depth_attachment = Some(depth);
                 depth_format = format;
+                depth_attachment = Some(depth);
                 let (stencil, format) = process_attachment(
-                    &stencil,
-                    ImageSubresourceState {
-                        stage_mask:
-                            vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS | 
-                            vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
-                        access_mask:
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ |
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                        layout: stencil_layout,
-                        queue_family_index,
-                        command_index: command_id.index(),
-                        command_timeline_value
-                    },
+                    stencil,
                     ResolveAspect::Stencil,
-                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    ImageUsages::DEPTH_STENCIL_ATTACHMENT,
                 )?;
-                stencil_attachment = Some(stencil);
                 stencil_format = format;
+                stencil_attachment = Some(stencil);
             },
         }
-        let mut rendering_info = vk::RenderingInfo {
-            s_type: vk::StructureType::RENDERING_INFO,
-            flags: vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS,
-            render_area: pass.render_area
-                .unwrap_or(RenderArea {
-                    width: min_extent.width,
-                    height: min_extent.height,
-                    ..Default::default()
-                }).into(),
-            layer_count: pass.layer_count,
-            color_attachment_count: vk_color_attachments.len(),
-            p_color_attachments: vk_color_attachments.as_ptr(),
-            p_depth_attachment: depth_attachment.as_ref().as_ptr(),
-            p_stencil_attachment: stencil_attachment.as_ref().as_ptr(),
-            ..Default::default()
-        };
-        if !pass.color_attachments.is_empty() {
+        if !color_attachments.is_empty() {
             self.signal_scope |= vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT;
         } else if
-            !matches!(pass.depth_stencil_attachment, DepthStencilAttachment::None)
+            !matches!(depth_stencil_attachment, DepthStencilAttachment::None)
         {
             self.signal_scope |= vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS;
         }
-        unsafe {
-            self.gpu
-                .vk()
-                .device()
-                .cmd_begin_rendering(command_buffer, &rendering_info);
-            vk_color_attachments.drop_and_free(&tmp_alloc);
-        }
         self.wait_scope |= vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT;
-        Ok(ActiveRenderPass {
+        let mut pass = ActiveRenderPass {
             cmd: self,
-            current_pipeline_id: None,
             sample_count: msaa_samples,
+            color_attachments,
+            depth_stencil_attachment,
             color_formats,
             depth_format,
             stencil_format,
-            tmp_alloc,
-        })
+            alloc: stack.guard(),
+        };
+        f(&mut pass).context_from_tracked(|orig| {
+            format_compact!("error recording render pass at {}", orig.or_this())
+        })?;
+        pass.finish(
+            &rendering_info,
+            min_extent,
+            &mut vk_color_attachments,
+            &mut depth_attachment,
+            &mut stencil_attachment,
+        )?;
+        unsafe {
+            vk_color_attachments.drop_and_free(&stack);
+        }
+        Ok(())
+    } 
+
+    #[inline(always)]
+    pub fn copy_commands(&mut self) -> CopyCommands<'_, 'b> {
+        CopyCommands::new(
+            self.recorder.forward(),
+            self.command_id,
+            self.queue.clone(),
+            Some(self.primary_command_buffer)
+        ).unwrap()
     }
-    
-    unsafe fn execute_draw_commands(
+}
+
+impl<'a, 'b, 'c> ActiveRenderPass<'a, 'b, 'c>
+{
+
+    pub fn draw<F>(
         &mut self,
-        storage: &DrawCommandStorage,
+        draw_command_id: DrawCommandId,
     ) -> Result<()>
     {
-        self.wait_scope |= storage.wait_scope;
-        let tmp_alloc = self.gpu.tmp_alloc();
-        let tmp_alloc = tmp_alloc.guard();
-        let pools = self.gpu.get_shader_resource_pools();
-        let mut write_cache = FixedVec32::with_len_with(pools.capacity(), |_| None, &tmp_alloc)?;
-        let command_id = self.command_id;
-        let command_timeline_value = self.command_timeline_value;
-        let primary_command_buffer = self.primary_command_buffer;
-        let queue_family_index = self.gpu.vk().queue_family_indices().graphics_index();
-        let cmd_cache = unsafe {
-            self.recorder.cache().as_mut()
-        };
-        let cmd_cache = &mut cmd_cache.graphics_command_cache;
-        let mut all_shader_stages = vk::ShaderStageFlags::empty();
-        let current_frame = self.recorder.current_frame();
-        for call in &storage.cache.shader_resource_binds {
-            let mut barrier_info = FixedVec32::with_capacity(call.barriers.len(), &tmp_alloc)?;
-            for (i, &resource) in call.sets.iter().enumerate() {
-                let Some(resource) = resource else {
-                    continue;
-                };
-                let set = i as u32;
-                barrier_info.clear();
-                barrier_info.extend(call.barriers.iter().copied().filter(|barrier| barrier.set == set));
-                let pool_id = resource.pool_id();
-                let pool = write_cache
-                    .get_mut(pool_id.slot_index().index() as usize)
-                    .ok_or_else(|| Error::just_context(format_compact!("invalid pool id {pool_id}")))?
-                    .get_or_try_insert_with(|| {
-                        Ok(pools.get(pool_id.slot_index())
-                            .context_with(|| format_compact!(
-                                "failed to find pool {pool_id}",
-                            ))?.write())
-                    })?;
-                let mut resource = pool.get_shader_resource_for_submit(
-                    resource,
-                    current_frame,
-                )?;
-                let shader_stage_mask = resource.shader_stage_mask();
-                let mut pipeline_stage = vk::PipelineStageFlags2::NONE;
-                if shader_stage_mask.contains(vk::ShaderStageFlags::VERTEX) {
-                    pipeline_stage |= vk::PipelineStageFlags2::VERTEX_SHADER;
-                }
-                if shader_stage_mask.contains(vk::ShaderStageFlags::FRAGMENT) {
-                    pipeline_stage |= vk::PipelineStageFlags2::FRAGMENT_SHADER;
-                }
-                all_shader_stages |= shader_stage_mask;
-                for binding in resource.binding_iter() {
-                    let (ordering, access, explicit_access) = barrier_info
-                        .iter()
-                        .find_map(|bar| (bar.binding == binding.binding())
-                            .then_some((bar.ordering, bar.access, Some(bar.access)))
-                        ).unwrap_or((CommandOrdering::None, ShaderAccess::ReadWrite, None));
-                    for buffer in binding.descriptor_buffers() {
-                        if let Some((id, offset, size)) = buffer.buffer {
-                            let cache = cmd_cache.buffer_cache.entry(id).or_default();
-                            if cache.touch(
-                                offset, size,
-                                pipeline_stage,
-                                vk::AccessFlags2::from_raw(access as u64),
-                                ordering,
-                            ) {
-                                cmd_cache.buffer_id_cache.push(id);
-                            }
-                        }
-                    }
-                    for image in binding.descriptor_images() {
-                        if let Some((id, layout, range)) = image.image {
-                            let cache = cmd_cache.image_cache
-                                .entry(id)
-                                .or_default();
-                            if cache.touch(layout, explicit_access, shader_stage_mask) {
-                                cmd_cache.image_id_cache.push(id);
-                            }
-                            cache.subresource_ranges.insert(range);
-                        }
-                    }
-                }
-            }
+        let cmd = self.cmd.gpu.get_draw_commands(draw_command_id)?;
+        if cmd.queue.family_index() != self.cmd.queue.family_index() {
+            return Err(Error::just_context(format_compact!(
+                "draw command queue {} family index {} is different from pass queue {} family index {}",
+                cmd.queue, cmd.queue.family_index(), self.cmd.queue, self.cmd.queue.family_index(),
+            )))
         }
-        for call in &storage.cache.draw_calls {
-            if let Some(index_buffer) = call.index_buffer {
-                let cache = cmd_cache.buffer_cache
-                    .entry(index_buffer.id)
-                    .or_default();
-                if cache.touch(
-                    index_buffer.offset,
-                    index_buffer.size,
-                    vk::PipelineStageFlags2::INDEX_INPUT,
-                    vk::AccessFlags2::INDEX_READ,
-                    CommandOrdering::None,
-                ) {
-                    cmd_cache.buffer_id_cache.push(index_buffer.id);
-                }
-            }
-            for vertex_buffer in &call.vertex_buffers {
-                let cache = cmd_cache.buffer_cache
-                    .entry(vertex_buffer.id)
-                    .or_default();
-                if cache.touch(
-                    vertex_buffer.offset,
-                    vertex_buffer.size,
-                    vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT,
-                    vk::AccessFlags2::VERTEX_ATTRIBUTE_READ,
-                    CommandOrdering::None,
-                ) {
-                    cmd_cache.buffer_id_cache.push(vertex_buffer.id);
-                }
-            }
+        if cmd.storage.color_formats.as_ref() != self.color_formats.as_ref() {
+            return Err(Error::just_context(format_compact!(
+                "draw command color formats {} don't match pass color formats {}",
+                cmd.storage.color_formats, self.color_formats,
+            )))
         }
-        if !storage.cache.draw_calls.is_empty() {
-            self.wait_scope |= vk::PipelineStageFlags2::VERTEX_INPUT;
+        if cmd.storage.depth_format != self.depth_format {
+            return Err(Error::just_context(format_compact!(
+                "draw command depth format {} doesn't match pass depth format {}",
+                cmd.storage.depth_format, self.depth_format,
+            )))
         }
-        else if all_shader_stages.contains(vk::ShaderStageFlags::VERTEX) {
-            self.wait_scope |= vk::PipelineStageFlags2::VERTEX_SHADER;
+        if cmd.storage.stencil_format != self.stencil_format {
+            return Err(Error::just_context(format_compact!(
+                "draw command stencil format {} doesn't match pass stencil format {}",
+                cmd.storage.stencil_format, self.stencil_format,
+            )))
         }
-        else if all_shader_stages.contains(vk::ShaderStageFlags::FRAGMENT) {
-            self.wait_scope |= vk::PipelineStageFlags2::FRAGMENT_SHADER;
-        }
-        for &id in &cmd_cache.buffer_id_cache {
-            let buffer = self.recorder.register_buffer(id)?;
-            let cache = cmd_cache.buffer_cache.get_mut(&id).unwrap();
-            let handle = buffer.handle();
-            let mut state = BufferState {
-                access_mask: vk::AccessFlags2::NONE,
-                stage_mask: vk::PipelineStageFlags2::NONE,
-                queue_family_index,
-                command_index: command_id.index(),
-                command_timeline_value,
-            };
-            for &(offset, size, stage_mask, access_mask, ordering) in &cache.ranges {
-                state.stage_mask = stage_mask;
-                state.access_mask = access_mask;
-                let memory_barriers = buffer.memory_barrier(
-                    offset, size, state,
-                    ordering, &mut cmd_cache.buffer_memory_barrier_cache,
-                ).context_with(|| format_compact!(
-                    "memory barrier for buffer with id {id} failed",
-                ))?;
-                unsafe {
-                    scheduler::cmd_pipeline_barrier(
-                        self.gpu.vk(),
-                        primary_command_buffer,
-                        &[(handle, memory_barriers)],
-                        &[],
-                        command_id.index(),
-                        command_timeline_value,
-                        &tmp_alloc,
-                    ).context_with(|| format_compact!(
-                        "memory barrier for buffer with id {id} failed"
-                    ))?;
-                }
-            }
-            cache.reset();
-        }
-        for &id in &cmd_cache.image_id_cache {
-            let image = self.recorder.register_image(id)?;
-            let cache = cmd_cache.image_cache.get_mut(&id).unwrap();
-            let layout = cache.layout.unwrap();
-            let mut stage_mask = vk::PipelineStageFlags2::NONE;
-            if cache.shader_stage_mask.contains(vk::ShaderStageFlags::VERTEX) {
-                stage_mask |= vk::PipelineStageFlags2::VERTEX_SHADER;
-            }
-            if cache.shader_stage_mask.contains(vk::ShaderStageFlags::FRAGMENT) {
-                stage_mask |= vk::PipelineStageFlags2::FRAGMENT_SHADER;
-            }
-            let state = ImageSubresourceState {
-                stage_mask,
-                access_mask: cache.access
-                    .map(|access| vk::AccessFlags2::from_raw(access as u64))
-                    .unwrap_or(layout.access_mask()),
-                layout: layout.into(),
-                queue_family_index,
-                command_index: command_id.index(),
-                command_timeline_value,
-            };
-            let handle = image.handle();
-            for &range in &cache.subresource_ranges {
-                let memory_barriers = image
-                    .memory_barrier(state, range, true, &mut cmd_cache.image_memory_barrier_cache)
-                    .context_with(|| format_compact!(
-                        "memory barrier for image with id {id} failed",
-                    ))?;
-                    unsafe {
-                        scheduler::cmd_pipeline_barrier(
-                            self.gpu.vk(),
-                            primary_command_buffer,
-                            &[], &[(handle, memory_barriers)],
-                            command_id.index(),
-                            command_timeline_value,
-                            &tmp_alloc,
-                        ).context_with(|| format_compact!(
-                            "memory barrier for image with id {id} failed"
-                        ))?;
-                    }
-            }
-            cache.reset();
-        }
-        cmd_cache.image_id_cache.clear();
-        cmd_cache.buffer_id_cache.clear();
-        unsafe {
-            self.gpu.vk().device()
-            .cmd_execute_commands(primary_command_buffer, &[storage.command_buffer]);
+        if cmd.storage.sample_count != self.sample_count {
+            return Err(Error::just_context(format_compact!(
+                "draw command sample count {} doesn't match pass sample count {}",
+                cmd.storage.sample_count, self.sample_count,
+            )))
         }
         Ok(())
     }
 
-    pub(super) fn finish<'c, Alloc>(self, alloc: &'c Alloc) -> Result<CommandResult<'c>> 
-        where Alloc: LocalAlloc<Error = Error>
-    {
-        unsafe {
-            self.gpu.vk().device()
-                .end_command_buffer(self.primary_command_buffer)
-                .context("failed to end command buffer")?;
-        }
-        let mut primary_command_buffers = NonNullVec32::with_capacity(1, alloc)?;
-        primary_command_buffers.push(self.primary_command_buffer);
-        Ok(CommandResult {
-            primary_command_buffers,
-            timeline_value: self.command_timeline_value,
-            wait_scope: self.wait_scope,
-            signal_scope: self.signal_scope,
-            queue: self.gpu.vk().graphics_queue(),
-        })
-    }
-}
-
-impl<'a, 'b, 'c, Alloc> ActiveRenderPass<'a, 'b, 'c, Alloc>
-    where Alloc: Guard<True>
-{
-
-    pub fn render_dynamic<F>(
+    pub fn dynamic_draw<F>(
         &mut self,
         f: F,
     ) -> Result<()>
@@ -734,13 +491,13 @@ impl<'a, 'b, 'c, Alloc> ActiveRenderPass<'a, 'b, 'c, Alloc>
     {
         let command_buffer = self.cmd.recorder
             .get_current_worker()
-            .allocate_secondaries(scheduler::CommandBufferKind::Graphics, 1)?[0];
+            .allocate_secondaries(&self.cmd.queue, 1)?[0];
         let mut rendering_inheritance_info = vk::CommandBufferInheritanceRenderingInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
             color_attachment_count: self.color_formats.len(),
-            p_color_attachment_formats: self.color_formats.as_ptr(),
-            depth_attachment_format: self.depth_format,
-            stencil_attachment_format: self.stencil_format,
+            p_color_attachment_formats: self.color_formats.as_ptr().cast(),
+            depth_attachment_format: self.depth_format.into(),
+            stencil_attachment_format: self.stencil_format.into(),
             rasterization_samples: self.sample_count.into(),
             ..Default::default()
         };
@@ -750,59 +507,422 @@ impl<'a, 'b, 'c, Alloc> ActiveRenderPass<'a, 'b, 'c, Alloc>
         }.push_next(&mut rendering_inheritance_info);
         let begin_info = vk::CommandBufferBeginInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
-            flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+            flags:
+                vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT |
+                vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE,
             p_inheritance_info: &inheritance_info,
             ..Default::default()
         };
         unsafe {
-            self.cmd.gpu.vk().device()
-            .begin_command_buffer(command_buffer, &begin_info)
-            .context("failed to begin secondary command buffer")?;
+            self.cmd.gpu.device()
+                .begin_command_buffer(command_buffer, &begin_info)
+                .context("failed to begin secondary command buffer")?;
         }
-        let cache = unsafe {
-            &mut *self.cmd.recorder.cache.graphics_command_cache.draw_cache.get()
-        };
-        let stack = self.cmd.recorder.stack().clone();
-        let stack = stack.guard();
-        let mut storage = unsafe { DrawCommandStorage::new(
+        let cache = unsafe { &mut *self.cmd.recorder.cache().get() };
+        let cache = &mut cache.graphics_command_cache;
+        if cache.next_draw_command_storage >= cache.draw_storages.len() {
+            let push_descriptor_device = self.cmd.gpu.get_extension_device();
+            cache.draw_storages.resize_with(cache.next_draw_command_storage + 1, || {
+                DrawCommandStorage::new(push_descriptor_device.clone())
+            });
+        }
+        let draw_storage = &mut cache.draw_storages[cache.next_draw_command_storage as usize];
+        cache.next_draw_command_storage += 1;
+        draw_storage.reinit(
             command_buffer,
             &self.color_formats,
             self.depth_format,
             self.stencil_format,
             self.sample_count,
-            SizedCowMut::Borrowed(cache),
-            DrawCommandAlloc::Borrowed(&stack),
-        )? };
-        let mut draw_commands = DrawCommands {
-            gpu: &self.cmd.gpu,
-            storage: &mut storage,
-            buffers: DynResourceReadGuard::new(&self.cmd.recorder.buffers),
-            images: DynResourceReadGuard::new(&self.cmd.recorder.images),
-        };
+            &self.alloc,
+        )?;
+        let mut draw_commands = DrawCommands::new(
+            self.cmd.gpu.clone(),
+            draw_storage,
+            &self.alloc,
+            self.cmd.recorder.buffers(),
+            self.cmd.recorder.images(),
+        );
         f(&mut draw_commands)?;
         unsafe {
-            self.cmd.gpu.vk().device()
-            .end_command_buffer(command_buffer)
-            .context("failed to end secondary command buffer")?;
-        }
-        unsafe {
-            self.cmd.execute_draw_commands(&storage)?;
+            self.cmd.gpu.device()
+                .end_command_buffer(command_buffer)
+                .context("failed to end secondary command buffer")?;
         }
         Ok(())
-    } 
-}
+    }
 
-impl<'a, 'b, 'c, Alloc> Drop for ActiveRenderPass<'a, 'b, 'c, Alloc>
-    where Alloc: Guard<True>,
-{
-
-    fn drop(&mut self) {
-        unsafe {
-            self.cmd.gpu
-                .vk()
-                .device()
-                .cmd_end_rendering(self.cmd.primary_command_buffer);
-            self.color_formats.drop_and_free(&self.tmp_alloc);
+    fn finish(
+        mut self,
+        rendering_info: &RenderingInfo,
+        min_extent: vk::Extent2D,
+        color_attachments: &mut [vk::RenderingAttachmentInfo<'_>],
+        depth_attachment: &mut Option<vk::RenderingAttachmentInfo<'_>>,
+        stencil_attachment: &mut Option<vk::RenderingAttachmentInfo<'_>>,
+    ) -> Result<()>
+    {
+        let cmd_cache = unsafe { &mut *self.cmd.recorder.cache().get() };
+        let num_draw_id = cmd_cache.graphics_command_cache.draw_ids.len();
+        let draw_storages = &mut cmd_cache.graphics_command_cache.draw_storages[
+            0..cmd_cache.graphics_command_cache.next_draw_command_storage as usize
+        ];
+        let tmp_alloc = self.cmd.gpu.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let command_id = self.cmd.command_id;
+        let primary_command_buffer = self.cmd.primary_command_buffer;
+        let queue_family_index = self.cmd.queue.family_index();
+        let mut command_buffers = FixedVec32::with_capacity(
+            draw_storages.len() as u32 + num_draw_id,
+            &tmp_alloc
+        )?;
+        for attachment in self.color_attachments {
+            let image_view = attachment.image_view;
+            cmd_cache.shader_resource_cache.touch_image(
+                image_view,
+                ShaderImageLayout::Attachment(AttachmentImageLayout::Color),
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                Some(ExplicitAccess::COLOR_ATTACHMENT),
+            );
+            if let Some(resolve) = attachment.resolve {
+                cmd_cache.shader_resource_cache.touch_image(
+                    resolve.image_view,
+                    ShaderImageLayout::Attachment(AttachmentImageLayout::Color),
+                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                    Some(ExplicitAccess::COLOR_ATTACHMENT),
+                );
+            }
         }
+        match self.depth_stencil_attachment {
+            DepthStencilAttachment::None => {},
+            DepthStencilAttachment::Depth(attachment) => {
+                let image_view = attachment.image_view;
+                cmd_cache.shader_resource_cache.touch_image(
+                    image_view,
+                    ShaderImageLayout::Attachment(AttachmentImageLayout::DepthStencil(
+                        DepthStencilAttachmentType::Depth)
+                    ),
+                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS |
+                    vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                    Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                );
+                if let Some(resolve) = attachment.resolve {
+                    cmd_cache.shader_resource_cache.touch_image(
+                        resolve.image_view,
+                        ShaderImageLayout::Attachment(
+                            AttachmentImageLayout::DepthStencil(DepthStencilAttachmentType::Depth)
+                        ),
+                        vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                        Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                    );
+                }
+            },
+            DepthStencilAttachment::Stencil(attachment) => {
+                cmd_cache.shader_resource_cache.touch_image(
+                    attachment.image_view,
+                    ShaderImageLayout::Attachment(AttachmentImageLayout::DepthStencil(
+                        DepthStencilAttachmentType::Stencil)
+                    ),
+                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS |
+                    vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                    Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                );
+                if let Some(resolve) = attachment.resolve {
+                    cmd_cache.shader_resource_cache.touch_image(
+                        resolve.image_view,
+                        ShaderImageLayout::Attachment(
+                            AttachmentImageLayout::DepthStencil(DepthStencilAttachmentType::Depth)
+                        ),
+                        vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                        Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                    );
+                }
+            },
+            DepthStencilAttachment::DepthStencil { depth, stencil } => {
+                let depth_image_view = depth.image_view;
+                let stencil_image_view = stencil.image_view;
+                let mut depth_layout = ShaderImageLayout::Attachment(
+                    AttachmentImageLayout::DepthStencil(DepthStencilAttachmentType::Depth)
+                );
+                let mut stencil_layout = ShaderImageLayout::Attachment(
+                    AttachmentImageLayout::DepthStencil(DepthStencilAttachmentType::Stencil)
+                );
+                if depth_image_view.image_id() == stencil_image_view.image_id() {
+                    depth_layout = ShaderImageLayout::Attachment(AttachmentImageLayout::DepthStencil(
+                        DepthStencilAttachmentType::DepthStencil
+                    ));
+                    stencil_layout = depth_layout;
+                }
+                cmd_cache.shader_resource_cache.touch_image(
+                    depth_image_view,
+                    depth_layout,
+                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS |
+                    vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                    Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                );
+                cmd_cache.shader_resource_cache.touch_image(
+                    stencil_image_view,
+                    stencil_layout,
+                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS |
+                    vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                    Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                );
+                if let Some(depth) = depth.resolve &&
+                    let Some(stencil) = stencil.resolve
+                {
+                    let mut depth_layout = ShaderImageLayout::Attachment(
+                        AttachmentImageLayout::DepthStencil(DepthStencilAttachmentType::Depth)
+                    );
+                    let mut stencil_layout = ShaderImageLayout::Attachment(
+                        AttachmentImageLayout::DepthStencil(DepthStencilAttachmentType::Stencil)
+                    );
+                    if depth.image_view.image_id() == stencil.image_view.image_id() {
+                        depth_layout = ShaderImageLayout::Attachment(AttachmentImageLayout::DepthStencil(
+                            DepthStencilAttachmentType::DepthStencil
+                        ));
+                        stencil_layout = depth_layout;
+                    }
+                    cmd_cache.shader_resource_cache.touch_image(
+                        depth.image_view,
+                        depth_layout,
+                        vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                        Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                    );
+                    cmd_cache.shader_resource_cache.touch_image(
+                        stencil.image_view,
+                        stencil_layout,
+                        vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                        Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                    );
+                } else if let Some(depth) = depth.resolve {
+                    cmd_cache.shader_resource_cache.touch_image(
+                        depth.image_view,
+                        ShaderImageLayout::Attachment(
+                            AttachmentImageLayout::DepthStencil(DepthStencilAttachmentType::Depth)
+                        ),
+                        vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                        Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                    );
+                } else if let Some(stencil) = stencil.resolve {
+                    cmd_cache.shader_resource_cache.touch_image(
+                        stencil.image_view,
+                        ShaderImageLayout::Attachment(
+                            AttachmentImageLayout::DepthStencil(DepthStencilAttachmentType::Stencil)
+                        ),
+                        vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+                        Some(ExplicitAccess::DEPTH_STENCIL_ATTACHMENT),
+                    );
+                }
+            },
+        };
+        for storage in draw_storages {
+            self.cmd.wait_scope |= storage.wait_scope;
+            let all_shader_stages = storage.pipeline_cache
+                .prepare_shader_resource_cache(
+                    &mut self.cmd.recorder,
+                    &tmp_alloc,
+                ).context("failed to process draw command pipeline cache")?;
+            for call in &storage.draw_calls {
+                if let Some(index_buffer) = call.index_buffer {
+                    cmd_cache.shader_resource_cache.touch_buffer(
+                        index_buffer.id,
+                        index_buffer.offset,
+                        unsafe { index_buffer.size.unwrap_unchecked().get() },
+                        vk::PipelineStageFlags2::INDEX_INPUT,
+                        ExplicitAccess::from_raw(vk::AccessFlags2::INDEX_READ.as_raw()),
+                        CommandOrdering::Lenient
+                    );
+                }
+                for vertex_buffer in &call.vertex_buffers {
+                    cmd_cache.shader_resource_cache.touch_buffer(
+                        vertex_buffer.id,
+                        vertex_buffer.offset,
+                        unsafe { vertex_buffer.size.unwrap_unchecked().get() },
+                        vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT,
+                        ExplicitAccess::from_raw(vk::AccessFlags2::VERTEX_ATTRIBUTE_READ.as_raw()),
+                        CommandOrdering::Lenient
+                    );
+                }
+            }
+            if !storage.draw_calls.is_empty() {
+                self.cmd.wait_scope |= vk::PipelineStageFlags2::VERTEX_INPUT;
+            }
+            else {
+                self.cmd.wait_scope |= all_shader_stages.pipeline_stage_mask();
+            }
+            let worker = self.cmd.recorder.get_current_worker();
+            for pipeline in &storage.pipelines {
+                worker.add_pipeline(pipeline.clone());
+            }
+            unsafe { storage.reset(&self.alloc) }
+            command_buffers.push(storage.command_buffer);
+        }
+        for &id in &cmd_cache.graphics_command_cache.draw_ids {
+            let storage = &self.cmd.gpu.get_draw_commands(id)?.storage;
+            self.cmd.wait_scope |= storage.wait_scope;
+            let all_shader_stages = storage.pipeline_cache.prepare_shader_resource_cache(
+                &mut self.cmd.recorder,
+                &tmp_alloc,
+            ).context("failed to process draw command pipeline cache")?;
+            for call in &storage.draw_calls {
+                if let Some(index_buffer) = call.index_buffer {
+                    cmd_cache.shader_resource_cache.touch_buffer(
+                        index_buffer.id,
+                        index_buffer.offset,
+                        unsafe { index_buffer.size.unwrap_unchecked().get() },
+                        vk::PipelineStageFlags2::INDEX_INPUT,
+                        ExplicitAccess::from_raw(vk::AccessFlags2::INDEX_READ.as_raw()),
+                        CommandOrdering::Lenient
+                    );
+                }
+                for vertex_buffer in &call.vertex_buffers {
+                    cmd_cache.shader_resource_cache.touch_buffer(
+                        vertex_buffer.id,
+                        vertex_buffer.offset,
+                        unsafe { vertex_buffer.size.unwrap_unchecked().get() },
+                        vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT,
+                        ExplicitAccess::from_raw(vk::AccessFlags2::VERTEX_ATTRIBUTE_READ.as_raw()),
+                        CommandOrdering::Lenient
+                    );
+                }
+            }
+            if !storage.draw_calls.is_empty() {
+                self.cmd.wait_scope |= vk::PipelineStageFlags2::VERTEX_INPUT;
+            }
+            else {
+                self.cmd.wait_scope |= all_shader_stages.pipeline_stage_mask();
+            }
+            let worker = self.cmd.recorder.get_current_worker();
+            for pipeline in &storage.pipelines {
+                worker.add_pipeline(pipeline.clone());
+            }
+            command_buffers.push(storage.command_buffer);
+        }
+        unsafe {
+            cmd_cache.shader_resource_cache.process(
+                &mut self.cmd.recorder,
+                self.cmd.primary_command_buffer,
+                queue_family_index,
+                command_id,
+                &tmp_alloc
+            ).context("failed to process shader resources")?;
+        }
+        for (i, attachment) in self.color_attachments.iter().enumerate() {
+            let image_view = attachment.image_view;
+            let images = self.cmd.recorder.images();
+            let image = images.get(image_view.image_id()).unwrap();
+            let state = image.view_state(
+                image_view, ImageAspects::COLOR,
+            )?;
+            let vk = &mut color_attachments[i];
+            vk.image_layout = state.layout;
+            if let Some(resolve) = attachment.resolve {
+                let image = images.get(resolve.image_view.image_id()).unwrap();
+                let state = image.view_state(
+                    resolve.image_view, ImageAspects::COLOR,
+                )?;
+                vk.resolve_image_layout = state.layout;
+            }
+        }
+        match self.depth_stencil_attachment {
+            DepthStencilAttachment::None => {},
+            DepthStencilAttachment::Depth(depth) => {
+                let image_view = depth.image_view;
+                let images = self.cmd.recorder.images();
+                let image = images.get(image_view.image_id()).unwrap();
+                let state = image.view_state(
+                    image_view, ImageAspects::DEPTH
+                )?;
+                let vk = depth_attachment.as_mut().unwrap();
+                vk.image_layout = state.layout;
+                if let Some(resolve) = depth.resolve {
+                    let image = images.get(resolve.image_view.image_id()).unwrap();
+                    let state = image.view_state(
+                        resolve.image_view, ImageAspects::DEPTH,
+                    )?;
+                    vk.resolve_image_layout = state.layout;
+                }
+            },
+            DepthStencilAttachment::Stencil(stencil) => {
+                let image_view = stencil.image_view;
+                let images = self.cmd.recorder.images();
+                let image = images.get(image_view.image_id()).unwrap();
+                let state = image.view_state(
+                    image_view, ImageAspects::STENCIL
+                )?;
+                let vk = stencil_attachment.as_mut().unwrap();
+                vk.image_layout = state.layout;
+                if let Some(resolve) = stencil.resolve {
+                    let image = images.get(resolve.image_view.image_id()).unwrap();
+                    let state = image.view_state(
+                        resolve.image_view, ImageAspects::STENCIL
+                    )?;
+                    vk.resolve_image_layout = state.layout;
+                }
+            },
+            DepthStencilAttachment::DepthStencil { depth, stencil } => {
+                let image_view = depth.image_view;
+                let images = self.cmd.recorder.images();
+                let image = images.get(image_view.image_id()).unwrap();
+                let state = image.view_state(
+                    image_view, ImageAspects::DEPTH
+                )?;
+                let vk_depth = depth_attachment.as_mut().unwrap();
+                vk_depth.image_layout = state.layout;
+                if let Some(resolve) = depth.resolve {
+                    let image = images.get(resolve.image_view.image_id()).unwrap();
+                    let state = image.view_state(
+                        resolve.image_view, ImageAspects::DEPTH
+                    )?;
+                    vk_depth.resolve_image_layout = state.layout;
+                }
+                let image_view = stencil.image_view;
+                let images = self.cmd.recorder.images();
+                let image = images.get(image_view.image_id()).unwrap();
+                let state = image.view_state(
+                    image_view, ImageAspects::STENCIL
+                )?;
+                let vk_stencil = stencil_attachment.as_mut().unwrap();
+                vk_stencil.image_layout = state.layout;
+                if let Some(resolve) = stencil.resolve {
+                    let image = images.get(resolve.image_view.image_id()).unwrap();
+                    let state = image.view_state(
+                        resolve.image_view, ImageAspects::STENCIL
+                    )?;
+                    vk_stencil.resolve_image_layout = state.layout;
+                }
+            },
+        };
+        let rendering_info = vk::RenderingInfo {
+            s_type: vk::StructureType::RENDERING_INFO,
+            flags: vk::RenderingFlags::CONTENTS_SECONDARY_COMMAND_BUFFERS,
+            render_area: rendering_info.render_area
+                .unwrap_or(RenderArea {
+                    width: min_extent.width,
+                    height: min_extent.height,
+                    ..Default::default()
+                }).into(),
+            layer_count: rendering_info.layer_count,
+            color_attachment_count: color_attachments.len() as u32,
+            p_color_attachments: color_attachments.as_ptr(),
+            p_depth_attachment: depth_attachment.as_ref().as_ptr(),
+            p_stencil_attachment: stencil_attachment.as_ref().as_ptr(),
+            ..Default::default()
+        };
+        unsafe {
+            self.cmd.gpu.device().cmd_begin_rendering(
+                primary_command_buffer,
+                &rendering_info
+            );
+            if !command_buffers.is_empty() {
+                self.cmd.gpu.device()
+                    .cmd_execute_commands(primary_command_buffer, &command_buffers);
+            }
+            self.cmd.gpu.device()
+                .cmd_end_rendering(primary_command_buffer);
+            self.color_formats.drop_and_free(&self.alloc);
+        }
+        cmd_cache.graphics_command_cache.next_draw_command_storage = 0;
+        cmd_cache.graphics_command_cache.draw_ids.clear();
+        Ok(())
     }
 }

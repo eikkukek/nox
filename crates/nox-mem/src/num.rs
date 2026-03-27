@@ -76,6 +76,18 @@ pub trait Integer:
 
     #[must_use]
     fn wrapping_add(self, x: Self) -> Self;
+
+    #[must_use]
+    fn wrapping_sub(self, x: Self) -> Self;
+
+    #[must_use]
+    fn wrapping_neg(self) -> Self;
+
+    #[must_use]
+    fn saturating_sub(self, x: Self) -> Self;
+
+    #[must_use]
+    fn from_bool(x: bool) -> Self;
 }
 
 macro_rules! impl_integers {
@@ -114,6 +126,26 @@ macro_rules! impl_integers {
                 #[inline(always)]
                 fn wrapping_add(self, x: Self) -> Self {
                     self.wrapping_add(x)
+                }
+
+                #[inline(always)]
+                fn wrapping_sub(self, x: Self) -> Self {
+                    self.wrapping_sub(x)
+                }
+
+                #[inline(always)]
+                fn wrapping_neg(self) -> Self {
+                    self.wrapping_neg()
+                }
+
+                #[inline(always)]
+                fn saturating_sub(self, x: Self) -> Self {
+                    self.saturating_sub(x)
+                }
+
+                #[inline(always)]
+                fn from_bool(x: bool) -> Self {
+                    x as Self
                 }
             }
         )*

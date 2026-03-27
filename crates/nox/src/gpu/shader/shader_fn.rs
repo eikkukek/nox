@@ -1,14 +1,12 @@
 use crate::Version;
 
-use super::*;
-
 #[inline(always)]
 pub fn glsl_to_spirv(
     input: &str,
     input_name: &str,
     shader_kind: shaderc::ShaderKind,
     vulkan_version: Version,
-) -> Result<shaderc::CompilationArtifact>
+) -> shaderc::Result<shaderc::CompilationArtifact>
 {
     let compiler = shaderc::Compiler::new()?;
     let mut options = shaderc::CompileOptions::new().unwrap();
@@ -18,11 +16,12 @@ pub fn glsl_to_spirv(
     );
     options.set_source_language(shaderc::SourceLanguage::GLSL);
     options.set_optimization_level(shaderc::OptimizationLevel::Performance);
-    Ok(compiler.compile_into_spirv(
+    options.set_generate_debug_info();
+    compiler.compile_into_spirv(
         input,
         shader_kind,
         input_name,
         "main",
         Some(&options)
-    )?)
+    )
 }

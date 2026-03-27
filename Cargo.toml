@@ -15,8 +15,5 @@ members = [
 ]
 
 exclude = [
-	"example",
-	"font-example",
-	"shape-example",
-	"gui-example",
+	"examples",
 ]

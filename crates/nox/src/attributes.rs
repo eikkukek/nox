@@ -1,22 +1,37 @@
 use crate::gpu;
 
 pub struct Attributes {
-    pub(crate) gpu_attributes: gpu::GpuAttributes,
+    pub(crate) buffered_frames: u32,
+    pub(crate) gpu_memory_layout: gpu::MemoryLayout,
+    pub(crate) gpu_cache_attributes: gpu::CacheAttributes,
 }
 
 impl Attributes {
 
-    #[inline(always)]
     pub(crate) fn new() -> Self
     {
         Attributes {
-            gpu_attributes: gpu::default_attributes(),
+            buffered_frames: 3,
+            gpu_memory_layout: Default::default(),
+            gpu_cache_attributes: Default::default(),
         }
     }
 
-    #[inline(always)]
-    pub fn with_gpu_attributes(mut self, attributes: gpu::GpuAttributes) -> Self {
-        self.gpu_attributes = attributes;
+    #[inline]
+    pub fn with_gpu_memory_layout(mut self, layout: gpu::MemoryLayout) -> Self {
+        self.gpu_memory_layout = layout;
+        self
+    }
+
+    #[inline]
+    pub fn with_buffered_frames(mut self, frames: u32) -> Self {
+        self.buffered_frames = frames;
+        self
+    }
+
+    #[inline]
+    pub fn with_gpu_cache_attributes(mut self, attributes: gpu::CacheAttributes) -> Self {
+        self.gpu_cache_attributes = attributes;
         self
     }
 }

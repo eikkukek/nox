@@ -1,7 +1,56 @@
-//! Vulkan extensions.
+//! Provides an interface for enabling and using Vulkan device extensions.
+//!
+//! # Core extensions
+//! The following device extensions are required by Nox and are always enabled:
+//! - [`VK_KHR_timeline_semaphore`][1]
+//! - If [`multi_viewport`][2] is enabled, [`VK_EXT_shader_viewport_index_layer`][3]
+//! - [`VK_KHR_create_renderpass2`][4]
+//! - [`VK_KHR_depth_stencil_resolve`][5]
+//! - [`VK_KHR_dynamic_rendering`][6]
+//! - [`VK_KHR_format_feature_flags2`][7]
+//! - [`VK_EXT_extended_dynamic_state`][8]
+//! - [`VK_KHR_copy_commands2`][9]
+//! - [`Vk_KHR_synchronization2`][10]
+//! - [`VK_KHR_maintenance4`][11]
+//! - [`VK_KHR_dynamic_rendering_local_read`][12]
+//! - [`VK_KHR_maintenance5`][13]
+//! - [`VK_KHR_maintenance6`][14]
+//! - [`VK_KHR_present_id2`][15]
+//! - [`VK_KHR_present_wait2`][16]
+//!
+//! # Provided extensions
+//! The following device extensions have been implemented for Nox and *can* be enabled by
+//! applications:
+//! - [`VK_KHR_push_descriptor`][push_descriptor]
+//! - [`VK_EXT_inline_uniform_block`][inline_uniform_block]
+//! - [`VK_KHR_index_type_uint8`][index_type_uint8]
+//! - [`VK_KHR_robustness2`][robustness2]
+//! - [`VK_EXT_pipeline_robustness`][pipeline_robustness]
+//!
+//! # Future extensions
+//!  *can* be enabled, but doesn't yet have a high level
+//! interface for usage in commands.
+//!
+//! [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_timeline_semaphore.html
+//! [2]: BaseDeviceFeatures::multi_viewport
+//! [3]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_EXT_shader_viewport_index_layer.html
+//! [4]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_create_renderpass2.html
+//! [5]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_depth_stencil_resolve.html
+//! [6]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_dynamic_rendering.html
+//! [7]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_format_feature_flags2.html
+//! [8]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_EXT_extended_dynamic_state.html
+//! [9]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_copy_commands2.html
+//! [10]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_synchronization2.html
+//! [11]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_maintenance4.html
+//! [12]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_dynamic_rendering_local_read.html
+//! [13]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_maintenance5.html
+//! [14]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_maintenance6.html
+//! [15]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_present_id2.html
+//! [16]: https://docs.vulkan.org/refpages/latest/refpages/source/VK_KHR_present_wait2.html
 
 mod core;
 pub mod push_descriptor;
+pub mod inline_uniform_block;
 pub mod index_type_uint8;
 pub mod robust_image_access;
 pub mod robustness2;
@@ -35,8 +84,9 @@ use {
     compact_str::format_compact,
     crate::{
         Version,
-        gpu::{Vulkan, PhysicalDeviceInfo, GpuAttributes},
+        gpu::prelude::*,
         log,
+        sync::Mutex,
     },
 };
 
@@ -155,7 +205,7 @@ impl DeviceAttribute {
     #[inline(always)]
     pub fn new_bool(name: ConstName, value: bool) -> Self {
         Self {
-            name: name.into(),
+            name,
             ty: AttributeType::Bool(value),
         }
     }
@@ -163,7 +213,7 @@ impl DeviceAttribute {
     #[inline(always)]
     pub fn new_u32(name: ConstName, value: u32) -> Self {
         Self {
-            name: name.into(),
+            name,
             ty: AttributeType::U32(value),
         }
     }
@@ -171,7 +221,7 @@ impl DeviceAttribute {
     #[inline(always)]
     pub fn new_i32(name: ConstName, value: i32) -> Self {
         Self {
-            name: name.into(),
+            name,
             ty: AttributeType::I32(value),
         }
     }
@@ -179,7 +229,7 @@ impl DeviceAttribute {
     #[inline(always)]
     pub fn new_device_size(name: ConstName, value: vk::DeviceSize) -> Self {
         Self {
-            name: name.into(),
+            name,
             ty: AttributeType::DeviceSize(value),
         }
     }
@@ -196,6 +246,14 @@ impl DeviceAttribute {
     pub fn u32(&self) -> Option<u32> {
         match self.ty {
             AttributeType::U32(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn i32(&self) -> Option<i32> {
+        match self.ty {
+            AttributeType::I32(value) => Some(value),
             _ => None,
         }
     }
@@ -244,8 +302,10 @@ impl Borrow<ConstName> for DeviceAttribute {
     }
 }
 
-pub unsafe trait AnyExtensionDevice: Any + Send + Sync {
+/// A trait for cloning [`ExtensionDevice`] trait objects.
+pub trait AnyExtensionDevice: Any + Send + Sync {
 
+    /// Clones self to a [`Box`].
     fn boxed(&self) -> Box<dyn AnyExtensionDevice>;
 }
 
@@ -269,29 +329,26 @@ impl Clone for ExtensionDeviceObj {
     }
 }
 
-pub unsafe trait ExtensionDevice: AnyExtensionDevice + Clone {
+/// A trait for a extension's device-level functions.
+pub trait ExtensionDevice: AnyExtensionDevice + Clone {
 
-    /// The name hash for the extension.
+    /// The name hash for the device.
     const NAME: ConstName;
 
     /// Precondition for using the device.
     ///
     /// Should return `true` when the precondition is met.
-    fn precondition<F>(f: F) -> bool
-        where F: Fn(&ConstName) -> Option<&DeviceAttribute>;
+    fn precondition<'a, F>(f: F) -> bool
+        where F: Fn(&ConstName) -> Option<&'a DeviceAttribute>;
 
-    /// Creates a new Device.
-    fn new(
-        instance: &nox_ash::Instance,
-        device: &nox_ash::Device,
-        device_info: &PhysicalDeviceInfo,
-    ) -> Box<dyn AnyExtensionDevice>;
+    /// Creates a new Device from [`LogicalDevice`].
+    fn new(device: &LogicalDevice) -> Box<Self>;
 }
 
 #[derive(Default)]
 pub struct EnabledDeviceExtensions {
     attributes: AHashSet<DeviceAttribute>,
-    extension_devices: AHashMap<ConstName, ExtensionDeviceObj>
+    extension_devices: Mutex<AHashMap<ConstName, ExtensionDeviceObj>>
 }
 
 impl EnabledDeviceExtensions {
@@ -314,11 +371,13 @@ impl EnabledDeviceExtensions {
     }
 
     #[inline(always)]
-    pub(crate) fn get_device<T: ExtensionDevice>(
-        &mut self,
-        vk: &Vulkan,
-    ) -> Option<T> {
-        let obj = self.extension_devices.entry(T::NAME)
+    pub(crate) fn get_device<T: ExtensionDevice + 'static>(
+        &self,
+        device: &LogicalDevice,
+    ) -> Option<T>
+    {
+        let mut devices = self.extension_devices.lock();
+        let obj = devices.entry(T::NAME)
             .or_try_insert_with(|| {
                 if !T::precondition(|name| {
                     self.attributes.get(name)
@@ -327,13 +386,9 @@ impl EnabledDeviceExtensions {
                         "precondition for {} not met", T::NAME.name
                     ))
                 }
-                Ok(ExtensionDeviceObj(T::new(
-                    vk.instance(),
-                    vk.device().ash_device(),
-                    vk.physical_device_info(),
-                )))
+                Ok(ExtensionDeviceObj(T::new(device)))
             }).inspect_err(|err| {
-                log::error!("{}", err);
+                log::debug!("{}", err);
             }).ok()?;
         obj.is::<T>().then(|| unsafe {
             mem::transmute::<
@@ -346,38 +401,35 @@ impl EnabledDeviceExtensions {
 }
 
 pub struct PhysicalDeviceContext<'a> {
-    instance: &'a nox_ash::Instance,
+    instance: &'a Instance,
+    physical_device: &'a PhysicalDevice,
     vulkan_12_features: &'a mut Option<vk::PhysicalDeviceVulkan12Features<'static>>,
     vulkan_14_features: &'a mut Option<vk::PhysicalDeviceVulkan14Features<'static>>,
     enabled_extensions: Option<&'a mut EnabledDeviceExtensions>,
-    physical_device: vk::PhysicalDevice,
-    physical_device_api_version: Version,
 }
 
 impl<'a> PhysicalDeviceContext<'a> {
 
     #[inline(always)]
-    pub unsafe fn new(
-        instance: &'a nox_ash::Instance,
+    pub fn new(
+        instance: &'a Instance,
+        physical_device: &'a PhysicalDevice,
         vulkan_12_features: &'a mut Option<vk::PhysicalDeviceVulkan12Features<'static>>,
         vulkan_14_features: &'a mut Option<vk::PhysicalDeviceVulkan14Features<'static>>,
         enabled_extensions: Option<&'a mut EnabledDeviceExtensions>,
-        physical_device: vk::PhysicalDevice,
-        physical_device_api_version: Version,
     ) -> Self {
         Self {
             instance,
+            physical_device,
             vulkan_12_features,
             vulkan_14_features,
             enabled_extensions,
-            physical_device,
-            physical_device_api_version,
         }
     }
 
     #[inline(always)]
     pub fn api_version(&self) -> Version {
-        self.physical_device_api_version
+        self.physical_device.api_version()
     }
 
     #[inline(always)]
@@ -390,8 +442,8 @@ impl<'a> PhysicalDeviceContext<'a> {
             ::default()
             .push_next(out);
         unsafe {
-            self.instance.get_physical_device_features2(
-                self.physical_device, &mut features,
+            self.instance.ash().get_physical_device_features2(
+                self.physical_device.handle(), &mut features,
             );
         }
     }
@@ -406,8 +458,8 @@ impl<'a> PhysicalDeviceContext<'a> {
             ::default()
             .push_next(out);
         unsafe {
-            self.instance.get_physical_device_properties2(
-                self.physical_device,
+            self.instance.ash().get_physical_device_properties2(
+                self.physical_device.handle(),
                 &mut properties
             );
         }
@@ -431,7 +483,9 @@ impl<'a> PhysicalDeviceContext<'a> {
     }
 }
 
-pub struct Precondition(Box<dyn Fn(&PhysicalDeviceContext<'_>) -> Option<MissingDeviceFeatureError>>);
+type FnPrecondition = dyn Fn(&PhysicalDeviceContext<'_>) -> Option<MissingDeviceFeatureError>;
+
+pub struct Precondition(Box<FnPrecondition>);
 
 impl Precondition {
 
@@ -443,8 +497,8 @@ impl Precondition {
     }
 
     #[inline(always)]
-    pub fn call(&self, context: &PhysicalDeviceContext<'_>) -> Option<MissingDeviceFeatureError> {
-        (self.0)(context)
+    pub fn call(&self, ctx: &PhysicalDeviceContext<'_>) -> Option<MissingDeviceFeatureError> {
+        (self.0)(ctx)
     }
 }
 
@@ -460,13 +514,13 @@ pub struct DeviceExtensionInfo {
 pub unsafe trait DeviceExtension: 'static + Send + Sync {
 
     /// Conditionally gets info about the extension.
-    fn get_info(&self, attributes: &GpuAttributes) -> Option<DeviceExtensionInfo>;
+    fn get_info(&self, attributes: &DeviceAttributes) -> Option<DeviceExtensionInfo>;
 
     /// Registers the extension and optionally returns a structure extending
     /// [`vk::DeviceCreateInfo`].
     fn register(
         &self,
-        context: &mut PhysicalDeviceContext<'_>,
+        ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj>;
 
     /// Clones self to a box.
@@ -497,6 +551,6 @@ impl Deref for DeviceExtensionObj {
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &*self.0
     }
 }

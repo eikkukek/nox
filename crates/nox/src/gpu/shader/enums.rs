@@ -5,52 +5,110 @@ use nox_mem::AsRaw;
 
 use spirv_cross2::spirv;
 
+use crate::gpu::prelude::*;
+
+nox_ash::ash_style_enum!(
+    /// A bitmask of [`shader stages`][1].
+    ///
+    /// [1]: ShaderStage
+    #[flags(Flags32)]
+    #[default = Self::empty()]
+    pub enum ShaderStageFlags {
+        #[display("vertex")]
+        VERTEX = vk::ShaderStageFlags::VERTEX.as_raw(),
+        #[display("tessellation control")]
+        TESSELLATION_CONTROL = vk::ShaderStageFlags::TESSELLATION_CONTROL.as_raw(),
+        #[display("tessellation evaluation")]
+        TESSELLATION_EVALUATION = vk::ShaderStageFlags::TESSELLATION_EVALUATION.as_raw(),
+        #[display("geometry")]
+        GEOMETRY = vk::ShaderStageFlags::GEOMETRY.as_raw(),
+        #[display("fragment")]
+        FRAGMENT = vk::ShaderStageFlags::FRAGMENT.as_raw(),
+        #[display("compute")]
+        COMPUTE = vk::ShaderStageFlags::COMPUTE.as_raw(),
+    }
+);
+
+impl ShaderStageFlags {
+
+    #[inline(always)]
+    pub fn pipeline_stage_mask(self) -> vk::PipelineStageFlags2 {
+        let mut mask = vk::PipelineStageFlags2::empty();
+        if self.contains(Self::VERTEX) {
+            mask |= vk::PipelineStageFlags2::VERTEX_SHADER;
+        }
+        if self.contains(Self::TESSELLATION_CONTROL) {
+            mask |= vk::PipelineStageFlags2::TESSELLATION_CONTROL_SHADER;
+        }
+        if self.contains(Self::TESSELLATION_EVALUATION) {
+            mask |= vk::PipelineStageFlags2::TESSELLATION_EVALUATION_SHADER;
+        }
+        if self.contains(Self::GEOMETRY) {
+            mask |= vk::PipelineStageFlags2::GEOMETRY_SHADER;
+        }
+        if self.contains(Self::FRAGMENT) {
+            mask |= vk::PipelineStageFlags2::FRAGMENT_SHADER;
+        }
+        if self.contains(Self::COMPUTE) {
+            mask |= vk::PipelineStageFlags2::COMPUTE_SHADER;
+        }
+        mask
+    }
+}
+
+/// An enumeration of all supported shader stages.
 #[repr(u32)]
 #[derive(Display, Clone, Copy, PartialEq, Eq, Hash, AsRaw)]
 pub enum ShaderStage {
-    #[display("unknown")]
-    Unknown = 0,
     #[display("vertex")]
-    Vertex = 1,
+    Vertex = ShaderStageFlags::VERTEX.as_raw(),
+    #[display("tessellation control")]
+    TesellationControl = ShaderStageFlags::TESSELLATION_CONTROL.as_raw(),
+    #[display("tessellation evaluation")]
+    TesellationEvaluation = ShaderStageFlags::TESSELLATION_EVALUATION.as_raw(),
+    #[display("geometry")]
+    Geometry = ShaderStageFlags::GEOMETRY.as_raw(),
     #[display("fragment")]
-    Fragment = 2,
+    Fragment = ShaderStageFlags::FRAGMENT.as_raw(),
     #[display("compute")]
-    Compute = 4,
+    Compute = ShaderStageFlags::COMPUTE.as_raw(),
 }
 
 impl ShaderStage {
 
-    pub(super) fn execution_model(self) -> Option<spirv::ExecutionModel> {
+    pub(super) fn execution_model(self) -> spirv::ExecutionModel {
         match self {
-            Self::Unknown => None,
-            Self::Vertex => Some(spirv::ExecutionModel::Vertex),
-            Self::Fragment => Some(spirv::ExecutionModel::Fragment),
-            Self::Compute => Some(spirv::ExecutionModel::GLCompute),
+            Self::Vertex => spirv::ExecutionModel::Vertex,
+            Self::TesellationControl => spirv::ExecutionModel::TessellationControl,
+            Self::TesellationEvaluation => spirv::ExecutionModel::TessellationEvaluation,
+            Self::Geometry => spirv::ExecutionModel::Geometry,
+            Self::Fragment => spirv::ExecutionModel::Fragment,
+            Self::Compute => spirv::ExecutionModel::GLCompute,
         }
     }
 }
 
-impl From<vk::ShaderStageFlags> for ShaderStage {
+impl From<ShaderStage> for ShaderStageFlags {
 
-    fn from(value: vk::ShaderStageFlags) -> Self {
-        match value {
-            vk::ShaderStageFlags::VERTEX => Self::Vertex,
-            vk::ShaderStageFlags::FRAGMENT => Self::Fragment,
-            vk::ShaderStageFlags::COMPUTE => Self::Compute,
-            _ => Self::Unknown,
-        }
+    #[inline(always)]
+    fn from(value: ShaderStage) -> Self {
+        Self::from_raw(value.as_raw())
     }
 }
 
 impl From<ShaderStage> for vk::ShaderStageFlags {
-
+    
+    #[inline(always)]
     fn from(value: ShaderStage) -> Self {
-        match value {
-            ShaderStage::Unknown => Self::empty(),
-            ShaderStage::Vertex => Self::VERTEX,
-            ShaderStage::Fragment => Self::FRAGMENT,
-            ShaderStage::Compute => Self::COMPUTE,
-        }
+        Self::from_raw(value.as_raw())
+    }
+}
+
+impl From<ShaderStageFlags> for vk::ShaderStageFlags {
+
+    #[inline(always)]
+    fn from(value: ShaderStageFlags) -> Self {
+        Self::from_raw(value.as_raw())
     }
 }
 
@@ -58,8 +116,10 @@ impl From<ShaderStage> for shaderc::ShaderKind {
 
     fn from(value: ShaderStage) -> Self {
         match value {
-            ShaderStage::Unknown => Self::AnyHit,
             ShaderStage::Vertex => Self::Vertex,
+            ShaderStage::TesellationControl => Self::TessControl,
+            ShaderStage::TesellationEvaluation => Self::TessEvaluation,
+            ShaderStage::Geometry => Self::Geometry,
             ShaderStage::Fragment => Self::Fragment,
             ShaderStage::Compute => Self::Compute,
         }
@@ -69,115 +129,216 @@ impl From<ShaderStage> for shaderc::ShaderKind {
 #[repr(i32)]
 #[derive(Debug, Display, Clone, Copy, AsRaw, PartialEq, Eq, Hash)]
 pub enum DescriptorType {
-    #[display("unknown")]
+    /// A type for situations where a supported desriptor type couldn't be determined
     Unknown = -1,
-    /// A type associated with [`Sampler`].
+    /// A type associated with a [`Sampler`].
+    ///
+    /// Descriptors with this descriptor type *must* be written through an [`image write`][1] that
+    /// contains a [`Sampler`].
     ///
     /// # Shader declaratios
     /// Glsl: `uniform sampler ...`
+    ///
+    /// [1]: DescriptorInfos::images
     #[display("sampler")]
     Sampler = vk::DescriptorType::SAMPLER.as_raw(),
-    /// A type associated with a sampled [`Image`].
+    /// A type associated with a sampled image.
+    ///
+    /// Descriptors with this descriptor type *must* be written through an [`image_write`][1] that
+    /// contains an [`ImageId`] to an image that *can* be [`sampled from`][2].
     ///
     /// # Shader declarations
     /// Glsl: `uniform texture2D ...`
+    ///
+    /// [1]: DescriptorInfos::images
+    /// [2]: ImageUsages::SAMPLED
     #[display("sampled image")]
     SampledImage = vk::DescriptorType::SAMPLED_IMAGE.as_raw(),
-    /// A type that combines both a [`Sampler`] and a sampled [`Image`].
+    /// A type that combines both a [`Sampler`] and a sampled image.
+    ///
+    /// Descriptors with this descriptor type *must* be written through an [`image write`][1] that
+    /// contains a [`Sampler`] and an [`ImageId`] to an image that *can* be [`sampled from`][2].
     ///
     /// # Shader declarations
     /// Glsl: `uniform sampler2D ...`
+    ///
+    /// [1]: DescriptorInfos::images
+    /// [2]: ImageUsages::SAMPLED
     #[display("combined image sampler")]
     CombinedImageSampler = vk::DescriptorType::COMBINED_IMAGE_SAMPLER.as_raw(),
-    /// A type associated with an [`Image`] that can be used for load, store and atomic operations.
+    /// A type associated with an image that can be used for load, store and atomic operations.
+    ///
+    /// Descriptors with this descriptor type *must* be written through an [`image write`][1] that
+    /// contains an [`ImageId`] to an image that *can* be used as a [`storage image`][2].
     ///
     /// # Shader declarations
     /// Glsl: `uniform image2D ...`
+    ///
+    /// [1]: DescriptorInfos::images
+    /// [2]: ImageUsages::STORAGE
     #[display("storage image")]
     StorageImage = vk::DescriptorType::STORAGE_IMAGE.as_raw(),
-    /// A type associated with a [`Buffer`] that can be used for load operations.
+    /// A type associated with a buffer that can be used for load operations.
+    ///
+    /// Descriptors with this descriptor type *must* be written through a [`buffer write`][1] that
+    /// contains a [`BufferId`] to a buffer that *can* be used as a [`uniform buffer`][2].
     ///
     /// # Shader declarations
-    /// Glsl: `uniform UBO { ... }`
+    /// Glsl: `uniform struct UBO { ... } ubo`
+    ///
+    /// [1]: DescriptorInfos::buffers
+    /// [2]: BufferUsages::UNIFORM_BUFFER
     #[display("uniform buffer")]
     UniformBuffer = vk::DescriptorType::UNIFORM_BUFFER.as_raw(),
-    /// A type associated with a [`Buffer`] that can be used for load, store and atomic operations.
+    /// A type associated with a buffer that can be used for load, store and atomic operations.
+    ///
+    /// Descriptors with this descriptor type *must* be written through a [`buffer write`][1] that
+    /// contains a [`BufferId`] to a buffer that *can* be used as a [`storage buffer`][2].
     ///
     /// # Shader declarations
-    /// Glsl: `buffer SSBO { ... }`
+    /// Glsl: `buffer struct SSBO { ... } ssbo`
+    ///
+    /// [1]: DescriptorInfos::buffers
+    /// [2]: BufferUsages::STORAGE_BUFFER
     #[display("storage buffer")]
     StorageBuffer = vk::DescriptorType::STORAGE_BUFFER.as_raw(),
-    /// A type associated with a [`Buffer`] and a buffer view that can be used for image sampling
+    /// A type associated with a buffer and a buffer view that can be used for image sampling
     /// operations.
+    ///
+    /// Descriptors with this descriptor type *must* be written through a [`buffer write`][1] that
+    /// contains a [`BufferId`] to a buffer that *can* be used as a [`uniform texel buffer`][2].
     ///
     /// # Shader declarations
     /// Glsl: `uniform samplerBuffer ...`
+    ///
+    /// [1]: DescriptorInfos::buffers
+    /// [2]: BufferUsages::UNIFORM_TEXEL_BUFFER
     #[display("uniform texel buffer")]
     UniformTexelBuffer = vk::DescriptorType::UNIFORM_TEXEL_BUFFER.as_raw(),
-    /// A type associated with a [`Buffer`] and a buffer view that can be used for image load,
+    /// A type associated with a buffer and a buffer view that can be used for image load,
     /// store and atomic operations.
+    ///
+    /// Descriptors with this descriptor type *must* be written through a [`buffer write`][1] that
+    /// contains a [`BufferId`] to a buffer that *can* be used as a [`storage texel buffer`][2].
     ///
     /// # Shader declarations
     /// Glsl: `uniform imageBuffer ...`
+    ///
+    /// [1]: DescriptorInfos::buffers
+    /// [2]: BufferUsages::STORAGE_TEXEL_BUFFER
     #[display("storage texel buffer")]
     StorageTexelBuffer = vk::DescriptorType::STORAGE_TEXEL_BUFFER.as_raw(),
     /// A type similar to [`DescriptorType::UniformBuffer`] where it's storage comes directly from
-    /// the shader resource rather than from a separate [`Buffer`].
+    /// the descriptor set rather than from a separate buffer.
     ///
-    /// The use of inline uniform blocks in shaders is unsupported for now due to lack of support
-    /// in GLSL.
+    /// Descriptors with this descriptor type *must* be written through an
+    /// [`inline uniform block write`][1].
+    ///
+    /// # Shader declarations
+    /// Glsl: `uniform struct UBO { ... } ubo`
+    ///
+    /// [1]: DescriptorInfos::inline_uniform_block
     #[display("inline uniform block")]
     InlineUniformBlock = vk::DescriptorType::INLINE_UNIFORM_BLOCK.as_raw(),
+    /// A type used for input attachments, which allows render passes to read earlier rendering
+    /// results within the same pass.
+    ///
+    /// Descriptors with this descriptor type *must* be written through an [`image write`][1] that
+    /// contains an [`ImageId`] to an image that *can* be used as an [`input attachment`][2].
+    ///
+    /// # Shader declarations
+    /// Glsl: `layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput ...`
+    ///
+    /// # Shader load
+    /// Glsl: `subpassLoad(subpassInput)`
+    ///
+    /// [1]: DescriptorInfos::images
+    /// [2]: ImageUsages::INPUT_ATTACHMENT
+    #[display("input attachment")]
+    InputAttachment = vk::DescriptorType::INPUT_ATTACHMENT.as_raw(),
+}
+
+/// ``` rust
+/// DescriptorType::UniformBuffer |
+/// DescriptorType::StorageBuffer |
+/// DescriptorType::UniformTexelBuffer |
+/// DescriptorType::StorageTexelBuffer
+/// ```
+#[macro_export]
+macro_rules! buffer_descriptor_types {
+    () => {
+        DescriptorType::UniformBuffer |
+        DescriptorType::StorageBuffer |
+        DescriptorType::UniformTexelBuffer |
+        DescriptorType::StorageTexelBuffer
+    };
+}
+
+/// ``` rust
+/// DescriptorType::Sampler |
+/// DescriptorType::SampledImage |
+/// DescriptorType::CombinedImageSampler |
+/// DescriptorType::StorageImage |
+/// DescriptorType::InputAttachment
+/// ```
+#[macro_export]
+macro_rules! image_descriptor_types {
+    () => {
+        DescriptorType::Sampler |
+        DescriptorType::SampledImage |
+        DescriptorType::CombinedImageSampler |
+        DescriptorType::StorageImage |
+        DescriptorType::InputAttachment
+    };
 }
 
 impl DescriptorType {
 
     #[inline(always)]
-    pub fn is_unsupported(self) -> bool {
-        matches!(self,
-            Self::Unknown |
-            Self::InlineUniformBlock,
-        )
-    }
-
-    #[inline(always)]
     pub fn is_buffer(self) -> bool {
-        matches!(self,
-            Self::UniformBuffer |
-            Self::StorageBuffer |
-            Self::UniformTexelBuffer |
-            Self::StorageTexelBuffer,
-        )
+        matches!(self, buffer_descriptor_types!())
     }
 
     #[inline(always)]
-    pub(crate) fn buffer_usage(self) -> Option<vk::BufferUsageFlags> {
+    pub fn buffer_usage(self) -> Option<BufferUsages> {
         match self {
-            Self::UniformBuffer => Some(vk::BufferUsageFlags::UNIFORM_BUFFER),
-            Self::StorageBuffer => Some(vk::BufferUsageFlags::STORAGE_BUFFER),
-            Self::UniformTexelBuffer => Some(vk::BufferUsageFlags::UNIFORM_TEXEL_BUFFER),
-            Self::StorageTexelBuffer => Some(vk::BufferUsageFlags::STORAGE_TEXEL_BUFFER),
+            Self::UniformBuffer => Some(BufferUsages::UNIFORM_BUFFER),
+            Self::StorageBuffer => Some(BufferUsages::STORAGE_BUFFER),
+            Self::UniformTexelBuffer => Some(BufferUsages::UNIFORM_TEXEL_BUFFER),
+            Self::StorageTexelBuffer => Some(BufferUsages::STORAGE_TEXEL_BUFFER),
+            Self::InlineUniformBlock => Some(BufferUsages::empty()),
             _ => None,
         }
     }
 
     #[inline(always)]
-    pub fn is_image(self) -> bool {
+    pub fn requires_buffer(self) -> bool {
         matches!(self,
-            Self::Sampler |
-            Self::SampledImage |
-            Self::StorageImage |
-            Self::CombinedImageSampler,
+            Self::UniformBuffer |
+            Self::StorageBuffer |
+            Self::UniformTexelBuffer |
+            Self::StorageTexelBuffer
         )
     }
 
     #[inline(always)]
-    pub(crate) fn image_usage(self) -> Option<vk::ImageUsageFlags> {
+    pub fn is_inline_uniform_block(self) -> bool {
+        matches!(self, Self::InlineUniformBlock)
+    }
+
+    #[inline(always)]
+    pub fn is_image(self) -> bool {
+        matches!(self, image_descriptor_types!())
+    }
+
+    #[inline(always)]
+    pub fn image_usage(self) -> Option<ImageUsages> {
         match self {
-            Self::Sampler => Some(vk::ImageUsageFlags::empty()),
-            Self::SampledImage => Some(vk::ImageUsageFlags::SAMPLED),
-            Self::StorageImage => Some(vk::ImageUsageFlags::STORAGE),
-            Self::CombinedImageSampler => Some(vk::ImageUsageFlags::SAMPLED),
+            Self::Sampler => Some(ImageUsages::empty()),
+            Self::SampledImage => Some(ImageUsages::SAMPLED),
+            Self::StorageImage => Some(ImageUsages::STORAGE),
+            Self::CombinedImageSampler => Some(ImageUsages::SAMPLED),
+            Self::InputAttachment => Some(ImageUsages::INPUT_ATTACHMENT),
             _ => None,
         }
     }
@@ -188,15 +349,32 @@ impl DescriptorType {
             Self::Sampler |
             Self::CombinedImageSampler,
         )
-    }
+    } 
 
     #[inline(always)]
     pub fn requires_image(self) -> bool {
         matches!(self,
             Self::SampledImage |
+            Self::CombinedImageSampler |
             Self::StorageImage |
-            Self::CombinedImageSampler,
+            Self::InputAttachment,
         )
+    } 
+
+    #[inline(always)]
+    pub(crate) fn shader_image_layout(&self) -> Option<ShaderImageLayout> {
+        match self {
+            Self::SampledImage | Self::CombinedImageSampler => {
+                Some(ShaderImageLayout::SampledReadOnly)
+            },
+            Self::StorageImage => {
+                Some(ShaderImageLayout::General(vk::AccessFlags2::SHADER_READ | vk::AccessFlags2::SHADER_WRITE))
+            },
+            Self::InputAttachment => {
+                Some(ShaderImageLayout::Attachment(AttachmentImageLayout::RenderingLocalRead { is_color: true, }))
+            },
+            _ => None,
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use nox_mem::vec::{Vec32, Vector};
+use nox_mem::vec::Vec32;
 
 use termcolor::ColorSpec;
 

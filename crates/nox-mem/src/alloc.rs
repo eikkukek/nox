@@ -26,7 +26,7 @@ pub unsafe trait LocalAlloc
     /// # Safety
     /// The pointer returned must be aligned to `align` and point to a valid array of bytes up to
     /// `size`.
-    unsafe fn allocate_raw(&self, layout: Layout) -> Result<NonNull<u8>, Self::Error>;
+    unsafe fn alloc_raw(&self, layout: Layout) -> Result<NonNull<u8>, Self::Error>;
 
     /// Frees a previously allocated block of `size` and `align`.
     /// # Safety
@@ -45,21 +45,21 @@ pub trait LocalAllocExt: LocalAlloc {
     /// # Safety
     /// The pointer returned must be aligned to the alignment of [`T`] and point to a valid array
     /// of type [`T`] up to `count`.
-    #[inline(always)]
-    unsafe fn allocate_uninit<T>(&self, count: usize) -> Result<NonNull<T>, Self::Error> {
+    #[inline]
+    unsafe fn alloc_uninit<T>(&self, count: usize) -> Result<NonNull<T>, Self::Error> {
         let size = mem::size_of::<T>() * count;
         let align = mem::align_of::<T>();
-        unsafe { self.allocate_raw(Layout::from_size_align_unchecked(size, align)).map(|ptr| ptr.cast::<T>()) }
+        unsafe { self.alloc_raw(Layout::from_size_align_unchecked(size, align)).map(|ptr| ptr.cast::<T>()) }
     }
 
     /// Allocates a potentially unsized type of [`T`] from a sized type [`U`] implementing the
     /// [`Dyn<T>`] trait.
     /// # Safety
     /// The pointer returned must be aligned to the alignment of [`T`] and point to a valid [`T`].
-    unsafe fn allocate_dyn<T: ?Sized, U: Dyn<T, Target = U>>(&self, value: U) -> Result<NonNull<T>, Self::Error> {
+    unsafe fn alloc_dyn<T: ?Sized, U: Dyn<T, Target = U>>(&self, value: U) -> Result<NonNull<T>, Self::Error> {
         unsafe {
             let mut raw_parts = U::raw_parts(&value);
-            let ptr = self.allocate_uninit(1)?;
+            let ptr = self.alloc_uninit(1)?;
             ptr.write(value);
             raw_parts.data = ptr.as_ptr();
             Ok(NonNull::new_unchecked(<U as Dyn<T>>::from_raw_parts(raw_parts).cast_mut()))
@@ -96,11 +96,34 @@ pub trait LocalAllocExt: LocalAlloc {
     }
 }
 
+unsafe impl<T> LocalAlloc for T
+    where
+        T: Deref,
+        <T as Deref>::Target: LocalAlloc,
+{
+
+    type Error = <<T as Deref>::Target as LocalAlloc>::Error;
+
+    #[inline]
+    unsafe fn alloc_raw(&self, layout: Layout) -> Result<NonNull<u8>, Self::Error> {
+        unsafe {
+            self.deref().alloc_raw(layout)
+        }
+    }
+
+    #[inline]
+    unsafe fn free_raw(&self, ptr: NonNull<u8>, layout: Layout) {
+        unsafe {
+            self.deref().free_raw(ptr, layout);
+        }
+    }
+}
+
 impl<T: LocalAlloc> LocalAllocExt for T {}
 
 pub struct LocalAllocWrap<Alloc, Wrap>
     where
-        Alloc: LocalAlloc,
+        Alloc: LocalAlloc + ?Sized,
         Wrap: Deref<Target = Alloc>,
 {
     pub alloc: Wrap,
@@ -109,11 +132,11 @@ pub struct LocalAllocWrap<Alloc, Wrap>
 
 impl<Alloc, Wrap> LocalAllocWrap<Alloc, Wrap>
     where
-        Alloc: LocalAlloc,
+        Alloc: LocalAlloc + ?Sized,
         Wrap: Deref<Target = Alloc>,
 {
 
-    #[inline(always)]
+    #[inline]
     pub fn new(alloc: Wrap) -> Self {
         Self {
             alloc,
@@ -124,11 +147,11 @@ impl<Alloc, Wrap> LocalAllocWrap<Alloc, Wrap>
 
 impl<Alloc, Wrap> AsRef<Self> for LocalAllocWrap<Alloc, Wrap>
     where
-        Alloc: LocalAlloc,
+        Alloc: LocalAlloc + ?Sized,
         Wrap: Deref<Target = Alloc>,
 {
 
-    #[inline(always)]
+    #[inline]
     fn as_ref(&self) -> &Self {
         self
     }
@@ -136,20 +159,20 @@ impl<Alloc, Wrap> AsRef<Self> for LocalAllocWrap<Alloc, Wrap>
 
 unsafe impl<Alloc, Wrap> LocalAlloc for LocalAllocWrap<Alloc, Wrap>
     where
-        Alloc: LocalAlloc,
+        Alloc: LocalAlloc + ?Sized,
         Wrap: Deref<Target = Alloc>,
 {
 
     type Error = Alloc::Error;
 
-    #[inline(always)]
-    unsafe fn allocate_raw(&self, layout: Layout) -> Result<NonNull<u8>, Self::Error> {
+    #[inline]
+    unsafe fn alloc_raw(&self, layout: Layout) -> Result<NonNull<u8>, Self::Error> {
         unsafe {
-            self.alloc.allocate_raw(layout)
+            self.alloc.alloc_raw(layout)
         }
     }
 
-    #[inline(always)]
+    #[inline]
     unsafe fn free_raw(&self, ptr: NonNull<u8>, layout: Layout) {
         unsafe {
             self.alloc.free_raw(ptr, layout)
@@ -177,13 +200,13 @@ mod std_features {
 
         type Error = StdAllocError;
 
-        #[inline(always)]
-        unsafe fn allocate_raw(&self, layout: Layout) -> Result<NonNull<u8>, Self::Error> {
+        #[inline]
+        unsafe fn alloc_raw(&self, layout: Layout) -> Result<NonNull<u8>, Self::Error> {
             let ptr = unsafe { alloc(layout) };
             NonNull::new(ptr).ok_or(StdAllocError { layout })
         }
 
-        #[inline(always)]
+        #[inline]
         unsafe fn free_raw(&self, ptr: NonNull<u8>, layout: Layout) {
             unsafe { dealloc(ptr.as_ptr(), layout) }
         }
@@ -192,3 +215,32 @@ mod std_features {
 
 #[cfg(feature = "std")]
 pub use std_features::*;
+
+#[macro_export]
+#[cfg(feature = "std")]
+macro_rules! pack_alloc {
+    (
+        $layout:ident as Layout,
+        $ptr:ident as *mut u8,
+        $($pack:ident as [$t:ty; $n:expr]),* $(,)?
+    ) => {
+        let mut align = 1;
+        $(
+            align = align.max(align_of::<$t>());
+        )*
+        let mut size = 0;
+        $($crate::paste! {
+            size = $crate::align_up(size, align_of::<$t>());
+            let mut [<$pack _ off>] = size;
+            size += size_of::<$t>() * $n;
+        })*
+        $layout = std::alloc::Layout::from_size_align_unchecked(size, align);
+        $ptr = std::alloc::alloc(
+            $layout
+        ).cast::<u8>();
+        assert!(!$ptr.is_null(), "global alloc failed");
+        $($crate::paste! {
+            $pack = $ptr.add([<$pack _ off>]).cast::<$t>();
+        })*
+    };
+}

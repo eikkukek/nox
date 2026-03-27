@@ -1,12 +1,9 @@
 mod shader_fn;
 mod enums;
-mod error;
-
-use std::ffi::{CString, CStr};
 
 use core::{
-    hash::Hash,
-    ops::Deref,
+    ffi::CStr,
+    hash::{self, Hash},
     ptr::NonNull,
 };
 
@@ -17,18 +14,16 @@ use spirv_cross2::{
     spirv::{self}, targets, Compiler, Module,
 };
 
-use compact_str::{CompactString, format_compact};
+use compact_str::format_compact;
 
-use nox_error::{Error, Location, caller};
+use crate::error::Error;
 
 use nox_mem::{
-    alloc::{LocalAllocExt, StdAlloc},
-    vec::{Vec32, Vector},
+    alloc::{LocalAllocExt, StdAlloc}, vec::Vec32
 };
 
 use nox_threads::futures::{
     future::RemoteHandle,
-    executor::block_on,
 };
 
 use shader_fn::glsl_to_spirv;
@@ -36,10 +31,10 @@ use shader_fn::glsl_to_spirv;
 use crate::{
     Version,
     error::Context,
-    dev::error as dev_error,
+    error::*,
+    sync::Arc,
 };
 
-pub use error::*;
 pub use enums::*;
 
 #[derive(Clone, Copy)]
@@ -68,7 +63,7 @@ impl<'a> ShaderSource<'a> {
                 let len = bin.len();
                 assert!(len <= u32::MAX as usize);
                 let spirv = StdAlloc
-                    .allocate_uninit(len)
+                    .alloc_uninit(len)
                     .expect("global alloc failed");
                 bin.as_ptr()
                     .copy_to_nonoverlapping(spirv.as_ptr(), len);
@@ -79,12 +74,13 @@ impl<'a> ShaderSource<'a> {
                 })
             },
             Self::Glsl(input) => unsafe {
-                let comp = glsl_to_spirv(input, name, stage.into(), api_version)?;
+                let comp = glsl_to_spirv(input, name, stage.into(), api_version)
+                .context("failed to compile glsl to spirv")?;
                 let bin = comp.as_binary();
                 let len = bin.len();
                 assert!(len <= u32::MAX as usize);
                 let spirv = StdAlloc
-                    .allocate_uninit(len)
+                    .alloc_uninit(len)
                     .expect("global alloc failed");
                 bin.as_ptr()
                     .copy_to_nonoverlapping(spirv.as_ptr(), len);
@@ -150,7 +146,7 @@ impl Clone for ShaderSourceCompiled {
         unsafe {
             let count = self.spirv_len as usize;
             let spirv = StdAlloc
-                .allocate_uninit(count)
+                .alloc_uninit(count)
                 .expect("global alloc failed");
             self.spirv
                 .copy_to_nonoverlapping(spirv, count);
@@ -178,15 +174,13 @@ pub struct ShaderAttributes<'a> {
     stage: ShaderStage,
     name: &'a str,
     entry_point: &'a CStr,
-    loc: Location,
 }
 
 pub struct ShaderAttributesOwned {
     source: Option<ShaderSourceOwned>,
     stage: ShaderStage,
-    name: CompactString,
-    entry_point: CString,
-    loc: Location,
+    name: Arc<str>,
+    entry_point: Arc<CStr>,
 }
 
 impl<'a> ShaderAttributes<'a> {
@@ -250,8 +244,7 @@ impl<'a> ShaderAttributes<'a> {
             source: self.source.map(|s| s.to_owned()),
             stage: self.stage,
             name: self.name.into(),
-            entry_point: self.entry_point.to_owned(),
-            loc: self.loc,
+            entry_point: self.entry_point.into(),
         }
     }
 }
@@ -264,35 +257,24 @@ pub struct SpecializationConstant<T> {
 
 #[derive(Clone)]
 pub struct Uniform {
-    pub(crate) stage: ShaderStage,
-    pub(crate) set: u32,
-    pub(crate) binding: u32,
-    pub(crate) ty: DescriptorType,
-    pub(crate) count: u32,
-    pub(crate) count_specialization: Vec32<SpecializationConstant<u32>>,
+    pub stage: ShaderStage,
+    pub input_attachment_index: Option<u32>,
+    pub set: u32,
+    pub binding: u32,
+    pub ty: DescriptorType,
+    pub name: Arc<str>,
+    pub count: u32,
+    pub count_specialization: Vec32<SpecializationConstant<u32>>,
+    pub struct_size: Option<u32>,
 }
 
 impl Uniform {
 
-    #[inline(always)]
-    pub fn ty(&self) -> DescriptorType {
-        self.ty
-    }
-
-    #[inline(always)]
-    pub fn set(&self) -> u32 {
-        self.set
-    }
-
-    #[inline(always)]
-    pub fn binding(&self) -> u32 {
-        self.binding
-    }
-
     pub(crate) fn as_layout_binding(
         &self,
-        count_specialization: &[SpecializationConstant<u32>]
-    ) -> DescriptorSetLayoutBinding {
+        count_specialization: &[SpecializationConstant<u32>],
+        inline_uniform_block: bool,
+    ) -> Result<DescriptorSetLayoutBinding> {
         let mut count = self.count;
         for spec in &self.count_specialization {
             if let Some(spec) = count_specialization
@@ -305,22 +287,62 @@ impl Uniform {
                 count *= spec.value;
             }
         }
-        DescriptorSetLayoutBinding {
+        let mut ty = self.ty;
+        if inline_uniform_block {
+            if !matches!(ty, DescriptorType::UniformBuffer) {
+                return Err(Error::just_context(format_compact!(
+                    "invalid cast of descriptor type {} to inline uniform block", ty,
+                )))
+            }
+            ty = DescriptorType::InlineUniformBlock;
+            count *= self.struct_size.ok_or_else(|| Error::just_context(format_compact!(
+                "struct size was none"
+            )))?;
+        }
+        Ok(DescriptorSetLayoutBinding {
             binding: self.binding,
-            descriptor_type: self.ty.into(),
+            descriptor_type: ty,
+            name: self.name.clone(),
             descriptor_count: count,
             stage_flags: self.stage.into(),
-        }
+            struct_size: self.struct_size,
+        })
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct DescriptorSetLayoutBinding {
+#[derive(Clone)]
+pub struct DescriptorSetLayoutBinding {
     pub binding: u32,
     pub descriptor_type: DescriptorType,
     pub descriptor_count: u32,
-    pub stage_flags: vk::ShaderStageFlags,
+    pub stage_flags: ShaderStageFlags,
+    pub name: Arc<str>,
+    pub struct_size: Option<u32>,
 }
+
+impl Hash for DescriptorSetLayoutBinding {
+
+    #[inline]
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.binding.hash(state);
+        self.descriptor_type.hash(state);
+        self.descriptor_count.hash(state);
+        self.stage_flags.hash(state);
+    }
+}
+
+impl PartialEq for DescriptorSetLayoutBinding {
+
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.binding == other.binding &&
+        self.descriptor_type == other.descriptor_type &&
+        self.descriptor_count == other.descriptor_count &&
+        self.stage_flags == other.stage_flags
+    }
+}
+
+impl Eq for DescriptorSetLayoutBinding {}
 
 impl From<DescriptorSetLayoutBinding> for vk::DescriptorSetLayoutBinding<'_> {
 
@@ -330,7 +352,7 @@ impl From<DescriptorSetLayoutBinding> for vk::DescriptorSetLayoutBinding<'_> {
             binding: value.binding,
             descriptor_type: value.descriptor_type.into(),
             descriptor_count: value.descriptor_count,
-            stage_flags: value.stage_flags,
+            stage_flags: value.stage_flags.into(),
             ..Default::default()
         }
     }
@@ -354,25 +376,13 @@ impl From<PushConstantRange> for vk::PushConstantRange {
     }
 }
 
-impl From<vk::PushConstantRange> for PushConstantRange {
-
-    fn from(value: vk::PushConstantRange) -> Self {
-        Self {
-            stage: value.stage_flags.into(),
-            offset: value.offset,
-            size: value.size,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct ShaderInner {
     compiled: ShaderSourceCompiled,
-    entry_point: CString,
+    entry_point: Arc<CStr>,
     uniforms: Vec32<Uniform>,
     push_constant_ranges: Vec32<PushConstantRange>,
     stage: ShaderStage,
-    loc: Location,
 }
 
 impl ShaderInner {
@@ -405,7 +415,7 @@ impl ShaderInner {
 
 pub enum Shader {
     Ready(ShaderInner),
-    Pending(RemoteHandle<dev_error::Result<ShaderInner>>)
+    Pending(RemoteHandle<Result<ShaderInner>>)
 }
 
 impl Shader {
@@ -413,30 +423,27 @@ impl Shader {
     /// Creates default [`ShaderAttributes`].
     ///
     /// For the attributes to be valid, a [`ShaderStage`] and [`ShaderSource`] need to be specified.
+    ///
     /// If the shader has a different entry point from `c"main"`, that also needs to be specified.
     #[inline(always)]
-    #[track_caller]
     pub fn default_attributes<'a>() -> ShaderAttributes<'a> {
         ShaderAttributes {
             source: None,
-            stage: ShaderStage::Unknown,
+            stage: ShaderStage::Vertex,
             name: "",
             entry_point: c"main",
-            loc: caller!(),
         }
     }
 
-    pub(crate) async fn new(
+    pub(crate) async fn async_new(
         attributes: ShaderAttributesOwned,
         api_version: Version,
-    ) -> dev_error::Result<ShaderInner>
+    ) -> Result<ShaderInner>
     {
         let Some(source) = attributes.source else {
             return Err(Error::just_context("no source given for shader"))
         };
-        let Some(execution_model) = attributes.stage.execution_model() else {
-            return Err(Error::just_context("no stage defined for shader"))
-        };
+        let execution_model = attributes.stage.execution_model();
         let compiled = source
             .borrow()
             .compile(api_version, attributes.stage, &attributes.name)
@@ -454,7 +461,10 @@ impl Shader {
         let resources = compiler
             .shader_resources()
             .context("failed to reflect")?;
-        let mut parse_uniform = |mut ty: DescriptorType, resource_ty: ResourceType| -> Result<()> {
+        let mut parse_uniform = |
+            mut ty: Option<DescriptorType>,
+            resource_ty: ResourceType
+        | -> core::result::Result<(), spirv_cross2::SpirvCrossError> {
             for resource in resources.resources_for_type(resource_ty)? {
                 let mut set = 0;
                 if let Some(DecorationValue::Literal(dec)) =
@@ -467,6 +477,12 @@ impl Shader {
                     compiler.decoration(resource.id, spirv::Decoration::Binding)?
                 {
                     binding = dec;
+                }
+                let mut input_attachment_index = None;
+                if let Some(DecorationValue::Literal(dec)) =
+                    compiler.decoration(resource.id, spirv::Decoration::InputAttachmentIndex)?
+                {
+                    input_attachment_index = Some(dec);
                 }
                 let mut count = 1;
                 let mut count_specialization = Vec32::new();
@@ -485,52 +501,70 @@ impl Shader {
                     }
                     desc = compiler.type_description(base)?;
                 }
-                if let TypeInner::Image(img) = &desc.inner {
+                let struct_size =
+                match &desc.inner {
+                    TypeInner::Struct(s) => { Some(s.size as u32) },
+                    TypeInner::Scalar(s) => Some(s.size.byte_size() as u32),
+                    TypeInner::Vector { width, scalar } => Some(width * scalar.size.byte_size() as u32),
+                    TypeInner::Matrix { columns, rows, scalar } =>
+                        Some(columns * rows * scalar.size.byte_size() as u32),
+                    _ => None,
+                };
+                if ty.is_none() &&
+                    let TypeInner::Image(img) = &desc.inner
+                {
                     if resource_ty == ResourceType::SampledImage {
                         if img.dimension == spirv::Dim::DimBuffer {
-                            ty = DescriptorType::UniformTexelBuffer;
+                            ty = Some(DescriptorType::UniformTexelBuffer);
                         }
                     } else if resource_ty == ResourceType::SeparateImage {
                         ty =
                             if img.dimension == spirv::Dim::DimBuffer {
-                                DescriptorType::UniformTexelBuffer
+                                Some(DescriptorType::UniformTexelBuffer)
                             } else {
-                                DescriptorType::SampledImage
+                                Some(DescriptorType::SampledImage)
                             };
                     } else if resource_ty == ResourceType::StorageImage {
                         ty =
                             if img.dimension == spirv::Dim::DimBuffer {
-                                DescriptorType::StorageTexelBuffer
+                                Some(DescriptorType::StorageTexelBuffer)
                             } else {
-                                DescriptorType::StorageImage
+                                Some(DescriptorType::StorageImage)
                             };
                     }
                 };
                 if desc.inner == TypeInner::Sampler {
-                    ty = DescriptorType::Sampler;
+                    ty = Some(DescriptorType::Sampler);
                 }
                 uniforms.push(Uniform {
                     stage,
+                    input_attachment_index,
                     set,
                     binding,
+                    ty: ty.unwrap_or(DescriptorType::UniformBuffer),
+                    name: compiler.name(resource.id)?
+                        .map(|name| name.as_ref().into())
+                        .unwrap_or(Default::default()),
                     count,
                     count_specialization,
-                    ty,
+                    struct_size,
                 });
             }
             Ok(())
         };
-        parse_uniform(DescriptorType::UniformBuffer, ResourceType::UniformBuffer)
+        parse_uniform(Some(DescriptorType::UniformBuffer), ResourceType::UniformBuffer)
             .context("failed to reflect uniform buffers")?;
-        parse_uniform(DescriptorType::StorageImage, ResourceType::StorageBuffer)
+        parse_uniform(Some(DescriptorType::StorageImage), ResourceType::StorageBuffer)
             .context("failed to reflect storage buffers")?;
-        parse_uniform(DescriptorType::CombinedImageSampler, ResourceType::SampledImage)
+        parse_uniform(Some(DescriptorType::CombinedImageSampler), ResourceType::SampledImage)
             .context("failed to reflect sampled images")?;
-        parse_uniform(DescriptorType::Sampler, ResourceType::SeparateSamplers)
+        parse_uniform(Some(DescriptorType::Sampler), ResourceType::SeparateSamplers)
             .context("failed to reflect separate images")?;
-        parse_uniform(DescriptorType::Unknown, ResourceType::SeparateImage)
+        parse_uniform(None, ResourceType::SeparateImage)
             .context("failed to reflect separate images")?;
-        parse_uniform(DescriptorType::Unknown, ResourceType::StorageImage)
+        parse_uniform(None, ResourceType::StorageImage)
+            .context("failed to reflect storage images")?;
+        parse_uniform(Some(DescriptorType::InputAttachment), ResourceType::SubpassInput)
             .context("failed to reflect storage images")?;
         for resource in resources
             .resources_for_type(ResourceType::PushConstant)
@@ -559,18 +593,17 @@ impl Shader {
         }
         Ok(ShaderInner {
             compiled,
-            entry_point: attributes.entry_point.into(),
+            entry_point: attributes.entry_point,
             uniforms,
             push_constant_ranges,
             stage,
-            loc: attributes.loc,
         })
     }
 
     #[inline(always)]
-    pub fn inner(&mut self) -> dev_error::Result<&ShaderInner> {
+    pub async fn inner(&mut self) -> Result<&ShaderInner> {
         if let Self::Pending(f) = self {
-            *self = Self::Ready(block_on(f)?);
+            *self = Self::Ready(f.await?);
         }
         Ok(match self {
             Self::Ready(s) => s,
@@ -579,10 +612,10 @@ impl Shader {
     }
 
     #[inline(always)]
-    pub fn into_inner(self) -> dev_error::Result<ShaderInner> {
+    pub async fn into_inner(self) -> Result<ShaderInner> {
         match self {
             Self::Ready(s) => Ok(s),
-            Self::Pending(f) => block_on(f),
+            Self::Pending(f) => f.await,
         }
     }
 }

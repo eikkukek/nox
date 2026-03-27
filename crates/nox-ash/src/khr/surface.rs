@@ -9,22 +9,10 @@ use crate::{
     prelude::VkResult,
 };
 
-use core::ops::Deref;
-
 /// Vk_KHR_surface instance-level functions.
 #[derive(Clone)]
 pub struct Instance {
     instance: ash::khr::surface::Instance,
-}
-
-impl Deref for Instance {
-
-    type Target = ash::khr::surface::Instance;
-
-    #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        &self.instance
-    }
 }
 
 impl Instance {
@@ -36,49 +24,153 @@ impl Instance {
         }
     }
 
-    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfaceFormatsKHR.html>
+    pub fn fp(&self) -> &InstanceFn {
+        self.instance.fp()
+    }
+
+    pub fn instance(&self) -> vk::Instance {
+        self.instance.instance()
+    }
+
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkDestroySurfaceKHR.html>
     ///
     /// # Safety
-    /// All Vulkan calls are inherently unsafe, because [`ash`] doesn't do any error checking by
-    /// itself.
+    /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
+    pub unsafe fn destroy_surface(
+        &self,
+        surface: vk::SurfaceKHR,
+        allocator: Option<&vk::AllocationCallbacks<'_>>
+    ) {
+        unsafe {
+            self.instance.destroy_surface(
+                surface,
+                allocator,
+            );
+        }
+    }
+
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfaceSupportKHR.html>
+    ///
+    /// # Safety
+    /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
     #[inline(always)]
-    pub unsafe fn get_physical_device_surface_formats_khr(
+    pub unsafe fn get_physical_device_surface_support(
         &self,
         physical_device: vk::PhysicalDevice,
+        queue_family_index: u32,
         surface: vk::SurfaceKHR,
-        surface_format_count: &mut u32,
-        p_surface_formats: *mut vk::SurfaceFormatKHR,
-    ) -> VkResult<()>
-    {
+    ) -> VkResult<bool> {
         unsafe {
-            (self.fp().get_physical_device_surface_formats_khr)(
-                physical_device,
-                surface,
-                surface_format_count,
-                p_surface_formats,
+            self.instance.get_physical_device_surface_support(
+                physical_device, queue_family_index, surface
             )
-        }.result()
+        }
     }
 
     /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfacePresentModesKHR.html>
+    ///
     /// # Safety
-    /// All Vulkan calls are inherently unsafe, because [`ash`] doesn't do any error checking by
-    /// itself.
+    /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
     #[inline(always)]
-    pub unsafe fn get_physical_device_surface_present_modes_khr(
+    pub unsafe fn get_physical_device_surface_present_modes_len(
         &self,
         physical_device: vk::PhysicalDevice,
         surface: vk::SurfaceKHR,
-        present_mode_count: &mut u32,
-        p_present_modes: *mut vk::PresentModeKHR,
-    ) -> VkResult<()>
+    ) -> VkResult<u32>
     {
+        let mut len = 0;
         unsafe {
             (self.fp().get_physical_device_surface_present_modes_khr)(
                 physical_device,
                 surface,
-                present_mode_count,
-                p_present_modes,
+                &mut len,
+                core::ptr::null_mut(),
+            )
+        }.result_with_success(len)
+    }
+
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfacePresentModesKHR.html>
+    ///
+    /// # Safety
+    /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
+    #[inline(always)]
+    pub unsafe fn get_physical_device_surface_present_modes(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        surface: vk::SurfaceKHR,
+        out: &mut [vk::PresentModeKHR],
+    ) -> VkResult<()>
+    {
+        let mut len = out.len() as u32;
+        unsafe {
+            (self.fp().get_physical_device_surface_present_modes_khr)(
+                physical_device,
+                surface,
+                &mut len,
+                out.as_mut_ptr(),
+            )
+        }.result()
+    }
+
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfaceCapabilitiesKHR.html>
+    ///
+    /// # Safety
+    /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
+    #[inline(always)]
+    pub unsafe fn get_physical_device_surface_capabilities(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        surface: vk::SurfaceKHR,
+    ) -> VkResult<vk::SurfaceCapabilitiesKHR> {
+        unsafe {
+            self.instance.get_physical_device_surface_capabilities(
+                physical_device,
+                surface
+            )
+        }
+    }
+
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfaceFormatsKHR.html>
+    ///
+    /// # Safety
+    /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
+    #[inline(always)]
+    pub unsafe fn get_physical_device_surface_formats_len(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        surface: vk::SurfaceKHR,
+    ) -> VkResult<u32>
+    {
+        let mut len = 0;
+        unsafe {
+            (self.fp().get_physical_device_surface_formats_khr)(
+                physical_device,
+                surface,
+                &mut len,
+                core::ptr::null_mut(),
+            )
+        }.result_with_success(len)
+    }
+
+    /// <https://docs.vulkan.org/refpages/latest/refpages/source/vkGetPhysicalDeviceSurfaceFormatsKHR.html>
+    ///
+    /// # Safety
+    /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
+    #[inline(always)]
+    pub unsafe fn get_physical_device_surface_formats(
+        &self,
+        physical_device: vk::PhysicalDevice,
+        surface: vk::SurfaceKHR,
+        out: &mut [vk::SurfaceFormatKHR]
+    ) -> VkResult<()>
+    {
+        let mut len = out.len() as u32;
+        unsafe {
+            (self.fp().get_physical_device_surface_formats_khr)(
+                physical_device,
+                surface,
+                &mut len,
+                out.as_mut_ptr(),
             )
         }.result()
     }

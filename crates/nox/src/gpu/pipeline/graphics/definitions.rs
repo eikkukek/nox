@@ -1,38 +1,16 @@
+use nox_proc::BuildStructure;
 use nox_ash::vk;
-
-use nox_mem::{
-    AsRaw,
-    vec::{Vector, Vec32},
-};
 
 use crate::gpu::prelude::*;
 
-use super::*;
-
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, BuildStructure)]
 pub struct DepthBiasInfo {
     pub constant_factor: f32,
     pub clamp: f32,
     pub slope_factor: f32,
 }
 
-impl DepthBiasInfo {
-
-    #[inline(always)]
-    pub fn new(
-        constant_factor: f32,
-        clamp: f32,
-        slope_factor: f32,
-    ) -> Self {
-        Self {
-            constant_factor: constant_factor.into(),
-            clamp: clamp.into(),
-            slope_factor: slope_factor.into(),
-        }
-    }
-}
-
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, BuildStructure)]
 pub struct SampleShadingInfo {
     pub samples: MsaaSamples,
     pub min_shading: f32,
@@ -40,39 +18,10 @@ pub struct SampleShadingInfo {
     pub alpha_to_one: bool,
 }
 
-impl SampleShadingInfo {
-
-    #[inline(always)]
-    pub fn new(
-        samples: MsaaSamples,
-        min_shading: f32,
-        alpha_to_coverage: bool,
-        alpha_to_one: bool,
-    ) -> Self
-    {
-        Self {
-            samples,
-            min_shading: min_shading.into(),
-            alpha_to_coverage,
-            alpha_to_one,
-        }
-    }
-}
-
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, BuildStructure)]
 pub struct DepthBounds {
     pub min: f32,
     pub max: f32,
-}
-
-impl DepthBounds {
-
-    pub fn new(min: f32, max: f32) -> Self {
-        Self {
-            min: min.into(),
-            max: max.into(),
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -150,78 +99,6 @@ impl Default for DepthStencilInfo {
 }
 
 #[derive(Clone, Copy)]
-pub struct WriteMask {
-    mask: u32,
-}
-
-impl WriteMask {
-
-    pub fn all() -> Self {
-        Self {
-            mask: vk::ColorComponentFlags::RGBA.as_raw(),
-        }
-    }
-
-    pub fn none() -> Self {
-        Self {
-            mask: 0,
-        }
-    }
-
-    pub fn with_r_bit(&mut self, bit: bool) -> &mut Self {
-        self.mask |= bit as u32;
-        self
-    }
-
-    pub fn with_g_bit(&mut self, bit: bool) -> &mut Self {
-        self.mask |= (bit as u32) << 1;
-        self
-    }
-
-    pub fn with_b_bit(&mut self, bit: bool) -> &mut Self {
-        self.mask |= (bit as u32) << 2;
-        self
-    }
-
-    pub fn with_a_bit(&mut self, bit: bool) -> &mut Self {
-        self.mask |= (bit as u32) << 3;
-        self
-    }
-}
-
-impl Default for WriteMask {
-
-    fn default() -> Self {
-        Self::all()
-    }
-}
-
-impl From<WriteMask> for vk::ColorComponentFlags {
-
-    fn from(value: WriteMask) -> Self {
-        Self::from_raw(value.mask)
-    }
-}
-
-impl From<vk::ColorComponentFlags> for WriteMask {
-
-    fn from(value: vk::ColorComponentFlags) -> Self {
-        Self {
-            mask: value.as_raw(),
-        }
-    }
-}
-
-impl AsRaw for WriteMask {
-
-    type Repr = u32;
-
-    fn as_raw(self) -> Self::Repr {
-        self.mask
-    }
-}
-
-#[derive(Clone, Copy)]
 pub struct ColorOutputBlendState {
     pub src_color_blend_factor: BlendFactor,
     pub dst_color_blend_factor: BlendFactor,
@@ -232,7 +109,7 @@ pub struct ColorOutputBlendState {
 }
 
 #[derive(Clone, Copy)]
-struct ColorOutputState(WriteMask, Option<ColorOutputBlendState>);
+pub(crate) struct ColorOutputState(pub ColorComponents, pub Option<ColorOutputBlendState>);
 
 impl From<ColorOutputState> for vk::PipelineColorBlendAttachmentState {
 
@@ -261,24 +138,6 @@ impl From<ColorOutputState> for vk::PipelineColorBlendAttachmentState {
     }
 }
 
-impl From<vk::PipelineColorBlendAttachmentState> for ColorOutputState {
-
-    fn from(value: vk::PipelineColorBlendAttachmentState) -> Self {
-        let mut s = Self(value.color_write_mask.into(), None);
-        if value.blend_enable == 1 {
-            s.1 = Some(ColorOutputBlendState {
-                src_color_blend_factor: BlendFactor::from_vk(value.src_color_blend_factor).unwrap(),
-                dst_color_blend_factor: BlendFactor::from_vk(value.dst_alpha_blend_factor).unwrap(),
-                color_blend_op: BlendOp::from_vk(value.color_blend_op).unwrap(),
-                src_alpha_blend_factor: BlendFactor::from_vk(value.src_alpha_blend_factor).unwrap(),
-                dst_alpha_blend_factor: BlendFactor::from_vk(value.dst_alpha_blend_factor).unwrap(),
-                alpha_blend_op: BlendOp::from_vk(value.alpha_blend_op).unwrap(),
-            });
-        }
-        s
-    }
-}
-
 #[derive(Default, Clone, Copy)]
 pub struct BlendConstants([f32; 4]);
 
@@ -290,22 +149,7 @@ impl From<BlendConstants> for [f32; 4] {
 }
 
 #[derive(Default, Clone)]
-pub struct ColorBlendInfo {
-    color_blend_attachment_states: Vec32<vk::PipelineColorBlendAttachmentState>,
+pub(crate) struct ColorBlendInfo {
     pub blend_constants: BlendConstants, // used in 'ConstColor' and 'ConstAlpha' BlendFactors
     pub logic_op: Option<vk::LogicOp>, // only for integer frame buffers, unused for now
-}
-
-impl ColorBlendInfo {
-    
-    pub fn add_attachment(&mut self, write_mask: WriteMask, blend_state: Option<ColorOutputBlendState>) {
-        self.color_blend_attachment_states
-            .push(
-                ColorOutputState(write_mask, blend_state).into()
-            );
-    }
-
-    pub fn attachments(&self) -> &[vk::PipelineColorBlendAttachmentState] {
-        &self.color_blend_attachment_states
-    }
 }

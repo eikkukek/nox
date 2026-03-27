@@ -21,7 +21,7 @@ use crate::{
 ///
 /// unsafe {
 ///     let ptr: Pointer<String> = StdAlloc
-///         .allocate_uninit(4)
+///         .alloc_uninit(4)
 ///         .unwrap().into();
 ///     ptr.insert_element("foo".to_string(), 0, 0);
 ///     ptr.insert_element("bar".to_string(), 1, 1);
@@ -62,20 +62,31 @@ impl<T, SizeType: IntoUsize> PartialEq for Pointer<T, SizeType> {
 
 impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
 
-    #[inline(always)]
+    #[inline]
     pub fn new(ptr: *mut T) -> Option<Self>
     {
         Some(Self(NonNull::new(ptr)?, PhantomData))
     }
 
-    #[inline(always)]
+    /// Constructs [`Pointer`] without checking if the pointer is null.
+    ///
+    /// # Safety
+    /// `ptr` *must* not be null.
+    #[inline]
+    pub unsafe fn new_unchecked(ptr: *mut T) -> Self {
+        unsafe {
+            Self(NonNull::new_unchecked(ptr), PhantomData)
+        }
+    }
+
+    #[inline]
     pub fn dangling() -> Self {
         Self(NonNull::dangling(), PhantomData)
     }
 
     /// # Safety
     /// This is unsafe as it can create invalid pointers.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn add(self, count: usize) -> Self {
         unsafe {
             self.0.add(count.into_usize()).into()
@@ -84,22 +95,23 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
 
     /// # Safety
     /// This is unsafe as it can create invalid pointers.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn sub(self, count: usize) -> Self {
         unsafe {
             self.0.sub(count.into_usize()).into()
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn cast<U>(self) -> Pointer<U, SizeType> {
         Pointer(self.0.cast(), PhantomData)
     }
    
     /// Moves elements from the pointee of [`self`] to the pointee of `dst`.
+    ///
     /// # Safety
     /// The source and destination *must not* overlap.
-    #[inline(always)] 
+    #[inline] 
     pub unsafe fn move_elements(self, dst: Self, len: SizeType) {
         unsafe {
             self.copy_to_nonoverlapping(*dst, len.into_usize());
@@ -110,7 +122,7 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
     /// `len`.
     /// # Safety
     /// [`Self`] needs to point to an aligned array of [`T`]s up to `len` + 1.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn insert_element(
         self, 
         value: T,
@@ -130,7 +142,7 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
     /// # Safety
     /// [`Self`] needs to point to a valid, aligned array of [`T`] which contains *initialized*
     /// values of [`T`] up to `len`.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn drop_in_place(self, len: SizeType) {
         if needs_drop::<T>() {
             unsafe {
@@ -146,7 +158,7 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
     /// [`self`] and `dst` need to be valid, aligned pointers to arrays of [`T`] up to `len` and
     /// [`self`] needs to hold valid, initialized values of [`T`] up to `len`. The source and
     /// destination *must* not overlap.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn clone_elements(self, dst: Self, len: SizeType)
         where T: Clone
     {

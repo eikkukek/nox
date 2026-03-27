@@ -143,18 +143,18 @@ impl<T, IndexType> SlotIndex<T, IndexType>
 {
 
     /// Gets the index part of [`SlotIndex`].
-    #[inline(always)]
+    #[inline]
     pub fn index(&self) -> u32 {
         self.index
     }
     
     /// Gets the version part of [`SlotIndex`].
-    #[inline(always)]
+    #[inline]
     pub fn version(&self) -> IndexType {
         self.version.get()
     }
    
-    #[inline(always)]
+    #[inline]
     fn unit_index(self) -> SlotIndex<(), IndexType> {
         SlotIndex {
             version: self.version,
@@ -169,7 +169,6 @@ unsafe impl<T, IndexType: UInteger> Sync for SlotIndex<T, IndexType> {}
 
 impl<T, IndexType: UInteger> fmt::Debug for SlotIndex<T, IndexType> {
 
-    #[inline(always)]
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         "SlotIndex { version: ".fmt(f)?;
         self.version.fmt(f)?;
@@ -182,7 +181,7 @@ impl<T, IndexType: UInteger> fmt::Debug for SlotIndex<T, IndexType> {
 impl<T, IndexType: UInteger> Default for SlotIndex<T, IndexType>
 {
 
-    #[inline(always)]
+    #[inline]
     fn default() -> Self {
         Self {
             version: unsafe {
@@ -196,7 +195,7 @@ impl<T, IndexType: UInteger> Default for SlotIndex<T, IndexType>
 
 impl<T, IndexType: UInteger> Clone for SlotIndex<T, IndexType> {
 
-    #[inline(always)]
+    #[inline]
     fn clone(&self) -> Self {
         *self
     }
@@ -314,7 +313,6 @@ impl<T, Alloc, Wrap, ReservePol, IndexType>
         ReservePol: ReservePolicy<u32>,
 {
 
-    #[inline(always)]
     pub fn new(alloc: Wrap) -> Self {
         Self {
             data: Pointer::dangling(),
@@ -332,7 +330,7 @@ impl<T, Alloc, Wrap, ReservePol, IndexType>
         }
         let capacity = ReservePol::grow(capacity, capacity as usize)?;
         let data: Pointer<Slot<T, IndexType>, u32> = unsafe { alloc
-            .allocate_uninit(capacity as usize)
+            .alloc_uninit(capacity as usize)
             .map_err(|err| TryReserveError::alloc_error(err, ()))?
             .into()
         };
@@ -352,7 +350,7 @@ impl<T, Alloc, Wrap, ReservePol, IndexType>
         })
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn insert(&mut self, value: T) -> Result<SlotIndex<T, IndexType>, TryReserveError<T>> {
         self.insert_internal(value)
     }
@@ -366,17 +364,17 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         IndexType: UInteger,
 {
 
-    #[inline(always)]
+    #[inline]
     pub fn len(&self) -> u32 {
         self.len
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn capacity(&self) -> u32 {
         self.capacity
     }
@@ -405,7 +403,7 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
     fn reserve_internal(&mut self, capacity: u32) -> Result<(), TryReserveError<()>> {
         if capacity == self.capacity { return Ok(()) }
         let tmp: Pointer<Slot<T, IndexType>, u32> = unsafe { self.alloc
-            .allocate_uninit(capacity as usize)
+            .alloc_uninit(capacity as usize)
             .map_err(|err| TryReserveError::alloc_error(err, ()))?
             .into()
         };
@@ -433,7 +431,6 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         Ok(())
     }
 
-    #[inline(always)]
     fn insert_internal(&mut self, value: T) -> Result<SlotIndex<T, IndexType>, TryReserveError<T>>
     {
         if self.free_head.is_none() {
@@ -458,7 +455,6 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         })
     }
 
-    #[inline(always)]
     pub fn remove(&mut self, index: SlotIndex<T, IndexType>) -> Result<T, IndexError<IndexType>>
     {
         if index.index >= self.capacity {
@@ -492,7 +488,6 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         Ok(value)
     }
 
-    #[inline(always)]
     pub fn contains(&self, index: SlotIndex<T, IndexType>) -> bool {
         if index.index >= self.capacity {
             return false
@@ -502,7 +497,6 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         slot.version == index_version
     }
 
-    #[inline(always)]
     pub fn get(&self, index: SlotIndex<T, IndexType>) -> Result<&T, IndexError<IndexType>> {
         if index.index >= self.capacity {
             return Err(IndexOutOfBounds {
@@ -524,7 +518,6 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         }
     }
 
-    #[inline(always)]
     pub fn get_mut(&mut self, index: SlotIndex<T, IndexType>) -> Result<&mut T, IndexError<IndexType>> {
         if index.index >= self.capacity {
             return Err(IndexOutOfBounds {
@@ -551,7 +544,7 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
     /// # Safety
     /// The index *must* be a valid index, otherwise the value might be uninitialized or out of
     /// bounds.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn get_unchecked(&self, index: SlotIndex<T, IndexType>) -> &T {
         unsafe {
             self.data.add(index.index as usize).as_ref()
@@ -565,7 +558,7 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
     /// # Safety
     /// The index *must* be a valid index, otherwise the value might be uninitialized or out of
     /// bounds.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn get_unchecked_mut(&mut self, index: SlotIndex<T, IndexType>) -> &mut T {
         unsafe {
             self.data.add(index.index as usize).as_mut()
@@ -573,7 +566,6 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         }
     }
 
-    #[inline(always)]
     pub fn clear(&mut self) {
         for i in 0..self.capacity() {
             unsafe {
@@ -588,110 +580,100 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
             }
         }
         self.len = 0;
-    } 
-
-    #[inline(always)]
-    pub fn max_index(&self) -> Option<u32> {
-        unsafe {
-            let capacity = self.capacity as usize;
-            let mut ptr = self.data.add(capacity - 1);
-            for i in (0..capacity).rev() {
-                if ptr.as_ref().next_free_index.is_none() {
-                    return Some(i as u32)
-                }
-                ptr = ptr.sub(1);
-            }
-        }
-        None
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn iter(&self) -> Iter<'_, T, IndexType> {
         unsafe {
             Iter::new(self.data, self.data.add(self.capacity as usize))
         }
     }
 
-    #[inline(always)]
+    #[inline]
+    pub fn keys(&self) -> IterKeys<'_, T, IndexType> {
+        unsafe {
+            IterKeys::new(self.data, self.data.add(self.capacity() as usize))
+        }
+    }
+
+    #[inline]
     pub fn values(&self) -> IterValues<'_, T, IndexType> {
         unsafe {
             IterValues::new(self.data, self.data.add(self.capacity() as usize))
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn iter_mut(&mut self) -> IterMut<'_, T, IndexType> {
         unsafe {
             IterMut::new(self.data, self.data.add(self.capacity as usize))
         }
     }
 
-    #[inline(always)]
-    pub fn values_mut(&self) -> IterMutValues<'_, T, IndexType> {
+    #[inline]
+    pub fn values_mut(&self) -> IterValuesMut<'_, T, IndexType> {
         unsafe {
-            IterMutValues::new(self.data, self.data.add(self.capacity() as usize))
+            IterValuesMut::new(self.data, self.data.add(self.capacity() as usize))
         }
     }
 }
 
-pub struct IterBase<'a, T, IndexType, IsMut, JustValues>
-    where
-        IndexType: UInteger,
-        IsMut: Conditional,
-        JustValues: Conditional,
-{
-    ptr: Pointer<Slot<T, IndexType>, u32>,
-    end: Pointer<Slot<T, IndexType>, u32>,
-    index: u32,
-    _marker: PhantomData<(&'a T, IsMut, JustValues)>
-}
+mod iter {
 
-impl<'a, T, IndexType, IsMut, JustValues> IterBase<'a, T, IndexType, IsMut, JustValues>
-    where
-        IndexType: UInteger, 
-        IsMut: Conditional,
-        JustValues: Conditional,
-{
+    use super::*;
 
-    #[inline(always)]
-    unsafe fn new(mut ptr: Pointer<Slot<T, IndexType>, u32>, end: Pointer<Slot<T, IndexType>, u32>) ->  Self {
-        let mut index = 0;
-        unsafe {
-            while ptr != end {
-                if ptr.as_ref().next_free_index.is_none() {
-                    break
+    pub struct KeyValue;
+    pub struct Keys;
+    pub struct Values;
+
+    pub struct Base<'a, T, IndexType, IsMut, Type>
+        where
+            IndexType: UInteger,
+            IsMut: Conditional,
+    {
+        pub(super) ptr: Pointer<Slot<T, IndexType>, u32>,
+        pub(super)end: Pointer<Slot<T, IndexType>, u32>,
+        pub(super) index: u32,
+        pub(super) _marker: PhantomData<(&'a T, IsMut, Type)>
+    }
+
+    impl<'a, T, IndexType, IsMut, Type> Base<'a, T, IndexType, IsMut, Type>
+        where
+            IndexType: UInteger, 
+            IsMut: Conditional,
+    {
+
+        pub(super) unsafe fn new(
+            mut ptr: Pointer<Slot<T, IndexType>, u32>,
+            end: Pointer<Slot<T, IndexType>, u32>
+        ) ->  Self
+        {
+            let mut index = 0;
+            unsafe {
+                while ptr != end {
+                    if ptr.as_ref().next_free_index.is_none() {
+                        break
+                    }
+                    ptr = ptr.add(1);
+                    index += 1;
                 }
-                ptr = ptr.add(1);
-                index += 1;
+            }
+            Self {
+                ptr,
+                end,
+                index,
+                _marker: PhantomData,
             }
         }
-        Self {
-            ptr,
-            end,
-            index,
-            _marker: PhantomData,
-        }
     }
 }
 
-pub type Iter<'a, T, IndexType> = IterBase<'a, T, IndexType, False, False>;
-pub type IterValues<'a, T, IndexType> = IterBase<'a, T, IndexType, False, True>;
-pub type IterMut<'a, T, IndexType> = IterBase<'a, T, IndexType, True, False>;
-pub type IterMutValues<'a, T, IndexType> = IterBase<'a, T, IndexType, True, True>;
+pub type Iter<'a, T, IndexType> = iter::Base<'a, T, IndexType, False, iter::KeyValue>;
+pub type IterKeys<'a, T, IndexType> = iter::Base<'a, T, IndexType, False, iter::Keys>;
+pub type IterValues<'a, T, IndexType> = iter::Base<'a, T, IndexType, False, iter::Values>;
 
-impl<'a, T, IndexType> Iter<'a, T, IndexType>
-    where IndexType: UInteger
-{
-
-    pub fn just_values(self) -> IterValues<'a, T, IndexType> {
-        IterValues {
-            ptr: self.ptr,
-            end: self.end,
-            index: self.index,
-            _marker: PhantomData,
-        }
-    }
-}
+pub type IterMut<'a, T, IndexType> = iter::Base<'a, T, IndexType, True, iter::KeyValue>;
+pub type IterValuesMut<'a, T, IndexType> = iter::Base<'a, T, IndexType, True, iter::Values>;
 
 impl<'a, T, IndexType> Iterator for Iter<'a, T, IndexType>
     where IndexType: UInteger,
@@ -732,16 +714,40 @@ impl<'a, T, IndexType> Iterator for Iter<'a, T, IndexType>
     }
 }
 
-impl<'a, T, IndexType> IterValues<'a, T, IndexType>
+impl<'a, T, IndexType> Iterator for IterKeys<'a, T, IndexType>
     where IndexType: UInteger
 {
 
-    pub fn with_indices(self) -> Iter<'a, T, IndexType> {
-        Iter {
-            ptr: self.ptr,
-            end: self.end,
-            index: self.index,
-            _marker: PhantomData,
+    type Item = SlotIndex<T, IndexType>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr == self.end {
+            None
+        }
+        else {
+            unsafe {
+                let item = self.ptr.as_ref();
+                let current_idx = self.index;
+                let mut ptr = self.ptr.add(1);
+                let end = self.end;
+                let mut index = self.index + 1;
+                while ptr != end {
+                    if ptr.as_ref().next_free_index.is_none() {
+                        break
+                    }
+                    ptr = ptr.add(1);
+                    index += 1;
+                }
+                self.ptr = ptr;
+                self.index = index;
+                Some(
+                    SlotIndex {
+                        version: item.version,
+                        index: current_idx,
+                        _marker: PhantomData,
+                    },
+                )
+            }
         }
     }
 }
@@ -775,20 +781,6 @@ impl<'a, T, IndexType> Iterator for IterValues<'a, T, IndexType>
                     item.value.assume_init_ref(),
                 )
             }
-        }
-    }
-}
-
-impl<'a, T, IndexType> IterMut<'a, T, IndexType>
-    where IndexType: UInteger
-{
-
-    pub fn just_values(self) -> IterMutValues<'a, T, IndexType> {
-        IterMutValues {
-            ptr: self.ptr,
-            end: self.end,
-            index: self.index,
-            _marker: PhantomData,
         }
     }
 }
@@ -832,21 +824,7 @@ impl<'a, T, IndexType> Iterator for IterMut<'a, T, IndexType>
     }
 }
 
-impl<'a, T, IndexType> IterMutValues<'a, T, IndexType>
-    where IndexType: UInteger
-{
-
-    pub fn with_indices(self) -> IterMut<'a, T, IndexType> {
-        IterMut {
-            ptr: self.ptr,
-            end: self.end,
-            index: self.index,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<'a, T, IndexType> Iterator for IterMutValues<'a, T, IndexType>
+impl<'a, T, IndexType> Iterator for IterValuesMut<'a, T, IndexType>
     where IndexType: UInteger
 {
 
@@ -918,7 +896,6 @@ impl_traits!(
 
         type Output = T;
 
-        #[inline(always)]
         fn index(&self, index: SlotIndex<T, IndexType>) -> &Self::Output {
             if index.index >= self.capacity {
                 panic!("index {} out of bounds with capacity {}",
@@ -940,7 +917,6 @@ impl_traits!(
     ,
     IndexMut<SlotIndex<T, IndexType>> =>
 
-        #[inline(always)]
         fn index_mut(&mut self, index: SlotIndex<T, IndexType>) -> &mut Self::Output {
             if index.index >= self.capacity {
                 panic!("index {} out of bounds with capacity {}", index.index, self.capacity)
@@ -963,7 +939,7 @@ impl_traits!(
         type Item = (SlotIndex<T, IndexType>, &'map T);
         type IntoIter = Iter<'map, T, IndexType>;
 
-        #[inline(always)]
+        #[inline]
         fn into_iter(self) -> Self::IntoIter {
             self.iter()
         }
@@ -973,7 +949,7 @@ impl_traits!(
         type Item = (SlotIndex<T, IndexType>, &'map mut T);
         type IntoIter = IterMut<'map, T, IndexType>;
 
-        #[inline(always)]
+        #[inline]
         fn into_iter(self) -> Self::IntoIter {
             self.iter_mut()
         }
@@ -983,7 +959,7 @@ impl_traits!(
         type Item = (SlotIndex<T, IndexType>, T);
         type IntoIter = IterMove<T, Alloc, ReservePol, IsStd, IndexType>;
 
-        #[inline(always)]
+        #[inline]
         fn into_iter(self) -> Self::IntoIter {
             IterMove {
                 slot_map: self,
@@ -993,9 +969,13 @@ impl_traits!(
     ,
     Drop =>
 
-        #[inline(always)]
         fn drop(&mut self) {
             self.clear();
+            if self.capacity() != 0 {
+                unsafe {
+                    self.alloc.free_uninit(*self.data, self.len() as usize);
+                }
+            }
         }
     ,
 );
@@ -1046,7 +1026,6 @@ mod std_features {
         where IndexType: UInteger
     {
 
-        #[inline(always)]
         pub fn new() -> Self {
             Self {
                 data: Pointer::dangling(),
@@ -1064,7 +1043,7 @@ mod std_features {
             }
             let capacity = DynPolicy::grow(0, capacity as usize).unwrap();
             let data: Pointer<Slot<T, IndexType>, u32> = unsafe { StdAlloc
-                .allocate_uninit(capacity as usize)
+                .alloc_uninit(capacity as usize)
                 .expect("global alloc failed")
                 .into()
             };
@@ -1084,7 +1063,6 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
         pub fn insert(&mut self, value: T) -> SlotIndex<T, IndexType> {
             self.insert_internal(value).unwrap()
         }
@@ -1098,7 +1076,7 @@ mod std_features {
 
         fn clone(&self) -> Self {
             let data: Pointer<Slot<T, IndexType>, u32> = unsafe { StdAlloc
-                .allocate_uninit(self.capacity as usize)
+                .alloc_uninit(self.capacity as usize)
                 .expect("global alloc failed")
                 .into()
             };

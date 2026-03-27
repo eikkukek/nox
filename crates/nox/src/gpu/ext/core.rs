@@ -7,13 +7,13 @@ struct TimelineSemaphoreExtension;
 
 unsafe impl DeviceExtension for TimelineSemaphoreExtension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::timeline_semaphore::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_2,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.timeline_semaphore == 0).then(|| {
                     MissingDeviceFeatureError::new("timeline semaphore")
                 })
@@ -23,7 +23,7 @@ unsafe impl DeviceExtension for TimelineSemaphoreExtension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDeviceTimelineSemaphoreFeatures
             ::default()
@@ -41,15 +41,15 @@ struct ShaderViewportIndexLayerExtension;
 
 unsafe impl DeviceExtension for ShaderViewportIndexLayerExtension {
 
-    fn get_info(&self, attributes: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, attributes: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         attributes.required_features.multi_viewport.then(|| {
             DeviceExtensionInfo {
                 name: ext::shader_viewport_index_layer::NAME,
                 deprecation_version: Version::VULKAN_API_VERSION_1_2,
-                precondition: Precondition::new(|context| {
-                    if context.api_version() >= Version::VULKAN_API_VERSION_1_2 {
+                precondition: Precondition::new(|ctx| {
+                    if ctx.api_version() >= Version::VULKAN_API_VERSION_1_2 {
                         let mut features = vk::PhysicalDeviceVulkan12Features::default();
-                        context.get_features(&mut features);
+                        ctx.get_features(&mut features);
                         (features.shader_output_viewport_index == 0).then(|| {
                             MissingDeviceFeatureError::new("shader output viewport index")
                         }).or_else(|| {
@@ -67,10 +67,10 @@ unsafe impl DeviceExtension for ShaderViewportIndexLayerExtension {
 
     fn register(
         &self,
-        context: &mut PhysicalDeviceContext<'_>,
+        ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
-        if context.api_version() >= Version::VULKAN_API_VERSION_1_2 {
-            let features = context.vulkan_12_features();
+        if ctx.api_version() >= Version::VULKAN_API_VERSION_1_2 {
+            let features = ctx.vulkan_12_features();
             features.shader_output_viewport_index = vk::TRUE;
             features.shader_output_layer = vk::TRUE;
         }
@@ -87,7 +87,7 @@ struct CreateRenderPass2Extension;
 
 unsafe impl DeviceExtension for CreateRenderPass2Extension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::create_renderpass2::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_2,
@@ -97,7 +97,7 @@ unsafe impl DeviceExtension for CreateRenderPass2Extension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         None
     }
@@ -112,7 +112,7 @@ struct DepthStencilResolveExtension;
 
 unsafe impl DeviceExtension for DepthStencilResolveExtension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::depth_stencil_resolve::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_2,
@@ -122,7 +122,7 @@ unsafe impl DeviceExtension for DepthStencilResolveExtension {
 
     fn register(
         &self,
-        context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         None
     }
@@ -137,13 +137,13 @@ struct DynamicRenderingExtension;
 
 unsafe impl DeviceExtension for DynamicRenderingExtension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::dynamic_rendering::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_3,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDeviceDynamicRenderingFeatures::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.dynamic_rendering == 0).then(|| {
                     MissingDeviceFeatureError::new("dynamic rendering")
                 })
@@ -153,7 +153,7 @@ unsafe impl DeviceExtension for DynamicRenderingExtension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDeviceDynamicRenderingFeatures
             ::default()
@@ -167,18 +167,43 @@ unsafe impl DeviceExtension for DynamicRenderingExtension {
 }
 
 #[derive(Clone, Copy)]
+struct FormatFeatureFlags2Extension;
+
+unsafe impl DeviceExtension for FormatFeatureFlags2Extension {
+
+    fn get_info(&self, _attributes: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
+        Some(DeviceExtensionInfo {
+            name: khr::format_feature_flags2::NAME,
+            deprecation_version: Version::VULKAN_API_VERSION_1_3,
+            precondition: None,
+        })
+    }
+
+    fn register(
+        &self,
+        _ctx: &mut PhysicalDeviceContext<'_>,
+    ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
+        None
+    }
+    
+    fn boxed(&self) -> Box<dyn DeviceExtension> {
+        Box::new(*self)
+    }
+}
+
+#[derive(Clone, Copy)]
 struct ExtendedDynamicStateExtension;
 
 unsafe impl DeviceExtension for ExtendedDynamicStateExtension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: ext::extended_dynamic_state::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_3,
-            precondition: Precondition::new(|context| {
-                if context.api_version() < Version::VULKAN_API_VERSION_1_3 {
+            precondition: Precondition::new(|ctx| {
+                if ctx.api_version() < Version::VULKAN_API_VERSION_1_3 {
                     let mut features = vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT::default();
-                    context.get_features(&mut features);
+                    ctx.get_features(&mut features);
                     (features.extended_dynamic_state == 0).then(|| {
                         MissingDeviceFeatureError::new("extended dynamic state")
                     })
@@ -191,9 +216,9 @@ unsafe impl DeviceExtension for ExtendedDynamicStateExtension {
 
     fn register(
         &self,
-        context: &mut PhysicalDeviceContext<'_>,
+        ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
-        (context.api_version() < Version::VULKAN_API_VERSION_1_3).then(||
+        (ctx.api_version() < Version::VULKAN_API_VERSION_1_3).then(||
             create_extends_device_create_info_obj(vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT
                 ::default()
                 .extended_dynamic_state(true)
@@ -211,7 +236,7 @@ struct CopyCommands2Extension;
 
 unsafe impl DeviceExtension for CopyCommands2Extension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::copy_commands2::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_3,
@@ -221,7 +246,7 @@ unsafe impl DeviceExtension for CopyCommands2Extension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         None
     }
@@ -236,13 +261,13 @@ struct Synchronization2Extension;
 
 unsafe impl DeviceExtension for Synchronization2Extension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::synchronization2::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_3,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDeviceSynchronization2Features::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.synchronization2 == 0).then(|| {
                     MissingDeviceFeatureError::new("synchronization2")
                 })
@@ -252,7 +277,7 @@ unsafe impl DeviceExtension for Synchronization2Extension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDeviceSynchronization2Features
             ::default().synchronization2(true)
@@ -269,13 +294,13 @@ struct Maintenance4Extension;
 
 unsafe impl DeviceExtension for Maintenance4Extension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::maintenance4::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_3,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDeviceMaintenance4Features::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.maintenance4 == 0).then(|| {
                     MissingDeviceFeatureError::new("maintenance4")
                 })
@@ -285,7 +310,7 @@ unsafe impl DeviceExtension for Maintenance4Extension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDeviceMaintenance4Features
             ::default()
@@ -303,13 +328,13 @@ struct DynamicRenderingLocalReadExtension;
 
 unsafe impl DeviceExtension for DynamicRenderingLocalReadExtension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::dynamic_rendering_local_read::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_4,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDeviceDynamicRenderingLocalReadFeatures::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.dynamic_rendering_local_read == 0).then(|| {
                     MissingDeviceFeatureError::new("dynamic rendering local read")
                 })
@@ -319,7 +344,7 @@ unsafe impl DeviceExtension for DynamicRenderingLocalReadExtension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDeviceDynamicRenderingLocalReadFeatures
             ::default().dynamic_rendering_local_read(true)
@@ -336,13 +361,13 @@ struct Maintenance5Extension;
 
 unsafe impl DeviceExtension for Maintenance5Extension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::maintenance5::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_4,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDeviceMaintenance5Features::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.maintenance5 == 0).then(|| {
                     MissingDeviceFeatureError::new("maintenance5")
                 })
@@ -352,7 +377,7 @@ unsafe impl DeviceExtension for Maintenance5Extension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDeviceMaintenance5Features
             ::default()
@@ -370,13 +395,13 @@ struct Maintenance6Extension;
 
 unsafe impl DeviceExtension for Maintenance6Extension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::maintenance6::NAME,
             deprecation_version: Version::VULKAN_API_VERSION_1_4,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDeviceMaintenance6Features::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.maintenance6 == 0).then(|| {
                     MissingDeviceFeatureError::new("maintenance6")
                 })
@@ -386,7 +411,7 @@ unsafe impl DeviceExtension for Maintenance6Extension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDeviceMaintenance6Features
             ::default()
@@ -400,17 +425,42 @@ unsafe impl DeviceExtension for Maintenance6Extension {
 }
 
 #[derive(Clone, Copy)]
+struct SwapchainExtension;
+
+unsafe impl DeviceExtension for SwapchainExtension {
+
+    fn get_info(&self, _attributes: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
+        Some(DeviceExtensionInfo {
+            name: khr::swapchain::NAME,
+            deprecation_version: Version::MAX,
+            precondition: None
+        })
+    }
+
+    fn register(
+        &self,
+        _ctx: &mut PhysicalDeviceContext<'_>,
+    ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
+        None
+    }
+
+    fn boxed(&self) -> Box<dyn DeviceExtension> {
+        Box::new(*self)
+    }
+}
+
+#[derive(Clone, Copy)]
 struct PresentId2Extension;
 
 unsafe impl DeviceExtension for PresentId2Extension {
 
-    fn get_info(&self, _: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
             name: khr::present_id2::NAME,
             deprecation_version: Version::MAX,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDevicePresentId2FeaturesKHR::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.present_id2 == 0).then(|| {
                     MissingDeviceFeatureError::new("present id2")
                 })
@@ -420,7 +470,7 @@ unsafe impl DeviceExtension for PresentId2Extension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDevicePresentId2FeaturesKHR
             ::default()
@@ -438,13 +488,13 @@ struct PresentWait2Extension;
 
 unsafe impl DeviceExtension for PresentWait2Extension {
 
-    fn get_info(&self, attributes: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _attributes: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         Some(DeviceExtensionInfo {
-            name: khr::present_wait2,
+            name: khr::present_wait2::NAME,
             deprecation_version: Version::MAX,
-            precondition: Precondition::new(|context| {
+            precondition: Precondition::new(|ctx| {
                 let mut features = vk::PhysicalDevicePresentWait2FeaturesKHR::default();
-                context.get_features(&mut features);
+                ctx.get_features(&mut features);
                 (features.present_wait2 == 0).then(|| {
                     MissingDeviceFeatureError::new("present wait2")
                 })
@@ -454,7 +504,7 @@ unsafe impl DeviceExtension for PresentWait2Extension {
 
     fn register(
         &self,
-        _context: &mut PhysicalDeviceContext<'_>,
+        _ctx: &mut PhysicalDeviceContext<'_>,
     ) -> Option<vk::ExtendsDeviceCreateInfoObj> {
         Some(create_extends_device_create_info_obj(vk::PhysicalDevicePresentWait2FeaturesKHR
             ::default()
@@ -468,10 +518,11 @@ unsafe impl DeviceExtension for PresentWait2Extension {
 }
 
 pub(crate) fn core_extensions() -> impl Iterator<Item = DeviceExtensionObj> {
-    let extensions: [DeviceExtensionObj; 14] = [
+    let extensions: [DeviceExtensionObj; 16] = [
         TimelineSemaphoreExtension.boxed().into(),
         ShaderViewportIndexLayerExtension.boxed().into(),
         DynamicRenderingExtension.boxed().into(),
+        FormatFeatureFlags2Extension.boxed().into(),
         ExtendedDynamicStateExtension.boxed().into(),
         CopyCommands2Extension.boxed().into(),
         Synchronization2Extension.boxed().into(),
@@ -481,6 +532,7 @@ pub(crate) fn core_extensions() -> impl Iterator<Item = DeviceExtensionObj> {
         Maintenance6Extension.boxed().into(),
         CreateRenderPass2Extension.boxed().into(),
         DepthStencilResolveExtension.boxed().into(),
+        SwapchainExtension.boxed().into(),
         PresentId2Extension.boxed().into(),
         PresentWait2Extension.boxed().into(),
     ];

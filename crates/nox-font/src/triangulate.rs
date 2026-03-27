@@ -1,7 +1,4 @@
-use nox::mem::{
-    vec_types::{GlobalVec, Vector},
-};
-
+use nox::mem::{vec::Vec32, vec32};
 use nox_geom::{
     earcut::{earcut, earcut_hole},
     bezier::{quad, cubic},
@@ -13,7 +10,7 @@ use super::*;
 
 #[derive(Debug)]
 pub struct Outline {
-    pub vertices: GlobalVec<[f32; 2]>,
+    pub vertices: Vec<[f32; 2]>,
     pub units_per_em: f32,
 }
 
@@ -22,7 +19,7 @@ impl Outline {
     #[inline(always)]
     fn new(units_per_em: f32) -> Self {
         Self {
-            vertices: GlobalVec::new(),
+            vertices: Vec::new(),
             units_per_em,
         }
     }
@@ -50,7 +47,7 @@ impl Outline {
 }
 
 pub struct OutlineBuilder {
-    pub outlines: GlobalVec<Outline>,
+    pub outlines: Vec<Outline>,
     current_outline: Option<Outline>,
     curve_tolerance: f32,
     pos: [f32; 2],
@@ -64,7 +61,7 @@ impl OutlineBuilder {
     #[inline(always)]
     pub fn new(curve_tolerance: f32, units_per_em: u16, winding_rule: i16) -> Self {
         Self {
-            outlines: GlobalVec::new(),
+            outlines: vec![],
             current_outline: Some(Outline::new(units_per_em as f32)),
             curve_tolerance,
             pos: Default::default(),
@@ -91,11 +88,11 @@ impl OutlineBuilder {
             return None
         }
 
-        let mut vertices = GlobalVec::new();
-        let mut ind = GlobalVec::new();
+        let mut vertices = vec32![];
+        let mut indices = vec32![];
 
         let winding_rule = self.winding_rule as f32;
-        let clock_wise = if self.winding_rule < 0 { true } else { false };
+        let clock_wise = self.winding_rule < 0;
 
         let outlines = &self.outlines;
 
@@ -107,22 +104,19 @@ impl OutlineBuilder {
 
             let outer = &outline.vertices;
 
-            let mut holes = GlobalVec::new();
+            let mut holes = vec32![];
 
             for o in outlines {
                 if o.is_hole(winding_rule) &&
-                    point_in_polygon(o.vertices[0].into(), outer) {
+                    point_in_polygon(o.vertices[0], outer) {
                     holes.push(earcut_hole(o.vertices.as_slice(), false));
                 }
             }
 
-            earcut(&outer, &holes, clock_wise, &mut vertices, &mut ind).unwrap();
+            earcut(outer, &holes, clock_wise, &mut vertices, &mut indices);
         }
 
-        let mut indices = GlobalVec::new();
-        indices.append_map(&ind, |&v| v as u32);
-
-        if vertices.len() == 0 {
+        if vertices.is_empty() {
             return None
         }
 
@@ -173,8 +167,8 @@ impl ttf_parser::OutlineBuilder for OutlineBuilder {
 
 #[derive(Default, Clone)]
 pub struct GlyphTriangles {
-    pub vertices: GlobalVec<Vertex>,
-    pub indices: GlobalVec<u32>,
+    pub vertices: Vec32<Vertex>,
+    pub indices: Vec32<u32>,
 }
 
 pub fn triangulate(

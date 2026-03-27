@@ -81,29 +81,29 @@ impl<const N: usize> ArrayString<N> {
         )
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn as_str(&self) -> &str {
-        core::str::from_utf8(&self.string[..self.len]).unwrap_or("<invalid utf-8>")
+        core::str::from_utf8(&self.string[..self.len]).unwrap()
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         &self.string[..self.len]
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn format(args: fmt::Arguments<'_>) -> Self {
         let mut s = Self { string: [0u8; N], len: 0 };
         s.write_fmt(args).expect("this shouldn't happen");
         s
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn len(&self) -> usize {
         self.len
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -121,7 +121,7 @@ impl<const N: usize> Default for ArrayString<N> {
 
 impl<const N: usize> AsRef<str> for ArrayString<N> {
 
-    #[inline(always)]
+    #[inline]
     fn as_ref(&self) -> &str {
         self.as_str()
     }
@@ -129,7 +129,7 @@ impl<const N: usize> AsRef<str> for ArrayString<N> {
 
 impl<const N: usize, const M: usize> PartialEq<ArrayString::<M>> for ArrayString::<N> {
 
-    #[inline(always)]
+    #[inline]
     fn eq(&self, other: &ArrayString<M>) -> bool {
         self.as_bytes() == other.as_bytes()
     }
@@ -170,21 +170,5 @@ impl<const N: usize> Write for ArrayString<N> {
         self.string[self.len..self.len + end].copy_from_slice(slice.as_bytes());
         self.len += end;
         Ok(())
-    }
-}
-
-#[cfg(feature = "std")]
-mod std_features {
-
-    use super::*;
-
-    use std::string::String;
-
-    impl<const N: usize> From<ArrayString<N>> for String {
-
-        #[inline(always)]
-        fn from(value: ArrayString<N>) -> Self {
-            Self::from(value.as_str())
-        }
     }
 }

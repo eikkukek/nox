@@ -60,7 +60,7 @@ impl<T: ?Sized, U: ?Sized> Pair<T, U> {
         size += size_of::<Allocation>();
         let ptr = unsafe {
             StdAlloc
-                .allocate_raw(Layout::from_size_align(size, align).unwrap())
+                .alloc_raw(Layout::from_size_align(size, align).unwrap())
                 .expect("global alloc failed")
         };
         let t_ptr = unsafe {

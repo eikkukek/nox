@@ -18,8 +18,6 @@ use crate::{
 };
 
 use super::{
-    Vector,
-    FallibleVec,
     Pointer,
     NonNullVecBase,
 };
@@ -28,19 +26,19 @@ pub struct DynPolicy;
 
 unsafe impl ReservePolicy for DynPolicy {
 
-    #[inline(always)]
+    #[inline]
     fn can_grow() -> bool {
         true
     }
 
-    #[inline(always)]
+    #[inline]
     fn grow(current: usize, required: usize) -> Result<usize, TryReserveError<()>> {
         let power_of_2 = required.next_power_of_two().max(2);
         if power_of_2 < current { Ok(current) }
         else { Ok(power_of_2) }
     }
 
-    #[inline(always)]
+    #[inline]
     fn grow_infallible(current: usize, required: usize) -> usize {
         let power_of_2 = required.next_power_of_two().max(2);
         if power_of_2 < current { current }
@@ -52,7 +50,7 @@ pub struct FixedPolicy;
 
 unsafe impl ReservePolicy for FixedPolicy {
 
-    #[inline(always)]
+    #[inline]
     fn can_grow() -> bool {
         false
     }
@@ -83,7 +81,7 @@ unsafe impl ReservePolicy<u32> for DynPolicy32 {
         true
     }
 
-    #[inline(always)]
+    #[inline]
     fn grow(current: u32, required: usize) -> core::result::Result<u32, TryReserveError<()>> {
         let power_of_2 = required.next_power_of_two().max(2);
         if power_of_2 > u32::MAX as usize {
@@ -93,7 +91,7 @@ unsafe impl ReservePolicy<u32> for DynPolicy32 {
         } else { Ok(power_of_2.max(2) as u32) }
     }
 
-    #[inline(always)]
+    #[inline]
     fn grow_infallible(current: u32, required: usize) -> u32 {
         let power_of_2 = required.next_power_of_two().max(2);
         if power_of_2 > u32::MAX as usize || power_of_2 <= current as usize {
@@ -106,7 +104,7 @@ unsafe impl ReservePolicy<u32> for DynPolicy32 {
 
 unsafe impl ReservePolicy<u32> for FixedPolicy32 {
 
-    #[inline(always)]
+    #[inline]
     fn can_grow() -> bool {
         false
     }
@@ -154,13 +152,12 @@ pub type FixedVec32<'a, T, Alloc> = AllocVecBase<T, u32, LocalAllocWrap<Alloc, &
 impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wrap>, ReservePol, False, SizeType>
     where
         T: Sized,
-        Alloc: LocalAlloc,
+        Alloc: LocalAlloc + ?Sized,
         Wrap: Deref<Target = Alloc>,
         ReservePol: ReservePolicy<SizeType>,
         SizeType: IntoUsize + FromUsize
 {
 
-    #[inline(always)]
     pub fn new(alloc: Wrap) -> Self {
         Self {
             data: Pointer::dangling(),
@@ -180,7 +177,7 @@ impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wra
         }
         let capacity = ReservePol::grow_infallible(capacity, capacity.into_usize());
         let data = unsafe { alloc
-            .allocate_uninit(capacity.into_usize())?
+            .alloc_uninit(capacity.into_usize())?
         }.into();
         Ok(Self {
             data,
@@ -204,7 +201,7 @@ impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wra
         }
         let capacity = ReservePol::grow_infallible(len, len.into_usize());
         let data: Pointer<T, SizeType> = unsafe { alloc
-            .allocate_uninit(capacity.into_usize())?
+            .alloc_uninit(capacity.into_usize())?
         }.into();
         for i in 0..len.into_usize() {
             unsafe { data.add(i).write(value.clone()) };
@@ -230,7 +227,7 @@ impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wra
         }
         let capacity = ReservePol::grow_infallible(len, len.into_usize());
         let data: Pointer<T, SizeType> = unsafe { alloc
-            .allocate_uninit(capacity.into_usize())?
+            .alloc_uninit(capacity.into_usize())?
             .into()
         };
         for i in 0..len.into_usize() {
@@ -243,6 +240,40 @@ impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wra
             alloc: LocalAllocWrap::new(alloc),
             _markers: PhantomData,
         })
+    }
+
+    pub fn flattened<U>(
+        slices: &[U],
+        alloc: Wrap,
+    ) -> Result<Self, TryReserveError<()>>
+        where
+            U: AsRef<[T]>,
+            T: Clone,
+    {
+        let capacity: usize = slices
+            .iter()
+            .map(|s| s.as_ref().len())
+            .sum();
+        let capacity = ReservePol::grow(
+            SizeType::from_usize_unchecked(capacity),
+            capacity,
+        )?;
+        let data: Pointer<T, SizeType> = unsafe { alloc
+            .alloc_uninit(capacity.into_usize())
+            .map_err(|err| TryReserveError::alloc_error(err, ()))?
+            .into()
+        };
+        let mut res = Self {
+            data,
+            capacity,
+            len: SizeType::ZERO,
+            alloc: LocalAllocWrap::new(alloc),
+            _markers: PhantomData,
+        };
+        for slice in slices {
+            res.append(slice.as_ref());
+        }
+        Ok(res)
     }
 }
 
@@ -262,7 +293,6 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     /// There are a multitude of reasons why this is unsafe. For example, the pointer needs to be valid up to
     /// capacity, the pointer needs to be a valid pointer for the given allocator and length needs to be
     /// less than capacity.
-    #[inline(always)]
     pub unsafe fn from_raw_parts(
         data: Pointer<T, SizeType>,
         len: SizeType,
@@ -284,7 +314,6 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     ///
     /// # Safety
     /// The inner pointer of the source vector must be valid for the new allocator.
-    #[inline(always)]
     pub unsafe fn with_alloc<A: LocalAlloc>(self, alloc: A) -> AllocVecBase<T, SizeType, A, ReservePol> {
         let vec = ManuallyDrop::new(self);
         AllocVec {
@@ -296,7 +325,6 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
         }
     }
 
-    #[inline(always)]
     pub unsafe fn into_non_null(self) -> NonNullVecBase<'static, T, SizeType> {
         let vec = ManuallyDrop::new(self);
         unsafe {
@@ -312,17 +340,15 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     /// # Safety
     /// The inner pointer needs to be valid up to the `capacity` and `capacity` needs to be greater
     /// than or equal to the vector's length (which can be set via [`AllocVec::set_len`]).
-    #[inline(always)]
     pub unsafe fn set_capacity(&mut self, capacity: SizeType) {
         self.capacity = capacity;
     }
 
     /// Consumes self and returns the inner pointer.
-    #[inline(always)]
     pub fn into_inner(self) -> Pointer<T, SizeType> {
         let vec = ManuallyDrop::new(self);
         vec.data
-    }
+    } 
 }
 
 pub struct IterAllocVec<T, SizeType: IntoUsize + FromUsize, Alloc: LocalAlloc> {
@@ -354,7 +380,8 @@ impl<T, SizeType, Alloc> Iterator for IterAllocVec<T, SizeType, Alloc>
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.start.into_usize(), Some(self.end.into_usize()))
+        let size = (self.end - self.start).into_usize();
+        (size, Some(size))
     }
 }
 
@@ -401,68 +428,101 @@ impl<T, SizeType, Alloc> Drop for IterAllocVec<T, SizeType, Alloc>
     }
 }
 
-impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
-    AllocVec<T, Alloc, ReservePol, IsStd, SizeType> where
+impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd, SizeType>
+    where
         Alloc: LocalAlloc,
         ReservePol: ReservePolicy<SizeType>,
         IsStd: Conditional,
         SizeType: IntoUsize + FromUsize,
 {
 
-    type Iter<'a> = slice::Iter<'a, T>
-        where
-            T: 'a, Self: 'a;
-
-    type IterMut<'a> = slice::IterMut<'a, T>
-        where
-            T: 'a, Self: 'a;
-
-    type ReservePol = ReservePol;
-
-    #[inline(always)]
-    fn len(&self) -> SizeType {
+    /// Returns the length of the vector.
+    #[inline]
+    pub fn len(&self) -> SizeType {
         self.len
     }
 
-    #[inline(always)]
-    fn capacity(&self) -> SizeType {
+    /// Returns whether the vector is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == SizeType::ZERO
+    }
+
+    /// Returns the allocated capacity of the vector.
+    #[inline]
+    pub fn capacity(&self) -> SizeType {
         self.capacity
     }
 
-    #[inline(always)]
-    fn as_ptr(&self) -> *const T {
+    /// Gets the pointer to the vector's data.
+    #[inline]
+    pub fn as_ptr(&self) -> *const T {
         self.data.as_ptr()
     }
 
-    #[inline(always)]
-    fn as_mut_ptr(&mut self) -> *mut T {
+    /// Gets a mutable pointer to the vector's data.
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut T {
         self.data.as_ptr()
     }
 
-    #[inline(always)]
-    fn as_slice(&self) -> &[T] {
+    /// Returns a slice over the contents of the vector.
+    #[inline]
+    pub fn as_slice(&self) -> &[T] {
         unsafe { slice::from_raw_parts(self.data.as_ptr(), self.len.into_usize()) }
     }
 
-    #[inline(always)]
-    fn as_mut_slice(&mut self) -> &mut [T] {
+    /// Returns a mutable slice over the contents of the vector.
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { slice::from_raw_parts_mut(self.data.as_ptr(), self.len.into_usize()) }
     }
 
-    #[inline(always)]
-    unsafe fn set_len(&mut self, len: SizeType) {
-        if len > self.capacity { panic!("len was larger than capacity") }
-        self.len = len;
+    /// A low-level operation that forces the length of the vector to `new_len`.
+    ///
+    /// Panics if `new_len` exceeds `capacity` on debug builds.
+    ///
+    /// # Safety
+    /// If `new_len` > current length, elements with elements at indices greater than or equal to
+    /// the current length are left uninitialized and if `new_len` < current length, elements at
+    /// indices less than or equal to the current length are not dropped when the vector is
+    /// [`cleared`][1] or [`dropped`][Drop].
+    ///
+    /// [1]: Self::clear
+    #[inline]
+    pub unsafe fn set_len(&mut self, new_len: SizeType) {
+        #[cfg(debug_assertions)]
+        if new_len > self.capacity { panic!("len was larger than capacity") }
+        self.len = new_len;
     }
 
-    #[inline(always)]
-    fn reserve(&mut self, capacity: SizeType)
+    /// Reserves space for the vector.
+    ///
+    /// This may speculatively reserve more space than `capacity` to avoid frequent reallocations.
+    ///
+    /// Use [`reserve_exact`][1] to allocate an exact capacity.
+    ///
+    /// This may panic if the vector has a fixed capacity or if an allocation fails.
+    ///
+    /// Use [`try_reserve`][2] if allocation failure can be handled.
+    ///
+    /// [1]: Self::reserve_exact
+    /// [2]: Self::try_reserve
+    pub fn reserve(&mut self, capacity: SizeType)
     {
         let capacity = ReservePol::grow_infallible(self.capacity, capacity.into_usize());
         self.reserve_exact(capacity);
     }
 
-    fn reserve_exact(&mut self, capacity: SizeType) {
+    /// Reserves space for the vector exactly up to `capacity`.
+    ///
+    /// This may panic if the vector has a fixed capacity or if an allocation fails.
+    ///
+    /// Use [`try_reserve_exact`][2] if allocation failure can be handled.
+    ///
+    /// [1]: Self::reserve_exact
+    /// [2]: Self::try_reserve
+    pub fn reserve_exact(&mut self, capacity: SizeType) {
         if capacity <= self.capacity { return }
         if !ReservePol::can_grow() {
             panic!(
@@ -471,7 +531,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
             )
         }
         let tmp = unsafe {
-            self.alloc.allocate_uninit(capacity.into_usize())
+            self.alloc.alloc_uninit(capacity.into_usize())
         }.unwrap().into();
         debug_assert!(self.len <= self.capacity);
         unsafe {
@@ -483,8 +543,54 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         self.data = tmp;
         self.capacity = capacity
     }
+    
+    /// Tries to reserve space for the vector, returning an error if the vector has a fixed capacity
+    /// or if an allocation fails.
+    ///
+    /// This may speculatively reserve more space than `capacity` to avoid frequent reallocations.
+    ///
+    /// Use [`try_reserve_exact`][1] to allocate an exact capacity.
+    ///
+    /// [1]: Self::try_reserve_exact
+    pub fn try_reserve(&mut self, capacity: SizeType) -> Result<(), TryReserveError<()>> {
+        let capacity = ReservePol::grow(
+            self.capacity, capacity.into_usize()
+        )?;
+        self.try_reserve_exact(capacity)
+    }
 
-    fn resize(&mut self, len: SizeType, value: T)
+    /// Tries to reserve space for the vector exactly up to `capacity`, returning an error if the
+    /// vector has a fixed capacity or if an allocation fails.
+    pub fn try_reserve_exact(&mut self, capacity: SizeType) -> Result<(), TryReserveError<()>> {
+        if capacity <= self.capacity { return Ok(()) }
+        if !ReservePol::can_grow() {
+            return Err(TryReserveError::max_capacity_exceeded(
+                self.capacity, capacity.into_usize(), (),
+            ))
+        }
+        let tmp = unsafe {
+            self.alloc.alloc_uninit(capacity.into_usize())
+        }.map_err(|err| TryReserveError::alloc_error(err, ()))?.into();
+        debug_assert!(self.len <= self.capacity);
+        unsafe {
+            self.data.move_elements(tmp, self.len);
+        }
+        if self.capacity != SizeType::ZERO {
+            unsafe { self.alloc.free_uninit(*self.data, self.capacity.into_usize()); }
+        }
+        self.data = tmp;
+        self.capacity = capacity;
+        Ok(())
+    }
+
+    /// Resizes the vector with a clonable value.
+    ///
+    /// If `len` is less than the current length, this shrinks the vector.
+    ///
+    /// This may panic if [`reserve`][1] fails.
+    ///
+    /// [1]: Self::reserve
+    pub fn resize(&mut self, len: SizeType, value: T)
         where
             T: Clone
     {
@@ -504,7 +610,14 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         self.len = len;
     }
 
-    fn resize_with<F>(&mut self, len: SizeType, mut f: F)
+    /// Resizes the vector with the given closure.
+    ///
+    /// If `len` is less than the current length, this shrinks the vector.
+    ///
+    /// This may panic if [`reserve`][1] fails.
+    ///
+    /// [1]: Self::reserve
+    pub fn resize_with<F>(&mut self, len: SizeType, mut f: F)
         where
             F: FnMut() -> T
     {
@@ -524,7 +637,14 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         self.len = len;
     }
 
-    fn try_resize_with<F, E>(
+    /// Tries to resize the vector with the given closure that may return an error.
+    ///
+    /// If `len` is less than the current length, this shrinks the vector.
+    ///
+    /// This may panic if [`reserve`][1] fails.
+    ///
+    /// [1]: Self::reserve
+    pub fn try_resize_with<F, E>(
         &mut self,
         len: SizeType,
         mut f: F,
@@ -554,8 +674,12 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         Ok(())
     }
 
-    #[inline(always)]
-    fn push(&mut self, value: T) {
+    /// Appends an element to the end of the vector.
+    ///
+    /// This may panic if [`reserve`][1] fails.
+    ///
+    /// [1]: Self::reserve
+    pub fn push(&mut self, value: T) {
         if self.len >= self.capacity {
             if self.capacity == SizeType::ZERO {
                 self.reserve(SizeType::from_usize_unchecked(2));
@@ -573,103 +697,14 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         self.len = self.len.step_forward();
     }
 
-    fn append(&mut self, slice: &[T])
-        where
-            T: Clone
-    {
-        let len = self.len.into_usize() + slice.len();
-        let capacity = ReservePol
-            ::grow(self.capacity, len)
-            .unwrap();
-        self.reserve_exact(capacity);
-        unsafe {
-            Pointer
-                ::new(slice.as_ptr().cast_mut())
-                .unwrap()
-                .clone_elements(
-                    self.data.add(self.len.into_usize()),
-                    FromUsize::from_usize_unchecked(slice.len()),
-                );
-        }
-        self.len = SizeType::from_usize_unchecked(len);
-    }
-
-    fn fast_append(&mut self, slice: &[T])
-        where T: Copy
-    {
-        let len = self.len.into_usize() + slice.len();
-        let capacity = ReservePol
-            ::grow(self.capacity, len)
-            .unwrap();
-        self.reserve_exact(capacity);
-        unsafe {
-            Pointer
-                ::new(slice.as_ptr().cast_mut())
-                .unwrap()
-                .fast_clone_elements(
-                    self.data.add(self.len.into_usize()),
-                    FromUsize::from_usize_unchecked(slice.len()),
-                );
-        }
-        self.len = SizeType::from_usize_unchecked(len);
-    }
-
-    fn append_map<U, F>(&mut self, slice: &[U], mut f: F)
-        where
-            F: FnMut(&U) -> T
-    {
-        let len = self.len.into_usize() + slice.len();
-        let capacity = ReservePol
-            ::grow(self.capacity, len)
-            .unwrap();
-        self.reserve_exact(capacity);
-        let len = self.len.into_usize();
-        for (i, u) in slice.iter().enumerate() {
-            unsafe {
-                self.data.add(len + i).write(f(u));
-            }
-        }
-        self.len = SizeType::from_usize_unchecked(len);
-    }
-
-    #[inline(always)]
-    fn pop(&mut self) -> Option<T> {
-        if self.len == SizeType::ZERO { return None }
-        self.len = self.len.step_backward();
-        let ptr = unsafe { self.data.add(self.len.into_usize()) };
-        Some(unsafe { ptr.read() })
-    }
-
-    #[inline(always)]
-    fn last(&self) -> Option<&T> {
-        if self.len == SizeType::ZERO {
-            None
-        }
-        else {
-            unsafe {
-                Some(
-                    self.data.add(self.len.into_usize() - 1).as_ref()
-                )
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn last_mut(&mut self) -> Option<&mut T> {
-        if self.len == SizeType::ZERO {
-            None
-        }
-        else {
-            unsafe {
-                Some(
-                    self.data.add(self.len.into_usize() - 1).as_mut()
-                )
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn insert(&mut self, index: SizeType, value: T) {
+    /// Inserts an element to the specified index.
+    ///
+    /// Panics if `index` is greater than the length of the vector.
+    ///
+    /// This may panic if [`reserve`][1] fails.
+    ///
+    /// [1]: Self::reserve
+    pub fn insert(&mut self, index: SizeType, value: T) {
         if index > self.len {
             panic!("index {} was out of bounds with len {} when inserting", index, self.len)
         }
@@ -687,9 +722,143 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         }
     }
 
-    fn remove(&mut self, index: SizeType) -> T {
+    /// Appends a slice to the end of the vector.
+    ///
+    /// If the type implements [`Copy`], consider using [`fast_append`][1]
+    ///
+    /// This may panic if [`reserve`][2] fails.
+    ///
+    /// [1]: Self::fast_append
+    /// [2]: Self::reserve
+    pub fn append(&mut self, slice: &[T])
+        where
+            T: Clone
+    {
+        let len = self.len.into_usize() + slice.len();
+        let capacity = ReservePol
+            ::grow(self.capacity, len)
+            .unwrap();
+        self.reserve_exact(capacity);
+        unsafe {
+            Pointer
+                ::new(slice.as_ptr().cast_mut())
+                .unwrap()
+                .clone_elements(
+                    self.data.add(self.len.into_usize()),
+                    FromUsize::from_usize_unchecked(slice.len()),
+                );
+        }
+        self.len = SizeType::from_usize_unchecked(len);
+    }
+
+    /// Appends a slice to the end of the vector by [`copying`][1] the values.
+    ///
+    /// This may be faster than [`append`][2] for types implementing [`Copy`].
+    ///
+    /// This may panic if [`reserve`][3] fails.
+    ///
+    /// [1]: Copy
+    /// [2]: Self::append
+    /// [3]: Self::reserve
+    pub fn fast_append(&mut self, slice: &[T])
+        where T: Copy
+    {
+        let len = self.len.into_usize() + slice.len();
+        let capacity = ReservePol
+            ::grow(self.capacity, len)
+            .unwrap();
+        self.reserve_exact(capacity);
+        unsafe {
+            Pointer
+                ::new(slice.as_ptr().cast_mut())
+                .unwrap()
+                .fast_clone_elements(
+                    self.data.add(self.len.into_usize()),
+                    FromUsize::from_usize_unchecked(slice.len()),
+                );
+        }
+        self.len = SizeType::from_usize_unchecked(len);
+    }
+    
+    /// Extends the vector with an iterator.
+    ///
+    /// This may panic if [`reserve`][1] fails.
+    ///
+    /// [1]: Self::reserve
+    pub fn extend<I>(&mut self, iter: I)
+        where I: IntoIterator<Item = T>
+    {
+        let iter = iter.into_iter();
+        if let (_, Some(len)) = iter.size_hint() {
+            self.reserve_exact(ReservePol::grow_infallible(
+                self.capacity,
+                self.len.into_usize() + len
+            ));
+        }
+        for item in iter {
+            self.push(item);
+        }
+    }
+
+    /// Extends the vector with an iterator over [`Result`], returning an error if any item in the
+    /// iterator is [`Err`].
+    ///
+    /// This may panic if [`reserve`][1] fails.
+    ///
+    /// [1]: Self::reserve
+    pub fn try_extend<I, E>(
+        &mut self,
+        iter: I,
+    ) -> Result<(), E>
+        where I: IntoIterator<Item = Result<T, E>>
+    {
+        let iter = iter.into_iter();
+        if let (_, Some(len)) = iter.size_hint() {
+            self.reserve_exact(ReservePol::grow_infallible(
+                self.capacity,
+                self.len.into_usize() + len
+            ));
+        }
+        for item in iter {
+            self.push(item?);
+        }
+        Ok(())
+    }
+
+    /// Returns a reference to the last element of the vector, or [`None`] if the vector is empty.
+    #[inline]
+    pub fn last(&self) -> Option<&T> {
+        if self.is_empty() {
+            None
+        } else {
+            unsafe {Some(
+                self.data.add(self.len.into_usize() - 1).as_ref()
+            )}
+        }
+    }
+
+    /// Returns a mutable reference to the last element of the vector, or [`None`] if the vector is
+    /// empty.
+    #[inline]
+    pub fn last_mut(&mut self) -> Option<&mut T> {
+        if self.is_empty() {
+            None
+        }
+        else {
+            unsafe {Some(
+                self.data.add(self.len.into_usize() - 1).as_mut()
+            )}
+        }
+    }
+
+    /// Removes an element from the specified index.
+    ///
+    /// Panics if `index` is greater than or equal to the length of the vector.
+    pub fn remove(&mut self, index: SizeType) -> T {
         if index >= self.len {
-            panic!("index {} was out of bounds with len {} when removing", index, self.len);
+            panic!("index {} was out of bounds with len {} when attempting to remove an element",
+                index, self.len
+            );
         }
         let removed = unsafe { self.data.add(index.into_usize()).read() };
         for i in index.into_usize() ..self.len.into_usize() - 1 {
@@ -700,11 +869,20 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         self.len = self.len.step_backward();
         removed
     }
-
-    #[inline(always)]
-    fn swap_remove(&mut self, index: SizeType) -> T {
-        if index == self.len {
-            panic!("index {} was out of bounds with len {} when removing", index, self.len)
+    
+    /// Removes an element from the specified index and replaces the value of that index with the
+    /// last element of the vector if `index` is not the last index.
+    ///
+    /// This may be faster than [`remove`][1] but this doesn't preserve the order of elements.
+    ///
+    /// Panics if `index` is greater than or equal to the length of the vector.
+    ///
+    /// [1]: Self::remove
+    pub fn swap_remove(&mut self, index: SizeType) -> T {
+        if index >= self.len {
+            panic!("index {} was out of bounds with len {} when attempting to remove an element",
+                index, self.len
+            )
         }
         let removed = unsafe { self.data.add(index.into_usize()).read() };
         self.len = self.len.step_backward();
@@ -716,7 +894,16 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         removed
     }
 
-    fn clear(&mut self) {
+    /// Removes the last element of the vector and returns it, or [`None`] if the vector is empty.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.len == SizeType::ZERO { return None }
+        self.len = self.len.step_backward();
+        let ptr = unsafe { self.data.add(self.len.into_usize()) };
+        Some(unsafe { ptr.read() })
+    } 
+
+    /// Removes all elements from the vector preserving its allocated capacity.
+    pub fn clear(&mut self) {
         debug_assert!(self.len <= self.capacity);
         if self.capacity == SizeType::ZERO { return }
         unsafe {
@@ -725,326 +912,106 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> Vector<T, SizeType> for
         self.len = SizeType::ZERO;
     }
 
-    fn move_from_vec<V, S>(&mut self, from: &mut V)
-        where
-            V: Vector<T, S>,
-            S: IntoUsize + FromUsize,
+    /// Retains all elements that satisfy the predicate, preserving the order of elements.
+    ///
+    /// See [`retain_unordered`][1] for an unordered version.
+    ///
+    /// [1]: Self::retain_unordered
+    pub fn retain<F>(&mut self, mut p: F)
+        where F: FnMut(&T) -> bool
     {
-        self.clear();
-        let capacity = ReservePol
-            ::grow(self.capacity, from.len().into_usize())
-            .unwrap();
-        self.reserve_exact(capacity);
-        let len = SizeType::from_usize_unchecked(from.len().into_usize());
-        unsafe {
-            Pointer
-                ::new(from.as_mut_ptr())
-                .unwrap()
-                .move_elements(self.data, len);
-        }
-        self.len = len;
-        unsafe { from.set_len(S::ZERO); }
-    }
-
-    fn move_from_vec_map<U, V, S, F>(&mut self, from: &mut V, mut f: F)
-        where 
-            V: Vector<U, S>,
-            S: IntoUsize + FromUsize,
-            F: FnMut(U) -> T
-    {
-        self.clear();
-        let capacity = ReservePol
-            ::grow(self.capacity, from.len().into_usize())
-            .unwrap();
-        self.reserve_exact(capacity);
-        let len = from.len().into_usize();
-        let src = from.as_ptr();
-        let dst = self.as_mut_ptr();
-        unsafe {
-            for i in 0..len {
-                dst.add(i)
-                .write(f(src.add(i).read()))
+        for i in SizeType::ZERO.iter(self.len).rev() {
+            if !p(&self[i.into_usize()]) {
+                self.remove(i);
             }
         }
-        self.len = SizeType::from_usize_unchecked(len);
-        unsafe { from.set_len(S::ZERO); }
     }
 
-    #[inline(always)]
-    fn iter(&self) -> Self::Iter<'_> {
+    /// Retains all elements that satisfy the predicate that takes a mutable reference, preserving
+    /// the order of elements
+    ///
+    /// See [`retain_unordered_mut`][1] for an unordered version.
+    ///
+    /// [1]: Self::retain_unordered_mut
+    pub fn retain_mut<F>(&mut self, mut p: F)
+        where F: FnMut(&mut T) -> bool
+    {
+        for i in SizeType::ZERO.iter(self.len).rev() {
+            if !p(&mut self[i.into_usize()]) {
+                self.remove(i);
+            }
+        }
+    }
+
+    /// Retains all elements that satisfy the predicate without preserving the order of elements.
+    pub fn retain_unordered<F>(&mut self, mut p: F)
+        where F: FnMut(&T) -> bool
+    {
+        for i in SizeType::ZERO.iter(self.len).rev() {
+            if !p(&self[i.into_usize()]) {
+                self.swap_remove(i);
+            }
+        }
+    }
+
+    /// Retains all elements that satisfy the predicate that takes a mutable reference without
+    /// preserving the order of elements
+    pub fn retain_unordered_mut<F>(&mut self, mut p: F)
+        where F: FnMut(&mut T) -> bool
+    {
+        for i in SizeType::ZERO.iter(self.len).rev() {
+            if !p(&mut self[i.into_usize()]) {
+                self.swap_remove(i);
+            }
+        }
+    }
+
+    /// Removes consecutive repeated elements from the vector according to [`PartialEq`]
+    pub fn dedup(&mut self)
+        where T: PartialEq
+    {
+        for i in (0..self.len.into_usize().saturating_sub(1)).rev() {
+            if self[i] == self[i + 1] {
+                self.remove(SizeType::from_usize_unchecked(i + 1));
+            }
+        }
+    }
+
+    /// Removes consecutive repeated elements from the vector according to a closure defined
+    /// equality.
+    pub fn dedup_by<F>(&mut self, mut p: F)
+        where F: FnMut(&T, &T) -> bool
+    {
+        for i in (0..self.len.into_usize().saturating_sub(1)).rev() {
+            if p(&self[i], &self[i + 1]) {
+                self.remove(SizeType::from_usize_unchecked(i + 1));
+            }
+        }
+    }
+
+    /// Removes consecutive repeated elements that resolve to a key implementing [`PartialEq`]. 
+    pub fn dedup_by_key<F, K>(&mut self, mut key: F)
+        where
+            F: FnMut(&T) -> K,
+            K: PartialEq,
+    {
+        for i in (0..self.len.into_usize().saturating_sub(1)).rev() {
+            if key(&self[i]) == key(&self[i + 1]) {
+                self.remove(SizeType::from_usize_unchecked(i + 1));
+            }
+        }
+    }
+
+    /// Returns an iterator over the elements of the vector.
+    #[inline]
+    pub fn iter(&self) -> slice::Iter<'_, T> {
         self.as_slice().iter()
     }
 
-    #[inline(always)]
-    fn iter_mut(&mut self) -> Self::IterMut<'_> {
+    /// Returns a mutable iterator over the elements of the vector.
+    #[inline]
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
         self.as_mut_slice().iter_mut()
-    }
-}
-
-impl<T, Alloc, ReservePol, IsStd, SizeType>
-    FallibleVec<T, SizeType> for AllocVec<T, Alloc, ReservePol, IsStd, SizeType>
-    where
-        Alloc: LocalAlloc,
-        ReservePol: ReservePolicy<SizeType>,
-        IsStd: Conditional,
-        SizeType: IntoUsize + FromUsize,
-{
-
-    #[inline(always)]
-    fn fallible_reserve(&mut self, capacity: SizeType) -> Result<(), TryReserveError<()>> {
-        let capacity = ReservePol::grow(self.capacity, capacity.into_usize())?;
-        self.fallible_reserve_exact(capacity)
-    }
-
-    fn fallible_reserve_exact(&mut self, capacity: SizeType) -> Result<(), TryReserveError<()>> {
-        if capacity <= self.capacity { return Ok(()) }
-        if !ReservePol::can_grow() {
-            return Err(TryReserveError::max_capacity_exceeded(self.capacity, capacity.into_usize(), ()))
-        }
-        let tmp = unsafe {
-            self.alloc.allocate_uninit(capacity.into_usize())
-        }.map_err(|err| TryReserveError::alloc_error(err, ()))?.into();
-        debug_assert!(self.len <= self.capacity);
-        unsafe {
-            self.data.move_elements(tmp, self.len);
-        }
-        if self.capacity != SizeType::ZERO {
-            unsafe { self.alloc.free_uninit(*self.data, self.capacity.into_usize()); }
-        }
-        self.data = tmp;
-        self.capacity = capacity;
-        Ok(())
-    }
-
-    fn fallible_resize(&mut self, len: SizeType, value: T) -> Result<(), TryReserveError<()>>
-        where
-            T: Clone
-    {
-        if len > self.capacity {
-            self.fallible_reserve_exact(len)?;
-        }
-        if len > self.len {
-            for i in self.len.into_usize()..len.into_usize() {
-                unsafe { self.data.add(i).write(value.clone()) }
-            }
-        }
-        else if len < self.len {
-            unsafe {
-                self.data.add(len.into_usize()).drop_in_place(self.len - len);
-            }
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_resize_with<F>(&mut self, len: SizeType, mut f: F) -> Result<(), TryReserveError<()>>
-        where
-            F: FnMut() -> T
-    {
-        if len > self.capacity {
-            self.fallible_reserve(len)?;
-        }
-        if len > self.len {
-            for i in self.len.into_usize()..len.into_usize() {
-                unsafe { self.data.add(i).write(f()) }
-            }
-        }
-        else if len < self.len {
-            unsafe {
-                self.data.add(len.into_usize()).drop_in_place(self.len - len);
-            }
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_try_resize_with<F, E, MapE>(
-        &mut self,
-        len: SizeType,
-        mut f: F,
-        map_reserve_err: MapE,
-    ) -> Result<(), E>
-        where
-            F: FnMut() -> Result<T, E>,
-            MapE: FnMut(TryReserveError<()>) -> E
-    {
-        if len > self.capacity {
-            self.fallible_reserve(len)
-                .map_err(map_reserve_err)?;
-        }
-        if len > self.len {
-            for i in self.len.into_usize()..len.into_usize() {
-                unsafe { self.data
-                    .add(i)
-                    .write(f().inspect_err(|_| {
-                        self.len = SizeType::from_usize_unchecked(i);
-                    })?)
-                }
-            }
-        }
-        else if len < self.len {
-            unsafe {
-                self.data.add(len.into_usize()).drop_in_place(self.len - len);
-            }
-        }
-        self.len = len;
-        Ok(())
-    }
-
-    fn fallible_push(&mut self, value: T) -> Result<(), TryReserveError<T>> {
-        if self.len >= self.capacity {
-            if self.capacity == SizeType::ZERO {
-                if let Err(err) = self.fallible_reserve_exact(SizeType::from_usize_unchecked(2)) {
-                    return Err(err.with_value(value))
-                }
-            }
-            else {
-                let capacity = match ReservePol
-                    ::grow(
-                        self.capacity,
-                        self.capacity.into_usize() * 2
-                    )
-                {
-                    Ok(c) => c,
-                    Err(err) => return Err(err.with_value(value))
-                };
-                if let Err(err) = self.fallible_reserve_exact(capacity) {
-                    return Err(err.with_value(value))
-                }
-            }
-        }
-        let ptr = unsafe { self.data.add(self.len.into_usize()) };
-        unsafe { ptr.write(value) };
-        self.len = self.len.step_forward();
-        Ok(())
-    }
-
-    fn fallible_append(&mut self, slice: &[T]) -> Result<(), TryReserveError<()>>
-        where
-            T: Clone
-    {
-        let len = self.len.into_usize() + slice.len();
-        let capacity = ReservePol::grow(self.capacity, len)?;
-        self.fallible_reserve_exact(capacity)?;
-        unsafe {
-            Pointer
-                ::new(slice.as_ptr().cast_mut())
-                .unwrap()
-                .clone_elements(
-                    self.data.add(self.len.into_usize()),
-                    SizeType::from_usize_unchecked(slice.len()),
-                );
-        }
-        self.len = SizeType::from_usize_unchecked(len);
-        Ok(())
-    }
-
-    fn fallible_append_map<U, F>(&mut self, slice: &[U], mut f: F) -> Result<(), TryReserveError<()>>
-        where
-            F: FnMut(&U) -> T
-    {
-        let len = self.len.into_usize() + slice.len();
-        let capacity = ReservePol::grow(self.capacity, len)?;
-        self.fallible_reserve_exact(capacity)?;
-        let len = self.len.into_usize();
-        for (i, u) in slice.iter().enumerate() {
-            unsafe {
-                self.data.add(len + i).write(f(u));
-            }
-        }
-        self.len = SizeType::from_usize_unchecked(len);
-        Ok(())
-    }
-
-    fn fallible_fast_append(&mut self, slice: &[T]) -> Result<(), TryReserveError<()>>
-        where T: Copy
-    {
-        let len = self.len.into_usize() + slice.len();
-        let capacity = ReservePol::grow(self.capacity, len)?;
-        self.fallible_reserve_exact(capacity)?;
-        unsafe {
-            Pointer
-                ::new(slice.as_ptr().cast_mut())
-                .unwrap()
-                .fast_clone_elements(
-                    self.data.add(self.len.into_usize()),
-                    SizeType::from_usize_unchecked(slice.len()),
-                );
-        }
-        self.len = SizeType::from_usize_unchecked(len);
-        Ok(())
-    }
-
-    fn fallible_insert(&mut self, index: SizeType, value: T) -> Result<(), TryReserveError<T>> {
-        if index > self.len {
-            panic!("index {} was out of bounds with len {} when inserting", index, self.len)
-        }
-        if index == self.len && index == self.capacity {
-            let capacity = match ReservePol
-                ::grow(
-                    self.capacity,
-                    self.capacity.into_usize() * 2
-                ) {
-                Ok(c) => c,
-                Err(err) => return Err(err.with_value(value))
-            };
-            if let Err(err) = self.fallible_reserve_exact(capacity) {
-                return Err(err.with_value(value))
-            }
-        }
-        unsafe {
-            self.data.insert_element(value, index, self.len);
-            self.len = self.len.step_forward();
-            Ok(())
-        }
-    }
-
-    fn fallible_move_from_vec<V, S>(&mut self, from: &mut V) -> Result<(), TryReserveError<()>>
-        where
-            V: Vector<T, S>,
-            S: IntoUsize + FromUsize,
-    {
-        self.clear();
-        let len = from.len().into_usize();
-        let capacity = ReservePol::grow(self.capacity, len)?;
-        self.fallible_reserve_exact(capacity)?;
-        let len = SizeType::from_usize_unchecked(len);
-        unsafe {
-            Pointer
-                ::new(from.as_mut_ptr())
-                .unwrap()
-                .move_elements(self.data, len);
-        }
-        self.len = len;
-        unsafe { from.set_len(S::ZERO); }
-        Ok(())
-    }
-
-    fn fallible_move_from_vec_map<U, V, S, F>(
-        &mut self,
-        from: &mut V,
-        mut f: F,
-    ) -> Result<(), TryReserveError<()>>
-        where 
-            V: Vector<U, S>,
-            S: IntoUsize + FromUsize,
-            F: FnMut(U) -> T
-    {
-        self.clear();
-        let len = from.len().into_usize();
-        let capacity = ReservePol::grow(self.capacity, len)?;
-        self.fallible_reserve_exact(capacity)?;
-        let src = from.as_ptr();
-        let dst = self.as_mut_ptr();
-        unsafe {
-            for i in 0..len {
-                dst.add(i)
-                .write(f(src.add(i).read()))
-            }
-        }
-        self.len = SizeType::from_usize_unchecked(len);
-        unsafe { from.set_len(S::ZERO); }
-        Ok(())
     }
 }
 
@@ -1058,7 +1025,6 @@ impl_traits!{
     >
     Drop =>
 
-        #[inline(always)]
         fn drop(&mut self) {
             self.clear();
             if self.capacity != SizeType::ZERO {
@@ -1073,14 +1039,14 @@ impl_traits!{
     ,
     AsRef<[T]> =>
 
-        #[inline(always)]
+        #[inline]
         fn as_ref(&self) -> &[T] {
             self.as_slice()
         }
     ,
     AsMut<[T]> =>
 
-        #[inline(always)]
+        #[inline]
         fn as_mut(&mut self) -> &mut [T] {
             self.as_mut_slice()
         }
@@ -1089,28 +1055,28 @@ impl_traits!{
 
         type Target = [T];
 
-        #[inline(always)]
+        #[inline]
         fn deref(&self) -> &Self::Target {
             self.as_ref()
         }
     ,
     DerefMut =>
 
-        #[inline(always)]
+        #[inline]
         fn deref_mut(&mut self) -> &mut Self::Target {
             self.as_mut()
         }
     ,
     Borrow<[T]> =>
 
-        #[inline(always)]
+        #[inline]
         fn borrow(&self) -> &[T] {
             self.as_slice()
         }
     ,
     BorrowMut<[T]> =>
 
-        #[inline(always)]
+        #[inline]
         fn borrow_mut(&mut self) -> &mut [T] {
             self.as_mut_slice()
         }
@@ -1120,7 +1086,7 @@ impl_traits!{
         type Item = &'vec T;
         type IntoIter = Iter<'vec, T>;
 
-        #[inline(always)]
+        #[inline]
         fn into_iter(self) -> Self::IntoIter {
             self.iter()
         }
@@ -1130,7 +1096,7 @@ impl_traits!{
         type Item = &'vec mut T;
         type IntoIter = IterMut<'vec, T>;
 
-        #[inline(always)]
+        #[inline]
         fn into_iter(self) -> Self::IntoIter {
             self.iter_mut()
         }
@@ -1140,7 +1106,6 @@ impl_traits!{
         type Item = T;
         type IntoIter = IterAllocVec<T, SizeType, Alloc>;
 
-        #[inline(always)]
         fn into_iter(self) -> Self::IntoIter {
             unsafe {
                 let s = ManuallyDrop::new(self);
@@ -1160,7 +1125,6 @@ impl_traits!{
     ,
     Hash where T: Hash =>
 
-        #[inline(always)]
         fn hash<H: Hasher>(&self, state: &mut H) {
             self.as_slice().hash(state)
         }
@@ -1281,14 +1245,13 @@ mod std_features {
     impl_traits!{
         for StdVecBase<T, SizeType: [IntoUsize + FromUsize], ReservePol: [ReservePolicy<SizeType>]>
         Default =>
-            #[inline(always)]
+            #[inline]
             fn default() -> Self {
                 StdVecBase::new()
             }
         ,
         Clone where T: Clone =>
 
-            #[inline(always)]
             fn clone(&self) -> Self {
                 let mut clone = StdVecBase::with_capacity(self.capacity);
                 unsafe {
@@ -1300,7 +1263,6 @@ mod std_features {
         ,
         From<&[T]> where T: Clone =>
             
-            #[inline(always)]
             fn from(value: &[T]) -> Self {
                 let len =  SizeType::from_usize_unchecked(value.len());
                 let mut vec = StdVecBase::with_capacity(len);
@@ -1352,7 +1314,7 @@ mod std_features {
     {
         
         /// Creates an empty vector with zero capacity.
-        #[inline(always)]
+        #[inline]
         pub fn new() -> Self {
             Self {
                 data: Pointer::dangling(),
@@ -1375,7 +1337,7 @@ mod std_features {
             }
             let capacity = ReservePol::grow_infallible(SizeType::ZERO, capacity.into_usize());
             let data = unsafe { StdAlloc
-                .allocate_uninit(capacity.into_usize())
+                .alloc_uninit(capacity.into_usize())
                 .expect("global alloc failed").into()
             };
             Self {
@@ -1395,7 +1357,7 @@ mod std_features {
                 return Default::default()
             }
             let data = unsafe { StdAlloc
-                .allocate_uninit(capacity.into_usize())
+                .alloc_uninit(capacity.into_usize())
                 .expect("global alloc failed").into()
             };
             Self {
@@ -1419,7 +1381,7 @@ mod std_features {
             }
             let capacity = ReservePol::grow_infallible(SizeType::ZERO, len.into_usize());
             let data: Pointer<T, SizeType> = unsafe { StdAlloc 
-                .allocate_uninit(capacity.into_usize())
+                .alloc_uninit(capacity.into_usize())
                 .expect("global alloc failed").into()
             };
             for i in 0..len.into_usize() {
@@ -1446,7 +1408,7 @@ mod std_features {
             }
             let capacity = len;
             let data: Pointer<T, SizeType> = unsafe { StdAlloc 
-                .allocate_uninit(capacity.into_usize())
+                .alloc_uninit(capacity.into_usize())
                 .expect("global alloc failed").into()
             };
             for i in 0..len.into_usize() {
@@ -1473,7 +1435,7 @@ mod std_features {
             }
             let capacity = ReservePol::grow_infallible(SizeType::ZERO, len.into_usize());
             let data: Pointer<T, SizeType> = unsafe { StdAlloc
-                .allocate_uninit(capacity.into_usize())
+                .alloc_uninit(capacity.into_usize())
                 .expect("global alloc failed").into()
             };
             for i in 0..len.into_usize() {
@@ -1486,6 +1448,28 @@ mod std_features {
                 alloc: StdAlloc,
                 _markers: PhantomData,
             }
+        }
+
+        pub fn flattened<U>(
+            slices: &[U],
+        ) -> Self
+            where
+                U: AsRef<[T]>,
+                T: Clone,
+        {
+            let capacity: usize = slices
+                .iter()
+                .map(|s| s.as_ref().len())
+                .sum();
+            let capacity = ReservePol::grow_infallible(
+                SizeType::ZERO,
+                capacity,
+            );
+            let mut res = Self::with_capacity(capacity);
+            for slice in slices {
+                res.append(slice.as_ref());
+            }
+            res
         }
     }
 
@@ -1500,7 +1484,7 @@ mod std_features {
             SizeType: IntoUsize + FromUsize,
     {
 
-        #[inline(always)]
+        #[inline]
         fn from(value: &AllocVec<T, Alloc, ReservePol, IsStd, SizeType>) -> Self {
             value.to_vec()
         }

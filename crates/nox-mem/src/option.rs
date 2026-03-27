@@ -3,6 +3,8 @@ use core::{
     ptr,
 };
 
+use crate::num::{NonZeroInteger, Integer};
+
 pub trait OptionExt<T> {
 
     /// [`Option::get_or_insert_with`] with a closure that may fail.
@@ -31,16 +33,27 @@ pub trait OptionExt<T> {
         where
             T: Deref,
             <T as Deref>::Target: Sized;
+
+    fn unwrap_or_sentinel<U>(self, x: U) -> U
+        where
+            U: Integer,
+            T: NonZeroInteger<U>;
+
+    fn unwrap_or_sentinel_with<U, F>(self, f: F) -> U
+        where
+            U: Integer,
+            F: FnOnce() -> U,
+            T: NonZeroInteger<U>;
 }
 
 pub trait OptionSlice<T> {
 
-    fn as_ptr(&self) -> *const T;
+    fn as_slice_ptr(&self) -> *const T;
 }
 
 impl<T> OptionExt<T> for Option<T> {
 
-    #[inline(always)]
+    #[inline]
     fn get_or_try_insert_with<E, F>(&mut self, f: F) -> Result<&mut T, E>
         where F: FnOnce() -> Result<T, E>
     {
@@ -53,7 +66,7 @@ impl<T> OptionExt<T> for Option<T> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn unwrap_or_try_else<F, E>(self, f: F) -> Result<T, E>
         where F: FnOnce() -> Result<T, E>
     {
@@ -66,7 +79,7 @@ impl<T> OptionExt<T> for Option<T> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn edit<F>(&mut self, f: F)
         where F: FnOnce(&mut T) 
     {
@@ -75,7 +88,7 @@ impl<T> OptionExt<T> for Option<T> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn as_ptr(&self) -> *const <T as Deref>::Target
         where
             T: Deref,
@@ -86,12 +99,38 @@ impl<T> OptionExt<T> for Option<T> {
             None => ptr::null(),
         }
     }
+
+    #[inline]
+    fn unwrap_or_sentinel<U>(self, x: U) -> U
+        where
+            U: Integer,
+            T: NonZeroInteger<U>
+    {
+        match self {
+            Some(value) => value.get(),
+            None => x,
+        }
+    }
+
+    #[inline]
+    fn unwrap_or_sentinel_with<U, F>(self, f: F) -> U
+        where
+            U: Integer,
+            F: FnOnce() -> U,
+            T: NonZeroInteger<U>
+    {
+        match self {
+            Some(value) => value.get(),
+            None => f(),
+        }
+        
+    }
 }
 
 impl<T> OptionSlice<T> for Option<&[T]> {
     
-    #[inline(always)]
-    fn as_ptr(&self) -> *const T {
+    #[inline]
+    fn as_slice_ptr(&self) -> *const T {
         match self {
             Some(value) => value.as_ptr(),
             None => ptr::null(),
@@ -101,8 +140,8 @@ impl<T> OptionSlice<T> for Option<&[T]> {
 
 impl<T> OptionSlice<T> for Option<&mut [T]> {
     
-    #[inline(always)]
-    fn as_ptr(&self) -> *const T {
+    #[inline]
+    fn as_slice_ptr(&self) -> *const T {
         match self {
             Some(value) => value.as_ptr(),
             None => ptr::null(),

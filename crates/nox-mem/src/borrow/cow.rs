@@ -35,13 +35,13 @@ impl<B> CowMut<'_, B>
 {
 
     /// Returns whether the data is borrowed.
-    #[inline(always)]
+    #[inline]
     pub fn is_borrowed(&self) -> bool {
         matches!(self, Self::Borrowed(_))
     }
 
     /// Returns whether the data is owned.
-    #[inline(always)]
+    #[inline]
     pub fn is_owned(&self) -> bool {
         matches!(self, Self::Owned(_))
     }
@@ -55,7 +55,7 @@ impl<B> CowMut<'_, B>
     ///
     /// If you want a mutable reference to `B` without cloning the data, simply use
     /// [`DerefMut`].
-    #[inline(always)]
+    #[inline]
     pub fn to_mut(&mut self) -> &mut <B as ToOwned>::Owned {
         match self {
             Self::Borrowed(b) => {
@@ -75,7 +75,7 @@ impl<B> CowMut<'_, B>
     /// data.
     ///
     /// Equivalent to [`Cow::into_owned`].
-    #[inline(always)]
+    #[inline]
     pub fn into_owned(self) -> <B as ToOwned>::Owned
     {
         match self {
@@ -92,7 +92,7 @@ impl<B> Deref for CowMut<'_, B>
 {
     type Target = B;
 
-    #[inline(always)]
+    #[inline]
     fn deref(&self) -> &Self::Target {
         match self {
             Self::Borrowed(b) => b,
@@ -106,7 +106,7 @@ impl<B> DerefMut for CowMut<'_, B>
         B: ?Sized + ToOwned,
         <B as ToOwned>::Owned: BorrowMut<B>,
 {
-    #[inline(always)]
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
             Self::Borrowed(b) => b,
@@ -136,7 +136,7 @@ impl<T, B> PartialEq<T> for CowMut<'_, B>
         <B as ToOwned>::Owned: BorrowMut<B>,
 {
 
-    #[inline(always)]
+    #[inline]
     fn eq(&self, other: &T) -> bool {
         self.deref() == other.borrow()
     }
@@ -153,7 +153,6 @@ impl<B> Debug for CowMut<'_, B>
         B: Debug + ?Sized + ToOwned,
         <B as ToOwned>::Owned: Debug + BorrowMut<B>,
 {
-    #[inline(always)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Borrowed(b) =>
@@ -175,7 +174,6 @@ impl<B> Display for CowMut<'_, B>
         <B as ToOwned>::Owned: Display + BorrowMut<B>,
 {
 
-    #[inline(always)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Borrowed(b) => b.fmt(f),

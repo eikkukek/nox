@@ -15,7 +15,7 @@ use crate::{
     conditional::{Conditional, True, False},
 };
 
-use super::{AllocVecBase, Vector, Pointer};
+use super::{AllocVecBase, Pointer};
 
 pub struct NonNullPolicy<SizeType>(PhantomData<SizeType>);
 
@@ -25,12 +25,12 @@ unsafe impl<'a> LocalAlloc for NonNullAlloc<'a> {
 
     type Error = TryReserveError<()>;
 
-    #[inline(always)]
-    unsafe fn allocate_raw(&self, _layout: Layout) -> Result<NonNull<u8>, Self::Error> {
+    #[inline]
+    unsafe fn alloc_raw(&self, _layout: Layout) -> Result<NonNull<u8>, Self::Error> {
         Err(TryReserveError::max_capacity_exceeded(0, 0, ()))
     }
 
-    #[inline(always)]
+    #[inline]
     unsafe fn free_raw(&self, _ptr: NonNull<u8>, _layout: Layout) {}
 }
 
@@ -55,7 +55,7 @@ unsafe impl<SizeType> ReservePolicy<SizeType> for NonNullPolicy<SizeType>
 
     fn grow_infallible(current: SizeType, required: usize) -> SizeType {
         if required > current.into_usize() {
-            panic!("maximum capacity of {current} exceeded")
+            panic!("maximum capacity of {current} exceeded with required capacity {required}")
         } else {
             current
         }
@@ -81,7 +81,6 @@ impl<'a, T, SizeType> NonNullVecBase<'a, T, SizeType>
     /// # Safety
     /// This is unsafe because you need to ensure that the pointer is valid for vector operations
     /// up to `capacity` for the duration the vector is used.
-    #[inline(always)]
     pub unsafe fn new(
         ptr: NonNull<T>,
         capacity: SizeType,
@@ -104,14 +103,13 @@ impl<'a, T, SizeType> NonNullVecBase<'a, T, SizeType>
 
     /// Creates a [`NonNullVec`] with the given capacity, allocting its memory from [`Alloc`]. The
     /// memory can be freed by getting the pointer back with [`NonNullVec::as_non_null()`].
-    #[inline(always)]
     pub fn with_capacity<Alloc: LocalAlloc + ?Sized>(
         capacity: SizeType,
         alloc: &'a Alloc,
     ) -> Result<Self, Alloc::Error>
     {
         unsafe {
-            let ptr = alloc.allocate_raw(
+            let ptr = alloc.alloc_raw(
                 Layout::from_size_align_unchecked(
                     capacity.into_usize() * size_of::<T>(),
                     align_of::<T>(),
@@ -140,7 +138,7 @@ impl<'a, T, SizeType, Clonable> NonNullVecBase<'a, T, SizeType, Clonable>
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn into_static(self) -> NonNullVecBase<'static, T, SizeType> {
         unsafe {
             NonNullVecBase {
@@ -157,7 +155,7 @@ impl<'a, T, SizeType, Clonable> NonNullVecBase<'a, T, SizeType, Clonable>
     /// # Safety
     /// It needs to be guaranteed that only one of the resulting vectors is ever used if vector
     /// operations are required.
-    #[inline(always)]
+    #[inline]
     pub unsafe fn into_clonable(self) -> NonNullVecBase<'a, T, SizeType, True> {
         unsafe {
             NonNullVecBase {
@@ -193,15 +191,17 @@ impl<'a, T, SizeType, Clonable> NonNullVecBase<'a, T, SizeType, Clonable>
         where Alloc: LocalAlloc + ?Sized
     {
         self.clear();
-        unsafe {
-            alloc.free_raw(
-                NonNull::new(self.as_mut_ptr()).unwrap().cast(),
-                Layout::from_size_align_unchecked(
-                    self.capacity().into_usize() * size_of::<T>(),
-                    align_of::<T>(),
-                ),
-            );
-            self.set_capacity(SizeType::ZERO);
+        if self.capacity() != SizeType::ZERO {
+            unsafe {
+                alloc.free_raw(
+                    NonNull::new(self.as_mut_ptr()).unwrap().cast(),
+                    Layout::from_size_align_unchecked(
+                        self.capacity().into_usize() * size_of::<T>(),
+                        align_of::<T>(),
+                    ),
+                );
+                self.set_capacity(SizeType::ZERO);
+            }
         }
     }
 
@@ -223,7 +223,7 @@ impl<'a, T, SizeType, Clonable> NonNullVecBase<'a, T, SizeType, Clonable>
 /// use nox_mem::alloc::{StdAlloc, LocalAllocExt};
 /// use nox_mem::vec::{NonNullVec, Vector};
 /// unsafe {
-///     let ptr = StdAlloc.allocate_uninit(4).unwrap();
+///     let ptr = StdAlloc.alloc_uninit(4).unwrap();
 ///     let mut vec = NonNullVec::new(ptr, 4);
 ///     vec.push("foo".to_string());
 ///     vec.push("bar".to_string());
@@ -267,14 +267,14 @@ impl_traits! {
     Deref =>
         type Target = AllocVecBase<T, SizeType, NonNullAlloc<'a>, NonNullPolicy<SizeType>>;
 
-        #[inline(always)]
+        #[inline]
         fn deref(&self) -> &Self::Target {
             &self.inner
         }
     ,
     DerefMut =>
 
-        #[inline(always)]
+        #[inline]
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.inner
         }

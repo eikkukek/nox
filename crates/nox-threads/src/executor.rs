@@ -17,16 +17,13 @@ pub use futures::executor::*;
 use ahash::AHashMap;
 
 use nox_error::{Error, Result, Context};
-use nox_mem::{
-    vec::{StdVec, Vector},
-    collections::EntryExt,
-};
+use nox_mem::collections::EntryExt;
 
 type Fut = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 struct Scheduler {
     injector: deque::Injector<Fut>,
-    maybe_parked: RwLock<StdVec<thread::Thread>>,
+    maybe_parked: RwLock<Vec<thread::Thread>>,
     shutdown: AtomicBool,
 }
 
@@ -35,7 +32,7 @@ impl Scheduler {
     pub fn new(n_threads: usize) -> Self {
         Self {
             injector: deque::Injector::new(),
-            maybe_parked: RwLock::new(StdVec::with_capacity(n_threads)),
+            maybe_parked: RwLock::new(Vec::with_capacity(n_threads)),
             shutdown: AtomicBool::new(false),
         }
     }
@@ -99,7 +96,7 @@ async fn worker(
 struct Inner {
     senders: AHashMap<std::thread::ThreadId, channel::Sender<Fut>>,
     scheduler: Arc<Scheduler>,
-    threads: Option<StdVec<std::thread::JoinHandle<()>>>,
+    threads: Option<Vec<std::thread::JoinHandle<()>>>,
 }
 
 impl Inner {
@@ -108,7 +105,7 @@ impl Inner {
     fn new(
         senders: AHashMap<std::thread::ThreadId, channel::Sender<Fut>>,
         scheduler: Arc<Scheduler>,
-        threads: StdVec<std::thread::JoinHandle<()>>,
+        threads: Vec<std::thread::JoinHandle<()>>,
     ) -> Self
     {
         Self {
@@ -189,7 +186,7 @@ impl ThreadPool {
             .map(|n| n.get().saturating_sub(1).max(1))
             .unwrap_or(1);
         let sheduler = Arc::new(Scheduler::new(n_threads));
-        let workers: StdVec<_> = (0..n_threads)
+        let workers: Vec<_> = (0..n_threads)
             .map(|i| {
                 (i, deque::Worker::new_fifo())
             }).collect();
@@ -198,7 +195,7 @@ impl ThreadPool {
             .map(|w| w.1.stealer())
             .collect();
         let mut senders = AHashMap::default();
-        let mut threads = StdVec::new();
+        let mut threads = Vec::new();
         for (idx, w) in workers.into_iter() {
             let stealers = stealers.clone();
             let scheduler = sheduler.clone();
@@ -237,7 +234,7 @@ impl ThreadPool {
     }
 
     #[inline(always)]
-    pub fn worker_threads(&self) -> StdVec<std::thread::ThreadId> {
+    pub fn worker_threads(&self) -> Vec<std::thread::ThreadId> {
         self.inner.read().senders
             .keys().copied()
             .collect()

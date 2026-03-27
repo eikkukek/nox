@@ -90,16 +90,16 @@ impl Device {
     /// # Safety
     /// All raw Vulkan calls are inherently unsafe, because no validation of input or usage is applied.
     #[inline(always)]
-    pub unsafe fn wait_for_present2_khr(
+    pub unsafe fn wait_for_present2(
         &self,
         swapchain: vk::SwapchainKHR,
-        p_present_wait2_info: &vk::PresentWait2InfoKHR,
+        present_wait2_info: &vk::PresentWait2InfoKHR<'_>,
     ) -> VkResult<vk::Result> {
         unsafe {
             (self.fp.wait_for_present2_khr)(
                 self.handle,
                 swapchain,
-                p_present_wait2_info,
+                present_wait2_info,
             )
         }.result_with_success(vk::Result::SUCCESS)
         .filter_err(|&err| matches!(

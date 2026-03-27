@@ -1,3 +1,5 @@
+use core::ops::Deref;
+
 use compact_str::format_compact;
 
 use nox_ash::vk;
@@ -8,19 +10,48 @@ use nox_threads::{
     sync::{FutureLock, SwapLock},
 };
 use nox_mem::{
-    vec::{Vec32, FixedVec32, Vector},
+    vec::{Vec32, FixedVec32},
     Display,
     vec32,
+    slot_map::SlotIndex,
 };
-use nox_alloc::arena::Arena;
 
 use crate::{
     gpu::prelude::*,
-    dev::error::*,
+    error::*,
     sync::*,
     log,
 };
 
+/// An identifier for a pipeline batch.
+///
+/// This *can* be used to [`destroy an entire pipeline batch`][1] at once.
+///
+/// You can get the id [`when building a pipeline batch`][2].
+///
+/// [1]: Gpu::destroy_pipeline_batch
+/// [2]: PipelineBatchBuilder::id
+#[must_use]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
+#[display("{0}")]
+pub struct PipelineBatchId(SlotIndex<OnceLock<PipelineBatch>>);
+
+impl PipelineBatchId {
+
+    #[inline(always)]
+    pub(crate) fn new(slot_index: SlotIndex<OnceLock<PipelineBatch>>) -> Self {
+        Self(slot_index)
+    }
+
+    #[inline(always)]
+    pub(crate) fn slot_index(self) -> SlotIndex<OnceLock<PipelineBatch>> {
+        self.0
+    }
+}
+
+/// An identifier for a [`graphics pipeline`][1].
+///
+/// [1]: GraphicsPipeline
 #[must_use]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
 #[display("(batch id: {0}, pipeline index: {0})")]
@@ -41,6 +72,9 @@ impl GraphicsPipelineId {
     }
 }
 
+/// An identifier for a [`compute pipeline`][1].
+///
+/// [1]: ComputePipeline
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
 #[display("(batch id: {0}, pipeline index: {0})")]
 pub struct ComputePipelineId(PipelineBatchId, u32);
@@ -81,8 +115,12 @@ impl PipelineBatchInner {
     }
 }
 
+/// Contains the handle of a pipeline batch, which contains the pipelines and metadata about the
+/// batch.
+///
+/// This is [`Clone`], [`Send`] and [`Sync`].
 #[derive(Clone)]
-pub(crate) struct PipelineBatch {
+pub struct PipelineBatch {
     inner: Arc<FutureLock<PipelineBatchInner, RemoteHandle<Result<PipelineBatchInner>>>>,
 }
 
@@ -94,32 +132,45 @@ impl PipelineBatch {
     }
 
     #[inline(always)]
-    pub fn get_graphics_pipeline(&self, idx: u32) -> Result<GraphicsPipeline> {
+    pub(crate) async fn get_graphics_pipeline<'a>(
+        &self,
+        idx: u32,
+    ) -> Result<impl Deref<Target = GraphicsPipeline> + use<'a>>
+    {
         self.inner
-            .load()?.graphics_pipelines
+            .load().await?.graphics_pipelines
             .load()
-            .get(idx as usize)
-            .ok_or_else(|| Error::just_context("invalid id"))?
-            .as_ref()
-            .ok_or_else(|| Error::just_context("graphics pipeline destroyed"))
-            .cloned()
+            .try_map(|pipelines| {
+                pipelines
+                    .get(idx as usize)
+                    .ok_or_else(|| Error::just_context("invalid id"))?
+                    .as_ref()
+                    .ok_or_else(|| Error::just_context("graphics pipeline destroyed"))
+            })
     }
 
     #[inline(always)]
-    pub fn get_compute_pipeline(&self, idx: u32) -> Result<ComputePipeline> {
+    pub(crate) async fn get_compute_pipeline<'a>(
+        &self,
+        idx: u32,
+    ) -> Result<impl Deref<Target = ComputePipeline> + use<'a>>
+    {
         self.inner
-            .load()?.compute_pipelines
+            .load().await?.compute_pipelines
             .load()
-            .get(idx as usize)
-            .ok_or_else(|| Error::just_context("invalid id"))?
-            .as_ref()
-            .ok_or_else(|| Error::just_context("compute pipeline is destroyed"))
-            .cloned()
+            .try_map(|pipelines| {
+                pipelines
+                    .get(idx as usize)
+                    .ok_or_else(|| Error::just_context("invalid id"))?
+                    .as_ref()
+                    .ok_or_else(|| Error::just_context("compute pipeline is destroyed"))
+            })
+            
     }
 
-    pub fn destroy_graphics_pipelines(&self, ids: &[GraphicsPipelineId]) -> Result<()> {
+    pub(crate) async fn destroy_graphics_pipelines(&self, ids: &[GraphicsPipelineId]) -> Result<()> {
         if ids.is_empty() { return Ok(()) }
-        let inner = self.inner.load()?;
+        let inner = self.inner.load().await?;
         let batch_id = inner.id;
         inner.graphics_pipelines
             .modify(|pipelines| {
@@ -140,9 +191,9 @@ impl PipelineBatch {
         Ok(())
     }
 
-    pub fn destroy_compute_pipelines(&self, ids: &[ComputePipelineId]) -> Result<()> {
+    pub(crate) async fn destroy_compute_pipelines(&self, ids: &[ComputePipelineId]) -> Result<()> {
         if ids.is_empty() { return Ok(()) }
-        let inner = self.inner.load()?;
+        let inner = self.inner.load().await?;
         let batch_id = inner.id;
         inner.compute_pipelines
             .modify(|pipelines| {
@@ -167,8 +218,8 @@ impl PipelineBatch {
 pub struct PipelineBatchBuilder {
     this_id: PipelineBatchId,
     gpu: Gpu,
-    graphics_create_infos: Option<Vec32<GraphicsPipelineCreateInfo>>,
-    compute_create_infos: Option<Vec32<ComputePipelineCreateInfo>>,
+    graphics_create_infos: Option<Vec32<GraphicsPipelineCreateTemplate>>,
+    compute_create_infos: Option<Vec32<ComputePipelineCreateTemplate>>,
     cache: Option<PipelineCache>,
     built: bool,
 }
@@ -191,28 +242,69 @@ impl PipelineBatchBuilder {
         }
     }
 
+    /// Gets the [`ID`][1] of the pipeline batch.
+    ///
+    /// [1]: PipelineBatchId
     #[inline(always)]
-    pub fn with_graphics_pipeline<F>(
-        &mut self,
-        create_info: GraphicsPipelineCreateInfo
-    ) -> GraphicsPipelineId
-    {
-        let infos = self.graphics_create_infos.as_mut().unwrap();
-        let idx = infos.len();
-        infos.push(create_info);
-        GraphicsPipelineId(self.this_id, idx)
+    pub fn id(self, out: &mut PipelineBatchId) -> Self {
+        *out = self.this_id;
+        self
     }
 
+    /// Appends [`GraphicsPipelineCreateInfo`]s to the batch.
+    ///
+    /// [`GraphicsPipelineId`]s are returned to as described in [`GraphicsPipelineCreateInfo`].
+    ///
+    /// # Valid usage
+    /// - Each create info *must* follow the valid usage described in
+    ///   [`GraphicsPipelineCreateInfo`].
     #[inline(always)]
-    pub fn with_compute_pipeline<F>(
-        &mut self,
-        create_infos: ComputePipelineCreateInfo,
-    ) -> Result<ComputePipelineId>
+    pub fn with_graphics_pipelines<'a, I>(
+        mut self,
+        create_infos: I,
+    ) -> Self
+        where I: IntoIterator<Item = GraphicsPipelineCreateInfo<'a>>
+    {
+        let infos = self.graphics_create_infos.as_mut().unwrap();
+        let mut id = infos.len();
+        let batch_id = self.this_id;
+        infos.extend(create_infos
+            .into_iter()
+            .map(|info| {
+                *info.meta = GraphicsPipelineId(batch_id, id);
+                id += 1;
+                info.into_template()
+            })
+        );
+        self
+    }
+
+    /// Appends [`ComputePipelineCreateInfo`]s to the batch.
+    ///
+    /// [`ComputePipelineId`]s are returned to as described in [`ComputePipelineCreateInfo`].
+    ///
+    /// # Valid usage
+    /// - Each create info *must* follow the valid usage described in
+    ///   [`ComputePipelineCreateInfo`].
+    #[inline(always)]
+    pub fn with_compute_pipelines<'a, I>(
+        mut self,
+        create_infos: I,
+    ) -> Self
+        where I: IntoIterator<Item = ComputePipelineCreateInfo<'a>>
     {
         let infos = self.compute_create_infos.as_mut().unwrap();
-        let idx = infos.len();
-        infos.push(create_infos);
-        Ok(ComputePipelineId(self.this_id, idx))
+        let mut id = infos.len();
+        let batch_id = self.this_id;
+        infos.extend(create_infos
+            .into_iter()
+            .map(|info| {
+                *info.meta = ComputePipelineId(batch_id, id);
+                id += 1;
+                info.into_template()
+            })
+        );
+        self
     }
 
     /// You should always call this once you have finished building.
@@ -228,41 +320,39 @@ impl PipelineBatchBuilder {
         let this_id = self.this_id;
         let graphics = thread_pool.spawn_with_handle(async move {
             let tmp_alloc = gpu.tmp_alloc();
-            let tmp_alloc = tmp_alloc.guard();
             let pipeline_count = create_infos.len();
             if pipeline_count == 0 {
-                return Ok(Default::default())
+                return Result::Ok(Default::default())
             }
             let mut prepared_create_infos = FixedVec32
                 ::with_capacity(pipeline_count, &tmp_alloc)?;
             for info in &create_infos {
                 prepared_create_infos.push(info.prepare(&gpu, &tmp_alloc)
-                    .context("failed to convert graphics pipeline info")?);
+                    .await
+                    .context("failed to convert graphics pipeline info")?
+                );
             }
             let mut vk_infos = FixedVec32
                 ::with_capacity(pipeline_count, &tmp_alloc)?;
-            for info in &prepared_create_infos {
-                vk_infos.push(info.0.as_create_info());
+            for (info, _) in &mut prepared_create_infos {
+                let mut vk_info = info.as_create_info();
+                info.rendering_info.p_next = &info.robustness_info as *const _ as *const core::ffi::c_void;
+                vk_info.p_next = &info.rendering_info as *const _ as *const core::ffi::c_void;
+                vk_infos.push(vk_info);
             }
             let mut pipelines = FixedVec32
-                ::with_capacity(create_infos.len(), &tmp_alloc)?;
+                ::with_len(create_infos.len(), vk::Pipeline::null(), &tmp_alloc)?;
             unsafe {
-                let device = gpu.vk().device();
+                let device = gpu.device();
                 let pipeline_cache = cache 
                     .map(|cache| cache.handle().into_inner())
                     .unwrap_or(vk::PipelineCache::null());
-                let result = (device.fp_v1_0().create_graphics_pipelines)(
-                    device.handle(),
+                device.create_graphics_pipelines(
                     pipeline_cache,
-                    create_infos.len(),
-                    vk_infos.as_ptr(),
-                    core::ptr::null(),
-                    pipelines.as_mut_ptr(),
-                );
-                if result != vk::Result::SUCCESS {
-                    return Err(Error::new(result, "failed to create graphics pipelines"))
-                }
-                pipelines.set_len(create_infos.len());
+                    &vk_infos,
+                    None,
+                    &mut pipelines,
+                ).context_with(|| "failed to create graphics pipelines")?;
             }
             let graphics_pipelines: Vec32<_> = pipelines
                 .iter()
@@ -270,12 +360,15 @@ impl PipelineBatchBuilder {
                 .enumerate()
                 .map(|(i, handle)| unsafe {
                     Some(GraphicsPipeline::new(
-                        gpu.vk().clone(),
+                        gpu.device().clone(),
                         handle,
                         prepared_create_infos[i].1.clone(),
                         &create_infos[i]
                     ))
                 }).collect();
+            unsafe {
+                tmp_alloc.clear();
+            }
             Ok(graphics_pipelines)
         }).context("send error")?;
         let gpu = self.gpu.clone();
@@ -283,10 +376,9 @@ impl PipelineBatchBuilder {
         let cache = self.cache.clone();
         let compute = thread_pool.spawn_with_handle(async move {
             let tmp_alloc = gpu.tmp_alloc();
-            let tmp_alloc = tmp_alloc.guard();
             let pipeline_count = create_infos.len();
             if pipeline_count == 0 {
-                return Ok(Default::default())
+                return Result::Ok(Default::default())
             }
             let mut vk_infos = FixedVec32
                 ::with_capacity(pipeline_count, &tmp_alloc)?;
@@ -295,30 +387,24 @@ impl PipelineBatchBuilder {
             for info in &mut create_infos {
                 let (vk_info, shader_set) = info
                     .prepare(&gpu)
+                    .await
                     .context("failed to convert compute pipeline info")?;
                 shader_sets.push(shader_set);
                 vk_infos.push(vk_info);
             }
             let mut pipelines = FixedVec32
-                ::with_capacity(vk_infos.len(), &tmp_alloc)?;
+                ::with_len(vk_infos.len(), vk::Pipeline::null(), &tmp_alloc)?;
             unsafe {
-                let device = gpu.vk().device();
+                let device = gpu.device();
                 let pipeline_cache = cache
                     .map(|cache| cache.handle().into_inner())
                     .unwrap_or(vk::PipelineCache::null());
-                let result = (device.fp_v1_0().create_compute_pipelines)(
-                    device.handle(),
+                device.create_compute_pipelines(
                     pipeline_cache,
-                    vk_infos.len(),
-                    vk_infos.as_ptr(),
-                    core::ptr::null(),
-                    pipelines.as_mut_ptr(),
-
-                );
-                if result != vk::Result::SUCCESS {
-                    return Err(Error::new(result, "failed to create compute pipelines"))
-                }
-                pipelines.set_len(vk_infos.len());
+                    &vk_infos,
+                    None,
+                    &mut pipelines
+                ).context("failed to create compute pipelines")?;
             };
             let compute_pipelines: Vec32<_> =
                 shader_sets 
@@ -326,11 +412,14 @@ impl PipelineBatchBuilder {
                     .enumerate()
                     .map(|(i, shader_set)| {
                         Some(unsafe { ComputePipeline::new(
-                            gpu.vk().clone(),
+                            gpu.device().clone(),
                             pipelines[i],
                             shader_set,
                         )})
                     }).collect();
+            unsafe {
+                tmp_alloc.clear();
+            }
             Ok(compute_pipelines)
         }).context("send error")?;
         let fut = thread_pool.spawn_with_handle(async move {
@@ -353,15 +442,18 @@ impl Drop for PipelineBatchBuilder {
     fn drop(&mut self) {
         if !self.built {
             log::warn!(
-                "pipeline batch (id: {}) was not built, pipeline batches should always be explicitly built and you should not rely on automatic builds",
-                self.this_id
+                "{}{}",
+                format_args!("pipeline batch (id: {}) was not built, pipeline batches should always be explicitly built ",
+                    self.this_id
+                ),
+                "and you should not rely on automatic builds"
             );
             let cloned = Self {
                 this_id: self.this_id,
                 gpu: self.gpu.clone(),
                 graphics_create_infos: self.graphics_create_infos.clone(),
                 compute_create_infos: self.compute_create_infos.clone(),
-                cache: self.cache,
+                cache: self.cache.clone(),
                 built: false,
             };
             cloned.build().ok();

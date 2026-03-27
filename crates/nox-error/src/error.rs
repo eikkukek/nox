@@ -41,7 +41,11 @@ impl Debug for Internal {
     }
 }
 
-#[derive(Error)] #[display(format_args!("{}", self.internal.context()))]
+/// The error type Nox uses.
+///
+/// Allows giving errors a context with the [`Context`][crate::Context] trait.
+#[derive(Error)]
+#[display(format_args!("{}", self.internal.context()))]
 pub struct Error {
     #[source(self.source())] internal: Internal,
     loc: Option<Location>,
@@ -103,6 +107,12 @@ impl Error {
         self.internal.source()
     }
 
+    #[inline(always)]
+    pub fn with_location(mut self, loc: Location) -> Self {
+        self.loc = Some(loc);
+        self
+    }
+
     fn new_internal(
         err: impl error::Error + Send + Sync + 'static,
         ctx: impl Display + Send + Sync + 'static,
@@ -142,53 +152,28 @@ impl Tracked for Error {
     }
 }
 
-pub trait BuildInternal {
+pub mod build_error {
 
-    fn new_internal<E, C>(
+    use super::*;
+
+    pub fn new<E, C>(
         err: E,
         ctx: C,
         loc: Option<Location>,
-    ) -> Self
-        where
-            E: error::Error + Send + Sync + 'static,
-            C: Display + Send + Sync + 'static;
-
-    fn just_context_internal<C>(
-        ctx: C,
-        loc: Option<Location>,
-    ) -> Self
-        where
-            C: Display + Send + Sync + 'static;
-
-    fn with_location(self, loc: Location) -> Self;
-}
-
-impl BuildInternal for Error {
-
-    fn new_internal<E, C>(
-        err: E,
-        ctx: C,
-        loc: Option<Location>,
-    ) -> Self
-        where
-            E: error::Error + Send + Sync + 'static,
-            C: Display + Send + Sync + 'static
+    ) -> Error
+        where 
+        E: error::Error + Send + Sync + 'static,
+        C: Display + Send + Sync + 'static,
     {
-        Self::new_internal(err, ctx, loc)
+        Error::new_internal(err, ctx, loc)
     }
 
-    fn just_context_internal<C>(
+    pub fn just_context<C>(
         ctx: C,
         loc: Option<Location>,
-    ) -> Self
-        where
-            C: Display + Send + Sync + 'static
+    ) -> Error
+        where C: Display + Send + Sync + 'static
     {
-        Self::just_context_internal(ctx, loc)
-    }
-
-    fn with_location(mut self, loc: Location) -> Self {
-        self.loc = Some(loc);
-        self
+        Error::just_context_internal(ctx, loc)
     }
 }

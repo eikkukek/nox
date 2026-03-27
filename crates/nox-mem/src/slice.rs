@@ -1,14 +1,11 @@
-use crate::{
-    size_of, align_of,
-    Plain,
-};
+use crate::Plain;
 
 pub use core::slice::*;
 
 /// Converts a slice over [`T`] to a slice over [`u8`].
-pub fn as_bytes<T>(slice: &[T]) -> Option<&[u8]> {
+pub fn as_bytes<T>(slice: &[T]) -> &[u8] {
     unsafe {
-        Some(from_raw_parts(slice.as_ptr() as *const u8, size_of_val(slice)))
+        from_raw_parts(slice.as_ptr() as *const u8, size_of_val(slice))
     }
 }
 
@@ -16,16 +13,16 @@ pub fn as_bytes<T>(slice: &[T]) -> Option<&[u8]> {
 /// # Safety
 /// All writes to the slice are unsafe and it is up to the user to ensure those writes don't result
 /// in invalid values of [`T`].
-pub unsafe fn as_bytes_mut<T>(slice: &mut [T]) -> Option<&mut [u8]> {
+pub unsafe fn as_bytes_mut<T>(slice: &mut [T]) -> &mut [u8] {
     unsafe {
-        Some(from_raw_parts_mut(slice.as_ptr() as *mut u8, size_of_val(slice)))
+        from_raw_parts_mut(slice.as_ptr() as *mut u8, size_of_val(slice))
     }
 }
 
 /// Converts a value of [`T`] to a slice of [`u8`].
-pub fn value_as_bytes<T>(value: &T) -> Option<&[u8]> {
+pub fn value_as_bytes<T>(value: &T) -> &[u8] {
     unsafe {
-        Some(from_raw_parts(value as *const T as *const u8, size_of!(T)))
+        from_raw_parts(value as *const T as *const u8, size_of::<T>())
     }
 }
 
@@ -33,9 +30,9 @@ pub fn value_as_bytes<T>(value: &T) -> Option<&[u8]> {
 /// # Safety
 /// All writes to the slice are unsafe and it is up to the programmer to ensure those writes don't
 /// result in an invalid value of [`T`].
-pub unsafe fn value_as_bytes_mut<T>(value: &mut T) -> Option<&mut [u8]> {
+pub unsafe fn value_as_bytes_mut<T>(value: &mut T) -> &mut [u8] {
     unsafe {
-        Some(from_raw_parts_mut(value as *mut T as *mut u8, size_of!(T)))
+        from_raw_parts_mut(value as *mut T as *mut u8, size_of::<T>())
     }
 }
 
@@ -47,12 +44,12 @@ pub unsafe fn value_as_bytes_mut<T>(value: &mut T) -> Option<&mut [u8]> {
 /// This is unsafe because [`U`] could contain fields which would become unaligned when
 /// reinterpreting the bytes of [`T`] to [`U`].
 pub unsafe fn cast<T: Copy, U: Copy>(slice: &[T]) -> Option<&[U]> {
-    if size_of!(T) != size_of!(U) || align_of!(T) != align_of!(U) {
+    if !size_of::<T>().is_multiple_of(size_of::<U>()) || align_of::<T>() < align_of::<U>() {
         None
     }
     else {
         unsafe {
-            Some(from_raw_parts(slice.as_ptr().cast(), slice.len()))
+            Some(from_raw_parts(slice.as_ptr().cast(), size_of_val(slice) / size_of::<U>()))
         }
     }
 }
@@ -113,13 +110,12 @@ mod std_features {
     impl<T> AllocSlice<T> for Box<[T]>
     {
 
-        #[inline(always)]
         fn with_len(len: usize, value: T) -> Self
             where T: Clone
         {
             unsafe {
                 let ptr: *mut T = StdAlloc
-                    .allocate_uninit(len)
+                    .alloc_uninit(len)
                     .unwrap().as_ptr();
                 for i in 0..len {
                     ptr.add(i).write(value.clone());
@@ -128,13 +124,12 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
         fn with_len_with<F>(len: usize, mut f: F) -> Self
             where F: FnMut(usize) -> T
         {
             unsafe {
                 let ptr: *mut T = StdAlloc
-                    .allocate_uninit(len)
+                    .alloc_uninit(len)
                     .unwrap().as_ptr();
                 for i in 0..len {
                     ptr.add(i).write(f(i));
@@ -143,13 +138,12 @@ mod std_features {
             }
         }
 
-        #[inline(always)]
         fn uninit_slice(len: usize) -> Self
             where T: Plain
         {
             unsafe {
                 let ptr: *mut T = StdAlloc
-                    .allocate_uninit(len)
+                    .alloc_uninit(len)
                     .unwrap().as_ptr();
                 Self::from_raw_parts(ptr, len)
             }
@@ -158,21 +152,18 @@ mod std_features {
 
     impl<T> AllocSlice<T> for Arc<[T]> {
 
-        #[inline(always)]
         fn with_len(len: usize, value: T) -> Self
             where T: Clone
         {
             (0..len).map(|_| value.clone()).collect()
         }
 
-        #[inline(always)]
         fn with_len_with<F>(len: usize, f: F) -> Self
             where F: FnMut(usize) -> T
         {
             (0..len).map(f).collect()
         }
 
-        #[inline(always)]
         fn uninit_slice(len: usize) -> Self
             where T: Plain
         {

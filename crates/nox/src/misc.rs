@@ -1,32 +1,3 @@
-pub trait ToRef<T> {
-
-    fn to_ref(&self) -> &T;
-}
-
-impl<T> ToRef<T> for T {
-
-    #[inline(always)]
-    fn to_ref(&self) -> &T {
-        self
-    }
-}
-
-impl<T> ToRef<T> for &T {
-
-    #[inline(always)]
-    fn to_ref(&self) -> &T {
-        self
-    }
-}
-
-impl<T> ToRef<T> for &mut T {
-
-    #[inline(always)]
-    fn to_ref(&self) -> &T {
-        self
-    }
-}
-
 pub const fn assert_send<T: Send>() {}
 pub const fn assert_sync<T: Sync>() {}
 
@@ -41,5 +12,15 @@ macro_rules! assert_send {
 macro_rules! assert_sync {
     ($t:ty) => {
         const _: () = $crate::misc::assert_sync::<$t>();
+    };
+}
+
+/// ``` rust
+/// x |= y & (z as u32) << y.trailing_zeros()
+/// ```
+#[macro_export]
+macro_rules! or_flag {
+    ($flags:expr, $flag:expr, $value:expr $(,)?) => {
+        $flags |= $flag & ($value as u32) << $flag.trailing_zeros();
     };
 }

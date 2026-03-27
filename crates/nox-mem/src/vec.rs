@@ -1,10 +1,8 @@
-mod vector;
 mod pointer;
 mod alloc_vec;
 mod array_vec;
 mod non_null;
 
-pub use vector::{Vector, FallibleVec};
 pub use pointer::Pointer;
 pub use alloc_vec::{
     AllocVecBase,

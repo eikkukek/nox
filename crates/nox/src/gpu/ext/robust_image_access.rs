@@ -4,13 +4,18 @@ use super::*;
 
 use nox_ash::ext;
 
-/// Attribute type `bool`.
-pub const IS_SUPPORTED_ATTRIBUTE_NAME: ConstName
-    = ConstName::new("robust_image_access supported");
+pub struct Attributes;
 
-/// Attribute type `bool`.
-pub const IS_ENABLED_ATTRIBUTE_NAME: ConstName
-    = ConstName::new("robust_image_access enabled");
+impl Attributes {
+
+    /// Attribute type `bool`.
+    pub const IS_SUPPORTED: ConstName
+        = ConstName::new("robust_image_access supported");
+
+    /// Attribute type `bool`.
+    pub const IS_ENABLED: ConstName
+        = ConstName::new("robust_image_access enabled");
+}
 
 /// The extension type.
 #[derive(Clone, Copy)]
@@ -20,7 +25,7 @@ pub struct Extension {
 
 unsafe impl DeviceExtension for Extension {
 
-    fn get_info(&self, _attributes: &GpuAttributes) -> Option<DeviceExtensionInfo> {
+    fn get_info(&self, _attributes: &DeviceAttributes) -> Option<DeviceExtensionInfo> {
         let s = *self;
         Some(DeviceExtensionInfo {
             name: ext::image_robustness::NAME,
@@ -47,12 +52,12 @@ unsafe impl DeviceExtension for Extension {
         context.get_features(&mut features);
         if features.robust_image_access != 0 {
             context.register_attribute(DeviceAttribute::new_bool(
-                IS_SUPPORTED_ATTRIBUTE_NAME, true
+                Attributes::IS_SUPPORTED, true
             ));
         }
         matches!(self.robust_image_access, RobustAccessRequirements::Enabled).then(|| {
             context.register_attribute(DeviceAttribute::new_bool(
-                IS_ENABLED_ATTRIBUTE_NAME, true
+                Attributes::IS_ENABLED, true
             ));
             create_extends_device_create_info_obj(vk::PhysicalDeviceImageRobustnessFeatures
                 ::default()

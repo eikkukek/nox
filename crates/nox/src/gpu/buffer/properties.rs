@@ -1,8 +1,8 @@
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct BufferProperties {
-    pub size: vk::DeviceSize,
-    pub usage: vk::BufferUsageFlags,
+pub struct BufferProperties {
+    pub size: DeviceSize,
+    pub usage: BufferUsages,
     pub create_flags: vk::BufferCreateFlags,
 }

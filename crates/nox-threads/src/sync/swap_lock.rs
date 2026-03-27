@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use core::ops::Deref;
+
 use parking_lot::Mutex;
 use arc_swap::ArcSwap;
 
@@ -7,12 +9,20 @@ use arc_swap::ArcSwap;
 ///
 /// Loads are lock free, stores lock and clone the inner data.
 #[derive(Default)]
-pub struct SwapLock<T: Clone> {
+pub struct SwapLock<T>
+    where T: Clone
+{
     mtx: Mutex<()>,
     data: ArcSwap<T>,
 }
 
-impl<T: Clone> SwapLock<T> {
+pub struct SwapLockGuard<T> {
+    inner: arc_swap::Guard<Arc<T>>,
+}
+
+impl<T> SwapLock<T>
+    where T: Clone
+{
 
     #[inline(always)]
     pub fn new(val: T) -> Self {
@@ -23,8 +33,8 @@ impl<T: Clone> SwapLock<T> {
     }
 
     #[inline(always)]
-    pub fn load(&self) -> arc_swap::Guard<Arc<T>> {
-        self.data.load()
+    pub fn load(&self) -> SwapLockGuard<T> {
+        SwapLockGuard { inner: self.data.load(), }
     }
 
     #[inline(always)]
@@ -36,5 +46,65 @@ impl<T: Clone> SwapLock<T> {
         let u = f(&mut data);
         self.data.store(Arc::new(data));
         u
+    }
+}
+
+impl<T> Deref for SwapLockGuard<T> {
+
+    type Target = T;
+    
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        self.inner.deref()
+    }
+}
+
+impl<T> SwapLockGuard<T> {
+
+    #[inline(always)]
+    pub fn map<U, F>(self, f: F) -> MappedSwapLockGuard<T, U>
+        where
+            U: ?Sized,
+            F: FnOnce(&T) -> &U,
+    {
+        let u = f(&self);
+        MappedSwapLockGuard {
+            u,
+            _inner: self,
+        }
+    }
+
+    #[inline(always)]
+    pub fn try_map<U, F, E>(self, f: F) -> Result<MappedSwapLockGuard<T, U>, E>
+        where
+            U: ?Sized,
+            F: FnOnce(&T) -> Result<&U, E>
+    {
+        let u = f(&self)?;
+        Ok(MappedSwapLockGuard {
+            u,
+            _inner: self,
+        })
+    }
+}
+
+pub struct MappedSwapLockGuard<T, U>
+    where U: ?Sized
+{
+    u: *const U,
+    _inner: SwapLockGuard<T>,
+}
+
+impl<T, U> Deref for MappedSwapLockGuard<T, U>
+    where U: ?Sized
+{
+
+    type Target = U;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            &*self.u
+        }
     }
 }

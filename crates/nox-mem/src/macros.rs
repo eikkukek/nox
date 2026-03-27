@@ -6,20 +6,6 @@ macro_rules! const_assert {
 }
 
 #[macro_export]
-macro_rules! size_of {
-    ($t:ty) => {
-        size_of::<$t>()
-    };
-}
-
-#[macro_export]
-macro_rules! align_of {
-    ($t:ty) => {
-        align_of::<$t>()
-    };
-}
-
-#[macro_export]
 macro_rules! slice {
     [$v:expr; $n:expr] => (
         [$v; $n].as_slice()
