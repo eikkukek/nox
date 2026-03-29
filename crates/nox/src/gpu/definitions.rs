@@ -440,7 +440,7 @@ impl From<(u32, u32)> for Dimensions {
     fn from(value: (u32, u32)) -> Self {
         Self {
             width: value.0,
-            height: value.0,
+            height: value.1,
             depth: 1,
         }
     }
@@ -762,7 +762,7 @@ impl ComponentInfo {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, BuildStructure)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, BuildStructure)]
 pub struct ImageRange {
     pub subresource_range: ImageSubresourceRange,
     pub component_info: Option<ComponentInfo>,
@@ -772,14 +772,10 @@ pub struct ImageRange {
 impl ImageRange {
 
     #[inline]
-    pub fn new(
-        subresource_range: ImageSubresourceRange,
-        component_info: Option<ComponentInfo>,
-    ) -> Self
-    {
+    pub fn whole_range(aspect: ImageAspects) -> Self {
         Self {
-            subresource_range,
-            component_info,
+            subresource_range: ImageSubresourceRange::default().aspect_mask(aspect),
+            component_info: None,
             is_cube_map: false,
         }
     }
@@ -1027,7 +1023,7 @@ impl From<ImageCopy> for vk::ImageCopy2<'_> {
     }
 }
 
-#[derive(Clone, Copy, BuildStructure)]
+#[derive(Default, Clone, Copy, BuildStructure)]
 pub struct BufferImageCopy {
     pub buffer_offset: DeviceSize,
     #[skip]
@@ -1036,6 +1032,7 @@ pub struct BufferImageCopy {
     pub buffer_image_height: Option<NonZeroU32>,
     pub image_subresource: ImageSubresourceLayers,
     pub image_offset: ImageCopyOffset,
+    #[skip]
     pub image_extent: Dimensions,
 }
 
@@ -1058,6 +1055,13 @@ impl BufferImageCopy {
     #[inline]
     pub fn buffer_image_height(mut self, buffer_row_length: u32) -> Self {
         self.buffer_row_length = NonZeroU32::new(buffer_row_length);
+        self
+    }
+
+    pub fn image_extent<Dim>(mut self, extent: Dim) -> Self
+        where Dim: Into<Dimensions>
+    {
+        self.image_extent = extent.into();
         self
     }
 

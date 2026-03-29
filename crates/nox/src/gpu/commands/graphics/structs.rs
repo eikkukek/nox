@@ -118,6 +118,14 @@ impl From<ClearValue> for vk::ClearValue {
     }
 }
 
+impl From<[f32; 4]> for ClearValue {
+
+    #[inline]
+    fn from(value: [f32; 4]) -> Self {
+        Self::Color(ClearColorValue::Float(value))
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct ResolveInfo {
     pub image_view: BareImageViewId,

@@ -5,6 +5,8 @@ use std::sync::Arc;
 use core::{
     slice,
     hash::Hash,
+    borrow::Borrow,
+    marker::PhantomData,
 };
 
 use ahash::AHashMap;
@@ -26,26 +28,44 @@ pub struct TextOffset {
     pub first_word: bool,
 }
 
-pub struct VertexTextRenderer<'a, H: Clone + PartialEq + Eq + Hash> {
-    faces: AHashMap<H, FaceCache<'a>>,
+pub struct VertexTextRenderer<
+    'a,
+    H: Clone + PartialEq + Eq + Hash,
+    F: Borrow<Face<'a>>
+> {
+    faces: AHashMap<H, FaceCache<F>>,
     curve_tolerance: f32,
+    _marker: PhantomData<&'a ()>
 }
 
-impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
+impl<'a, H, F> VertexTextRenderer<'a, H, F>
+    where
+        H: Clone + PartialEq + Eq + Hash,
+        F: Borrow<Face<'a>>
+{
 
-    pub fn new(fonts: impl IntoIterator<Item = (impl Into<H>, Face<'a>)>, curve_tolerance: f32) -> Self {
+    pub fn new(fonts: impl IntoIterator<Item = (impl Into<H>, F)>, curve_tolerance: f32) -> Self {
         let mut faces = AHashMap::default();
-        for face in fonts {
-            faces.insert(face.0.into(), FaceCache { face: face.1, trigs: Default::default(), offsets: Default::default() });
+        for (hash, face) in fonts {
+            faces.insert(
+                hash.into(),
+                FaceCache {
+                    face,
+                    trigs: Default::default(),
+                    offsets: Default::default(),
+                },
+            );
         }
         Self {
             faces,
             curve_tolerance,
+            _marker: PhantomData,
         }
     }
 
     pub fn font_height(&mut self, font: &H) -> Option<f32> {
         let FaceCache { face, trigs: _, offsets: _ } = self.faces.get(font)?;
+        let face = face.borrow();
         Some((face.ascender() - face.descender() + face.line_gap()) as f32 / face.units_per_em() as f32)
     }
 
@@ -73,6 +93,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
         let mut skip_row = false;
         for segment in text {
             let FaceCache { face, trigs: _, offsets: _ } = faces.get(segment.font())?;
+            let face = face.borrow();
             let units_per_em = face.units_per_em() as f32;
             height = height.max((face.ascender() - face.descender() + face.line_gap()) as f32 / units_per_em);
             let space = face.glyph_hor_advance(face.glyph_index(' ')?)? as f32 / units_per_em;
@@ -141,6 +162,7 @@ impl<'a, H: Clone + PartialEq + Eq + Hash> VertexTextRenderer<'a, H> {
             };
         for (i, (start, word, font, shape)) in shapes.iter().enumerate() {
             let FaceCache { face, trigs, offsets } = faces.get_mut(font).unwrap();
+            let face = (*face).borrow();
             let units_per_em = face.units_per_em() as f32;
             if let Some(start) = start {
                 pen_x = *start;

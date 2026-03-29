@@ -1,5 +1,5 @@
 pub mod ext;
-pub mod memory_binder;
+mod memory_binder;
 pub mod device;
 pub mod extendable;
 
@@ -29,6 +29,8 @@ mod event;
 use core::{
     ops::Deref,
     cell::UnsafeCell,
+    num::NonZeroU32,
+    time::Duration,
 };
 
 use compact_str::format_compact;
@@ -84,18 +86,15 @@ pub(crate) mod prelude {
         super::shader_set::*,
         super::descriptor::*,
         pipeline::vertex_input::*,
-        super::memory_binder,
+        super::memory_binder::*,
         interface::*,
         super::ext,
         surface::VulkanWindow,
         super::event::Event,
-        super::memory_binder::MemoryProperties,
     };
 
-    pub type DeviceName = ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
-
-    pub const MIN_BUFFERED_FRAMES: u32 = 2;
-    pub const MAX_BUFFERED_FRAMES: u32 = 8;
+    pub type DeviceName =
+        ArrayString<{vk::MAX_PHYSICAL_DEVICE_NAME_SIZE}>;
 
     pub(crate) use surface::Surface;
 
@@ -210,7 +209,7 @@ struct GpuInner {
     timeline_semaphores: RwLock<SlotMap<vk::Semaphore>>,
     draw_commands: RwLock<SlotMap<DrawCommandResource>>,
     tmp_allocs: Arc<TmpAllocs>,
-    buffered_frames: u32,
+    desired_buffered_frames: u32,
     device: LogicalDevice,
 }
 
@@ -228,7 +227,7 @@ impl Gpu {
         device: LogicalDevice,
         thread_pool: ThreadPool,
         memory_layout: MemoryLayout,
-        buffered_frames: u32,
+        desired_buffered_frames: NonZeroU32,
     ) -> Result<Self> {
         let main_tmp_alloc = Arena
             ::with_fallback(memory_layout.tmp_arena_size())
@@ -242,9 +241,9 @@ impl Gpu {
         for id in thread_pool.worker_threads() {
             tmp_allocs
                 .entry(id)
-                .or_try_insert_with(|| Ok(Arc::new(Arena::with_fallback(memory_layout.tmp_arena_size())
-                    .context("failed to create arena alloc")?
-                )))?;
+                .or_try_insert_with(|| Ok(Arc::new(Arena::with_fallback(
+                    memory_layout.tmp_arena_size()
+                ).context("failed to create arena alloc")?)))?;
         }
         let command_workers = device.command_workers();
         let s = Self{inner:Arc::new(GpuInner {
@@ -263,7 +262,7 @@ impl Gpu {
                 fallback_alloc: Arc::new(main_tmp_alloc),
                 tmp_allocs,
             }),
-            buffered_frames: buffered_frames.clamp(MIN_BUFFERED_FRAMES, MAX_BUFFERED_FRAMES),
+            desired_buffered_frames: desired_buffered_frames.get(),
             memory_layout,
         })};
         let queue_scheduler = QueueScheduler::new(s.clone(), command_workers)
@@ -284,7 +283,7 @@ impl Gpu {
             device,
             event_loop.thread_pool(),
             attributes.gpu_memory_layout,
-            attributes.buffered_frames,
+            NonZeroU32::new(attributes.desired_buffered_frames).unwrap(),
         )?, create_cache(attributes.gpu_cache_attributes)))
     }
 
@@ -387,10 +386,11 @@ impl Gpu {
         };
         let mut image_format_prop = vk::ImageFormatProperties2::default();
         unsafe {
-            self.inner.device.instance().ash().get_physical_device_image_format_properties2(
-                self.inner.device.physical_device().handle(),
-                &format_info, &mut image_format_prop
-            ).context("failed to get image format properties")?;
+            self.inner.device.instance().ash()
+                .get_physical_device_image_format_properties2(
+                    self.inner.device.physical_device().handle(),
+                    &format_info, &mut image_format_prop
+                ).context("failed to get image format properties")?;
         }
         let image_format_prop = image_format_prop.image_format_properties;
         let mut format_properties3 = vk::FormatProperties3::default();
@@ -425,6 +425,10 @@ impl Gpu {
         })
     }
 
+    pub fn desired_buffered_frames(&self) -> u32 {
+        self.inner.desired_buffered_frames
+    }
+
     pub fn create_surface<H: VulkanWindow>(
         &self,
         window: Arc<H>,
@@ -433,7 +437,7 @@ impl Gpu {
         Ok(SurfaceId(surfaces.insert(Surface::new(
             window,
             self.clone(),
-            self.inner.buffered_frames,
+            self.inner.desired_buffered_frames,
         )?)))
     }
 
@@ -447,7 +451,9 @@ impl Gpu {
             .get_mut(surface_id.slot_index())
             .context_with(|| format_compact!(
                 "invalid surface id {surface_id}"
-            ))?.request_swapchain_update(self.inner.buffered_frames, framebuffer_size);
+            ))?.request_swapchain_update(
+                self.inner.desired_buffered_frames, framebuffer_size
+            );
         Ok(())
     }
 
@@ -646,15 +652,6 @@ impl Gpu {
     #[inline]
     pub(crate) fn write_surfaces(&self) -> ResourceWriteGuard<'_, Surface, SurfaceId> {
         ResourceWriteGuard::new(self.inner.surfaces.write())
-    }
-
-    pub fn create_shader(
-        &self,
-        attributes: ShaderAttributes,
-    ) -> Result<Shader> {
-        Ok(Shader::Pending(self.inner.thread_pool.spawn_with_handle(Shader::async_new(
-            attributes.to_owned(), self.api_version(),
-        )).context("spawn error")?))
     }
 
     pub fn create_shader_set<const N_SHADERS: usize>(
@@ -912,6 +909,13 @@ impl Gpu {
     }
 
     #[inline]
+    pub(crate) fn discard_pipeline_batch(&self, id: PipelineBatchId) {
+        self.inner.pipeline_batches.modify(|data| {
+            data.remove(id.slot_index())
+        }).ok();
+    }
+
+    #[inline]
     pub(crate) fn init_pipeline_batch(
         &self,
         id: PipelineBatchId,
@@ -980,8 +984,12 @@ impl Gpu {
     pub fn destroy_pipelines(
         &self,
         batch_id: PipelineBatchId,
-        graphics_pipeline_ids: &[GraphicsPipelineId],
-        compute_pipeline_ids: &[ComputePipelineId],
+        graphics_pipeline_ids: impl IntoIterator<
+            IntoIter = impl ExactSizeIterator<Item = GraphicsPipelineId>
+        >,
+        compute_pipeline_ids: impl IntoIterator<
+            IntoIter = impl ExactSizeIterator<Item = ComputePipelineId>
+        >,
     ) -> Result<()>
     {
         self.inner.pipeline_batches.modify(|batches| {
@@ -990,8 +998,12 @@ impl Gpu {
                 .context_with(|| format_compact!(
                     "invalid pipeline batch id {batch_id}"
                 ))?.get().unwrap();
-            block_on(batch.destroy_graphics_pipelines(graphics_pipeline_ids))?;
-            block_on(batch.destroy_compute_pipelines(compute_pipeline_ids))?;
+            block_on(batch.destroy_graphics_pipelines(
+                graphics_pipeline_ids.into_iter()
+            ))?;
+            block_on(batch.destroy_compute_pipelines(
+                compute_pipeline_ids.into_iter()
+            ))?;
             Ok(())
         })
     } 
@@ -1213,15 +1225,123 @@ impl Gpu {
     pub fn map_buffer(
         &self,
         id: BufferId
-    ) -> Result<memory_binder::MemoryMap>
+    ) -> Result<MemoryMap>
     {
         self.inner.buffers
             .write()
             .get_mut(id.0)
             .context_with(|| format_compact!(
                 "invalid buffer id {id}"
-            ))?.memory().map_memory()
+            ))?.memory_mut().map_memory()
             .context("failed to map memory")
+    }
+
+    pub fn flush_mapped_memory_ranges(
+        &self,
+        ranges: &[MappedBufferMemoryRange],
+    ) -> Result<()>
+    {
+        let tmp_alloc = self.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let mut vk_ranges = FixedVec32::with_capacity(
+            ranges.len() as u32,
+            &tmp_alloc
+        )?;
+        let buffers = self.read_buffers();
+        let non_coherent_atom_size = self.device_limits().non_coherent_atom_size();
+        for range in ranges {
+            let buffer = buffers.get(range.buffer_id)?;
+            let memory = buffer.memory();
+            if !memory.is_mapped() {
+                return Err(Error::just_context(format_compact!(
+                    "buffer {} memory is not mapped",
+                    range.buffer_id,
+                )))
+            }
+            let offset = memory.offset() + range.offset;
+            if !offset.is_multiple_of(non_coherent_atom_size) {
+                return Err(Error::just_context(format_compact!(
+                    "buffer {} range offset {offset} is not a multiple of non coherent atom size {}",
+                    range.buffer_id, non_coherent_atom_size,
+                )))
+            }
+            if !range.size.is_multiple_of(non_coherent_atom_size) &&
+                offset + range.size != memory.memory_size() {
+                return Err(Error::just_context(format_compact!(
+                    "buffer {} range size {} is not a multiple of non coherent atom size {}",
+                    range.buffer_id, range.size, non_coherent_atom_size,
+                )))
+            }
+            if range.offset + range.size > memory.size() {
+                return Err(Error::just_context(format_compact!(
+                    "buffer {} range offset {} + size {} is greater than allocation size {}",
+                    range.buffer_id, range.offset, range.size, memory.size(),
+                )))
+            }
+            vk_ranges.push(vk::MappedMemoryRange {
+                memory: <_ as vk::Handle>::from_raw(memory.handle()),
+                offset,
+                size: range.size,
+                ..Default::default()
+            });
+        } 
+        unsafe {
+            self.device().flush_mapped_memory_ranges(&vk_ranges)
+        }.context("failed to flush mapped memory ranges")
+    }
+
+    pub fn invalidate_mapped_memory_ranges(
+        &self,
+        ranges: &[MappedBufferMemoryRange],
+    ) -> Result<()>
+    {
+        let tmp_alloc = self.tmp_alloc();
+        let tmp_alloc = tmp_alloc.guard();
+        let mut vk_ranges = FixedVec32::with_capacity(
+            ranges.len() as u32,
+            &tmp_alloc
+        )?;
+        let buffers = self.read_buffers();
+        let non_coherent_atom_size = self.device_limits().non_coherent_atom_size();
+        for range in ranges {
+            let buffer = buffers.get(range.buffer_id)?;
+            let memory = buffer.memory();
+            if !memory.is_mapped() {
+                return Err(Error::just_context(format_compact!(
+                    "buffer {} memory is not mapped",
+                    range.buffer_id,
+                )))
+            }
+            let offset = memory.offset() + range.offset;
+            if !offset.is_multiple_of(non_coherent_atom_size) {
+                return Err(Error::just_context(format_compact!(
+                    "buffer {} range offset {offset} is not a multiple of non coherent atom size {}",
+                    range.buffer_id, non_coherent_atom_size,
+                )))
+            }
+            if !range.size.is_multiple_of(non_coherent_atom_size) &&
+                offset + range.size != memory.memory_size() {
+                return Err(Error::just_context(format_compact!(
+                    "buffer {} range size {} is not a multiple of non coherent atom size {}",
+                    range.buffer_id, range.size, non_coherent_atom_size,
+                )))
+            }
+            if range.offset + range.size > memory.size() {
+                return Err(Error::just_context(format_compact!(
+                    "buffer {} range offset {} + size {} is greater than allocation size {}",
+                    range.buffer_id, range.offset, range.size, memory.size(),
+                )))
+            }
+            vk_ranges.push(vk::MappedMemoryRange {
+                memory: <_ as vk::Handle>::from_raw(memory.handle()),
+                offset,
+                size: range.size,
+                ..Default::default()
+            });
+        } 
+        unsafe {
+            self.device().invalidate_mapped_memory_ranges(&vk_ranges)
+        }.context("failed to flush mapped memory ranges")
     }
 
     #[inline]
@@ -1323,13 +1443,13 @@ impl Gpu {
         }
     }
 
-    /// Waits for previous semaphores until `timeout` where `timeout` is in nanoseconds.
+    /// Waits for previous semaphores until `timeout`.
     ///
     /// Returns Ok(true) on success, Ok(false) on timeout and Err(err) if there's another error.
     pub fn wait_for_semaphores(
         &self,
         semaphores: &[(TimelineSemaphoreId, u64)],
-        timeout: u64,
+        timeout: Duration,
     ) -> Result<bool> {
         let tmp_alloc = self.tmp_alloc();
         let tmp_alloc = tmp_alloc.guard();
@@ -1356,7 +1476,7 @@ impl Gpu {
         let res = unsafe {
             self.inner.device.wait_semaphores(
                 &wait_info,
-                timeout,
+                timeout.as_nanos() as u64,
             )
         }.context("unexpected vulkan error")?;
         Ok(res == vk::Result::SUCCESS)

@@ -7,15 +7,13 @@ use core::{
 
 use nox::{
     mem::{
-        vec_types::{GlobalVec, Vector},
+        vec::Vec32,
     },
     win,
+    or_flag,
 };
 
-use nox_geom::{
-    shapes::*,
-    *,
-};
+use nox_geom::*;
 
 use crate::{
     surface::*,
@@ -25,18 +23,18 @@ use crate::{
 };
 
 pub struct RowText {
-    pub index: usize,
-    pub row_index: usize,
-    pub selectable_index: usize,
+    pub index: u32,
+    pub row_index: u32,
+    pub selectable_index: u32,
     pub reaction_id: Option<ReactionId>,
 }
 
 impl RowText {
 
     pub fn new(
-        index: usize,
-        row_index: usize,
-        selectable_index: usize,
+        index: u32,
+        row_index: u32,
+        selectable_index: u32,
         reaction_id: Option<ReactionId>
     ) -> Self {
         Self {
@@ -90,18 +88,19 @@ impl<'a, Surface> CtxSurface<'a, Surface> {
     }
 }
 
-pub struct UiContext<'a, 'b, Surface, Style>
-    where
-        Surface: UiReactSurface,
-        Style: UiStyle,
+type FnCurrentRowPaint = dyn FnMut(&mut Painter, Row);
+
+pub struct UiContext<'a, 'b, Surface>
+    where Surface: UiReactSurface,
 {
-    win: &'a mut win::WindowContext,
-    style: &'a Style,
+    win: &'a mut win::WindowContext<'b>,
+    style: &'a UiStyle,
     surface: UnsafeCell<CtxSurface<'a, Surface>>,
-    text_renderer: &'a mut TextRenderer<'b>,
-    current_row_text: GlobalVec<RowText>,
-    current_row_reactions: GlobalVec<(ReactionId, Vec2)>,
-    current_row_paints: Option<GlobalVec<NonNull<dyn FnMut(&mut Painter, Row)>>>,
+    text_renderer: &'a mut TextRenderer,
+    command_dependencies: &'a mut Vec32<nox::gpu::CommandDependency>,
+    current_row_text: Vec32<RowText>,
+    current_row_reactions: Vec32<(ReactionId, Vec2)>,
+    current_row_paints: Option<Vec32<NonNull<FnCurrentRowPaint>>>,
     collapsing_header_id: CollapsingHeaderId,
     image_loader: &'a mut ImageLoader,
     widget_off: Vec2,
@@ -115,55 +114,57 @@ pub struct UiContext<'a, 'b, Surface, Style>
     flags: u32,
 }
 
-impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
-    where
-        Surface: UiReactSurface,
-        Style: UiStyle,
+impl<'a, 'b, Surface> UiContext<'a, 'b, Surface>
+    where Surface: UiReactSurface,
 {
 
     const IS_COLLAPSING: u32 = 0x1;
     const IS_COLLAPSED: u32 = 0x2;
 
     pub fn new(
-        win: &'a mut win::WindowContext,
+        win: &'a mut win::WindowContext<'b>,
         surface: &'a mut Surface,
-        style: &'a Style,
+        style: &'a UiStyle,
         start_off: Vec2,
-        text_renderer: &'a mut TextRenderer<'b>,
+        text_renderer: &'a mut TextRenderer,
         image_loader: &'a mut ImageLoader,
+        command_dependencies: &'a mut Vec32<nox::gpu::CommandDependency>,
     ) -> Self {
         Self {
             win,
             surface: UnsafeCell::new(CtxSurface::Regular(surface)),
             style,
-            text_renderer: text_renderer,
+            text_renderer,
+            command_dependencies,
             current_row_text: Default::default(),
             current_row_reactions: Default::default(),
-            current_row_paints: Some(GlobalVec::new()),
+            current_row_paints: Some(Vec32::new()),
             collapsing_header_id: Default::default(),
             image_loader,
             widget_off: start_off,
             min_width: 0.0,
             min_width_sub: 0.0,
             beam_height: 0.0,
-            slider_width: style.default_slider_width(),
-            input_text_width: style.default_input_text_width(),
+            slider_width: style.default_slider_width,
+            input_text_width: style.default_input_text_width,
             current_height: 0.0,
-            row_widget_off_x: style.item_pad_outer().x,
+            row_widget_off_x: style.item_pad_outer.x,
             flags: 0,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new_collapsing(
         label: &str,
         mut surface: NonNull<&'a mut Surface>,
-        win: &'a mut win::WindowContext,
-        style: &'a Style,
-        text_renderer: &'a mut TextRenderer<'b>,
+        win: &'a mut win::WindowContext<'b>,
+        style: &'a UiStyle,
+        text_renderer: &'a mut TextRenderer,
         widget_off: Vec2,
         slider_width: f32,
         input_text_width: f32,
         image_loader: &'a mut ImageLoader,
+        command_dependencies: &'a mut Vec32<nox::gpu::CommandDependency>,
     ) -> Self {
         let surface_ref = unsafe {
             surface.as_mut()
@@ -172,9 +173,12 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
         collapsing_header.set_label(style, text_renderer, label);
         collapsing_header.offset = widget_off;
         let collapsed = collapsing_header.collapsed();
-        let item_pad_outer = style.item_pad_outer();
+        let item_pad_outer = style.item_pad_outer;
         let base_off = widget_off +
-            vec2(item_pad_outer.x, style.calc_text_height(&collapsing_header.label_text()) + style.item_pad_outer().y);
+            vec2(
+                item_pad_outer.x,
+                style.calc_text_height(collapsing_header.label_text()) + style.item_pad_outer.y
+            );
         let mut flags = Self::IS_COLLAPSING;
         or_flag!(flags, Self::IS_COLLAPSED, collapsed);
         Self {
@@ -183,12 +187,13 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
             win,
             surface: UnsafeCell::new(CtxSurface::Collapsing(surface)),
             style,
-            text_renderer: text_renderer,
+            text_renderer,
             current_row_text: Default::default(),
             current_row_reactions: Default::default(),
-            current_row_paints: Some(GlobalVec::new()),
+            current_row_paints: Some(Vec32::new()),
             collapsing_header_id: id,
             image_loader,
+            command_dependencies,
             min_width: 0.0,
             min_width_sub: 0.0,
             beam_height: 0.0,
@@ -237,12 +242,12 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     }
 
     #[inline(always)]
-    pub fn win(&mut self) -> &mut win::WindowContext {
+    pub fn win(&mut self) -> &mut win::WindowContext<'b> {
         self.win
     }
 
     #[inline(always)]
-    pub fn style(&self) -> &Style {
+    pub fn style(&self) -> &UiStyle {
         self.style
     }
 
@@ -256,14 +261,15 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
                 .painter_storage(),
             self.style,
             self.text_renderer,
-            self.image_loader
+            self.image_loader,
+            self.command_dependencies,
         )
     }
 
     #[inline(always)]
-    pub fn add<'c, T>(
+    pub fn add<T>(
         &mut self,
-        (value, mut f): (T, impl FnMut(&mut UiReactContext<Surface, Style>, &mut Reaction, T)),
+        (value, mut f): (T, impl FnMut(&mut UiReactContext<Surface>, &mut Reaction, T)),
     ) -> ReactionRef<'_, Surface>
         where 
             T: RefAddr,
@@ -273,24 +279,24 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
         };
         let reaction = surface.as_mut().reaction_from_addr(value, |surface, reaction, value| {
             reaction.offset = self.widget_off;
-            f(&mut UiReactContext { ui: self, surface }, reaction.into(), value)
+            f(&mut UiReactContext { ui: self, surface }, reaction, value)
         });
         let size = reaction.size;
         self.current_height = self.current_height.max(size.y);
-        self.widget_off.x += size.x + self.style.item_pad_outer().x;
+        self.widget_off.x += size.x + self.style.item_pad_outer.x;
         self.current_row_reactions.push((reaction.id(), size));
         let ptr = reaction as _;
         ReactionRef { ptr, _marker: PhantomData }
     }
 
     #[inline(always)]
-    pub fn render_text(&mut self, mut f: impl FnMut(&Style, &mut TextRenderer)) {
+    pub fn render_text(&mut self, mut f: impl FnMut(&UiStyle, &mut TextRenderer)) {
         f(self.style, self.text_renderer);
     }
 
     pub fn collapsing<'c, F>(&'c mut self, label: &str, mut f: F)
         where 
-            F: FnMut(&mut UiContext<'c, 'b, Surface, Style>),
+            F: FnMut(&mut UiContext<'c, 'b, Surface>),
     {
         if self.is_collapsed() {
             return
@@ -299,12 +305,12 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
             self.end_row();
         }
         self.widget_off.x = self.row_widget_off_x;
-        let item_pad_outer = self.style.item_pad_outer();
+        let item_pad_outer = self.style.item_pad_outer;
         let mut surface = self.surface.get_mut().as_mut();
         let mut collapsing = UiContext::new_collapsing(
             label, NonNull::new(&mut surface).unwrap(), self.win, self.style, self.text_renderer,
             self.widget_off, self.slider_width, self.input_text_width,
-            self.image_loader,
+            self.image_loader, self.command_dependencies,
         );
         if !collapsing.is_collapsed() {
             f(&mut collapsing);
@@ -335,7 +341,7 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
         if self.current_height == 0.0 {
             return
         }
-        let item_pad_outer = self.style.item_pad_outer();
+        let item_pad_outer = self.style.item_pad_outer;
         self.min_width = (self.widget_off.x - self.min_width_sub).max(self.min_width);
         self.widget_off.x = self.row_widget_off_x;
         let height_add = self.current_height + item_pad_outer.y;
@@ -363,23 +369,24 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
         }
         paints.clear();
         self.current_row_paints = Some(paints);
-        let current_height_halved_scaled = current_height_halved / self.style.font_scale();
+        let current_height_halved_scaled = current_height_halved / self.style.font_scale;
         let surface = self.surface.get_mut().as_mut();
         for &RowText { index, row_index, selectable_index: _, reaction_id: _ } in &self.current_row_text {
             if let Some(text) = surface.ui_surface_mut().get_text(index) {
-                let text = &mut *text.as_mut();
-                let row_height_halved = text.text.row_height * 0.5;
-                let row = text.rows[row_index - text.row_offset as usize].clone();
-                for &offset in &row.offsets {
-                    if let Some(offset) = text.text.get_offset_mut(offset) {
-                        let mut vec: Vec2 = offset.offset.into();
-                        vec.y += current_height_halved_scaled - row_height_halved;
-                        offset.offset = vec.into();
+                text.edit(|text| {
+                    let row_height_halved = text.text.row_height * 0.5;
+                    let row = text.rows[(row_index - text.row_offset) as usize].clone();
+                    for &offset in &row.offsets {
+                        if let Some(offset) = text.text.get_offset_mut(offset) {
+                            let mut vec: Vec2 = offset.offset.into();
+                            vec.y += current_height_halved_scaled - row_height_halved;
+                            offset.offset = vec.into();
+                        }
                     }
-                }
-                let delta_off = current_height_halved - row_height_halved * self.style.font_scale();
-                text.bounds.min.y += delta_off;
-                text.bounds.max.y += delta_off;
+                    let delta_off = current_height_halved - row_height_halved * self.style.font_scale;
+                    text.bounds.min.y += delta_off;
+                    text.bounds.max.y += delta_off;
+                });
                 /*
                 if let Some(id) = reaction_id {
                     self.surface.edit_selectable_text(id, |text| {
@@ -516,28 +523,25 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
         self.add((label, |ui, reaction, label| {
             let id = reaction.id();
             let offset = reaction.offset();
-            let visuals = ui.style().interact_visuals(&reaction);
+            let visuals = ui.style().interact_visuals(reaction);
             let mut size = Default::default();
             let text = ui
                 .reaction_text(id, label)
                 .edit(|text| {
                     text.offset = offset;
-                    text.offset.x += ui.style().item_pad_inner().x;
+                    text.offset.x += ui.style().item_pad_inner.x;
                     text.color = visuals.fg_stroke_col();
                     size = ui.style().calc_text_box_size(&text.text);
                 });
             reaction.size = size;
             ui.add_text(text);
-            let rounding = self.style.rounding();
+            let rounding = self.style.rounding;
             ui.paint(move |painter, row| {
                 painter
                     .rect(
                         id,
-                        rect(Default::default(), size, rounding),
                         offset + vec2(0.0, row.height_halved - size.y * 0.5),
-                        visuals.fill_col,
-                        visuals.bg_strokes.clone(),
-                        visuals.bg_stroke_idx,
+                        UiRect::bg(&visuals).rect(vec2(0.0, 0.0), size, rounding),
                     );
             });
         })) 
@@ -550,13 +554,13 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     ) -> bool
     {
         self.add((&mut *value, |ui, reaction, value| {
-            let item_pad_inner = ui.style().item_pad_inner();
+            let item_pad_inner = ui.style().item_pad_inner;
             let id = reaction.id();
             let offset = reaction.offset();
             let size_max = ui.font_height();
             let rect_size = vec2(size_max, size_max);
             let mut text_width = 0.0;
-            let visuals = ui.style().interact_visuals(&reaction);
+            let visuals = ui.style().interact_visuals(reaction);
             let fg_col = visuals.fg_stroke_col();
             let text = ui
                 .reaction_text(id, label)
@@ -569,7 +573,7 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
             ui.add_text(text);
             let size = vec2(size_max + text_width + item_pad_inner.x, size_max);
             reaction.size = size;
-            let rounding = ui.style().rounding();
+            let rounding = ui.style().rounding;
             if reaction.clicked() {
                 *value = !*value;
             }
@@ -584,19 +588,14 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
                 painter
                     .rect(
                         id,
-                        rect(Default::default(), rect_size, rounding),
                         offset + vec2(0.0, row.height_halved - size.y * 0.5),
-                        visuals.fill_col,
-                        visuals.bg_strokes.clone(),
-                        visuals.bg_stroke_idx
-                    )
-                    .checkmark(
+                        UiRect::bg(&visuals).rect(vec2(0.0, 0.0), rect_size, rounding),
+                    ).checkmark(
                         id,
-                        1.0,
                         offset + rect_size * 0.5 + vec2(0.0, row.height_halved - rect_size.y * 0.5),
-                        checkbox_col,
-                        Default::default(),
-                        0
+                        UiCheckmark::default()
+                            .scale(1.0)
+                            .fill_col(checkbox_col),
                     );
             });
         }));
@@ -604,7 +603,7 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     }
 
     pub fn slider_width(&mut self, width: f32) {
-        self.slider_width = width.clamp(self.style.slider_min_width(), f32::MAX);
+        self.slider_width = width.clamp(self.style.slider_min_width, f32::MAX);
     }
 
     pub fn slider<T: Sliderable>(
@@ -617,21 +616,21 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     {
         self.add((&mut *value, |ui, reaction, value| {
             let id = reaction.id();
-            ui.reaction_data(id, || SliderData::new(), |ui, slider| {
+            ui.reaction_data(id, SliderData::new, |ui, slider| {
                 slider.update_value(ui.ui.slider_width, value, min, max);
                 slider.update(ui, reaction);
             });
         }));
         self.add((&mut *value, |ui, reaction, value| {
             let id = reaction.id();
-            ui.reaction_data(id, || DragValueData::new(), |ui, drag_value| {
+            ui.reaction_data(id, DragValueData::new, |ui, drag_value| {
                 drag_value.set_input_params(
                     ui.style(),
-                    ui.style().min_input_text_width(),
+                    ui.style().min_input_text_width,
                     None,
                     false,
                 );
-                drag_value.calc_value(ui.style(), value, T::MIN, T::MAX, drag_speed);
+                drag_value.calc_value(ui.style(), value, (T::MIN, T::MAX), drag_speed);
                 drag_value.update(ui, reaction);
             });
         }));
@@ -673,7 +672,7 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     ) -> ReactionRef<'_, Surface> {
         self.add((value, |ui, reaction, value| {
             let id = reaction.id();
-            ui.reaction_data(id, || InputTextData::new(), |ui, input_text| {
+            ui.reaction_data(id, InputTextData::new, |ui, input_text| {
                 input_text.set_params(
                     width, None, center_text,
                     empty_input_prompt, format_input,
@@ -736,14 +735,14 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     {
         self.add((value, |ui, reaction, value| {
             let id = reaction.id();
-            ui.reaction_data(id, || DragValueData::new(), |ui, drag_value| {
+            ui.reaction_data(id, DragValueData::new, |ui, drag_value| {
                 drag_value.set_input_params(
                     ui.style(),
                     min_width,
                     format_input,
                     false
                 );
-                drag_value.calc_value(ui.style(), value, min, max, drag_speed);
+                drag_value.calc_value(ui.style(), value, (min, max), drag_speed);
                 drag_value.update(ui, reaction);
             });
         }))
@@ -758,10 +757,10 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     ) -> ReactionRef<'c, Surface>
     {
         self.add((value, |ui, reaction, value| {
-            let item_pad_inner = ui.style().item_pad_inner();
+            let item_pad_inner = ui.style().item_pad_inner;
             let id = reaction.id();
             let offset = reaction.offset;
-            let radius = ui.style().default_handle_radius();
+            let radius = ui.style().default_handle_radius;
             let diameter = radius * 2.0;
             let visuals = ui.style().interact_visuals(reaction);
             let fg_col = visuals.fg_stroke_col();
@@ -794,21 +793,15 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
                 painter
                     .circle(
                         id,
-                        circle(vec2(radius, radius), radius),
-                        16,
                         offset + vec2(0.0, row.height_halved - size_y_half),
-                        visuals.fill_col,
-                        visuals.bg_strokes.clone(),
-                        visuals.bg_stroke_idx
-                    )
-                    .circle(
+                        UiCircle::bg(&visuals)
+                            .circle([radius, radius], radius),
+                    ).circle(
                         id,
-                        circle(vec2(radius, radius), inner_radius),
-                        16,
                         offset + vec2(0.0, row.height_halved - size_y_half),
-                        radio_col,
-                        Default::default(),
-                        0
+                        UiCircle::default()
+                            .circle([radius, radius], inner_radius)
+                            .fill_col(radio_col),
                     );
             });
         }))
@@ -823,7 +816,7 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
     ) -> ReactionRef<'_, Surface>
     {
         self.add((value, |ui, reaction, value| {
-            let item_pad_inner = ui.style().item_pad_inner();
+            let item_pad_inner = ui.style().item_pad_inner;
             let id = reaction.id();
             let visuals = ui.style().interact_visuals(reaction);
             let mut size = Default::default();
@@ -840,9 +833,9 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
             if reaction.clicked() {
                 *value = target.clone();
             }
-            let rounding = ui.style().rounding();
+            let rounding = ui.style().rounding;
             let value = value.clone();
-            let selected_col = ui.style().selection_col();
+            let selected_col = ui.style().selection_col;
             let offset = reaction.offset();
             let target = target.clone();
             ui.paint(move |painter, row| {
@@ -855,11 +848,10 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
                 painter
                     .rect(
                         id,
-                        rect(Default::default(), size, rounding),
                         offset + vec2(0.0, row.height_halved - size.y * 0.5),
-                        fill_col,
-                        visuals.bg_strokes.clone(),
-                        visuals.bg_stroke_idx
+                        UiRect::bg(&visuals)
+                            .rect(vec2(0.0, 0.0), size, rounding)
+                            .fill_col(fill_col),
                     );
             });
         }))
@@ -894,7 +886,7 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
         source: ImageSource,
         size: Vec2,
     ) -> ReactionRef<'_, Surface> {
-        let reaction = self.add((label, |ui, reaction, _| {
+        self.add((label, |ui, reaction, _| {
             let offset = reaction.offset;
             reaction.size = size;
             let source = match source {
@@ -920,45 +912,41 @@ impl<'a, 'b, Surface, Style> UiContext<'a, 'b, Surface, Style>
                         size
                     );
             });
-        }));
-        reaction
+        }))
     }
 
     #[inline(always)]
     pub fn standard_interact_height(&self) -> f32 {
-        (self.style.default_handle_radius() + self.style.item_pad_inner().y) * 2.0
+        (self.style.default_handle_radius + self.style.item_pad_inner.y) * 2.0
     }
 }
 
-impl<'a, 'b, Surface, Style> Drop for UiContext<'a, 'b, Surface, Style>
-    where 
-        Surface: UiReactSurface,
-        Style: UiStyle,
+impl<'a, 'b, Surface> Drop for UiContext<'a, 'b, Surface>
+    where Surface: UiReactSurface,
 {
     fn drop(&mut self) {
         if !self.is_collapsing() {
             self.end_row();
-            self.surface.get_mut().as_mut().ui_surface_mut().set_widget_rect_max(vec2(self.min_width, self.widget_off.y));
+            self.surface.get_mut()
+                .as_mut()
+                .ui_surface_mut()
+                .set_widget_rect_max(vec2(self.min_width, self.widget_off.y));
         }
     }
 }
 
-pub struct UiReactContext<'a, 'b, 'c, Surface, Style>
-    where 
-        Surface: UiReactSurface,
-        Style: UiStyle,
+pub struct UiReactContext<'a, 'b, 'c, Surface>
+    where Surface: UiReactSurface,
 {
-    ui: &'a mut UiContext<'b, 'c, Surface, Style>,
+    ui: &'a mut UiContext<'b, 'c, Surface>,
     surface: &'a mut Surface::Surface
 }
 
-pub trait UiReact {
+pub trait UiReact<'c> {
 
-    type Style: UiStyle;
+    fn win(&mut self) -> &mut win::WindowContext<'c>;
 
-    fn win(&mut self) -> &mut win::WindowContext;
-
-    fn style(&self) -> &Self::Style;
+    fn style(&self) -> &UiStyle;
 
     fn surface_moving(&self) -> bool;
 
@@ -968,9 +956,14 @@ pub trait UiReact {
 
     fn add_text(&mut self, text: SharedText);
     
-    fn render_text(&mut self, f: impl FnMut(&Self::Style, &mut TextRenderer));
+    fn render_text(&mut self, f: impl FnMut(&UiStyle, &mut TextRenderer));
 
-    fn reaction_data<T: 'static>(&mut self, id: ReactionId, new: impl FnMut() -> T, modify: impl FnMut(&mut Self, &mut T));
+    fn reaction_data<T: 'static>(
+        &mut self,
+        id: ReactionId,
+        new: impl FnMut() -> T, 
+        modify: impl FnMut(&mut Self, &mut T)
+    );
 
     fn animated_bool(&mut self, id: ReactionId, value: bool) -> f32;
 
@@ -981,21 +974,17 @@ pub trait UiReact {
     fn tmp_data<T>(&mut self, count: usize) -> Option<NonNull<T>>;
 }
 
-impl<'a, 'b, 'c, Surface, Style> UiReact for UiReactContext<'a, 'b, 'c, Surface, Style>
-    where
-        Surface: UiReactSurface,
-        Style: UiStyle,
+impl<'a, 'b, 'c, Surface> UiReact<'c> for UiReactContext<'a, 'b, 'c, Surface>
+    where Surface: UiReactSurface,
 {
 
-    type Style = Style;
-
     #[inline(always)]
-    fn win(&mut self) -> &mut win::WindowContext {
+    fn win(&mut self) -> &mut win::WindowContext<'c> {
         self.ui.win
     }
 
     #[inline(always)]
-    fn style(&self) -> &Self::Style {
+    fn style(&self) -> &UiStyle {
         self.ui.style
     }
 
@@ -1024,8 +1013,9 @@ impl<'a, 'b, 'c, Surface, Style> UiReact for UiReactContext<'a, 'b, 'c, Surface,
         text: &str,
     ) -> SharedText
     {
-        let text = self.surface.reaction_text(self.ui.style, self.ui.text_renderer, id, text);
-        text.edit(|text| text.reset())
+        self.surface
+            .reaction_text(self.ui.style, self.ui.text_renderer, id, text)
+            .edit(|text| text.reset())
     }
 
     #[inline(always)]
@@ -1035,7 +1025,7 @@ impl<'a, 'b, 'c, Surface, Style> UiReact for UiReactContext<'a, 'b, 'c, Surface,
     }
 
     #[inline(always)]
-    fn render_text(&mut self, mut f: impl FnMut(&Style, &mut TextRenderer)) {
+    fn render_text(&mut self, mut f: impl FnMut(&UiStyle, &mut TextRenderer)) {
         f(self.ui.style, self.ui.text_renderer);
     }
 
@@ -1069,7 +1059,7 @@ impl<'a, 'b, 'c, Surface, Style> UiReact for UiReactContext<'a, 'b, 'c, Surface,
 
     #[inline(always)]
     fn standard_interact_height(&self) -> f32 {
-        (self.ui.style.default_handle_radius() + self.ui.style.item_pad_inner().y) * 2.0
+        (self.ui.style.default_handle_radius + self.ui.style.item_pad_inner.y) * 2.0
     }
 
     #[inline(always)]
@@ -1085,10 +1075,16 @@ macro_rules! impl_widget {
         $($arg:ident: $arg_ty:ty),*
         $(,)?
     )) => {
-        fn $fn<'a, Surface: $crate::UiReactSurface, Style: $crate::UiStyle>(
+        fn $fn<'a, Surface: $crate::UiReactSurface>(
             $first: $first_ty,
             $($arg: $arg_ty),*
-        ) -> ($first_ty, impl FnMut(&mut UiReactContext<Surface, Style>, &mut Reaction, $first_ty))
+        ) -> (
+                $first_ty,
+                impl for<'b, 'c, 'd> FnMut(
+                    &mut UiReactContext<'b, 'c, 'd, Surface>,
+                    &mut Reaction, $first_ty
+                )
+            )
         {
             (
                 $first,

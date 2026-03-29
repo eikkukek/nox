@@ -25,12 +25,20 @@ use crate::{
 
 #[derive(Clone, Copy, BuildStructure)]
 pub struct DrawInfo {
+    /// Specifies the first vertex.
     #[default(0)]
     pub first_vertex: u32,
+    /// Specifies vertex count.
+    ///
+    /// The default is one.
     #[default(1)]
     pub vertex_count: u32,
+    /// Specifies the first instance.
     #[default(0)]
     pub first_instance: u32,
+    /// Specifies instance count.
+    ///
+    /// The default is one.
     #[default(1)]
     pub instance_count: u32,
 }
@@ -54,18 +62,21 @@ pub struct IndexedDrawInfo {
 #[derive(Clone, Copy, Debug)]
 pub struct DrawBufferRange {
     pub id: BufferId,
-    pub offset: u64,
+    pub offset: DeviceSize,
     pub size: Option<NonZeroU64>,
 }
 
 impl DrawBufferRange {
 
+    /// Set size to zero to specify the entire buffer from [`offset`][1].
+    ///
+    /// [1]: Self::offset
     #[inline(always)]
-    pub fn new(id: BufferId, offset: u64, size: Option<NonZeroU64>) -> Self {
+    pub fn new(id: BufferId, offset: DeviceSize, size: DeviceSize) -> Self {
         Self {
             id,
             offset,
-            size,
+            size: NonZeroU64::new(size),
         }
     }
 }
@@ -1199,7 +1210,7 @@ impl<'a, 'b, State> DrawPipelineCommands<'a, 'b, State> {
             index_buffer: Some(DrawBufferRange::new(
                 index_buffer.id,
                 index_buffer.offset,
-                NonZeroU64::new(index_buf_size),
+                index_buf_size,
             )),
             vertex_buffers: NonNullVec32::with_capacity(
                 n_bindings,

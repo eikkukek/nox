@@ -153,6 +153,26 @@ impl NewCommands for NewGraphicsCommands {
 
 unsafe impl<'a, 'b> Commands<'a, 'b> for GraphicsCommands<'a, 'b> {
 
+    fn add_signal_semaphore(
+        &mut self, 
+        semaphore_id: TimelineSemaphoreId,
+        value: u64,
+    ) {
+        self.recorder.add_signal_semaphore(self.command_id, semaphore_id, value);
+    }
+
+    fn add_wait_semaphore(
+        &mut self,
+        semaphore_id: TimelineSemaphoreId,
+        value: u64,
+        dependency_hint: MemoryDependencyHint,
+    ) {
+        self.recorder.add_wait_semaphore(
+            self.command_id,
+            semaphore_id, value, dependency_hint
+        );
+    }
+
     fn finish<'c, Alloc>(self, alloc: &'c Alloc) -> Result<CommandResult<'c, Alloc>>
         where Alloc: ?Sized + LocalAlloc<Error = Error> 
     {

@@ -162,16 +162,6 @@ impl<'a, 'b, F> ApplicationHandler<RunEvent> for NoxRun<'a, 'b, F>
                 event_loop.exit();
                 expand_error!(err);
             }
-            if let Err(err) = self.gpu
-                .tick(|event| {
-                    (self.event_handler)(&event_loop, Event::GpuEvent(event))
-                }, &mut self.gpu_cache)
-                .context("gpu error")
-            {
-                event_loop.exit();
-                expand_error!(err);
-                return
-            }
             self.event_loop.tick();
         }
     }

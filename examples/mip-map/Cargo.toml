@@ -1,9 +1,8 @@
 [package]
-name = "gui-example"
+name = "mip-map"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 nox = { path = "../../crates/nox" }
-nox-gui = { path = "../../crates/nox-gui" }
-memmap2 = "0.9.8"
+image = { version = "0.25.8" }

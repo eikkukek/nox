@@ -159,7 +159,7 @@ impl Surface {
                 let swapchain = self.swapchain.insert(Swapchain::new(
                     self.gpu.device(),
                     self.handle,
-                    vk::Extent2D { width: size.0, height: size.0 },
+                    vk::Extent2D { width: size.0, height: size.1 },
                     desired_image_count.get(),
                     &self.alloc,
                     &tmp_alloc,

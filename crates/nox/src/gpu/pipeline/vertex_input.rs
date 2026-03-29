@@ -1,6 +1,6 @@
-use nox_ash::vk;
-
+use nox_proc::BuildStructure;
 use nox_mem::AsRaw;
+use nox_ash::vk;
 
 use crate::gpu::prelude::*;
 
@@ -42,7 +42,7 @@ impl From<VertexInputRate> for vk::VertexInputRate {
 /// [2]: Self::format
 /// [3]: Self::offset
 /// [4]: GraphicsPipeline
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, BuildStructure)]
 pub struct VertexInputAttribute {
     pub location: u32,
     pub format: Format,
@@ -91,7 +91,7 @@ pub trait VertexInput<const N_ATTRIBUTES: usize> {
 
 /// Desribes a vertex input in a [`graphics pipeline`][1].
 ///
-/// The [`stride`][2] of a vertex inpute *can* be [`dynamic`][3] when creating the pipeline.
+/// The [`stride`][2] of a vertex input *can* be [`dynamic`][3] when creating the pipeline.
 ///
 /// # Vulkan docs
 /// <https://docs.vulkan.org/refpages/latest/refpages/source/VkVertexInputBindingDescription.html>
@@ -99,11 +99,29 @@ pub trait VertexInput<const N_ATTRIBUTES: usize> {
 /// [1]: GraphicsPipeline
 /// [2]: Self::stride
 /// [3]: DynamicState::VertexInputBindingStride
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, BuildStructure)]
 pub struct VertexInputBinding {
     pub binding: u32,
     pub input_rate: VertexInputRate,
+    #[skip]
     pub stride: u32,
+}
+
+impl VertexInputBinding {
+
+    pub fn new<T>(binding: u32, input_rate: VertexInputRate) -> Self
+    {
+        Self {
+            binding,
+            input_rate,
+            stride: size_of::<T>() as u32,
+        }
+    }
+
+    pub fn stride<T>(mut self) -> Self {
+        self.stride = size_of::<T>() as u32;
+        self
+    }
 }
 
 impl From<VertexInputBinding> for vk::VertexInputBindingDescription {

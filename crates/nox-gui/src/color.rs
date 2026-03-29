@@ -2,7 +2,7 @@ use core::f32::consts;
 
 use core::fmt::Display;
 
-use nox::gpu::VkFormat;
+use nox::gpu::Format;
 
 pub trait Color: Copy + Display {
 
@@ -25,7 +25,7 @@ pub struct ColorSRGBA {
 
 impl ColorSRGBA {
 
-    pub const VK_FORMAT: VkFormat = VkFormat::R32G32B32A32_SFLOAT;
+    pub const FORMAT: Format = Format::R32g32b32a32Sfloat;
 
     #[inline(always)]
     pub const fn new(r: f32, g: f32, b: f32, alpha: f32) -> Self {
@@ -107,7 +107,7 @@ impl Color for ColorSRGBA {
     fn from_hsva(value: ColorHSVA) -> Self {
         let map = |n: f32| -> f32 {
             let k = (n + value.hue / consts::FRAC_PI_3) % 6.0;
-            let ch = value.val - value.val * value.sat * k.min(4.0 - k).min(1.0).max(0.0);
+            let ch = value.val - value.val * value.sat * k.min(4.0 - k).clamp(0.0, 1.0);
             if ch <= 0.04045 {
                 ch / 12.92
             } else {
@@ -263,7 +263,7 @@ impl Color for ColorHSVA {
     fn to_srgba(self) -> ColorSRGBA {
         let map = |n: f32| -> f32 {
             let k = (n + self.hue / consts::FRAC_PI_3) % 6.0;
-            let ch = self.val - self.val * self.sat * k.min(4.0 - k).min(1.0).max(0.0);
+            let ch = self.val - self.val * self.sat * k.min(4.0 - k).clamp(0.0, 1.0);
             if ch <= 0.04045 {
                 ch / 12.92
             } else {

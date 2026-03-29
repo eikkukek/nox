@@ -1,5 +1,3 @@
-#[macro_use]
-
 mod ring_buffer;
 mod shaders;
 mod color;
@@ -60,4 +58,9 @@ pub use image::{ImageSource, ImageLoader};
 pub use reaction::*;
 pub use helpers::*;
 
-pub type TextRenderer<'a> = font::VertexTextRenderer<'a, compact_str::CompactString>;
+pub type ConstName = nox::gpu::ext::ConstName;
+
+pub type TextRenderer = font::VertexTextRenderer<'static, ConstName, font::OwnedFace>;
+
+pub use geom::vec2;
+pub use geom::shapes;

@@ -1,5 +1,4 @@
-use core::f32::consts::{PI, TAU, FRAC_PI_3};
-
+use image::EncodableLayout;
 use nox::{
     Platform, Version,
     gpu::{self, ext},
@@ -7,24 +6,19 @@ use nox::{
     mem::collections::{EntryExt, HashMap},
     sync::{Arc, SwapLock, atomic::{self, AtomicU64}},
 };
+const BLEND_STATE: gpu::ColorOutputBlendState = gpu::ColorOutputBlendState {
+    src_color_blend_factor: gpu::BlendFactor::SrcAlpha,
+    dst_color_blend_factor: gpu::BlendFactor::OneMinusSrcAlpha,
+    color_blend_op: gpu::BlendOp::Add,
+    src_alpha_blend_factor: gpu::BlendFactor::One,
+    dst_alpha_blend_factor: gpu::BlendFactor::OneMinusSrcAlpha,
+    alpha_blend_op: gpu::BlendOp::Add,
+};
 
-fn hsva_to_srgb_pack32(hue: f32, sat: f32, val: f32) -> u32 {
-    let map = |n: f32| -> f32 {
-        let k = (n + hue / FRAC_PI_3) % 6.0;
-        let ch = val - val * sat * k.min(4.0 - k).clamp(0.0, 1.0);
-        if ch <= 0.04045 {
-            ch / 12.92
-        } else {
-            ((ch + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    let (r, g, b) = (map(5.0), map(3.0), map(1.0));
-    u32::from_le_bytes([
-        (r * 255.0) as u8,
-        (g * 255.0) as u8,
-        (b * 255.0) as u8,
-        255u8,
-    ])
+#[inline(always)]
+pub fn load_rgba_image(path: &str) -> ::image::ImageResult<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>> {
+    let image = ::image::ImageReader::open(path)?.decode()?;
+    Ok(image.to_rgba8())
 }
 
 fn main() {
@@ -74,16 +68,13 @@ fn main() {
     log::info!("selected device: {}",
         logical_device.physical_device().device_name()
     );
-    let min_uniform_buffer_offset_alignment = logical_device
-        .physical_device()
-        .limits().min_uniform_buffer_offset_alignment;
     let queue = logical_device.device_queues()[0].clone();
     let globals = nox::create_globals();
     let window = globals.add(|event_loop| {
         Ok(event_loop.create_window(
             nox::win::default_attributes()
                 .with_resizable(true)
-                .with_title("Hello, Triangle")
+                .with_title("mip map")
         )?)
     });
     let pipeline_cache = globals.add(|event_loop| {
@@ -101,31 +92,32 @@ fn main() {
                 .with_glsl("
                     #version 450
 
-                    const vec2 positions[3] = {
-                        vec2(-0.5f, 0.5f),
-                        vec2(0.0f, -0.5f),
-                        vec2(0.5f, 0.5f)
-                    };
+                    vec2 positions[6] = vec2[](
+                        vec2(1.0, 1.0),
+                        vec2(0.0, 1.0),
+                        vec2(0.0, 0.0),
+                        vec2(1.0, 0.0),
+                        vec2(1.0, 1.0),
+                        vec2(0.0, 0.0)
 
-                    layout(set = 0, binding = 0) uniform Colors {
-                        uvec3 data;
-                    } colors;
+                    );
 
-                    layout(location = 0) out vec4 out_color;
+                    vec2 uvs[6] = vec2[](
+                        vec2(1.0, 1.0),
+                        vec2(0.0, 1.0),
+                        vec2(0.0, 0.0),
+                        vec2(1.0, 0.0),
+                        vec2(1.0, 1.0),
+                        vec2(0.0, 0.0)
+                    );
 
-                    vec4 unpack_color(uint color) {
-                        return vec4(
-                            (color & 0xFF) / 255.0f,
-                            ((color >> 8) & 0xFF) / 255.0f,
-                            ((color >> 16) & 0xFF) / 255.0f,
-                            1.0f
-                        );
-                    }
+                    layout(location = 0) out vec2 out_uv;
 
                     void main() {
                         uint idx = gl_VertexIndex;
-                        out_color = unpack_color(colors.data[idx]);
-                        gl_Position = vec4(positions[idx], 0.0f, 1.0f);
+                        out_uv = uvs[idx];
+                        const float scale = 0.5;
+                        gl_Position = vec4((positions[idx] - vec2(0.5, 0.5)) * scale, 0.0f, 1.0f);
                     }
                 ")
             )?;
@@ -136,11 +128,13 @@ fn main() {
                     .with_glsl("
                         #version 450
 
-                        layout(location = 0) in vec4 in_color;
+                        layout(location = 0) in vec2 in_uv;
                         layout(location = 0) out vec4 out_color;
 
+                        layout(set = 0, binding = 0) uniform sampler2D tex;
+
                         void main() {
-                            out_color = in_color;
+                            out_color = texture(tex, in_uv);
                         }
                     ")
             )?;
@@ -155,27 +149,51 @@ fn main() {
                         )
                 )?)
     });
-    let buffer = globals.add(|event_loop| {
-        let mut id = Default::default();
-        let memory_binder = gpu::
+    let image = globals.add(|event_loop| {
+        let staging_binder = gpu::
+            GlobalBinder::new(
+                event_loop.gpu().device().clone(),
+                gpu::MemoryProperties::HOST_VISIBLE | gpu::MemoryProperties::HOST_COHERENT,
+                gpu::MemoryProperties::HOST_VISIBLE | gpu::MemoryProperties::HOST_COHERENT,
+            );
+        let view_binder = gpu::
             GlobalBinder::new(
                 event_loop.gpu().device().clone(),
                 gpu::MemoryProperties::DEVICE_LOCAL,
-                gpu::MemoryProperties::HOST_VISIBLE
+                gpu::MemoryProperties::HOST_VISIBLE,
             );
-        event_loop
-            .gpu()
-            .create_resources(
-                [gpu::BufferCreateInfo::new(
-                    &mut id, 
-                    &memory_binder,
-                    12.max(min_uniform_buffer_offset_alignment) * 3,
-                    gpu::BufferUsages::UNIFORM_BUFFER |
-                    gpu::BufferUsages::TRANSFER_DST,
-                ).unwrap()],
-                [],
-            )?;
-        Ok(id)
+        let new_img = load_rgba_image("ferris.png").unwrap();
+        let gpu = event_loop.gpu();
+        let (width, height) = new_img.dimensions();
+        let mem_size = (width * height) as gpu::DeviceSize * 4;
+        let mip_levels = 32 - (width | height).leading_zeros();
+        let (mut staging_id, mut image_id) = Default::default();
+        gpu.create_resources(
+            [gpu::BufferCreateInfo::new(
+                &mut staging_id,
+                &staging_binder,
+                mem_size,
+                gpu::BufferUsages::TRANSFER_SRC,
+            ).unwrap()],
+            [gpu::ImageCreateInfo
+                ::new(&mut image_id, &view_binder)
+                .with_dimensions((width, height))
+                .with_format(gpu::Format::R8g8b8a8Srgb, false)
+                .with_usage(
+                    gpu::ImageUsages::TRANSFER_DST |
+                    gpu::ImageUsages::TRANSFER_SRC |
+                    gpu::ImageUsages::SAMPLED)
+                .with_mip_levels(mip_levels)
+            ])?;
+        let mut map = gpu.map_buffer(staging_id)?;
+        unsafe {
+            map.write_bytes(new_img.as_bytes())
+        }
+        let view_id = gpu.create_image_view(
+            image_id,
+            gpu::ImageRange::whole_range(gpu::ImageAspects::COLOR),
+        )?;
+        Ok((view_id, staging_id, width, height))
     });
     let timeline_semaphore = globals.add(|event_loop| {
         let mut id = Default::default();
@@ -191,9 +209,16 @@ fn main() {
         extent: AtomicU64,
     }
     let fb_state: Arc<FrameBufferState> = Default::default();
-    let mut hues = [0.0, PI / 3.0, 2.0 * PI / 3.0];
-    let sat: f32 = 94.0 / 100.0;
-    let val: f32 = 97.0 / 100.0;
+    let sampler = gpu::SamplerCreateInfo
+        ::default()
+        .min_filter(gpu::Filter::Linear)
+        .mag_filter(gpu::Filter::Linear)
+        .max_lod(gpu::Sampler::LOD_CLAMP_NONE)
+        .address_mode(
+            gpu::SamplerAddressMode::ClampToBorder,
+            gpu::SamplerAddressMode::ClampToBorder,
+            gpu::SamplerAddressMode::ClampToBorder,
+        ).build(logical_device.clone()).unwrap();
     nox::Nox::new(
         platform,
         logical_device,
@@ -207,25 +232,28 @@ fn main() {
                         event_loop.exit();
                     }
                     let mut commands = event_loop.gpu().schedule_commands();
-                    let buffer_id = *buffer;
+                    let (view, staging, width, height) = *image;
                     let fb_state = fb_state.clone();
+                    let sampler = sampler.clone();
                     commands.new_commands::<gpu::NewGraphicsCommands>(
                         queue.clone(),
                         move |cmd| {
-                            let mut copy_cmd = cmd.copy_commands();
-                            let buffer_offset = timeline_value % 3 * 12.max(
-                                min_uniform_buffer_offset_alignment
-                            );
-                            copy_cmd.update_buffer(
-                                buffer_id,
-                                buffer_offset,
-                                &[
-                                    hsva_to_srgb_pack32(hues[0], sat, val),
-                                    hsva_to_srgb_pack32(hues[1], sat, val),
-                                    hsva_to_srgb_pack32(hues[2], sat, val),
-                                ],
-                                gpu::CommandOrdering::Lenient,
-                            )?;
+                            if timeline_value == 3 {
+                                let mut cmd = cmd.copy_commands();
+                                cmd.copy_buffer_to_image(
+                                    staging,
+                                    view.image_id(),
+                                    &[gpu::BufferImageCopy
+                                        ::default()
+                                        .image_subresource(gpu::ImageSubresourceLayers
+                                            ::default()
+                                            .aspect_mask(gpu::ImageAspects::COLOR)
+                                        ).image_extent((width, height))
+                                    ],
+                                    gpu::CommandOrdering::Strict
+                                )?;
+                                cmd.gen_mip_map(view.image_id(), gpu::Filter::Linear)?;
+                            }
                             let (image_view, format) = cmd.swapchain_image_view(
                                 window.surface_id()
                             )?;
@@ -264,13 +292,13 @@ fn main() {
                                         )?;
                                         pipeline_cmd.push_descriptor_bindings(&[
                                             gpu::PushDescriptorBinding::new(
-                                                "colors",
+                                                "tex",
                                                 0,
-                                                gpu::DescriptorInfos::buffers(&[
-                                                    gpu::DescriptorBufferInfo::default()
-                                                    .buffer_id(buffer_id)
-                                                    .offset(buffer_offset)
-                                                    .size(12)
+                                                gpu::DescriptorInfos::images(&[
+                                                    gpu::DescriptorImageInfo {
+                                                        sampler: Some(sampler.clone()),
+                                                        image_view: Some(view),
+                                                    },
                                                 ]),
                                                 gpu::CommandBarrierInfo::new(
                                                     gpu::CommandOrdering::Strict,
@@ -281,7 +309,7 @@ fn main() {
                                         pipeline_cmd.begin_drawing(
                                             gpu::DrawInfo
                                                 ::default()
-                                                .vertex_count(3),
+                                                .vertex_count(6),
                                                 &[], None,
                                                 |cmd| {
                                                     cmd.draw()?;
@@ -304,9 +332,6 @@ fn main() {
                         timeline_value + 1,
                     );
                     timeline_value += 1;
-                    for hue in &mut hues {
-                        *hue = (*hue + event_loop.delta_time_secs_f32()) % TAU;
-                    }
                     Ok(())
                 },
                 nox::Event::GpuEvent(event) => {
@@ -335,7 +360,7 @@ fn main() {
                                                         .with_color_output(
                                                             format,
                                                             gpu::ColorComponents::default(),
-                                                            None,
+                                                            Some(BLEND_STATE),
                                                         )
                                                 ]);
                                             let _ = batch.build()?;

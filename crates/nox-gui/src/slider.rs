@@ -3,10 +3,7 @@ use core::{
     str::FromStr,
 };
 
-use nox_geom::{
-    *,
-    shapes::*,
-};
+use nox_geom::*;
 
 use crate::{
     surface::*,
@@ -26,7 +23,7 @@ pub trait Sliderable: Copy + FromStr + PartialEq {
 
     fn display(
         &self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         to: &mut impl Write, 
     ) -> core::fmt::Result;
 }
@@ -36,6 +33,14 @@ pub struct SliderData {
     t: f32,
     quantized_t: f32,
     flags: u32,
+}
+
+impl Default for SliderData {
+
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SliderData {
@@ -102,13 +107,13 @@ impl SliderData {
     }
 
     #[inline(always)]
-    pub fn update<Surface: UiReactSurface, Style: UiStyle>(
+    pub fn update<Surface: UiReactSurface>(
         &mut self,
-        ui: &mut UiReactContext<Surface, Style>,
+        ui: &mut UiReactContext<Surface>,
         reaction: &mut Reaction,
     )
     {
-        let radius = ui.style().default_handle_radius();
+        let radius = ui.style().default_handle_radius;
         let diameter = radius * 2.0;
         let slider_size = vec2(
             self.width,
@@ -126,25 +131,18 @@ impl SliderData {
         let offset = reaction.offset();
         let handle_offset = self.handle_offset(offset, slider_size, handle_size);
         let id = reaction.id();
-        let rounding = ui.style().rounding();
+        let rounding = ui.style().rounding;
         let visuals = ui.style().interact_visuals(reaction);
         ui.paint(move |painter, row| {
             painter
                 .rect(
                     id,
-                    rect(Default::default(), slider_size, rounding),
                     offset + vec2(0.0, row.height_halved - slider_size.y * 0.5),
-                    visuals.fill_col,
-                    visuals.bg_strokes.clone(),
-                    visuals.bg_stroke_idx
-                )
-                .rect(
+                    UiRect::bg(&visuals).rect(vec2(0.0, 0.0), slider_size, rounding),
+                ).rect(
                     id,
-                    rect(Default::default(), handle_size, rounding),
                     handle_offset + vec2(0.0, row.height_halved - handle_size.y * 0.5),
-                    visuals.fill_col,
-                    visuals.fg_strokes.clone(),
-                    visuals.fg_stroke_idx
+                    UiRect::fg(&visuals).rect(vec2(0.0, 0.0), handle_size, rounding),
                 );
         });
     }
@@ -179,11 +177,11 @@ impl Sliderable for f32 {
     #[inline(always)]
     fn display(
         &self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         to: &mut impl Write,
     ) -> core::fmt::Result
     {
-        style.f32_format(*self, to)
+        (style.f32_format)(*self, to)
     }
 }
 
@@ -194,7 +192,7 @@ impl Sliderable for f64 {
 
     #[inline(always)]
     fn slide_and_quantize_t(&mut self, min: Self, max: Self, t: f32) -> f32 {
-        *self = ((1.0 - t as f64) * min + t as f64 * max) as f64;
+        *self = (1.0 - t as f64) * min + t as f64 * max;
         t
     }
 
@@ -216,11 +214,11 @@ impl Sliderable for f64 {
     #[inline(always)]
     fn display(
         &self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         to: &mut impl Write,
     ) -> core::fmt::Result
     {
-        style.f64_format(*self, to)
+        (style.f64_format)(*self, to)
     }
 }
 
@@ -283,7 +281,7 @@ macro_rules! impl_sliderable_int {
                 #[inline(always)]
                 fn display(
                     &self,
-                    _style: &impl UiStyle,
+                    _style: &UiStyle,
                     to: &mut impl Write,
                 ) -> core::fmt::Result
                 {
@@ -351,7 +349,7 @@ macro_rules! impl_sliderable_uint {
                 #[inline(always)]
                 fn display(
                     &self,
-                    _style: &impl UiStyle,
+                    _style: &UiStyle,
                     to: &mut impl Write,
                 ) -> core::fmt::Result
                 {

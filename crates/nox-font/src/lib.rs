@@ -2,7 +2,7 @@ mod face;
 mod triangulate;
 mod vertex_text_renderer;
 
-pub use face::Face;
+pub use face::*;
 pub use triangulate::{triangulate, GlyphTriangles};
 pub use vertex_text_renderer::*;
 

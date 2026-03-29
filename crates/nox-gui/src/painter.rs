@@ -1,19 +1,19 @@
-use core::{
-    cell::UnsafeCell,
-    ptr::NonNull,
-};
+use core::ptr::NonNull;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use ahash::{AHashMap, AHashSet};
 
 use compact_str::format_compact;
 
+use nox_proc::BuildStructure;
 use nox::{
     mem::{
-        vec_types::{ArrayVec, GlobalVec, Vector},
-        Allocator,
+        vec::{ArrayVec, Vec32},
+        alloc::LocalAllocExt,
+        AsRaw,
     },
-    alloc::arena_alloc::ArenaAlloc,
+    alloc::arena::Arena,
     gpu,
+    error::*,
 };
 
 use nox_geom::{
@@ -23,7 +23,6 @@ use nox_geom::{
 
 use crate::{
     image::{ImageSourceInternal, ImageSourceUnsafe, ImageData},
-    error::*,
     *,
 };
 
@@ -66,10 +65,7 @@ impl PartialEq for Shape {
                 }
             },
             Self::FlatRect(_, _) => {
-                match other {
-                    Shape::FlatRect(_, _) => true,
-                    _ => false,
-                }
+                matches!(other, Shape::FlatRect(_, _))
             },
         }
     }
@@ -82,7 +78,7 @@ struct ShapeParams {
     fill_col: ColorSRGBA,
     shape_vertex_range: Option<VertexRange>,
     strokes: ArrayVec<(Stroke, Option<VertexRange>), 4>,
-    stroke_idx: u32,
+    stroke_type: StrokeType,
 }
 
 impl ShapeParams {
@@ -93,15 +89,15 @@ impl ShapeParams {
         offset: Vec2,
         fill_col: ColorSRGBA,
         strokes: ArrayVec<Stroke, 4>,
-        stroke_idx: u32,
+        stroke_type: StrokeType,
     ) -> Self {
         Self {
             shape: Shape::Rect(rect),
             offset,
             fill_col,
             shape_vertex_range: None,
-            strokes: strokes.mapped(|&v| (v, None)),
-            stroke_idx,
+            strokes: strokes.map(|&v| (v, None)),
+            stroke_type,
         }
     }
 
@@ -112,15 +108,15 @@ impl ShapeParams {
         offset: Vec2,
         fill_col: ColorSRGBA,
         strokes: ArrayVec<Stroke, 4>,
-        stroke_idx: u32,
+        stroke_type: StrokeType,
     ) -> Self {
         Self {
             shape: Shape::Circle(circle, steps),
             offset,
             fill_col,
             shape_vertex_range: None,
-            strokes: strokes.mapped(|&v| (v, None)),
-            stroke_idx,
+            strokes: strokes.map(|&v| (v, None)),
+            stroke_type,
         }
     }
 
@@ -130,15 +126,15 @@ impl ShapeParams {
         offset: Vec2,
         fill_col: ColorSRGBA,
         strokes: ArrayVec<Stroke, 4>,
-        stroke_idx: u32,
+        stroke_type: StrokeType,
     ) -> Self {
         Self {
             shape: Shape::Checkmark(scale),
             offset,
             fill_col,
             shape_vertex_range: None,
-            strokes: strokes.mapped(|&v| (v, None)),
-            stroke_idx,
+            strokes: strokes.map(|&v| (v, None)),
+            stroke_type,
         }
     }
 
@@ -155,20 +151,20 @@ impl ShapeParams {
             fill_col,
             shape_vertex_range: None,
             strokes: Default::default(),
-            stroke_idx: 0,
+            stroke_type: StrokeType::Type1,
         }
     }
 }
 
 #[derive(Default)]
 struct ReactionShapes {
-    shapes: GlobalVec<ShapeParams>,
-    rendered_shapes: GlobalVec<ShapeParams>,
-    prev_shapes: GlobalVec<(Shape, ArrayVec<f32, 4>)>,
-    images_by_path: FxHashMap<CompactString, UnsafeCell<ImageData>>,
-    images_by_id: FxHashMap<gpu::ImageId, UnsafeCell<ImageData>>,
-    prev_active_images: GlobalVec<ImageSourceUnsafe>,
-    active_images: GlobalVec<ImageSourceUnsafe>,
+    shapes: Vec32<ShapeParams>,
+    rendered_shapes: Vec32<ShapeParams>,
+    prev_shapes: Vec32<(Shape, ArrayVec<f32, 4>)>,
+    images_by_path: AHashMap<CompactString, ImageData>,
+    images_by_id: AHashMap<gpu::ImageViewId, ImageData>,
+    prev_active_images: Vec32<ImageSourceUnsafe>,
+    active_images: Vec32<ImageSourceUnsafe>,
 }
 
 impl ReactionShapes {
@@ -178,57 +174,36 @@ impl ReactionShapes {
         self.shapes.len() != self.rendered_shapes.len() ||
         self.shapes
             .iter()
-            .map(|v| (v.shape, v.strokes.mapped(|&v| v.0.thickness)))
+            .map(|v| (v.shape, v.strokes.map(|&v| v.0.thickness)))
             .ne(self.prev_shapes.iter().cloned())
     }
 
     #[inline(always)]
-    fn active_image_iter(&self) -> impl Iterator<Item = Option<&mut ImageData>> {
-        self.active_images
-            .iter()
-            .map(|source| unsafe {
-                match source.as_image_source() {
-                    ImageSource::Path(p) => {
-                        self.images_by_path
-                            .get(p)
-                            .map(|i| &mut *i.get())
-                    },
-                    ImageSource::Id(id) => {
-                        self.images_by_id
-                            .get(&id)
-                            .map(|i| &mut *i.get())
-                    },
-                }
-            })
-    }
-
-    #[inline(always)]
-    fn prev_image_iter(&self) -> impl Iterator<Item = Option<&mut ImageData>> {
-        self.prev_active_images
-            .iter()
-            .map(|source| unsafe {
-                match source.as_image_source() {
-                    ImageSource::Path(p) => {
-                        self.images_by_path
-                            .get(p)
-                            .map(|i| &mut *i.get())
-                    },
-                    ImageSource::Id(id) => {
-                        self.images_by_id
-                            .get(&id)
-                            .map(|i| &mut *i.get())
-                    },
-                }
-            })
-    }
+    fn active_image_iter<'a>(&'a mut self) -> impl Iterator<Item = &'a mut ImageData> + 'a {
+        let s: *mut Self = self;
+        (0..).scan(s, |s, idx| {
+            let s = unsafe { &mut **s };
+            s.active_images
+                .get(idx)
+                .and_then(|&source| unsafe {
+                    match source.as_image_source() {
+                        ImageSource::Path(p) => {
+                            s.images_by_path
+                                .get_mut(p)
+                        },
+                        ImageSource::Id(id) => {
+                            s.images_by_id
+                                .get_mut(&id)
+                        },
+                    }
+                }) 
+        })
+    } 
 
     #[inline(always)]
     fn hide(
         &self,
         vertices: &mut [Vertex],
-        window_semaphore: (gpu::TimelineSemaphoreId, u64),
-        gpu: &mut gpu::GpuContext,
-        tmp_alloc: &impl Allocator,
     ) -> Result<()>
     {
         for params in &self.rendered_shapes {
@@ -237,21 +212,16 @@ impl ReactionShapes {
                 hide_vertices(vertices, range);
             }
         }
-        for data in self.prev_image_iter() {
-            if let Some(data) = data {
-                data.hide(window_semaphore, gpu, tmp_alloc)
-                    .context_with(|| format_compact!(
-                        "failed to hide image at location {}", data.location_or_this(),
-                    ))?;
-            }
-        }
         Ok(())
     }
 
     #[inline(always)]
     fn reset(&mut self) {
         self.prev_shapes.clear();
-        self.prev_shapes.append_map(&self.shapes, |v| (v.shape, v.strokes.mapped(|&v| v.0.thickness)));
+        self.prev_shapes.extend(self.shapes
+            .iter()
+            .map(|v| (v.shape, v.strokes.map(|&v| v.0.thickness)))
+        );
         if self.rendered_shapes.len() == self.shapes.len() {
             for (i, shape) in self.rendered_shapes.iter_mut().enumerate() {
                 let update = self.shapes[i].clone();
@@ -261,7 +231,7 @@ impl ReactionShapes {
                 for (j, stroke) in update.strokes.iter().enumerate() {
                     shape.strokes[j].0 = stroke.0;
                 }
-                shape.stroke_idx = update.stroke_idx;
+                shape.stroke_type = update.stroke_type;
             }
         }
         self.shapes.clear();
@@ -272,39 +242,33 @@ impl ReactionShapes {
 }
 
 pub struct PainterStorage {
-    vertices: GlobalVec<Vertex>,
-    indices_usize: GlobalVec<usize>,
-    indices: GlobalVec<u32>,
-    points: GlobalVec<[f32; 2]>,
-    checkmark_points: GlobalVec<[f32; 2]>,
-    helper_points: GlobalVec<[f32; 2]>,
-    reaction_shapes: FxHashMap<ReactionId, ReactionShapes>,
-    active_reactions: FxHashSet<ReactionId>,
-    prev_active_reactions: GlobalVec<ReactionId>,
-    shapes: GlobalVec<(ReactionId, ShapeParams)>,
-    stack: ArenaAlloc,
-    flags: u32,
+    vertices: Vec32<Vertex>,
+    indices: Vec32<u32>,
+    points: Vec32<[f32; 2]>,
+    checkmark_points: Vec32<[f32; 2]>,
+    helper_points: Vec32<[f32; 2]>,
+    reaction_shapes: AHashMap<ReactionId, ReactionShapes>,
+    active_reactions: AHashSet<ReactionId>,
+    prev_active_reactions: Vec32<ReactionId>,
+    shapes: Vec32<(ReactionId, ShapeParams)>,
+    stack: Arena,
 }
 
 impl PainterStorage {
-
-    const REQUIRES_TRANSFER_COMMANDS: u32 = 0x1;
 
     #[inline(always)]
     pub fn new(stack_size: usize) -> Self {
         Self {
             vertices: Default::default(),
-            indices_usize: Default::default(),
             indices: Default::default(),
             points: Default::default(),
             checkmark_points: Default::default(),
             helper_points: Default::default(),
-            reaction_shapes: FxHashMap::default(),
-            active_reactions: FxHashSet::default(),
+            reaction_shapes: AHashMap::default(),
+            active_reactions: AHashSet::default(),
             prev_active_reactions: Default::default(),
             shapes: Default::default(),
-            stack: ArenaAlloc::new(stack_size).unwrap(),
-            flags: 0,
+            stack: Arena::new(stack_size).unwrap(),
         }
     } 
 
@@ -318,28 +282,19 @@ impl PainterStorage {
         unsafe {
             self.stack.clear();
         }
-        self.flags &= !Self::REQUIRES_TRANSFER_COMMANDS;
     }
 
     pub fn end(
         &mut self,
-        window_semaphore: (gpu::TimelineSemaphoreId, u64),
-        gpu: &mut gpu::GpuContext,
-        tmp_alloc: &impl Allocator,
     ) -> Result<()>
     {
         self.prev_active_reactions.retain(|v| !self.active_reactions.contains(v));
         for reaction in &self.prev_active_reactions {
             let shapes = self.reaction_shapes.get(reaction).unwrap();
-            shapes.hide(&mut self.vertices, window_semaphore, gpu, tmp_alloc)
+            shapes.hide(&mut self.vertices)
                 .context("failed to hide shape")?;
         }
         Ok(())
-    }
-
-    #[inline(always)]
-    pub fn requires_transfer_commands(&self) -> bool {
-        self.flags & Self::REQUIRES_TRANSFER_COMMANDS == Self::REQUIRES_TRANSFER_COMMANDS
     }
 
     pub fn triangulate(&mut self)
@@ -355,22 +310,19 @@ impl PainterStorage {
             }
         }
         let vertices = &mut self.vertices;
-        let indices_usize = &mut self.indices_usize;
         let indices = &mut self.indices;
         if requires_triangulation {
             vertices.clear();
-            indices_usize.clear();
             indices.clear();
             self.shapes.clear();
             for shapes in &mut self.reaction_shapes {
                 shapes.1.rendered_shapes.clear();
             }
             vertices.clear();
-            indices_usize.clear();
             let points = &mut self.points;
             let helper_points = &mut self.helper_points;
             for id in self.active_reactions.iter() {
-                let reaction_shapes = self.reaction_shapes.get_mut(&id).unwrap();
+                let reaction_shapes = self.reaction_shapes.get_mut(id).unwrap();
                 for shape in &mut reaction_shapes.shapes {
                     match shape.shape {
                         Shape::Rect(rect) => {
@@ -383,12 +335,12 @@ impl PainterStorage {
                                     &mut |p| { helper_points.push(p.into()); }
                                 );
                                 let vertex_off = vertices.len();
-                                earcut::earcut(&helper_points, &[], false, vertices, indices_usize).ok();
+                                earcut::earcut(helper_points, &[], false, vertices, indices);
                                 *range = VertexRange::new(vertex_off..vertices.len());
                                 helper_points.clear();
                             }
                             let vertex_off = vertices.len();
-                            earcut::earcut(&points, &[], false, vertices, indices_usize).ok();
+                            earcut::earcut(points, &[], false, vertices, indices);
                             shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
                         },
                         Shape::Circle(circle, steps) => {
@@ -401,16 +353,16 @@ impl PainterStorage {
                                     &mut |p| { helper_points.push(p.into()); }
                                 );
                                 let vertex_off = vertices.len();
-                                earcut::earcut(&helper_points, &[], false, vertices, indices_usize).ok();
+                                earcut::earcut(helper_points, &[], false, vertices, indices);
                                 *range = VertexRange::new(vertex_off..vertices.len());
                                 helper_points.clear();
                             }
                             let vertex_off = vertices.len();
-                            earcut::earcut(&points, &[], false, vertices, indices_usize).ok();
+                            earcut::earcut(points, &[], false, vertices, indices);
                             shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
                         },
                         Shape::Checkmark(scale) => {
-                            points.clone_from_slice(&self.checkmark_points);
+                            points.fast_append(&self.checkmark_points);
                             for point in &mut *points {
                                 point[0] *= scale;
                                 point[1] *= scale;
@@ -423,12 +375,12 @@ impl PainterStorage {
                                     &mut |p| { helper_points.push(p.into()); }
                                 );
                                 let vertex_off = vertices.len();
-                                earcut::earcut(&helper_points, &[], false, vertices, indices_usize).ok();
+                                earcut::earcut(helper_points, &[], false, vertices, indices);
                                 *range = VertexRange::new(vertex_off..vertices.len());
                                 helper_points.clear();
                             }
                             let vertex_off = vertices.len();
-                            earcut::earcut(&points, &[], false, vertices, indices_usize).ok();
+                            earcut::earcut(points, &[], false, vertices, indices);
                             shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
                         },
                         Shape::FlatRect(min, max) => {
@@ -440,7 +392,7 @@ impl PainterStorage {
                                 vec2(max.x, min.y).into(),
                             ]);
                             shape.shape_vertex_range = VertexRange::new(vertex_off..vertices.len());
-                            indices_usize.append(&[
+                            indices.fast_append(&[
                                 vertex_off, vertex_off + 2, vertex_off + 1,
                                 vertex_off + 3, vertex_off + 2, vertex_off,
                             ]);
@@ -453,7 +405,6 @@ impl PainterStorage {
                     helper_points.clear();
                 }
             }
-            indices.append_map(&indices_usize, |&v| v as u32);
         }
         for (_, params) in self.shapes.iter().cloned() {
             let offset = params.offset;
@@ -485,7 +436,7 @@ impl PainterStorage {
             } else {
                 set_vertex_params(vertices, params.shape_vertex_range, offset, params.fill_col);
                 for (i, stroke) in params.strokes.iter().enumerate() {
-                    if i as u32 == params.stroke_idx {
+                    if i as u32 == params.stroke_type.as_raw() {
                         set_vertex_params(vertices, stroke.1, offset, stroke.0.col);
                     } else {
                         hide_vertices(vertices, stroke.1);
@@ -494,149 +445,204 @@ impl PainterStorage {
             }
         }
         self.shapes.clear();
-    }
+    } 
 
-    pub fn render(
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(
         &mut self,
-        frame_graph: &mut gpu::FrameGraph,
-        render_format: gpu::ColorFormat,
-        add_read: &mut dyn FnMut(gpu::ReadInfo),
-    ) -> Result<()> {
-        for id in &self.active_reactions {
-            if let Some(shapes) = self.reaction_shapes.get_mut(id) {
-                for data in shapes.active_image_iter() {
-                    if let Some(data) = data {
-                        data.render(frame_graph, render_format, add_read)
-                            .context_with(|| format_compact!(
-                                "failed to render image at location {}", data.location_or_this(),
-                            ))?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn transfer_work(
-        &mut self,
-        commands: &mut gpu::TransferCommands,
-        window_semaphore: (gpu::TimelineSemaphoreId, u64),
-        sampler: gpu::SamplerId,
-        texture_pipeline_layout: gpu::PipelineLayoutId,
-        tmp_alloc: &impl Allocator,
-    ) -> Result<()>
-    {
-        for id in &self.active_reactions {
-            let shapes= self.reaction_shapes
-                .get_mut(id)
-                .unwrap();
-            for data in shapes.active_image_iter() {
-                if let Some(data) = data {
-                    data.transfer_work(
-                        commands,
-                        window_semaphore,
-                        sampler,
-                        texture_pipeline_layout,
-                        tmp_alloc
-                    ).context_with(|| format_compact!(
-                        "transfer work failed for image at location {}", data.location_or_this()
-                    ))?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn render_work(
-        &mut self,
-        commands: &mut gpu::RenderCommands,
-        sampler: gpu::SamplerId,
+        cmd: &mut gpu::DrawCommands<'_>,
+        rec: &mut RecordCmd<'_>,
+        cached_data: &CachedUiData,
+        sampler: gpu::Sampler,
         offset: Vec2,
         bounds: BoundingRect,
-        base_pipeline: gpu::GraphicsPipelineId,
-        text_pipeline: gpu::GraphicsPipelineId,
-        texture_pipeline: gpu::GraphicsPipelineId,
-        texture_pipeline_layout: gpu::PipelineLayoutId,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
-        tmp_alloc: &impl Allocator,
-        get_custom_pipeline: &mut dyn FnMut(&str) -> Option<gpu::GraphicsPipelineId>,
     ) -> Result<()>
     {
         let vert_count = self.vertices.len();
         let idx_count = self.indices.len();
-        let vert_mem = unsafe {
-            vertex_buffer.allocate(commands, vert_count)?
-        };
-        let idx_mem = unsafe {
-            index_buffer.allocate(commands, idx_count)?
-        };
+        let vert_mem = rec.allocate_vertices(vert_count)?;
+        let idx_mem = rec.allocate_indices(idx_count)?;
         unsafe {
             self.vertices
                 .as_ptr()
-                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count);
+                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count as usize);
             self.indices
                 .as_ptr()
-                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
+                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count as usize);
         }
-        let draw_info = gpu::DrawInfo {
-            index_count: idx_count as u32,
+        let draw_info = gpu::IndexedDrawInfo {
+            index_count: idx_count,
             ..Default::default()
         };
-        commands.bind_pipeline(base_pipeline)?;
+        let (viewport, scissor) = cached_data.viewport_and_scissor();
+        let mut pipeline_cmd = cmd.bind_pipeline(rec.base_pipeline(), &[viewport], &[scissor])?;
         let pc_vertex = push_constants_vertex(
             offset,
             vec2(1.0, 1.0),
-            inv_aspect_ratio,
-            unit_scale,
+            cached_data.inv_aspect_ratio,
+            cached_data.unit_scale,
         );
         let pc_fragment = base_push_constants_fragment(
             bounds.min,
             bounds.max,
         );
-        commands.push_constants(|pc| unsafe {
-            if pc.stage == gpu::ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        commands.draw_indexed(
+        pipeline_cmd.push_constants(pc_vertex.0, &[pc_vertex.1])?;
+        pipeline_cmd.push_constants(pc_fragment.0, &[pc_fragment.1])?;
+        pipeline_cmd.begin_drawing_indexed(
             draw_info,
-            [
-                gpu::DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-            ],
-            gpu::DrawBufferInfo {
-                id: index_buffer.id(),
-                offset: idx_mem.offset,
-            },
+            gpu::IndexBufferInfo::new(
+                rec.index_buffer_id(),
+                idx_mem.offset,
+            ),
+            &[gpu::DrawBufferRange::new(
+                rec.vertex_buffer_id(),
+                vert_mem.offset,
+                vert_mem.size
+            )], None,
+            |cmd| { cmd.draw_indexed()?; Ok(()) }
         )?;
         for id in &self.active_reactions {
             let shapes = self.reaction_shapes
                 .get_mut(id)
                 .unwrap();
             for data in shapes.active_image_iter() {
-                if let Some(data) = data {
-                    data.render_work(
-                        commands, sampler,
-                        texture_pipeline, texture_pipeline_layout,
-                        offset, bounds,
-                        inv_aspect_ratio, unit_scale, tmp_alloc
-                    ).context_with(|| format_compact!(
-                        "image render work failed at location {}", data.location_or_this(),
+                data.draw(cmd, rec, sampler.clone(), cached_data, offset, bounds)
+                    .context_with(|| format_compact!(
+                        "failed to render image"
                     ))?;
-                }
             }
         }
         Ok(())
     }
 }
 
+pub use nox_geom::shapes::Rect;
+
+#[derive(Default, Clone, BuildStructure)]
+pub struct UiRect {
+    #[skip]
+    pub rect: Rect,
+    pub strokes: InteractStrokes,
+    pub stroke_type: StrokeType,
+    pub fill_col: ColorSRGBA,
+}
+
+impl UiRect {
+
+    #[inline]
+    pub fn fg(visuals: &InteractVisuals) -> Self {
+        Self {
+            rect: Default::default(),
+            strokes: visuals.fg_strokes.clone(),
+            stroke_type: visuals.fg_stroke_type,
+            fill_col: visuals.fill_col,
+        }
+    }
+
+    #[inline]
+    pub fn bg(visuals: &InteractVisuals) -> Self {
+        Self {
+            rect: Default::default(),
+            strokes: visuals.bg_strokes.clone(),
+            stroke_type: visuals.bg_stroke_type,
+            fill_col: visuals.fill_col,
+        }
+    }
+
+    #[inline]
+    pub fn rect<P: Into<Vec2>>(mut self, min: P, max: P, rounding: f32) -> Self
+    {
+        self.rect = rect(min, max, rounding);
+        self
+    }
+}
+
+pub use nox_geom::shapes::Circle;
+
+#[derive(Clone, BuildStructure)]
+pub struct UiCircle {
+    #[skip]
+    pub circle: Circle,
+    /// Specifies how many segments the circle is divided to when triangulating.
+    ///
+    /// Default value is 16.
+    #[default(16)]
+    pub steps: u32,
+    pub strokes: InteractStrokes,
+    pub stroke_type: StrokeType,
+    pub fill_col: ColorSRGBA,
+}
+
+impl UiCircle {
+
+    #[inline]
+    pub fn fg(visuals: &InteractVisuals) -> Self {
+        Self {
+            circle: Default::default(),
+            steps: 16,
+            strokes: visuals.fg_strokes.clone(),
+            stroke_type: visuals.fg_stroke_type,
+            fill_col: visuals.fill_col,
+        }
+    }
+
+    #[inline]
+    pub fn bg(visuals: &InteractVisuals) -> Self {
+        Self {
+            circle: Default::default(),
+            steps: 16,
+            strokes: visuals.bg_strokes.clone(),
+            stroke_type: visuals.bg_stroke_type,
+            fill_col: visuals.fill_col,
+        }
+    }
+
+    #[inline]
+    pub fn circle<P: Into<Vec2>>(mut self, origin: P, radius: f32) -> Self {
+        self.circle = circle(origin, radius);
+        self
+    }
+}
+
+#[derive(Clone, BuildStructure)]
+pub struct UiCheckmark {
+    /// Specifies how big the checkmark will be relative to text size.
+    ///
+    /// Default value is 1.0.
+    #[default(1.0)]
+    pub scale: f32,
+    pub strokes: InteractStrokes,
+    pub stroke_type: StrokeType,
+    pub fill_col: ColorSRGBA,
+}
+
+impl UiCheckmark {
+
+    #[inline]
+    pub fn fg(visuals: &InteractVisuals) -> Self {
+        Self {
+            scale: 1.0,
+            strokes: visuals.fg_strokes.clone(),
+            stroke_type: visuals.fg_stroke_type,
+            fill_col: visuals.fill_col,
+        }
+    }
+
+    #[inline]
+    pub fn bg(visuals: &InteractVisuals) -> Self {
+        Self {
+            scale: 1.0,
+            strokes: visuals.bg_strokes.clone(),
+            stroke_type: visuals.bg_stroke_type,
+            fill_col: visuals.fill_col,
+        }
+    }
+}
+
 pub struct Painter<'a> {
     storage: &'a mut PainterStorage,
     image_loader: &'a mut ImageLoader,
+    command_dependencies: &'a mut Vec32<gpu::CommandDependency>,
 }
 
 impl<'a> Painter<'a>
@@ -645,15 +651,17 @@ impl<'a> Painter<'a>
     #[inline(always)]
     pub fn new(
         storage: &'a mut PainterStorage,
-        style: &impl UiStyle,
+        style: &UiStyle,
         text_renderer: &mut TextRenderer,
         image_loader: &'a mut ImageLoader,
+        command_dependencies: &'a mut Vec32<gpu::CommandDependency>,
     ) -> Self {
         storage.checkmark_points.clear();
         style.get_checkmark_points(text_renderer, &mut storage.checkmark_points);
         Self {
             storage,
             image_loader,
+            command_dependencies,
         }
     }
 
@@ -661,22 +669,19 @@ impl<'a> Painter<'a>
     pub fn rect(
         &mut self,
         reaction_id: ReactionId,
-        rect: Rect,
         offset: Vec2,
-        fill_col: ColorSRGBA,
-        strokes: ArrayVec<Stroke, 4>,
-        stroke_idx: u32,
+        rect: UiRect,
     ) -> &mut Self {
         self.storage.active_reactions.insert(reaction_id);
         let entry = self.storage.reaction_shapes
             .entry(reaction_id)
             .or_default();
         let shape_params = ShapeParams::new_rect(
-            rect,
+            rect.rect,
             offset,
-            fill_col,
-            strokes,
-            stroke_idx,
+            rect.fill_col,
+            rect.strokes,
+            rect.stroke_type,
         );
         entry.shapes.push(shape_params);
         self
@@ -686,24 +691,20 @@ impl<'a> Painter<'a>
     pub fn circle(
         &mut self,
         reaction_id: ReactionId,
-        circle: Circle,
-        steps: u32,
         offset: Vec2,
-        fill_col: ColorSRGBA,
-        strokes: ArrayVec<Stroke, 4>,
-        stroke_idx: u32,
+        circle: UiCircle,
     ) -> &mut Self {
         self.storage.active_reactions.insert(reaction_id);
         let entry = self.storage.reaction_shapes
             .entry(reaction_id)
             .or_default();
         let shape_params = ShapeParams::new_circle(
-            circle,
-            steps,
+            circle.circle,
+            circle.steps,
             offset,
-            fill_col,
-            strokes,
-            stroke_idx,
+            circle.fill_col,
+            circle.strokes,
+            circle.stroke_type,
         );
         entry.shapes.push(shape_params);
         self
@@ -713,22 +714,19 @@ impl<'a> Painter<'a>
     pub fn checkmark(
         &mut self,
         reaction_id: ReactionId,
-        scale: f32,
         offset: Vec2,
-        fill_col: ColorSRGBA,
-        strokes: ArrayVec<Stroke, 4>,
-        stroke_idx: u32,
+        check_mark: UiCheckmark,
     ) -> &mut Self {
         self.storage.active_reactions.insert(reaction_id);
         let entry = self.storage.reaction_shapes
             .entry(reaction_id)
             .or_default();
         let shape_params = ShapeParams::new_checkmark(
-            scale,
+            check_mark.scale,
             offset,
-            fill_col,
-            strokes,
-            stroke_idx,
+            check_mark.fill_col,
+            check_mark.strokes,
+            check_mark.stroke_type,
         );
         entry.shapes.push(shape_params);
         self
@@ -772,28 +770,22 @@ impl<'a> Painter<'a>
             .or_default();
         let source = match source {
             ImageSource::Path(p) => unsafe {
-                let src = self.image_loader.load_image(p);
+                let (src, dep) = self.image_loader.load_image(p);
+                if let Some(dep) = dep {
+                    self.command_dependencies.push(dep);
+                }
                 if let Some(data) = entry.images_by_path
                     .get_mut(p)
                 {
-                    let data = data.get_mut();
                     data.update_source(src, caller!(), offset, size);
-                    if data.requires_transfer_commands() {
-                        self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
-                    }
-                } else
-                {
+                } else {
                     let data = entry.images_by_path
                         .entry(p.into())
                         .or_default();
-                    let data = data.get_mut();
                     data.update_source(src, caller!(), offset, size);
-                    if data.requires_transfer_commands() {
-                        self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
-                    }
                 }
                 let len = p.len();
-                if let Some(data) = self.storage.stack.allocate_uninit(len) {
+                if let Ok(data) = self.storage.stack.alloc_uninit(len) {
                     p.as_ptr()
                         .copy_to_nonoverlapping(data.as_ptr(), len);
                     ImageSourceUnsafe::Path(data, len)
@@ -802,15 +794,13 @@ impl<'a> Painter<'a>
                 }
             },
             ImageSource::Id(id) => {
-                let src = ImageSourceInternal::Id(id);
+                let src = ImageSourceInternal {
+                    view_id: id,
+                };
                 let data = entry.images_by_id
                     .entry(id)
                     .or_default();
-                let data = data.get_mut();
                 data.update_source(src, caller!(), offset, size);
-                if data.requires_transfer_commands() {
-                    self.storage.flags |= PainterStorage::REQUIRES_TRANSFER_COMMANDS;
-                }
                 ImageSourceUnsafe::Id(id)
             },
         };

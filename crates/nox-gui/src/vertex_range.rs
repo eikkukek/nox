@@ -9,10 +9,10 @@ pub struct VertexRange {
 impl VertexRange {
 
     #[inline(always)]
-    pub fn new(range: core::ops::Range<usize>) -> Option<Self> {
+    pub fn new(range: core::ops::Range<u32>) -> Option<Self> {
         (range.start != range.end).then_some(Self {
-            start: range.start as u32,
-            end: NonZeroU32::new(range.end as u32)?,
+            start: range.start,
+            end: NonZeroU32::new(range.end)?,
         })
     }
 

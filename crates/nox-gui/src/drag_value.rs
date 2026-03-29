@@ -1,6 +1,6 @@
 use core::fmt::Write;
 
-use nox::win;
+use nox::{win, or_flag};
 
 use crate::{
     surface::*,
@@ -15,6 +15,14 @@ pub struct DragValueData {
     flags: u32,
 }
 
+impl Default for DragValueData {
+
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DragValueData {
 
     const HELD: u32 = 0x1;
@@ -22,7 +30,7 @@ impl DragValueData {
     const DRAGGED: u32 = 0x4;
     const TRANSPARENT_INACTIVE_BG: u32 = 0x8;
 
-    #[inline(always)]
+    #[inline]
     pub fn new() -> Self {
         Self {
             input_text: InputTextData::new(),
@@ -33,25 +41,25 @@ impl DragValueData {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn held(&self) -> bool {
         self.flags & Self::HELD == Self::HELD
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn hovered(&self) -> bool {
         self.flags & Self::HOVERED == Self::HOVERED
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn dragged(&self) -> bool {
         self.flags & Self::DRAGGED == Self::DRAGGED
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn set_input_params(
         &mut self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         width: f32,
         format_input: Option<fn(&mut dyn Write, &str) -> core::fmt::Result>,
         transparent_inactive_bg: bool,
@@ -64,20 +72,19 @@ impl DragValueData {
                     self.flags |= Self::TRANSPARENT_INACTIVE_BG;
                     ColorSRGBA::black(0.0)
                 } else {
-                    style.widget_bg_col()
+                    style.widget_bg_col
                 }
             ),
             true, "", format_input, self.held()
         );
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn calc_value<T>(
         &mut self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         value: &mut T,
-        min: T,
-        max: T,
+        (min, max): (T, T),
         drag_speed: f32,
     )
         where
@@ -102,13 +109,12 @@ impl DragValueData {
     }
 
 
-    #[inline(always)]
+    #[inline]
     pub fn calc_and_map_value<T, U>(
         &mut self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         value: &mut T,
-        min: T,
-        max: T,
+        (min, max): (T, T),
         drag_speed: f32,
         mut map_to: impl FnMut(&T) -> U,
         mut map_from: impl FnMut(U) -> T,
@@ -135,9 +141,9 @@ impl DragValueData {
         }
     }
 
-    pub fn update<Surface: UiReactSurface, Style: UiStyle>(
+    pub fn update<Surface: UiReactSurface>(
         &mut self,
-        ui: &mut UiReactContext<Surface, Style>,
+        ui: &mut UiReactContext<Surface>,
         reaction: &mut Reaction,
     )
     {

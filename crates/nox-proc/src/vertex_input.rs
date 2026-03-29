@@ -69,8 +69,9 @@ pub fn vertex_input(item: TokenStream) -> TokenStream {
             fn get_attributes(
                 first_location: u32,
             ) -> [nox::gpu::VertexInputAttribute; #n] {
-                [ #( #inputs ),*
-                ]
+                [#(
+                    #inputs
+                ),*]
             }
         }
     };

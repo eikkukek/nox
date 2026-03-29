@@ -11,6 +11,7 @@ mod base {
     #[derive(Clone)]
     pub struct Template<Meta: Send + Sync> {
         pub(crate) meta: Meta,
+        pub(crate) shader_set_id: ShaderSetId,
         pub(crate) dynamic_states: Vec32<DynamicState>,
         pub(crate) vertex_input_bindings: Vec32<VertexInputBinding>,
         pub(crate) vertex_input_attributes: Vec32<VertexInputAttributeInternal>,
@@ -25,7 +26,6 @@ mod base {
         pub(crate) color_outputs: Vec32<(Format, ColorOutputState)>,
         pub(crate) depth_output_format: Format,
         pub(crate) stencil_output_format: Format,
-        pub(crate) shader_set_id: Option<ShaderSetId>,
         pub(crate) line_width: f32,
         pub(crate) depth_clamp: bool,
         pub(crate) rasterizer_discard: bool,
@@ -38,9 +38,9 @@ pub type GraphicsPipelineCreateTemplate = base::Template<()>;
 
 impl GraphicsPipelineCreateTemplate {
     
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self::_new(())
+    #[inline]
+    pub fn new(shader_set_id: ShaderSetId) -> Self {
+        Self::_new((), shader_set_id)
     }
 }
 
@@ -55,12 +55,17 @@ impl<'a> GraphicsPipelineCreateInfo<'a> {
     /// the id of the to be created [`GraphicsPipeline`] is returned to `out_id`.
     ///
     /// # Valid usage
-    /// - Before adding the pipeline to a batch, a valid [`ShaderSetId`] *must* be set via
-    ///   [`GraphicsPipelineCreateInfo::with_shader_set`], and it *must* be compatible as described
-    ///   in the method.
-    #[inline(always)]
-    pub fn new(out_id: &'a mut GraphicsPipelineId) -> Self {
-        Self::_new(out_id)
+    /// - `shader_set_id` *must* be a valid [`ShaderSetId`].
+    /// - The shader set *must* contain a shader with [`ShaderStage::Vertex`].
+    /// - If [`GraphicsPipelineCreateInfo::rasterizer_discard`] is false or the dynamic state
+    ///   includes [`DynamicState::RasterizerDiscardEnable`], the shader set *must* contain a shader
+    ///   with [`ShaderStage::Fragment`].
+    #[inline]
+    pub fn new(
+        out_id: &'a mut GraphicsPipelineId,
+        shader_set_id: ShaderSetId,
+    ) -> Self {
+        Self::_new(out_id, shader_set_id)
     }
 
     /// Creates a new [`GraphicsPipelineCreateInfo`] from a [`GraphicsPipelineCreateTemplate`].
@@ -69,10 +74,14 @@ impl<'a> GraphicsPipelineCreateInfo<'a> {
     /// the id of the to be created [`GraphicsPipeline`] is returned to `out_id`.
     ///
     /// # Valid usage
-    /// - If not specified in the template, a valid [`ShaderSetId`] *must* be set via
-    ///   [`GraphicsPipelineCreateInfo::with_shader_set`], and it *must* be compatible as described
-    ///   in the method.
-    #[inline(always)]
+    /// - [`shader_set_id`][1] *must* be a valid [`ShaderSetId`].
+    /// - The shader set *must* contain a shader with [`ShaderStage::Vertex`].
+    /// - If [`GraphicsPipelineCreateInfo::rasterizer_discard`] is false or the dynamic state
+    ///   includes [`DynamicState::RasterizerDiscardEnable`], the shader set *must* contain a shader
+    ///   with [`ShaderStage::Fragment`].
+    ///
+    /// [1]: GraphicsPipelineCreateTemplate
+    #[inline]
     pub fn from_template(
         out_id: &'a mut GraphicsPipelineId,
         template: GraphicsPipelineCreateTemplate,
@@ -81,7 +90,7 @@ impl<'a> GraphicsPipelineCreateInfo<'a> {
     }
 
     /// Turns the create info into [`GraphicsPipelineCreateTemplate`].
-    #[inline(always)]
+    #[inline]
     pub fn into_template(
         self
     ) -> GraphicsPipelineCreateTemplate {
@@ -94,6 +103,7 @@ impl<Meta: Send + Sync> base::Template<Meta> {
     fn cast<T: Send + Sync>(self, meta: T) -> base::Template<T> {
         base::Template {
             meta,
+            shader_set_id: self.shader_set_id,
             dynamic_states: self.dynamic_states,
             vertex_input_bindings: self.vertex_input_bindings,
             vertex_input_attributes: self.vertex_input_attributes,
@@ -108,7 +118,6 @@ impl<Meta: Send + Sync> base::Template<Meta> {
             color_outputs: self.color_outputs,
             depth_output_format: self.depth_output_format,
             stencil_output_format: self.stencil_output_format,
-            shader_set_id: self.shader_set_id,
             line_width: self.line_width,
             depth_clamp: self.depth_clamp,
             rasterizer_discard: self.rasterizer_discard,
@@ -116,9 +125,10 @@ impl<Meta: Send + Sync> base::Template<Meta> {
         }
     }
 
-    fn _new(meta: Meta) -> Self {
+    fn _new(meta: Meta, shader_set_id: ShaderSetId) -> Self {
         Self {
             meta,
+            shader_set_id,
             dynamic_states: vec32![],
             color_outputs: vec32![],
             vertex_input_bindings: vec32![],
@@ -133,7 +143,6 @@ impl<Meta: Send + Sync> base::Template<Meta> {
             color_blend_info: ColorBlendInfo::default(),
             depth_output_format: Format::Undefined,
             stencil_output_format: Format::Undefined,
-            shader_set_id: None,
             line_width: 1.0,
             depth_clamp: false,
             rasterizer_discard: false,
@@ -151,37 +160,54 @@ impl<Meta: Send + Sync> base::Template<Meta> {
     /// - If [`GraphicsPipelineCreateInfo::rasterizer_discard`] is false or the dynamic state
     ///   includes [`DynamicState::RasterizerDiscardEnable`], the shader set *must* contain a shader
     ///   with [`ShaderStage::Fragment`].
-    #[inline(always)]
+    #[inline]
     pub fn with_shader_set(mut self, id: ShaderSetId) -> Self {
-        self.shader_set_id = Some(id);
+        self.shader_set_id = id;
         self
     }
 
     /// Adds vertex input to the pipeline.
     ///
-    /// The binding must be unique and input locations from [`I::get_attributes()`] with
-    /// `first_location` must not contain locations already added to the pipeline.
-    #[inline(always)]
-    pub fn with_vertex_input<const N_ATTRIBUTES: usize, I>(
-        mut self, 
-        binding: u32,
-        first_location: u32,
-        input_rate: VertexInputRate,
-    ) -> Result<Self>
-        where I: VertexInput<N_ATTRIBUTES>
-    {
+    /// The binding must be unique and input [`locations`][1].
+    ///
+    /// [1]: VertexInputAttribute::locationv
+    pub fn with_vertex_input(
+        mut self,
+        binding: VertexInputBinding,
+        attributes: &mut [VertexInputAttribute],
+    ) -> Result<Self> {
         if self.vertex_input_bindings
             .iter()
-            .any(|b| b.binding == binding)
+            .any(|b| binding.binding == b.binding)
         {
             return Err(Error::just_context(format_compact!(
-                "binding {binding} already exists in pipeline"
+                "binding {} already exists in pipeline", binding.binding
             )))
         }
-        let attributes = I::get_attributes(first_location);
-        let last_location = attributes.last()
-            .map(|attr| attr.location)
-            .unwrap_or(first_location);
+        self.vertex_input_bindings.push(binding);
+        if attributes.is_empty() {
+            return Ok(self)
+        }
+        attributes.sort_unstable_by_key(|a| a.location);
+        if let Some((_, attr)) = attributes[0..attributes.len() - 1]
+            .iter().enumerate()
+            .find(|&(i, a)|
+                attributes[i + 1..]
+                    .iter()
+                    .any(|b| a.location == b.location)
+            )
+        {
+            return Err(Error::just_context(format_compact!(
+                "location {} duplicated in attributes",
+                attr.location,
+            )))
+        }
+        let first_location = unsafe {
+            attributes.first().unwrap_unchecked()
+        }.location;
+        let last_location = unsafe {
+            attributes.last().unwrap_unchecked()
+        }.location;
         for attr in self.vertex_input_attributes.iter().copied() {
             if attr.location >= first_location &&
                 attr.location <= last_location
@@ -192,14 +218,13 @@ impl<Meta: Send + Sync> base::Template<Meta> {
             }
         }
         self.vertex_input_attributes
-            .extend(attributes.iter().map(|attr| attr.into_internal(binding)));
-        self.vertex_input_bindings.push(VertexInputBinding {
-            binding, input_rate, stride: size_of::<I>() as u32,
-        });
+            .extend(attributes.iter().map(|attr|
+                attr.into_internal(binding.binding
+            )));
         Ok(self)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_dynamic_states(mut self, dynamic_state: &[DynamicState]) -> Self {
         self.dynamic_states.fast_append(dynamic_state);
         self
@@ -212,61 +237,66 @@ impl<Meta: Send + Sync> base::Template<Meta> {
     ///
     /// If dynamic states contain [`DynamicState::LineWidth`], this value is ignored and *must* be
     /// set with [`DrawCommands`]
-    #[inline(always)]
+    #[inline]
     pub fn with_line_width(mut self, width: f32) -> Self {
         self.line_width = width;
         self
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_depth_clamp(mut self, enabled: bool) -> Self {
         self.depth_clamp = enabled;
         self
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_depth_stencil(mut self, info: DepthStencilInfo) -> Self {
         self.depth_stencil_info = Some(info);
         self
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_rasterizer_discard(mut self, enabled: bool) -> Self {
         self.rasterizer_discard = enabled;
         self
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_polygon_mode(mut self, polygon_mode: PolygonMode) -> Self {
         self.polygon_mode = polygon_mode;
         self
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_cull_mode(mut self, cull_modes: CullModes) -> Self {
         self.cull_mode = cull_modes;
         self
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_front_face(mut self, front_face: FrontFace) -> Self {
         self.front_face = front_face;
         self
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_depth_bias(mut self, depth_bias_info: DepthBiasInfo) -> Self {
         self.depth_bias_info = Some(depth_bias_info);
         self
     }
 
-    #[inline(always)]
-    pub fn with_primitive_topology(mut self, topology: PrimitiveTopology, restart_enable: bool) -> Self {
+    #[inline]
+    pub fn with_primitive_topology(
+        mut self,
+        topology: PrimitiveTopology,
+        restart_enable: bool
+    ) -> Self
+    {
         self.primitive_topology = (topology, restart_enable);
         self
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn with_sample_shading(mut self, sample_shading_info: SampleShadingInfo) -> Self {
         self.sample_shading_info = Some(sample_shading_info);
         self
@@ -274,7 +304,7 @@ impl<Meta: Send + Sync> base::Template<Meta> {
 
     /// Blend constants are used with color attachments that use 'ConstColor' or 'ConstAlpha' BlendFactors.
     /// The default constants are [0.0, 0.0, 0.0, 0.0]
-    #[inline(always)]
+    #[inline]
     pub fn with_blend_constants(mut self, blend_constants: BlendConstants) -> Self {
         self.color_blend_info.blend_constants = blend_constants;
         self
@@ -283,7 +313,7 @@ impl<Meta: Send + Sync> base::Template<Meta> {
     /// Appends a color output to the pipeline.
     ///
     /// The number of color outputs of a pipeline must match exactly with the number of outputs in the fragment shader.
-    #[inline(always)]
+    #[inline]
     pub fn with_color_output(
         mut self,
         format: Format,
@@ -299,14 +329,14 @@ impl<Meta: Send + Sync> base::Template<Meta> {
     } 
 
     /// Sets the depth output format of the pipeline.
-    #[inline(always)]
+    #[inline]
     pub fn with_depth_output(mut self, format: Format) -> Self {
         self.depth_output_format = format;
         self
     }
 
     /// Sets the stencil output format of the pipeline.
-    #[inline(always)]
+    #[inline]
     pub fn with_stencil_output(mut self, format: Format) -> Self {
         self.stencil_output_format = format;
         self
@@ -334,7 +364,7 @@ impl<Meta: Send + Sync> base::Template<Meta> {
     /// [8]: PipelineRobustnessBufferBehavior::RobustBufferAccess2
     /// [9]: ext::robustness2::Attributes::IS_ROBUST_IMAGE_ACCESS_2_SUPPORTED
     /// [10]: PipelineRobustnessImageBehavior::RobustImageAccess2
-    #[inline(always)]
+    #[inline]
     pub fn with_robustness_info(mut self, info: PipelineRobustnessInfo) -> Self {
         self.robustness_info = info;
         self
@@ -348,17 +378,9 @@ impl<Meta: Send + Sync> base::Template<Meta> {
         where 
             Alloc: LocalAlloc<Error = Error> + Sync,
     {
-        let Some(shader_set_id) = self.shader_set_id else {
-            return Err(Error::just_context(
-                "a shader set must be specified for a graphics pipeline"
-            ))
-        };
         let shader_set = gpu
-            .get_shader_set(shader_set_id)
-            .await
-            .context_with(|| format_compact!(
-                "invalid shader set id {shader_set_id}",
-            ))?;
+            .get_shader_set(self.shader_set_id)
+            .await?;
 
         let shaders = shader_set.shaders();
         let mut shader_stage_infos = NonNullVec32
@@ -656,7 +678,7 @@ impl<'a, Alloc> PreparedCreateInfos<'a, Alloc>
     where Alloc: LocalAlloc,
 {
 
-    #[inline(always)]
+    #[inline]
     pub fn as_create_info(&self) -> vk::GraphicsPipelineCreateInfo<'static> {
         vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
@@ -681,7 +703,6 @@ impl<Alloc> Drop for PreparedCreateInfos<'_, Alloc>
     where Alloc: LocalAlloc,
 {
 
-    #[inline(always)]
     fn drop(&mut self) {
         unsafe {
             self.shader_stage_infos.drop_and_free(self.alloc);

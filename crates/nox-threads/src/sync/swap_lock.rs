@@ -24,7 +24,7 @@ impl<T> SwapLock<T>
     where T: Clone
 {
 
-    #[inline(always)]
+    #[inline]
     pub fn new(val: T) -> Self {
         Self {
             mtx: Mutex::new(()),
@@ -32,12 +32,20 @@ impl<T> SwapLock<T>
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn load(&self) -> SwapLockGuard<T> {
         SwapLockGuard { inner: self.data.load(), }
     }
 
-    #[inline(always)]
+    #[inline]
+    pub fn swap(&self, value: T) -> T {
+        let _lock = self.mtx.lock();
+        let data = self.data.load().as_ref().clone();
+        self.data.store(Arc::new(value));
+        data
+    }
+
+    #[inline]
     pub fn modify<F, U>(&self, f: F) -> U
         where F: FnOnce(&mut T) -> U
     {
@@ -53,7 +61,7 @@ impl<T> Deref for SwapLockGuard<T> {
 
     type Target = T;
     
-    #[inline(always)]
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.inner.deref()
     }
@@ -61,7 +69,7 @@ impl<T> Deref for SwapLockGuard<T> {
 
 impl<T> SwapLockGuard<T> {
 
-    #[inline(always)]
+    #[inline]
     pub fn map<U, F>(self, f: F) -> MappedSwapLockGuard<T, U>
         where
             U: ?Sized,
@@ -74,7 +82,7 @@ impl<T> SwapLockGuard<T> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn try_map<U, F, E>(self, f: F) -> Result<MappedSwapLockGuard<T, U>, E>
         where
             U: ?Sized,
@@ -101,7 +109,7 @@ impl<T, U> Deref for MappedSwapLockGuard<T, U>
 
     type Target = U;
 
-    #[inline(always)]
+    #[inline]
     fn deref(&self) -> &Self::Target {
         unsafe {
             &*self.u

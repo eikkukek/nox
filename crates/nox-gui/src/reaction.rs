@@ -1,6 +1,6 @@
 use compact_str::CompactString;
 
-use nox::win;
+use nox::{win, or_flag};
 
 use nox_geom::*;
 
@@ -116,8 +116,7 @@ impl Reaction {
     #[inline(always)]
     pub fn update(
         &mut self,
-        win: &win::WindowContext,
-        cursor_pos: Vec2,
+        cached_data: &CachedUiData,
         surface_pos: Vec2,
         cursor_in_window: bool,
         hover_blocked: bool,
@@ -130,25 +129,24 @@ impl Reaction {
             Self::HOVER_BLOCKED
         );
         or_flag!(self.flags, Self::HOVER_BLOCKED, hover_blocked);
-        let rel_cursor_pos = cursor_pos - surface_pos;
+        let rel_cursor_pos = cached_data.cursor_pos - surface_pos;
         let cursor_in_self = BoundingRect::from_position_size(
             self.offset, self.size
         ).is_point_inside(rel_cursor_pos);
-        let mouse_left_state = win.mouse_button_state(win::MouseButton::Left);
         if self.held() {
-            if mouse_left_state.released() {
+            if cached_data.mouse_button_left_state.released() {
                 self.flags &= !Self::HELD;
                 or_flag!(self.flags, Self::CLICKED, cursor_in_self);
             }
         } else if cursor_in_self && !hover_blocked && cursor_in_window {
             self.flags |= Self::HOVERED;
-            or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
+            or_flag!(self.flags, Self::HELD, cached_data.mouse_button_left_state.pressed());
         }
         self.rel_cursor_pos = rel_cursor_pos - self.offset;
-        if self.hovered() {
-            if let Some(hover_text) = self.hover_text.take() {
-                return Some(hover_text)
-            }
+        if let Some(hover_text) = self.hover_text.take() &&
+            self.hovered()
+        {
+            return Some(hover_text)
         }
         None
     }

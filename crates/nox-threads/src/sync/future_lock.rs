@@ -12,7 +12,6 @@ use core::{
 use crate::{
     futures::future::Future,
     error::{Result, Error},
-    executor::block_on,
 };
 
 use parking_lot::Mutex;
@@ -20,7 +19,7 @@ use parking_lot::Mutex;
 struct Inner<T, F, E = Error>
     where 
         T: 'static,
-        F: Future<Output = result::Result<T, E>>,
+        F: Future<Output = result::Result<T, E>> + 'static,
         E: error::Error + Send + Sync + 'static,
 {
     pending: MaybeUninit<F>,
@@ -49,7 +48,7 @@ struct Inner<T, F, E = Error>
 /// ```
 pub struct FutureLock<T, F, E = Error>
     where
-        F: Future<Output = result::Result<T, E>> + Send + Sync,
+        F: Future<Output = result::Result<T, E>> + Send + Sync + 'static,
         T: 'static + Send + Sync,
         E: error::Error + Send + Sync + 'static,
 {
@@ -97,7 +96,17 @@ impl<T, F, E> FutureLock<T, F, E>
                         Result::<&T>::Ok(self.inner.ready.assume_init_ref())
                     },
                     2 => {
-                        self.load().await
+                        loop {
+                            let value = *self.mtx.lock();
+                            if value == 1 {
+                                unsafe {
+                                    return Ok(self.inner.ready.assume_init_ref())
+                                }
+                            } else if value == -1 {
+                                return Result::<&T>::Err(Error::just_context("lock poisoned"))
+                            }
+                            std::hint::spin_loop();
+                        }
                     },
                     0 => {
                         let ready = {
@@ -148,7 +157,10 @@ impl<T, F, E> Drop for FutureLock<T, F, E>
                 self.inner.ready.assume_init_read();
             }
             0 => unsafe {
-                block_on(self.inner.pending.assume_init_read()).ok();
+                let p = self.inner.pending.assume_init_read();
+                std::thread::spawn(async move || {
+                    p.await
+                }).join().ok();
             }
             _ => {}
         }

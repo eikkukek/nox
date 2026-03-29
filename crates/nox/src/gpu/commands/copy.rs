@@ -58,6 +58,26 @@ impl NewCommands for NewCopyCommands {
 
 unsafe impl<'a, 'b> Commands<'a, 'b> for CopyCommands<'a, 'b> {
 
+    fn add_signal_semaphore(
+        &mut self, 
+        semaphore_id: TimelineSemaphoreId,
+        value: u64,
+    ) {
+        self.recorder.add_signal_semaphore(self.command_id, semaphore_id, value);
+    }
+
+    fn add_wait_semaphore(
+        &mut self,
+        semaphore_id: TimelineSemaphoreId,
+        value: u64,
+        dependency_hint: MemoryDependencyHint,
+    ) {
+        self.recorder.add_wait_semaphore(
+            self.command_id, semaphore_id,
+            value, dependency_hint
+        );
+    }
+
     fn finish<'c, Alloc>(self, alloc: &'c Alloc) -> Result<CommandResult<'c, Alloc>>
         where Alloc: ?Sized + nox_mem::alloc::LocalAlloc<Error = Error>
     {
@@ -1873,13 +1893,13 @@ impl<'a, 'b> CopyCommands<'a, 'b> {
             let mut mip_dimensions = properties.dimensions;
             let queue_family_index = self.queue.family_index();
             let src_state = ImageSubresourceState::new(
-                vk::PipelineStageFlags2::BLIT,
+                vk::PipelineStageFlags2::TRANSFER,
                 vk::AccessFlags2::TRANSFER_READ,
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 queue_family_index,
             );
             let dst_state = ImageSubresourceState::new(
-                vk::PipelineStageFlags2::BLIT,
+                vk::PipelineStageFlags2::TRANSFER,
                 vk::AccessFlags2::TRANSFER_WRITE,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 queue_family_index,
@@ -1894,9 +1914,11 @@ impl<'a, 'b> CopyCommands<'a, 'b> {
                 &mut cache.shader_resource_cache.image_memory_barrier_cache,
             ).context("image memory barrier failed")?;
             let device = self.gpu.device();
-            let mem_barriers = cache.shader_resource_cache.image_memory_barrier_cache.flush(&[ranges], &tmp_alloc)?;
+            let mem_barriers = cache.shader_resource_cache.image_memory_barrier_cache.flush(
+                &[ranges], &tmp_alloc
+            )?;
             let dependency_info = vk::DependencyInfo {
-                memory_barrier_count: mem_barriers.len(),
+                image_memory_barrier_count: mem_barriers.len(),
                 p_image_memory_barriers: mem_barriers.as_ptr(),
                 ..Default::default()
             };
@@ -1905,17 +1927,7 @@ impl<'a, 'b> CopyCommands<'a, 'b> {
             }
             let filter: vk::Filter = filter.into();
             for i in 1..mip_levels {
-                let next_mip_dimensions = {
-                    let width =
-                        if mip_dimensions.width > 1 {
-                            mip_dimensions.width / 2
-                        } else { 1 };
-                    let height =
-                        if mip_dimensions.height > 1 {
-                            mip_dimensions.height / 2
-                        } else { 1 };
-                    Dimensions::new(width, height, 1)
-                };
+                let next_mip_dimensions = properties.dimensions.lod(i);
                 let subresource = ImageSubresourceRange::default()
                     .aspect_mask(properties.aspect_mask)
                     .base_mip_level(i - 1)
@@ -1927,9 +1939,11 @@ impl<'a, 'b> CopyCommands<'a, 'b> {
                     true,
                     &mut cache.shader_resource_cache.image_memory_barrier_cache,
                 ).context("image memory barrier failed")?;
-                let mem_barriers = cache.shader_resource_cache.image_memory_barrier_cache.flush(&[ranges], &tmp_alloc)?;
+                let mem_barriers = cache.shader_resource_cache.image_memory_barrier_cache.flush(
+                    &[ranges], &tmp_alloc
+                )?;
                 let dependency_info = vk::DependencyInfo {
-                    memory_barrier_count: mem_barriers.len(),
+                    image_memory_barrier_count: mem_barriers.len(),
                     p_image_memory_barriers: mem_barriers.as_ptr(),
                     ..Default::default()
                 };
@@ -1942,7 +1956,7 @@ impl<'a, 'b> CopyCommands<'a, 'b> {
                         vk::Offset3D {
                             x: mip_dimensions.width as i32, 
                             y: mip_dimensions.height as i32,
-                            z: 1
+                            z: 1,
                         },
                     ],
                     src_subresource: ImageSubresourceLayers::default()

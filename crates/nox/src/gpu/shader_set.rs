@@ -239,11 +239,6 @@ pub struct ShaderSet {
 impl ShaderSet {
 
     #[inline(always)]
-    pub fn default_attributes() -> ShaderSetAttributes {
-        ShaderSetAttributes::new()
-    }
-
-    #[inline(always)]
     pub fn pipeline_layout(&self) -> vk::PipelineLayout {
         self.inner.pipeline_layout
     }
@@ -336,20 +331,17 @@ pub struct ShaderSetAttributes {
     count_spec: AHashMap<(u32, u32), Vec32<SpecializationConstant<u32>>>,
     flags: AHashMap<u32, DescriptorSetLayoutFlags>,
     inline_uniform_blocks: AHashSet<(u32, u32)>,
-    push_descriptor_required: bool,
+}
+
+pub fn default_shader_set_attributes() -> ShaderSetAttributes {
+    ShaderSetAttributes {
+        count_spec: AHashMap::default(),
+        flags: AHashMap::default(),
+        inline_uniform_blocks: AHashSet::default()
+    }
 }
 
 impl ShaderSetAttributes {
-
-    #[inline(always)]
-    fn new() -> Self {
-        Self {
-            count_spec: AHashMap::default(),
-            flags: AHashMap::default(),
-            inline_uniform_blocks: AHashSet::default(),
-            push_descriptor_required: false,
-        }
-    }
 
     #[inline(always)]
     pub fn with_descriptor_set_layout_flags(
@@ -361,9 +353,6 @@ impl ShaderSetAttributes {
             .entry(set)
             .and_modify(|f| *f |= flags)
             .or_insert(flags);
-        if flags.contains(DescriptorSetLayoutFlags::PUSH_DESCRIPTOR) {
-            self.push_descriptor_required = true;
-        }
         self
     }
 
@@ -495,9 +484,9 @@ impl ShaderCache {
                 let mut shaders_inner = ArrayVec::<_, N_SHADERS>::new();
                 let mut all_stage_flags = ShaderStageFlags::empty();
                 let mut max_set = 0;
-                for shader in shaders {
+                for shader in &shaders {
                     let inner = shader
-                        .into_inner()
+                        .inner()
                         .await
                         .context("failed to create shader")?;
                     all_stage_flags |= inner.stage().into();
@@ -727,7 +716,7 @@ impl ShaderCache {
                         }),
                     pipeline_layout,
                 )))
-                }).context("failed to spawn")?
+            }).context("failed to spawn")?
         ));
         Ok(ShaderSetId(index))
     }

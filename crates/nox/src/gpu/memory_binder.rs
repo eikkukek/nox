@@ -38,7 +38,8 @@ pub enum HostCoherency {
 }
 
 #[derive(Clone, Copy)]
-pub struct MappedMemoryRange {
+pub struct MappedBufferMemoryRange {
+    pub buffer_id: BufferId,
     pub offset: DeviceSize,
     pub size: DeviceSize,
 }
@@ -58,6 +59,11 @@ pub unsafe trait DeviceMemory: 'static + Send + Sync {
     /// [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceMemory.html
     fn handle(&self) -> u64;
 
+    /// Returns the size of the inner [`device memory`][1] allocation.
+    ///
+    /// [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceMemory.html
+    fn memory_size(&self) -> u64;
+
     /// Returns the offset into the inner [`device memory`][1] of this allocation.
     ///
     /// [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceMemory.html
@@ -65,6 +71,9 @@ pub unsafe trait DeviceMemory: 'static + Send + Sync {
 
     /// Returns the size of this allocation.
     fn size(&self) -> vk::DeviceSize;
+
+    /// Returns whether the memory is mapped to host memory.
+    fn is_mapped(&self) -> bool;
 
     /// Tries to map the region of this allocation from the inner [`device memory`][1].
     ///
@@ -78,10 +87,6 @@ pub unsafe trait DeviceMemory: 'static + Send + Sync {
     ///
     /// [1]: https://docs.vulkan.org/refpages/latest/refpages/source/VkDeviceMemory.html
     fn unmap_memory(&mut self) -> Result<()>;
-
-    fn flush_mapped_ranges(&self, memory_ranges: &[MappedMemoryRange]) -> Result<()>;
-
-    fn invalidate_mapped_ranges(&self, memory_ranges: &[MappedMemoryRange]) -> Result<()>;
 
     /// Returns whether the memory allocated is optimal as defined when creating the
     /// [`binder`][1] used to allocate this memory.
@@ -129,7 +134,35 @@ impl DeviceMemoryObj {
 pub struct MemoryMap {
     pub map: *mut u8,
     pub size: usize,
-    pub coherent: bool,
+    pub is_coherent: bool,
+}
+
+unsafe impl Send for MemoryMap {}
+unsafe impl Sync for MemoryMap {}
+
+impl MemoryMap {
+    
+    /// Writes bytes to the mapped memory.
+    ///
+    /// Panics if the byte count is larger than [`size`][1]
+    ///
+    /// # Safety
+    /// It has to be ensured that the mapping is still valid up to [`size`][1].
+    ///
+    /// [1]: Self::size
+    #[inline]
+    pub unsafe fn write_bytes(
+        &mut self,
+        bytes: &[u8]
+    ) {
+        assert!(self.size <= bytes.len());
+        unsafe {
+            bytes.as_ptr().copy_to_nonoverlapping(
+                self.map,
+                bytes.len()
+            );
+        }
+    }
 }
 
 /// A trait for [`vk::DeviceMemory`] allocators.
@@ -145,10 +178,10 @@ pub unsafe trait MemoryBinder: 'static + Send + Sync {
     fn max_alloc_size(&self) -> vk::DeviceSize;
 
     /// Returns ['host coherency`][HostCoherency] of optimal allocations.
-    fn optimal_coherency(&self) -> HostCoherency;
+    fn optimal_host_coherency(&self) -> HostCoherency;
 
     /// Returns ['host coherency`][HostCoherency] of suboptimal allocations.
-    fn suboptimal_coherency(&self) -> HostCoherency;
+    fn suboptimal_host_coherency(&self) -> HostCoherency;
 
     /// Allocates device memory.
     ///

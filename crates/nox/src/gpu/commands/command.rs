@@ -9,6 +9,7 @@ use nox_mem::{
     vec::{Vec32, NonNullVec32, FixedVec32},
     slot_map::*,
     Display,
+    conditional::True,
     vec32,
 };
 use nox_ash::{vk, ash_style_enum};
@@ -63,6 +64,19 @@ pub trait NewCommands {
 /// [4]: LogicalDevice::cmd_pipeline_barrier2
 pub unsafe trait Commands<'a, 'b>: Sized
 {
+    fn add_signal_semaphore(
+        &mut self, 
+        semaphore_id: TimelineSemaphoreId,
+        value: u64,
+    );
+
+    fn add_wait_semaphore(
+        &mut self,
+        semaphore_id: TimelineSemaphoreId,
+        value: u64,
+        dependency_hint: MemoryDependencyHint,
+    );
+    
     fn finish<'c, Alloc>(self, alloc: &'c Alloc) -> Result<CommandResult<'c, Alloc>>
         where Alloc: ?Sized + LocalAlloc<Error = Error>;
 }
@@ -203,7 +217,7 @@ impl BindingBarrierInfo {
 ///
 /// [1]: Commands
 /// [2]: Gpu::tick
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Display)] #[display("{0}")]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)] #[display("{0}")]
 pub struct CommandId(pub(crate) SlotIndex<CommandFrameResources>);
 
 impl CommandId {
@@ -463,7 +477,7 @@ impl SchedulerWorker {
     ) -> Result<(TimelineSemaphoreId, u64)> {
         if self.gpu.wait_for_semaphores(
             &[(self.semaphore_id, self.timeline_value)],
-            self.gpu.device().frame_timeout(),
+            core::time::Duration::from_nanos(self.gpu.device().frame_timeout()),
         )? {
             self.timeline_value += 1;
             self.last_reset = current_frame;
@@ -491,9 +505,10 @@ impl Drop for SchedulerWorker {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct CommandFrameResources {
     pub(super) fp: NonNull<FpRecordCommand>,
-    pub(super) dep: NonNullVec32<'static, CommandDependency>,
+    pub(super) dep: NonNullVec32<'static, CommandDependency, True>,
     pub(super) loc: Location,
 }
 
@@ -575,12 +590,12 @@ impl<'a> CommandBuilder<'a> {
     /// [2]: CommandId
     /// [3]: Gpu::tick
     #[inline(always)]
-    pub fn with_dependency(
+    pub fn with_dependencies(
         self,
-        dependencies: CommandDependency,
+        dependency: impl IntoIterator<Item = CommandDependency>,
     ) -> Self
     {
-        self.resources.dependencies.push(dependencies);
+        self.resources.dependencies.extend(dependency);
         self
     }
 
@@ -645,7 +660,7 @@ impl<'a> Drop for CommandBuilder<'a> {
             NonNullVec32::new(
                 NonNull::new_unchecked(self.resources.dependencies.as_mut_ptr()),
                 self.resources.dependencies.capacity()
-            ).with_len(self.resources.dependencies.len())
+            ).with_len(self.resources.dependencies.len()).into_clonable()
         }
     }
 }

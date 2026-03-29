@@ -387,12 +387,12 @@ impl CommandRecorderInner<'_> {
         let mut swapchain_wait_semaphores = NonNullVec32::with_capacity(sorted.len(), alloc)?;
         for &idx in &sorted {
             let index = idx.index() as usize;
-            let mut command = self.inner.commands.remove(idx).unwrap();
+            let mut command = self.inner.commands.get(idx).unwrap().clone();
             let cmd_resources = &mut self.inner.command_resources[index];
             let timeline_value = cmd_resources.timeline_value + 1;
             for &dep in &command.dep {
-                if !self.inner.commands.contains(dep.dependency.0) {
-                    return Err(Error::just_context(format_compact!(
+                if let Err(err) = self.inner.commands.get(dep.dependency.0) {
+                    return Err(Error::new(err, format_compact!(
                         "command {} had a dependency with an invalid id {}",
                         command.loc, dep.dependency,
                     )))
@@ -402,7 +402,7 @@ impl CommandRecorderInner<'_> {
                 let semaphore_value = wait_for.timeline_value;
                 unsafe {
                     self.inner.command_resources.get_unchecked_mut(index)
-                    .add_wait_for_semaphore(semaphore_id, semaphore_value, dep.hint);
+                        .add_wait_for_semaphore(semaphore_id, semaphore_value, dep.hint);
                 }
             }
             let command_result = unsafe {
@@ -464,6 +464,19 @@ impl CommandRecorderInner<'_> {
                 .map(|&id| {
                     let &(value, dependency_hint) = command_resources.wait_semaphores
                         .get(&id).unwrap();
+                    if let Some(signal) = command_resources.signal_semaphores
+                        .iter()
+                        .filter_map(|&signal| (signal.0 == id).then_some(signal.1))
+                        .find(|&signal| signal <= value)
+                    {
+                        return Err(Error::just_context(format_compact!(
+                            "{}{}",
+                            format_args!("command id {} semaphore {id} signal value {signal} was less than or ",
+                                CommandId(idx)
+                            ),
+                            format_args!("equal to wait value {value}")
+                        )))
+                    }
                     Ok(vk::SemaphoreSubmitInfo {
                         semaphore: self.inner.gpu.get_timeline_semaphore(id)?,
                         value,
@@ -519,7 +532,7 @@ impl CommandRecorderInner<'_> {
                 ..Default::default()
             });
         }
-        debug_assert!(self.inner.commands.is_empty());
+        self.inner.commands.clear();
         let present_prep_semaphore = unsafe {
             self.inner.gpu.get_timeline_semaphore(
                 self.inner.workers[self.inner.free_worker as usize]
@@ -828,6 +841,31 @@ impl<'a, 'b> CommandRecorder<'a, 'b> {
     }
 
     #[inline]
+    pub fn add_signal_semaphore(
+        &self,
+        command_id: CommandId,
+        semaphore_id: TimelineSemaphoreId,
+        value: u64,
+    ) {
+        unsafe { &mut *self.inner }
+            .inner.command_resources[command_id.index() as usize]
+            .signal_semaphores.push((semaphore_id, value));
+    }
+    
+    #[inline]
+    pub fn add_wait_semaphore(
+        &self,
+        command_id: CommandId,
+        semaphore_id: TimelineSemaphoreId,
+        value: u64,
+        dependency_hint: MemoryDependencyHint,
+    ) {
+        unsafe { &mut *self.inner }
+            .inner.command_resources[command_id.index() as usize]
+            .add_wait_for_semaphore(semaphore_id, value, dependency_hint);
+    }
+
+    #[inline]
     pub(crate) fn buffers(&self) -> ResourceReadGuard<'_, BufferMeta, BufferId> {
         self.as_ref().inner.gpu.read_buffers::<BufferId>()
     }
@@ -872,10 +910,7 @@ impl<'a, 'b> CommandRecorder<'a, 'b> {
                 ImageId::new(index),
                 unsafe {
                     img.get_unchecked_mut(index)
-                        .create_view(ImageRange::new(ImageSubresourceRange
-                            ::default()
-                            .aspect_mask(ImageAspects::COLOR), None
-                        ))?
+                        .create_view(ImageRange::whole_range(ImageAspects::COLOR))?
                 }
             );
         }

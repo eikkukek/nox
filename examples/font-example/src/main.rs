@@ -1,12 +1,6 @@
-use std::{
-    fs::File,
-};
-
-use memmap2::Mmap;
-
 use nox::{
     event_loop::ActiveEventLoop,
-    gpu::{self, memory_binder::MemoryBinder},
+    gpu::{self, MemoryBinder},
     mem::collections::{EntryExt, HashMap},
     sync::{Arc, SwapLock, atomic::{self, AtomicU64}},
 };
@@ -30,7 +24,7 @@ pub struct App {
     rendered_text: Arc<RenderedText>,
     semaphore: gpu::TimelineSemaphoreId,
     semaphore_value: u64,
-    image_alloc: gpu::memory_binder::LinearBinder,
+    image_alloc: gpu::LinearBinder,
     frame_semaphore: gpu::TimelineSemaphoreId,
     frame: u64,
 }
@@ -40,22 +34,22 @@ impl App {
     pub fn new(
         event_loop: &ActiveEventLoop<'_>,
     ) -> nox::EventResult<Self> {
-        let regular = File::open("adobe-garamond/AGaramondPro-Regular.otf").unwrap();
-        let regular = unsafe {
-            Mmap::map(&regular).unwrap()
-        };
-        let regular = Face::parse(&regular, 0).unwrap();
-        let italic = File::open("adobe-garamond/AGaramondPro-Italic.otf").unwrap();
-        let italic = unsafe {
-            Mmap::map(&italic).unwrap()
-        };
-        let italic = Face::parse(&italic, 0).unwrap();
-        let bold = File::open("adobe-garamond/AGaramondPro-Bold.otf").unwrap();
-        let bold = unsafe {
-            Mmap::map(&bold).unwrap()
-        };
-        let bold = Face::parse(&bold, 0).unwrap();
-        let mut text = VertexTextRenderer::new([("regular", regular), ("italic", italic), ("bold", bold)], 0.02);
+        let regular: Box<[u8]> =
+            include_bytes!("../adobe-garamond/AGaramondPro-Regular.otf")
+            .iter().copied().collect();
+        let regular = parse_owned_face(regular, 0).unwrap();
+        let italic: Box<[u8]> =
+            include_bytes!("../adobe-garamond/AGaramondPro-Italic.otf")
+            .iter().copied().collect();
+        let italic = parse_owned_face(italic, 0).unwrap();
+        let bold: Box<[u8]> = include_bytes!("../adobe-garamond/AGaramondPro-Bold.otf")
+            .iter().copied().collect();
+        let bold = parse_owned_face(bold, 0).unwrap();
+        let mut text = VertexTextRenderer::new([
+            ("regular", regular),
+            ("italic", italic),
+            ("bold", bold)
+        ], 0.02);
         let rendered_text = Arc::new(text.render(
             &[
                 text_segment("To AV moi @ 2 gå ", &"italic"),
@@ -65,9 +59,9 @@ impl App {
             true,
             5.0
         ).unwrap());
-        let vertex_shader = event_loop.gpu().create_shader(
-            gpu::Shader
-                ::default_attributes()
+        let vertex_shader = gpu::Shader::new(
+            event_loop.gpu(),
+            gpu::default_shader_attributes()
                 .with_glsl("#version 450
 
                 layout(location = 0) in vec2 in_pos;
@@ -93,9 +87,9 @@ impl App {
                 }").with_stage(gpu::ShaderStage::Vertex)
                 .with_name("vertex shader")
         )?;
-        let fragment_shader = event_loop.gpu().create_shader(
-            gpu::Shader
-                ::default_attributes()
+        let fragment_shader = gpu::Shader::new(
+            event_loop.gpu(),
+            gpu::default_shader_attributes()
                 .with_glsl("#version 450
 
                 layout(location = 0) out vec4 out_color;
@@ -109,7 +103,7 @@ impl App {
         )?;
         let shader_set = event_loop.gpu().create_shader_set(
             [vertex_shader, fragment_shader],
-            gpu::ShaderSet::default_attributes(),
+            gpu::default_shader_set_attributes(),
         )?;
         let vertex_buffers: Arc<[gpu::BufferId]> = (0..rendered_text.len())
             .map(|_| Default::default())
@@ -121,9 +115,9 @@ impl App {
             .map(|_| Default::default())
             .collect();
         let mut staging_buffer = Default::default();
-        let memory_binder = gpu::memory_binder::GlobalBinder
+        let memory_binder = gpu::GlobalBinder
             ::new(
-                event_loop.gpu().clone(),
+                event_loop.gpu().device().clone(),
                 gpu::MemoryProperties::HOST_VISIBLE | gpu::MemoryProperties::HOST_COHERENT,
                 gpu::MemoryProperties::HOST_VISIBLE | gpu::MemoryProperties::HOST_COHERENT,
             );
@@ -133,9 +127,9 @@ impl App {
             .create_resources(
                 [gpu::BufferCreateInfo::new(
                     &mut staging_buffer,
+                    &memory_binder,
                     staging_buffer_size,
                     gpu::BufferUsages::TRANSFER_SRC,
-                    &memory_binder,
                 ).unwrap()],
                 []
             )?;
@@ -170,21 +164,24 @@ impl App {
                     [
                         gpu::BufferCreateInfo::new(
                             &mut vertex,
-                            n_vertices as gpu::DeviceSize,
-                            gpu::BufferUsages::VERTEX_BUFFER | gpu::BufferUsages::TRANSFER_DST,
                             &memory_binder,
+                            n_vertices as gpu::DeviceSize,
+                            gpu::BufferUsages::VERTEX_BUFFER |
+                            gpu::BufferUsages::TRANSFER_DST,
                         ).unwrap(),
                         gpu::BufferCreateInfo::new(
                             &mut offset,
-                            n_offsets as gpu::DeviceSize,
-                            gpu::BufferUsages::VERTEX_BUFFER | gpu::BufferUsages::TRANSFER_DST,
                             &memory_binder,
+                            n_offsets as gpu::DeviceSize,
+                            gpu::BufferUsages::VERTEX_BUFFER |
+                            gpu::BufferUsages::TRANSFER_DST,
                         ).unwrap(),
                         gpu::BufferCreateInfo::new(
                             &mut index,
-                            n_indices as gpu::DeviceSize,
-                            gpu::BufferUsages::INDEX_BUFFER | gpu::BufferUsages::TRANSFER_DST,
                             &memory_binder,
+                            n_indices as gpu::DeviceSize,
+                            gpu::BufferUsages::INDEX_BUFFER |
+                            gpu::BufferUsages::TRANSFER_DST,
                         ).unwrap()
                     ],
                     []
@@ -274,8 +271,8 @@ impl App {
             rendered_text,
             semaphore,
             semaphore_value: 1,
-            image_alloc: gpu::memory_binder::LinearBinder::new(
-                event_loop.gpu().clone(),
+            image_alloc: gpu::LinearBinder::new(
+                event_loop.gpu().device().clone(),
                 1 << 25,
                 gpu::MemoryProperties::DEVICE_LOCAL,
                 gpu::MemoryProperties::HOST_VISIBLE
@@ -474,21 +471,28 @@ impl App {
                                 .entry(new_format)
                                 .or_try_insert_with_key(|&format| {
                                     let mut id = Default::default();
-                                    event_loop
+                                    let _ = event_loop
                                         .gpu()
                                         .create_pipeline_batch(None)?
                                         .with_graphics_pipelines([
                                             gpu::GraphicsPipelineCreateInfo
-                                                ::new(&mut id)
-                                                .with_shader_set(self.shader_set)
+                                                ::new(&mut id, self.shader_set)
                                                 .with_color_output(
                                                     format,
                                                     gpu::ColorComponents::default(),
                                                     None,
-                                                ).with_vertex_input::<_, nox_font::Vertex>(
-                                                    0, 0, gpu::VertexInputRate::Vertex
-                                                )?.with_vertex_input::<_, nox_font::VertexOffset>(
-                                                    1, 1, gpu::VertexInputRate::Instance
+                                                ).with_vertex_input(
+                                                    gpu::VertexInputBinding::new::<nox_font::Vertex>(
+                                                        0,
+                                                        gpu::VertexInputRate::Vertex,
+                                                    ),
+                                                    &mut nox_font::Vertex::get_attributes(0)
+                                                )?.with_vertex_input(
+                                                    gpu::VertexInputBinding::new::<nox_font::VertexOffset>(
+                                                        1,
+                                                        gpu::VertexInputRate::Instance
+                                                    ),
+                                                    &mut nox_font::VertexOffset::get_attributes(1),
                                                 )?.with_sample_shading(gpu::SampleShadingInfo   
                                                     ::default().samples(gpu::MsaaSamples::X8)
                                                 ),

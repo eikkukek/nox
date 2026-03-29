@@ -54,7 +54,7 @@ impl PipelineBatchId {
 /// [1]: GraphicsPipeline
 #[must_use]
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
-#[display("(batch id: {0}, pipeline index: {0})")]
+#[display("(batch id: {0}, pipeline index: {1})")]
 pub struct GraphicsPipelineId(PipelineBatchId, u32);
 
 impl GraphicsPipelineId {
@@ -76,7 +76,7 @@ impl GraphicsPipelineId {
 ///
 /// [1]: ComputePipeline
 #[derive(Default, Clone, Copy, PartialEq, Eq, Hash, Debug, Display)]
-#[display("(batch id: {0}, pipeline index: {0})")]
+#[display("(batch id: {0}, pipeline index: {1})")]
 pub struct ComputePipelineId(PipelineBatchId, u32);
 
 impl ComputePipelineId {
@@ -168,13 +168,17 @@ impl PipelineBatch {
             
     }
 
-    pub(crate) async fn destroy_graphics_pipelines(&self, ids: &[GraphicsPipelineId]) -> Result<()> {
-        if ids.is_empty() { return Ok(()) }
+    pub(crate) async fn destroy_graphics_pipelines(
+        &self,
+        ids: impl ExactSizeIterator<Item = GraphicsPipelineId>
+    ) -> Result<()>
+    {
+        if ids.len() == 0 { return Ok(()) }
         let inner = self.inner.load().await?;
         let batch_id = inner.id;
         inner.graphics_pipelines
             .modify(|pipelines| {
-                for &id in ids {
+                for id in ids {
                     if id.batch_id() != batch_id {
                         return Err(Error::just_context(format_compact!(
                             "graphics pipeline id {id} batch id is different from this batch id {batch_id}",
@@ -191,13 +195,17 @@ impl PipelineBatch {
         Ok(())
     }
 
-    pub(crate) async fn destroy_compute_pipelines(&self, ids: &[ComputePipelineId]) -> Result<()> {
-        if ids.is_empty() { return Ok(()) }
+    pub(crate) async fn destroy_compute_pipelines(
+        &self,
+        ids: impl ExactSizeIterator<Item = ComputePipelineId>
+    ) -> Result<()>
+    {
+        if ids.len() == 0 { return Ok(()) }
         let inner = self.inner.load().await?;
         let batch_id = inner.id;
         inner.compute_pipelines
             .modify(|pipelines| {
-                for &id in ids {
+                for id in ids {
                     if id.batch_id() != batch_id {
                         return Err(Error::just_context(format_compact!(
                             "compute pipeline id {id} batch id is different from this batch id {batch_id}",
@@ -242,15 +250,6 @@ impl PipelineBatchBuilder {
         }
     }
 
-    /// Gets the [`ID`][1] of the pipeline batch.
-    ///
-    /// [1]: PipelineBatchId
-    #[inline(always)]
-    pub fn id(self, out: &mut PipelineBatchId) -> Self {
-        *out = self.this_id;
-        self
-    }
-
     /// Appends [`GraphicsPipelineCreateInfo`]s to the batch.
     ///
     /// [`GraphicsPipelineId`]s are returned to as described in [`GraphicsPipelineCreateInfo`].
@@ -260,9 +259,9 @@ impl PipelineBatchBuilder {
     ///   [`GraphicsPipelineCreateInfo`].
     #[inline(always)]
     pub fn with_graphics_pipelines<'a, I>(
-        mut self,
+        &mut self,
         create_infos: I,
-    ) -> Self
+    ) -> &mut Self
         where I: IntoIterator<Item = GraphicsPipelineCreateInfo<'a>>
     {
         let infos = self.graphics_create_infos.as_mut().unwrap();
@@ -288,9 +287,9 @@ impl PipelineBatchBuilder {
     ///   [`ComputePipelineCreateInfo`].
     #[inline(always)]
     pub fn with_compute_pipelines<'a, I>(
-        mut self,
+        &mut self,
         create_infos: I,
-    ) -> Self
+    ) -> &mut Self
         where I: IntoIterator<Item = ComputePipelineCreateInfo<'a>>
     {
         let infos = self.compute_create_infos.as_mut().unwrap();
@@ -306,12 +305,30 @@ impl PipelineBatchBuilder {
         );
         self
     }
+    
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.graphics_create_infos
+            .as_ref()
+            .map(|g| g.is_empty())
+            .unwrap() &&
+        self.compute_create_infos
+            .as_ref()
+            .map(|c| c.is_empty())
+            .unwrap()
+    }
+
+    #[inline]
+    pub fn discard(mut self) {
+        self.built = true;
+        self.gpu.discard_pipeline_batch(self.this_id);
+    }
 
     /// You should always call this once you have finished building.
     ///
     /// Unbuilt pipeline batches are built on [`Drop`], but you should *not* rely on that.
     #[inline(always)]
-    pub fn build(mut self) -> Result<()> {
+    pub fn build(mut self) -> Result<PipelineBatchId> {
         self.built = true;
         let thread_pool = self.gpu.thread_pool().clone();
         let gpu = self.gpu.clone();
@@ -432,7 +449,7 @@ impl PipelineBatchBuilder {
         self.gpu.init_pipeline_batch(
             this_id, PipelineBatch::new(fut),
         );
-        Ok(())
+        Ok(self.this_id)
     }
 }
 

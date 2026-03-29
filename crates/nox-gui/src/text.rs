@@ -1,10 +1,3 @@
-use std::rc::Rc;
-
-use core::{
-    cell::{RefCell, RefMut},
-    ops::{Deref, DerefMut},
-};
-
 use nox_font::{RenderedText, TextOffset};
 
 use nox_geom::{
@@ -12,16 +5,15 @@ use nox_geom::{
 };
 
 use nox::{
-    mem::{
-        vec_types::{GlobalVec, Vector},
-    },
+    mem::vec::Vec32,
+    sync::*, threads::sync::SwapLockGuard,
 };
 
 use crate::*;
 
 #[derive(Default, Clone, Debug)]
 pub struct RowOffsets {
-    pub offsets: GlobalVec<TextOffset>,
+    pub offsets: Vec32<TextOffset>,
     pub row_height: f32,
     pub max_x: f32,
     pub min_x: f32,
@@ -42,8 +34,8 @@ impl RowOffsets {
 #[derive(Default, Clone)]
 pub struct Text {
     pub text: RenderedText,
-    pub reset_offsets: GlobalVec<GlobalVec<font::VertexOffset>>,
-    pub rows: GlobalVec<RowOffsets>,
+    pub reset_offsets: Vec32<Vec32<font::VertexOffset>>,
+    pub rows: Vec32<RowOffsets>,
     pub color: ColorSRGBA,
     pub offset: Vec2,
     pub scale: Vec2,
@@ -51,14 +43,15 @@ pub struct Text {
     pub row_offset: u32,
     pub row_count: u32,
     pub bounds: BoundingRect,
-    pub tool_tip: Option<Rc<CompactString>>,
+    pub tool_tip: Option<Arc<CompactString>>,
 }
 
 impl Text {
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         text: RenderedText,
-        rows: GlobalVec<RowOffsets>,
+        rows: Vec32<RowOffsets>,
         color: ColorSRGBA,
         offset: Vec2,
         scale: Vec2,
@@ -66,14 +59,16 @@ impl Text {
         row_offset: u32,
         row_count: u32,
         bounds: Option<BoundingRect>,
-        tool_tip: Option<Rc<CompactString>>,
+        tool_tip: Option<Arc<CompactString>>,
     ) -> Self
     {
-        let mut reset_offsets = GlobalVec::default();
+        let mut reset_offsets = Vec32::default();
         for (_, instance) in &text.text {
-            let inst = reset_offsets.push(GlobalVec::default());
+            reset_offsets.push(Vec32::default());
             for &offset in &instance.offsets {
-                inst.push(offset);
+                unsafe {
+                    reset_offsets.last_mut().unwrap_unchecked()
+                }.push(offset);
             }
         }
         Self {
@@ -99,39 +94,24 @@ impl Text {
 }
 
 #[derive(Default, Clone)]
-pub struct SharedText(pub Rc<RefCell<Text>>);
-
-pub struct SharedTextMut<'a>(pub RefMut<'a, Text>);
+pub struct SharedText(pub Arc<SwapLock<Text>>);
 
 impl SharedText {
 
+    #[inline]
     pub fn new(text: Text) -> Self {
-        Self(Rc::new(RefCell::new(text)))
+        Self(Arc::new(SwapLock::new(text)))
     }
 
-    pub fn as_mut(&self) -> SharedTextMut<'_> {
-        SharedTextMut(self.0.borrow_mut())
-    }
-
-    pub fn edit(self, mut f: impl FnMut(&mut SharedTextMut)) -> Self {
-        f(&mut self.as_mut());
+    #[inline]
+    pub fn edit<F: FnOnce(&mut Text)>(self, f: F) -> Self {
+        self.0.modify(f);
         self
     }
-}
 
-impl<'a> Deref for SharedTextMut<'a> {
-
-    type Target = Text;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<'a> DerefMut for SharedTextMut<'a> {
-
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+    #[inline]
+    pub fn load(&self) -> SwapLockGuard<Text> {
+        self.0.load()
     }
 }
 

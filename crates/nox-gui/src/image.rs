@@ -1,57 +1,67 @@
-use std::{
-    fs,
-    rc::Rc,
-};
+use std::fs;
 
 use core::{
     ptr::NonNull,
     slice,
+    time::Duration,
 };
 
-use rustc_hash::FxHashMap;
+use ahash::AHashMap;
 
 use ::image::EncodableLayout;
 
 use nox::{
-    mem::Allocator,
     gpu,
-    GlobalAlloc,
+    error::*,
+    threads::executor::block_on,
+    expand_warn,
 };
+
+use gpu::MemoryBinder;
 
 use nox_geom::*;
 
 use crate::*;
-use crate::error::{Result, Location, Context, Tracked};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ImageSource<'a> {
+    Id(gpu::ImageViewId),
     Path(&'a str),
-    Id(gpu::ImageId),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum ImageSourceOwned {
+    Id(gpu::ImageViewId),
     Path(CompactString),
-    Id(gpu::ImageId),
 }
 
 #[derive(Clone, Copy)]
 pub enum ImageSourceUnsafe {
+    Id(gpu::ImageViewId),
     Path(NonNull<u8>, usize),
-    Id(gpu::ImageId),
 }
 
-impl ImageSourceUnsafe {
+unsafe impl Send for ImageSourceUnsafe {}
+unsafe impl Sync for ImageSourceUnsafe {}
 
+impl ImageSourceUnsafe {
+    
+    /// Converts self into [`ImageSource`].
+    ///
+    /// # Safety
+    /// If this is a [`path`][1], it has to be ensured that the pointer is a valid pointer up to
+    /// size.
+    ///
+    /// [1]: Self::Path
     pub unsafe fn as_image_source<'a>(&'a self) -> ImageSource<'a> {
-        match self {
-            &Self::Path(data, len) => unsafe {
+        match *self {
+            Self::Path(data, len) => unsafe {
                 ImageSource::Path(str
                     ::from_utf8(slice::from_raw_parts(data.as_ptr(), len))
                     .unwrap_or_default()
                 )
             },
-            &Self::Id(id) => ImageSource::Id(id)
+            Self::Id(id) => ImageSource::Id(id)
         }
     }
 }
@@ -66,32 +76,16 @@ impl<'a> From<ImageSource<'a>> for ImageSourceOwned {
     }
 }
 
-#[derive(Clone, Eq)]
-pub enum ImageSourceInternal {
-    Err,
-    Path(Rc<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>>),
-    Id(gpu::ImageId),
+
+#[derive(Clone, Copy,  Eq)]
+pub struct ImageSourceInternal {
+    pub view_id: gpu::ImageViewId,
 }
 
 impl PartialEq for ImageSourceInternal {
 
     fn eq(&self, other: &Self) -> bool {
-        match self {
-            Self::Err => matches!(other, Self::Err),
-            Self::Path(this) =>
-                match other {
-                    Self::Err => false,
-                    Self::Path(other) => Rc::ptr_eq(this, other),
-                    Self::Id(_) => false,
-                },
-            Self::Id(this) => 
-                match other {
-                    Self::Err => false,
-                    Self::Path(_) => false,
-                    Self::Id(other) => this == other,
-                }
-
-        }
+        self.view_id == other.view_id
     }
 }
 
@@ -105,52 +99,340 @@ macro_rules! image_source {
     };
 }
 
+type ImageBuffer = ::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>;
+
+struct LoadedImage {
+    last_modified: std::time::SystemTime,
+    last_updated: u64,
+    source: ImageBuffer,
+    staging_binder: gpu::LinearBinder,
+    staging_id: gpu::BufferId,
+    view_binder: gpu::LinearBinder,
+    view_id: gpu::ImageViewId,
+}
 
 pub struct ImageLoader {
-    images: FxHashMap<CompactString, (std::time::SystemTime, Rc<::image::ImageBuffer<::image::Rgba<u8>, Vec<u8>>>)>,
+    gpu: gpu::Gpu,
+    images: AHashMap<CompactString, LoadedImage>,
+    semaphore: gpu::TimelineSemaphoreId,
+    semaphore_value: u64,
+    err_view_id: gpu::ImageViewId,
+    err_staging_id: gpu::BufferId,
+    err_image_loaded: bool,
 }
 
 impl ImageLoader {
 
+    const ERR_BYTES: &[u8] =
+    &[
+        255, 0, 203, 255,
+        0, 0, 0, 255,
+        0, 0, 0, 255,
+        255, 0, 203, 255,
+    ];
+
     #[inline(always)]
-    pub fn new() -> Self {
-        Self {
-            images: FxHashMap::default(),
+    pub fn new(
+        gpu: gpu::Gpu,
+    ) -> Result<Self>
+    {
+        let (mut err_staging_id, mut err_image_id) = Default::default();
+        let memory_binder = gpu::GlobalBinder::new(
+            gpu.device().clone(),
+            gpu::MemoryProperties::DEVICE_LOCAL,
+            gpu::MemoryProperties::DEVICE_LOCAL
+        );
+        gpu.create_resources(
+            [gpu::BufferCreateInfo::new(
+                &mut err_staging_id,
+                &memory_binder,
+                size_of_val(Self::ERR_BYTES) as gpu::DeviceSize,
+                gpu::BufferUsages::TRANSFER_SRC | gpu::BufferUsages::TRANSFER_DST
+            ).unwrap()],
+            [gpu::ImageCreateInfo
+                ::new(
+                    &mut err_image_id,
+                    &memory_binder,
+                ).with_dimensions((2, 2))
+                .with_format(gpu::Format::R8g8b8a8Srgb, false)
+                .with_usage(gpu::ImageUsages::TRANSFER_DST | gpu::ImageUsages::SAMPLED)
+            ])?;
+        let err_view_id = gpu.create_image_view(
+            err_image_id,
+            gpu::ImageRange::whole_range(gpu::ImageAspects::COLOR),
+        )?;
+        let mut semaphore = Default::default();
+        gpu.create_timeline_semaphores([(&mut semaphore, 0)])?;
+        Ok(Self {
+            gpu,
+            images: AHashMap::default(),
+            semaphore,
+            semaphore_value: 0,
+            err_view_id,
+            err_staging_id,
+            err_image_loaded: false,
+        })
+    }
+
+    fn load_err_image(&mut self) -> (ImageSourceInternal, Option<gpu::CommandDependency>) {
+        let mut command_id = None;
+        if !self.err_image_loaded {
+            let (err_staging_id, err_view_id) = (self.err_staging_id, self.err_view_id);
+            let mut scheduler = self.gpu.schedule_commands();
+            let mut cmd = scheduler.new_commands::<gpu::NewCopyCommands>(
+                self.gpu.any_device_queue(gpu::QueueFlags::GRAPHICS).unwrap(),
+                move |cmd| {
+                    cmd.update_buffer(err_staging_id, 0, Self::ERR_BYTES, gpu::CommandOrdering::Lenient)?;
+                    cmd.copy_buffer_to_image(
+                        err_staging_id,
+                        err_view_id.image_id(),
+                        &[gpu::BufferImageCopy
+                            ::default()
+                            .image_subresource(gpu::ImageSubresourceLayers
+                                ::default()
+                                .aspect_mask(gpu::ImageAspects::COLOR)
+                            ).image_extent((2, 2))
+                        ],
+                        gpu::CommandOrdering::Strict
+                    )?;
+                    Ok(())
+                }
+            ).ok();
+            command_id = cmd.take().map(|cmd| {
+                let cmd = cmd.with_signal_semaphore(self.semaphore, self.semaphore_value + 1);
+                cmd.id()
+            });
+            self.semaphore_value += 1;
         }
+        self.err_image_loaded = true;
+        (
+            ImageSourceInternal { view_id: self.err_view_id, },
+            command_id
+                .map(|id| gpu::CommandDependency::new(id, gpu::MemoryDependencyHint::FRAGMENT_SHADER))
+        )
     }
 
     #[inline(always)]
-    pub fn load_image(&mut self, path: &str) -> ImageSourceInternal {
-        if let Some((last_modified, source)) = self.images.get_mut(path) {
-            if let Ok(meta) = fs::metadata(path) {
-                if let Ok(modified) = meta.modified() {
-                    if modified == *last_modified {
-                        return ImageSourceInternal::Path(source.clone())
+    pub fn load_image(&mut self, path: &str) -> (ImageSourceInternal, Option<gpu::CommandDependency>) {
+        if let Some(img) = self.images.get_mut(path) &&
+            let Ok(meta) = fs::metadata(path) &&
+            let Ok(modified) = meta.modified()
+        {
+            if modified == img.last_modified {
+                return (ImageSourceInternal {
+                    view_id: img.view_id,
+                }, None)
+            }
+            if let Ok(new_img) = load_rgba_image(path) {
+                let mut command_id = Default::default();
+                match block_on(async {
+                    if !self.gpu.wait_for_semaphores(&[(self.semaphore, img.last_updated)],
+                        Duration::from_secs(2)
+                    )? {
+                        return Err(Error::just_context("semaphore wait timeout"))
                     }
-                    if let Ok(new_img) = load_rgba_image(path) {
-                        *source = Rc::new(new_img);
-                        *last_modified = modified;
-                    } else {
-                        return ImageSourceInternal::Err
+                    unsafe {
+                        img.staging_binder.release_resources();
+                        img.view_binder.release_resources();
                     }
+                    self.gpu.destroy_resources([img.staging_id], [img.view_id.image_id()])?;
+                    let (width, height) = new_img.dimensions();
+                    let mem_size = (width * height) as gpu::DeviceSize * 4;
+                    let mip_levels = 32 - (width | height).leading_zeros();
+                    let (mut staging_id, mut image_id) = Default::default();
+                    self.gpu.create_resources(
+                        [gpu::BufferCreateInfo::new(
+                            &mut staging_id,
+                            &img.staging_binder,
+                            mem_size,
+                            gpu::BufferUsages::TRANSFER_SRC,
+                        ).unwrap()],
+                        [gpu::ImageCreateInfo
+                            ::new(&mut image_id, &img.view_binder)
+                            .with_dimensions((width, height))
+                            .with_format(gpu::Format::R8g8b8a8Srgb, false)
+                            .with_usage(gpu::ImageUsages::TRANSFER_DST | gpu::ImageUsages::SAMPLED)
+                            .with_mip_levels(mip_levels)
+                        ])?;
+                    let mut map = self.gpu.map_buffer(staging_id)?;
+                    unsafe {
+                        map.write_bytes(new_img.as_bytes());
+                    }
+                    if !map.is_coherent {
+                        self.gpu.flush_mapped_memory_ranges(&[
+                            gpu::MappedBufferMemoryRange {
+                                buffer_id: staging_id,
+                                offset: 0,
+                                size: mem_size,
+                            },
+                        ])?;
+                    }
+                    let view_id = self.gpu.create_image_view(
+                        image_id,
+                        gpu::ImageRange::whole_range(gpu::ImageAspects::COLOR),
+                    )?;
+                    command_id = self.gpu
+                        .schedule_commands()
+                        .new_commands::<gpu::NewCopyCommands>(
+                            self.gpu.any_device_queue(gpu::QueueFlags::GRAPHICS).unwrap(),
+                            move |cmd| {
+                                cmd.copy_buffer_to_image(
+                                    staging_id,
+                                    image_id,
+                                    &[gpu::BufferImageCopy
+                                        ::default()
+                                        .image_subresource(gpu::ImageSubresourceLayers
+                                            ::default()
+                                            .aspect_mask(gpu::ImageAspects::COLOR)
+                                        ).image_extent((width, height))
+                                    ],
+                                    gpu::CommandOrdering::Lenient,
+                                )?;
+                                Ok(())
+                            }
+                        )?.with_signal_semaphore(self.semaphore, self.semaphore_value + 1).id();
+                    self.semaphore_value += 1;
+                    img.staging_id = staging_id;
+                    img.view_id = view_id;
+                    img.last_updated = self.semaphore_value;
+                    img.source = new_img;
+                    img.last_modified = modified;
+                    Result::Ok(())
+                }) {
+                    Ok(()) => {
+                        return (ImageSourceInternal {
+                            view_id: img.view_id,
+                        }, Some(gpu::CommandDependency::new(
+                            command_id, gpu::MemoryDependencyHint::FRAGMENT_SHADER,
+                        )))
+                    },
+                    Err(err) => {
+                        expand_warn!(Error::new(
+                            err, "(nox_gui) failed to load image to gpu memory",
+                        ));
+                    },
                 }
             }
-            return ImageSourceInternal::Err
+            return self.load_err_image()
         }
-        if let Ok(meta) = fs::metadata(path) {
-            if let Ok(modified) = meta.modified() {
-                if let Ok(new_img) = load_rgba_image(path) {
-                    return ImageSourceInternal::Path(
-                        self.images
-                            .entry(path.into())
-                            .or_insert((modified, Rc::new(new_img)))
-                            .1
-                            .clone()
-                    )
+        if let Ok(meta) = fs::metadata(path) &&
+            let Ok(last_modified) = meta.modified() &&
+            let Ok(new_img) = load_rgba_image(path)
+        {
+            let mut command_id = Default::default();
+            match block_on(async {
+                let (width, height) = new_img.dimensions();
+                let buf_size = new_img.as_bytes().len() as gpu::DeviceSize;
+                let mip_levels = 32 - (width | height).leading_zeros();
+                let img_size: gpu::DeviceSize = (0..mip_levels).map(|i| buf_size >> i).sum();
+                let staging_binder = gpu::LinearBinder
+                    ::new(
+                        self.gpu.device().clone(),
+                        buf_size,
+                        gpu::MemoryProperties::HOST_VISIBLE,
+                        gpu::MemoryProperties::HOST_VISIBLE | gpu::MemoryProperties::HOST_COHERENT,
+                    )?;
+                let view_binder = gpu::LinearBinder
+                    ::new(
+                        self.gpu.device().clone(),
+                        img_size,
+                        gpu::MemoryProperties::DEVICE_LOCAL,
+                        gpu::MemoryProperties::DEVICE_LOCAL
+                    )?;
+                let (mut staging_id, mut image_id) = Default::default();
+                self.gpu.create_resources(
+                    [gpu::BufferCreateInfo::new(
+                        &mut staging_id,
+                        &staging_binder,
+                        buf_size,
+                        gpu::BufferUsages::TRANSFER_SRC
+                    ).unwrap()],
+                    [gpu::ImageCreateInfo
+                        ::new(&mut image_id, &view_binder)
+                        .with_dimensions((width, height))
+                        .with_format(gpu::Format::R8g8b8a8Srgb, false)
+                        .with_usage(
+                            gpu::ImageUsages::TRANSFER_SRC |
+                            gpu::ImageUsages::TRANSFER_DST |
+                            gpu::ImageUsages::SAMPLED
+                        ).with_mip_levels(mip_levels)
+                    ])?;
+                let mut map = self.gpu.map_buffer(staging_id)?;
+                unsafe {
+                    map.write_bytes(new_img.as_bytes());
                 }
+                if !map.is_coherent {
+                    self.gpu.flush_mapped_memory_ranges(&[
+                        gpu::MappedBufferMemoryRange {
+                            buffer_id: staging_id,
+                            offset: 0,
+                            size: buf_size,
+                        },
+                    ])?;
+                }
+                let view_id = self.gpu.create_image_view(
+                    image_id,
+                    gpu::ImageRange::whole_range(gpu::ImageAspects::COLOR),
+                )?;
+                command_id = self.gpu.schedule_commands()
+                    .new_commands::<gpu::NewCopyCommands>(
+                        self.gpu.any_device_queue(gpu::QueueFlags::GRAPHICS).unwrap(),
+                        move |cmd| {
+                            cmd.copy_buffer_to_image(
+                                staging_id,
+                                image_id,
+                                &[gpu::BufferImageCopy
+                                    ::default()
+                                    .image_subresource(gpu::ImageSubresourceLayers
+                                        ::default()
+                                        .aspect_mask(gpu::ImageAspects::COLOR)
+                                    ).image_extent((width, height))
+                                ],
+                                gpu::CommandOrdering::Lenient,
+                            )?;
+                            cmd.gen_mip_map(image_id, gpu::Filter::Linear)?;
+                            Ok(())
+                        }
+                    )?.with_signal_semaphore(self.semaphore, self.semaphore_value + 1).id();
+                self.semaphore_value += 1;
+                Result::Ok(LoadedImage {
+                    last_modified,
+                    last_updated: self.semaphore_value,
+                    source: new_img,
+                    staging_binder,
+                    staging_id,
+                    view_binder,
+                    view_id,
+                })
+            }) {
+                Ok(img) => {
+                    let view_id = img.view_id;
+                    self.images.insert(path.into(), img);
+                    return (ImageSourceInternal {
+                        view_id,
+                    }, Some(gpu::CommandDependency::new(
+                        command_id, gpu::MemoryDependencyHint::FRAGMENT_SHADER,
+                    )))
+                },
+                Err(err) => {
+                    expand_warn!(Error::new(
+                        err, "(nox_gui) failed to load image to gpu memory",
+                    ));
+                },
             }
         }
-        ImageSourceInternal::Err
+        self.load_err_image()
+    }
+}
+
+impl Drop for ImageLoader {
+
+    fn drop(&mut self) {
+        self.gpu.destroy_resources([self.err_staging_id], [self.err_view_id.image_id()]).ok();
+        self.gpu.destroy_timeline_semaphores(&[self.semaphore]);
+        for image in self.images.values() {
+            self.gpu.destroy_resources([image.staging_id], [image.view_id.image_id()]).ok();
+        }
     }
 }
 
@@ -159,11 +441,7 @@ pub struct ImageData {
     offset: Vec2,
     size: Vec2,
     source: Option<ImageSourceInternal>,
-    render_format: gpu::ColorFormat,
-    image: Option<gpu::ImageId>,
-    shader_resource: Option<gpu::ShaderResourceId>,
     loc: Option<Location>,
-    flags: u32,
 }
 
 impl Tracked for ImageData {
@@ -175,19 +453,7 @@ impl Tracked for ImageData {
 
 impl ImageData {
 
-    const SOURCE_RESET: u32 = 0x1;
-
-    #[inline(always)]
-    pub fn requires_transfer_commands(&self) -> bool {
-        self.flags & Self::SOURCE_RESET == Self::SOURCE_RESET
-    }
-
-    #[inline(always)]
-    fn source_reset(&self) -> bool {
-        self.flags & Self::SOURCE_RESET == Self::SOURCE_RESET
-    }
-
-    #[inline(always)]
+    #[inline]
     pub fn update_source(
         &mut self,
         source: ImageSourceInternal,
@@ -196,213 +462,71 @@ impl ImageData {
         size: Vec2,
     )
     {
-        if let Some(cur) = &self.source {
-            if cur != &source {
-                self.flags |= Self::SOURCE_RESET;
-                self.source = Some(source.clone());
-            }
-        } else {
-            self.flags |= Self::SOURCE_RESET;
-            self.source = Some(source.clone());
-        }
+        self.source = Some(source);
         self.loc = Some(loc);
         self.offset = offset;
         self.size = size;
-    }
+    } 
 
-    pub fn render(
+    pub fn draw(
         &mut self,
-        frame_graph: &mut gpu::FrameGraph,
-        render_format: gpu::ColorFormat,
-        add_read: &mut dyn FnMut(gpu::ReadInfo),
-    ) -> Result<()> {
-        self.render_format = render_format;
-        if !self.source_reset() && let Some(image) = self.image {
-            let resource_id = frame_graph
-                .add_image(image)
-                .context("failed to add image to frame graph")?;
-            add_read(gpu::ReadInfo::new(resource_id, None));
-        }
-        Ok(())
-    }
-
-    pub fn transfer_work(
-        &mut self,
-        commands: &mut gpu::TransferCommands,
-        window_semaphore: (gpu::TimelineSemaphoreId, u64),
-        sampler: gpu::SamplerId,
-        texture_pipeline_layout: gpu::PipelineLayoutId,
-        tmp_alloc: &impl Allocator,
-    ) -> Result<()> {
-        if self.source_reset() {
-            let source = self.source.as_ref().unwrap();
-            if commands.gpu().wait_for_semaphores(
-                &[(window_semaphore.0, window_semaphore.1)],
-                u64::MAX,
-                tmp_alloc,
-            ).context("failed to wait for window semaphores")?
-            {
-                self.flags &= !Self::SOURCE_RESET;
-                if let Some(image) = self.image {
-                    commands.gpu().destroy_image(image);
-                }
-                let image = match source {
-                    ImageSourceInternal::Err => {
-                        let bytes =
-                        [
-                            255, 0, 203, 255,
-                            0, 0, 0, 255,
-                            0, 0, 0, 255,
-                            255, 0, 203, 255,
-                        ];
-                        let &mut image = self.image.insert(commands.gpu().create_image(gpu::ResourceBinderImage::DefaultBinder, |builder| {
-                            builder
-                                .with_dimensions(gpu::Dimensions::new(2, 2, 1))
-                                .with_format(self.render_format, false)
-                                .with_usage(gpu::ImageUsage::Sampled)
-                                .with_usage(gpu::ImageUsage::TransferDst);
-                        }).context("failed to create gpu image")?);
-                        commands.copy_data_to_image(
-                            image, &bytes, None, None, None,
-                        ).context("failed to copy data to gpu image")?;
-                        image
-                    }
-                    ImageSourceInternal::Path(buf) => {
-                        let (bytes, dim) = (buf.as_bytes(), buf.dimensions());
-                        let &mut image = self.image.insert(commands.gpu().create_image(gpu::ResourceBinderImage::DefaultBinder, |builder| {
-                            builder
-                                .with_dimensions(gpu::Dimensions::new(dim.0, dim.1, 1))
-                                .with_format(self.render_format, false)
-                                .with_usage(gpu::ImageUsage::Sampled)
-                                .with_usage(gpu::ImageUsage::TransferDst)
-                                .with_usage(gpu::ImageUsage::TransferSrc)
-                                .with_mip_levels((dim.0.max(dim.1) as f32).log2().floor() as u32);
-                        }).context("failed to create gpu image")?);
-                        commands.copy_data_to_image(
-                            image, bytes, None, None, None
-                        ).context("failed to copy data to gpu image")?;
-                        commands
-                            .gen_mip_maps(image, gpu::Filter::Linear)
-                            .context("failed to gen mip maps for image")?;
-                        image
-                    },
-                    &ImageSourceInternal::Id(t) => {
-                        *self.image.insert(t)
-                    }
-                };
-                let resource =
-                    if let Some(resource) = self.shader_resource {
-                        resource
-                    } else {
-                        commands.gpu().allocate_shader_resources(
-                            &[
-                                gpu::ShaderResourceInfo::new(texture_pipeline_layout, 0)
-                            ],
-                            |_, id| { self.shader_resource = Some(id); },
-                            tmp_alloc,
-                        ).context("failed to allocate shader resources")?;
-                        self.shader_resource.unwrap()
-                    };
-                commands.gpu().update_shader_resources(
-                    &[
-                        gpu::ShaderResourceImageUpdate {
-                            resource,
-                            binding: 0,
-                            starting_index: 0,
-                            infos: &[
-                                gpu::ShaderResourceImageInfo {
-                                    sampler,
-                                    image_source: (image, None),
-                                    storage_image: false,
-                                }
-                            ]
-                        }
-                    ], &[], &[], tmp_alloc
-                ).context("failed to update shader resources")?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn render_work(
-        &mut self,
-        commands: &mut gpu::RenderCommands,
-        sampler: gpu::SamplerId,
-        texture_pipeline: gpu::GraphicsPipelineId,
-        texture_pipeline_layout: gpu::PipelineLayoutId,
+        cmd: &mut gpu::DrawCommands,
+        rec: &mut RecordCmd<'_>,
+        sampler: gpu::Sampler,
+        cached_data: &CachedUiData,
         content_off: Vec2,
         content_area: BoundingRect,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
-        tmp_alloc: &impl Allocator,
     ) -> Result<()> {
-        if self.shader_resource.is_none() {
-            commands.gpu_mut().allocate_shader_resources(
-                &[
-                    gpu::ShaderResourceInfo::new(texture_pipeline_layout, 0)
-                ],
-                |_, id| { self.shader_resource = Some(id); },
-                tmp_alloc
-            ).context("failed to allocate shader resources")?;
-            commands.gpu_mut().update_shader_resources(
-                &[
-                    gpu::ShaderResourceImageUpdate {
-                        resource: self.shader_resource.unwrap(),
-                        binding: 0,
-                        starting_index: 0,
-                        infos: &[
-                            gpu::ShaderResourceImageInfo {
-                                sampler,
-                                image_source: (self.image.unwrap(), None),
-                                storage_image: false,
-                            }
-                    ]
-                    }
-                ], &[], &[], tmp_alloc
-            ).context("failed to update shader resources")?;
-        }
-        commands.bind_pipeline(texture_pipeline).context("failed to bind texture pipeline")?;
-        commands.bind_shader_resources(|_| {
-            self.shader_resource.unwrap()
-        }).context("failed to bind shader resources")?;
+        let Some(source) = self.source else {
+            return Ok(())
+        };
+        let (viewport, scissor) = cached_data.viewport_and_scissor();
+        let mut pipeline_cmd = cmd.bind_pipeline(
+            rec.texture_pipeline(),
+            &[viewport], &[scissor],
+        ).context("failed to bind texture pipeline")?;
+        pipeline_cmd.push_descriptor_bindings(&[
+            gpu::PushDescriptorBinding::new(
+                "tex",
+                0,
+                gpu::DescriptorInfos::images(&[
+                    gpu::DescriptorImageInfo {
+                        sampler: Some(sampler),
+                        image_view: Some(source.view_id),
+                    },
+                ]),
+                gpu::CommandBarrierInfo::new(
+                    gpu::CommandOrdering::Lenient,
+                    gpu::ExplicitAccess::SHADER_READ,
+                ),
+            )?,
+        ]).context("failed to push descriptor binding")?;
         let pc_vertex = calc_texture_push_constants_vertex(
             content_off + self.offset,
             self.size,
-            inv_aspect_ratio,
-            unit_scale
+            cached_data.inv_aspect_ratio,
+            cached_data.unit_scale
         );
         let pc_fragment = base_push_constants_fragment(
             content_area.min, content_area.max
         );
-        commands.push_constants(|pc| unsafe {
-            if pc.stage == gpu::ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        }).context("failed to push constants")?;
-        commands
-            .draw_bufferless(6, 1)
-            .context("failed to draw image")?;
-        Ok(())
-    }
-
-    pub fn hide(
-        &mut self,
-        window_semaphore: (gpu::TimelineSemaphoreId, u64),
-        gpu: &mut gpu::GpuContext,
-        tmp_alloc: &impl Allocator,
-    ) -> Result<()> {
-        if let Some(resource) = self.shader_resource.take() {
-            if gpu.wait_for_semaphores(
-                &[(window_semaphore.0, window_semaphore.1)],
-                u64::MAX,
-                tmp_alloc,
-            ).context("failed to wait for window semaphores")? {
-                gpu.free_shader_resources(&[resource], &GlobalAlloc)
-                    .context("failed to free shader resources")?;
-            }
-        }
+        pipeline_cmd
+            .push_constants(pc_vertex.0, &[pc_vertex.1])
+            .context("failed to push constants")?;
+        pipeline_cmd
+            .push_constants(pc_fragment.0, &[pc_fragment.1])
+            .context("failed to push constants")?;
+        pipeline_cmd.begin_drawing(
+            gpu::DrawInfo
+                ::default()
+                .vertex_count(6),
+            &[],
+            None,
+            |cmd| {
+                cmd.draw()?;
+                Ok(())
+            },
+        ).context("failed to draw image")?;
         Ok(())
     }
 }

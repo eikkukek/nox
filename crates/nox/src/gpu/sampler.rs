@@ -40,7 +40,7 @@ impl Sampler {
     pub const LOD_CLAMP_NONE: f32 = vk::LOD_CLAMP_NONE;
 
     #[inline(always)]
-    pub fn new(
+    fn new(
         device: LogicalDevice,
         create_info: SamplerCreateInfo,
     ) -> Result<Self> {
@@ -151,7 +151,13 @@ impl SamplerCreateInfo {
         self.address_mode_v = v;
         self.address_mode_w = w;
         self
-    }  
+    }
+
+    /// Builds the sampler, returning an error on failure.
+    #[inline]
+    pub fn build(self, device: LogicalDevice) -> Result<Sampler> {
+        Sampler::new(device, self)
+    }
 }
 
 impl PartialEq for Sampler {

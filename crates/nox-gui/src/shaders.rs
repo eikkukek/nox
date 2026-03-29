@@ -1,13 +1,9 @@
-use nox::{
-    mem::value_as_bytes,
-    gpu::VertexInput,
-};
-
-use crate::*;
-
+use nox::gpu::VertexInput;
 use nox_geom::{
     *
 };
+
+use crate::*;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy, VertexInput)]
@@ -41,11 +37,11 @@ impl From<Vec2> for Vertex {
 
 #[repr(C)]
 #[derive(Clone, Copy, VertexInput)]
-pub struct ColorPickerVertex {
+pub struct _ColorPickerVertex {
     pub pos: Vec2,
 }
 
-impl From<[f32; 2]> for ColorPickerVertex {
+impl From<[f32; 2]> for _ColorPickerVertex {
 
     fn from(value: [f32; 2]) -> Self {
         Self {
@@ -77,23 +73,14 @@ pub fn push_constants_vertex(
     scale: Vec2,
     inv_aspect_ratio: f32,
     unit_scale: f32,
-) -> PushConstantsVertex 
+) -> (u32, PushConstantsVertex)
 {
-    PushConstantsVertex {
+    (0, PushConstantsVertex {
         vert_off,
         scale,
         inv_aspect_ratio,
         unit_scale,
-    }
-}
-
-impl PushConstantsVertex {
-
-    pub unsafe fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            value_as_bytes(self).unwrap()
-        }
-    }
+    })
 }
 
 #[repr(C)]
@@ -106,26 +93,17 @@ pub struct BasePushConstantsFragment{
 pub fn base_push_constants_fragment(
     min_bounds: Vec2,
     max_bounds: Vec2,
-) -> BasePushConstantsFragment
+) -> (u32, BasePushConstantsFragment)
 {
-    BasePushConstantsFragment {
+    (32, BasePushConstantsFragment {
         min_bounds,
         max_bounds,
-    }
-}
-
-impl BasePushConstantsFragment {
-
-    pub unsafe fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            value_as_bytes(self).unwrap()
-        }
-    }
+    })
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct AlphaPickerPushConstantsFragment {
+pub struct _AlphaPickerPushConstantsFragment {
     pub hue: f32,
     pub sat: f32,
     pub val: f32,
@@ -133,13 +111,13 @@ pub struct AlphaPickerPushConstantsFragment {
     pub tile_width: f32,
 }
 
-pub fn aplha_picker_push_constants_fragment(
+pub fn _aplha_picker_push_constants_fragment(
     color: ColorHSVA,
     picker_width: f32,
     tile_width: f32,
-) -> AlphaPickerPushConstantsFragment
+) -> _AlphaPickerPushConstantsFragment
 {
-    AlphaPickerPushConstantsFragment {
+    _AlphaPickerPushConstantsFragment {
         hue: color.hue,
         sat: color.sat,
         val: color.val,
@@ -148,37 +126,19 @@ pub fn aplha_picker_push_constants_fragment(
     }
 }
 
-impl AlphaPickerPushConstantsFragment {
-
-    pub unsafe fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            value_as_bytes(self).unwrap()
-        }
-    }
-}
-
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct ColorPickerPushConstantsFragment {
+pub struct _ColorPickerPushConstantsFragment {
     pub hue: f32,
 }
 
-pub fn color_picker_push_constants_fragments(hue: f32) -> ColorPickerPushConstantsFragment {
-    ColorPickerPushConstantsFragment {
+pub fn _color_picker_push_constants_fragments(hue: f32) -> _ColorPickerPushConstantsFragment {
+    _ColorPickerPushConstantsFragment {
         hue,
     }
 }
 
-impl ColorPickerPushConstantsFragment {
-
-    pub unsafe fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            value_as_bytes(self).unwrap()
-        }
-    }
-}
-
-pub const BASE_VERTEX_SHADER: &'static str = "
+pub const BASE_VERTEX_SHADER: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
@@ -200,15 +160,14 @@ pub const BASE_VERTEX_SHADER: &'static str = "
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
         out_pos = pos + pc.vert_off + in_offset;
-        pos *= pc.unit_scale;
-        pos += (pc.vert_off + in_offset) * pc.unit_scale;
+        pos = (pos + pc.vert_off + in_offset) * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
         out_color = in_color;
     }
 ";
 
-pub const BASE_FRAGMENT_SHADER: &'static str = "
+pub const BASE_FRAGMENT_SHADER: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
@@ -235,7 +194,7 @@ pub const BASE_FRAGMENT_SHADER: &'static str = "
     }
 ";
 
-pub const TEXTURE_VERTEX_SHADER: &'static str = "
+pub const TEXTURE_VERTEX_SHADER: &str = "
     #version 450
 
     layout(location = 0) out vec2 out_pos;
@@ -273,15 +232,14 @@ pub const TEXTURE_VERTEX_SHADER: &'static str = "
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
         out_pos = pos + pc.vert_off;
-        pos *= pc.unit_scale;
-        pos += pc.vert_off * pc.unit_scale;
+        pos = (pos + pc.vert_off) * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
         out_uv = uvs[vertex_index];
     }
 ";
 
-pub const TEXTURE_FRAGMENT_SHADER: &'static str = "
+pub const TEXTURE_FRAGMENT_SHADER: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
@@ -289,7 +247,8 @@ pub const TEXTURE_FRAGMENT_SHADER: &'static str = "
 
     layout(location = 0) out vec4 out_color;
 
-    layout(set = 0, binding = 0) uniform sampler2D render_image;
+    // push descriptor
+    layout(set = 0, binding = 0) uniform sampler2D tex;
 
     layout(push_constant) uniform PushConstant {
         layout(offset = 32) vec2 min_bounds;
@@ -303,14 +262,14 @@ pub const TEXTURE_FRAGMENT_SHADER: &'static str = "
 
     void main() {
         if (in_rect()) {
-            out_color = texture(render_image, in_uv);
+            out_color = texture(tex, in_uv);
         } else {
             out_color = vec4(0.0);
         }
     }
 ";
 
-pub const TEXT_VERTEX_SHADER: &'static str = "
+pub const TEXT_VERTEX_SHADER: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
@@ -342,14 +301,13 @@ pub const TEXT_VERTEX_SHADER: &'static str = "
         out_min_bounds = in_min_bounds;
         out_max_bounds = in_max_bounds;
         out_color = in_color;
-        pos *= pc.unit_scale;
-        pos += pc.vert_off * pc.unit_scale;
+        pos = (pos + pc.vert_off) * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
     }
 ";
 
-pub const TEXT_FRAGMENT_SHADER: &'static str = "
+pub const TEXT_FRAGMENT_SHADER: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
@@ -373,7 +331,7 @@ pub const TEXT_FRAGMENT_SHADER: &'static str = "
     }
 ";
 
-pub const COLOR_PICKER_VERTEX_SHADER: &'static str = "
+pub const COLOR_PICKER_VERTEX_SHADER: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
@@ -391,15 +349,14 @@ pub const COLOR_PICKER_VERTEX_SHADER: &'static str = "
         vec2 pos = in_pos;
         pos.x *= pc.scale.x;
         pos.y *= pc.scale.y;
-        pos *= pc.unit_scale;
-        pos += pc.vert_off * pc.unit_scale;
+        pos = (pos + pc.vert_off) * pc.unit_scale;
         pos.x *= pc.inv_aspect_ratio;
         gl_Position = vec4(pos, 0.0, 1.0);
         out_pos = in_pos;
     }
 ";
 
-pub const COLOR_PICKER_FRAGMENT_SHADER: &'static str = "
+pub const COLOR_PICKER_FRAGMENT_SHADER: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
@@ -438,7 +395,7 @@ pub const COLOR_PICKER_FRAGMENT_SHADER: &'static str = "
     }
 ";
 
-pub const COLOR_PICKER_FRAGMENT_SHADER_HUE: &'static str = "
+pub const COLOR_PICKER_FRAGMENT_SHADER_HUE: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;
@@ -469,7 +426,7 @@ pub const COLOR_PICKER_FRAGMENT_SHADER_HUE: &'static str = "
     }
 ";
 
-pub const COLOR_PICKER_FRAGMENT_SHADER_ALPHA: &'static str = "
+pub const COLOR_PICKER_FRAGMENT_SHADER_ALPHA: &str = "
     #version 450
 
     layout(location = 0) in vec2 in_pos;

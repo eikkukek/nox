@@ -12,7 +12,6 @@ use nox_mem::{
 };
 
 use crate::gpu::prelude::{
-    memory_binder::DeviceMemoryObj,
     subresource_state::*,
     *,
 };
@@ -274,7 +273,12 @@ impl BufferMeta {
     }
 
     #[inline]
-    pub fn memory(&mut self) -> &mut DeviceMemoryObj {
+    pub fn memory(&self) -> &DeviceMemoryObj {
+        &self.memory
+    }
+    
+    #[inline]
+    pub fn memory_mut(&mut self) -> &mut DeviceMemoryObj {
         &mut self.memory
     } 
 

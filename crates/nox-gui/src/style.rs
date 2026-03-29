@@ -5,17 +5,29 @@ use core::{
 use std::f32::consts::FRAC_PI_2;
 
 use nox_proc::BuildStructure;
-use nox::mem::vec::{ArrayVec, Vec32};
+use nox::mem::{vec::{ArrayVec, Vec32}, AsRaw};
 use nox_geom::*;
 
 use crate::*;
 
+#[repr(u32)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, AsRaw)]
+pub enum StrokeType {
+    #[default]
+    Type1 = 0,
+    Type2 = 1,
+    Type3 = 2,
+    Custom = 3,
+}
+
+pub type InteractStrokes = ArrayVec<Stroke, 4>;
+
 pub struct InteractVisuals {
     pub fill_col: ColorSRGBA,
-    pub bg_strokes: ArrayVec<Stroke, 4>,
-    pub bg_stroke_idx: u32,
-    pub fg_strokes: ArrayVec<Stroke, 4>,
-    pub fg_stroke_idx: u32,
+    pub bg_strokes: InteractStrokes,
+    pub bg_stroke_type: StrokeType,
+    pub fg_strokes: InteractStrokes,
+    pub fg_stroke_type: StrokeType,
     pub rounding: f32,
 }
 
@@ -23,15 +35,16 @@ impl InteractVisuals {
 
     #[inline(always)]
     pub fn fg_stroke_col(&self) -> ColorSRGBA {
-        self.fg_strokes[self.fg_stroke_idx as usize].col
+        self.fg_strokes[self.fg_stroke_type as usize].col
     }
 }
 
 #[derive(Clone, BuildStructure)]
 #[by_mut]
 pub struct UiStyle {
-    pub regular_font: CompactString,
-    #[default(DEFAULT_WIDGET_BG_COL)]
+    #[default(ConstName::new(""))]
+    pub regular_font: ConstName,
+    #[default(DEFAULT_WINDOW_BG_COL)]
     pub window_bg_col: ColorSRGBA,
     #[default(DEFAULT_WINDOW_TITLE_BAR_COL)]
     pub window_title_bar_col: ColorSRGBA,
@@ -94,7 +107,7 @@ pub struct UiStyle {
     #[default(0.01)]
     pub scroll_bar_width: f32,
     #[default(0.02)]
-    pub scroll_bar_fat_with: f32,
+    pub scroll_bar_fat_width: f32,
     #[default(0.002)]
     pub window_stroke_thickness: f32,
     #[default(0.0035)]
@@ -144,7 +157,7 @@ pub struct UiStyle {
 impl UiStyle {
 
     #[inline]
-    fn interact_visuals(&self, reaction: &Reaction) -> InteractVisuals {
+    pub fn interact_visuals(&self, reaction: &Reaction) -> InteractVisuals {
         let bg_strokes = ArrayVec::from([
             Stroke {
                 col: self.active_widget_stroke_col,
@@ -169,18 +182,18 @@ impl UiStyle {
             InteractVisuals {
                 fill_col: self.widget_bg_col,
                 bg_strokes,
-                bg_stroke_idx: 0,
+                bg_stroke_type: StrokeType::Type1,
                 fg_strokes,
-                fg_stroke_idx: 0,
+                fg_stroke_type: StrokeType::Type1,
                 rounding: self.rounding,
             }
         } else if reaction.hovered() {
             InteractVisuals {
                 fill_col: self.widget_bg_col,
                 bg_strokes,
-                bg_stroke_idx: 1,
+                bg_stroke_type: StrokeType::Type2,
                 fg_strokes,
-                fg_stroke_idx: 1,
+                fg_stroke_type: StrokeType::Type2,
                 rounding: self.rounding,
             }
         } else {
@@ -188,16 +201,16 @@ impl UiStyle {
             InteractVisuals {
                 fill_col: self.widget_bg_col,
                 bg_strokes,
-                bg_stroke_idx: 2,
+                bg_stroke_type: StrokeType::Type3,
                 fg_strokes,
-                fg_stroke_idx: 1,
+                fg_stroke_type: StrokeType::Type2,
                 rounding: self.rounding,
             }
         }
     }
 
     #[inline]
-    fn get_checkmark_points(
+    pub fn get_checkmark_points(
         &self,
         text_renderer: &mut TextRenderer, 
         points: &mut Vec32<[f32; 2]>,
@@ -220,54 +233,54 @@ impl UiStyle {
     }
 
     #[inline]
-    fn calc_font_height(&self, text_renderer: &mut TextRenderer) -> f32
+    pub fn calc_font_height(&self, text_renderer: &mut TextRenderer) -> f32
     {
         text_renderer.font_height(&self.regular_font).unwrap_or_default() *
             self.font_scale
     }
 
     #[inline]
-    fn calc_text_size(&self, text: &font::RenderedText) -> Vec2 {
+    pub fn calc_text_size(&self, text: &font::RenderedText) -> Vec2 {
         vec2(text.text_width, text.row_height * text.text_rows as f32) * self.font_scale
     }
 
     #[inline]
-    fn calc_text_width(&self, text: &font::RenderedText) -> f32 {
+    pub fn calc_text_width(&self, text: &font::RenderedText) -> f32 {
         text.text_width * self.font_scale
     }
 
     #[inline]
-    fn calc_text_height(&self, text: &font::RenderedText) -> f32 {
+    pub fn calc_text_height(&self, text: &font::RenderedText) -> f32 {
         text.row_height * text.text_rows as f32 * self.font_scale
     }
 
     #[inline]
-    fn calc_text_box_size(&self, text: &font::RenderedText) -> Vec2 {
+    pub fn calc_text_box_size(&self, text: &font::RenderedText) -> Vec2 {
         self.item_pad_inner + self.item_pad_inner + self.calc_text_size(text)
     } 
 
     #[inline]
-    fn calc_text_box_width(&self, text: &font::RenderedText) -> f32 {
+    pub fn calc_text_box_width(&self, text: &font::RenderedText) -> f32 {
         self.item_pad_inner.x + self.item_pad_inner.x +  self.calc_text_width(text)
     }
 
     #[inline]
-    fn calc_text_box_height(&self, text: &font::RenderedText) -> f32 {
+    pub fn calc_text_box_height(&self, text: &font::RenderedText) -> f32 {
         self.item_pad_inner.y + self.item_pad_inner.y + self.calc_text_height(text)
     }
 
     #[inline]
-    fn calc_text_box_size_from_text_size(&self, text_size: Vec2) -> Vec2 {
+    pub fn calc_text_box_size_from_text_size(&self, text_size: Vec2) -> Vec2 {
         self.item_pad_inner + self.item_pad_inner +  text_size
     }
 
     #[inline]
-    fn calc_text_box_width_from_text_width(&self, text_width: f32) -> f32 {
+    pub fn calc_text_box_width_from_text_width(&self, text_width: f32) -> f32 {
         self.item_pad_inner.x + self.item_pad_inner.x +  text_width
     }
 
     #[inline]
-    fn calc_text_box_height_from_text_height(&self, text_height: f32) -> f32 {
+    pub fn calc_text_box_height_from_text_height(&self, text_height: f32) -> f32 {
         self.item_pad_inner.y + self.item_pad_inner.y + text_height
     }
 }

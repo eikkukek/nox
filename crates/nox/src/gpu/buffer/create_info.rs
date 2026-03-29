@@ -5,10 +5,7 @@ use core::{
 use nox_ash::vk;
 
 use crate::{
-    gpu::prelude::{
-        memory_binder::MemoryBinder,
-        *,
-    },
+    gpu::prelude::*,
     error,
 };
 
@@ -36,9 +33,9 @@ impl<'a> BufferCreateInfo<'a> {
     /// You can specify a different memory binder by [`BufferCreateInfo::with_memory_binder`].
     pub fn new(
         out: &'a mut BufferId,
+        memory_binder: &'a dyn MemoryBinder,
         size: DeviceSize,
         usage: BufferUsages,
-        memory_binder: &'a dyn MemoryBinder,
     ) -> Option<Self> {
         Some(Self {
             out,

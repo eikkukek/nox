@@ -25,7 +25,6 @@ use nox_alloc::arena::{self, Arena};
 
 use {
     crate::gpu::prelude::{
-        memory_binder::{DeviceMemoryObj, MemoryBinder},
         subresource_state::*,
         *
     },

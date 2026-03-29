@@ -1,5 +1,3 @@
-use core::marker::PhantomData;
-
 use ahash::AHashMap;
 use compact_str::CompactString;
 
@@ -101,7 +99,6 @@ impl RenderedText {
 #[derive(Default)]
 pub struct CombinedRenderedText<UserInstanceData> {
     pub text: AHashMap<char, (InstancedText, Vec<UserInstanceData>)>,
-    _marker: PhantomData<UserInstanceData>,
 }
 
 impl<UserInstanceData> CombinedRenderedText<UserInstanceData> {
@@ -110,7 +107,6 @@ impl<UserInstanceData> CombinedRenderedText<UserInstanceData> {
     pub fn new() -> Self {
         Self {
             text: AHashMap::default(),
-            _marker: PhantomData,
         }
     }
 
@@ -151,8 +147,9 @@ impl<UserInstanceData> CombinedRenderedText<UserInstanceData> {
     }
 }
 
-pub(super) struct FaceCache<'a> {
-    pub face: Face<'a>,
+pub(super) struct FaceCache<F>
+{
+    pub face: F,
     pub trigs: AHashMap<char, Option<Arc<GlyphTriangles>>>,
     pub offsets: AHashMap<char, Option<Vec<VertexOffset>>>,
 }

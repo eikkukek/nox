@@ -3,22 +3,21 @@ use core::{
     any::TypeId,
 };
 
+use ahash::{AHashMap, AHashSet};
+use compact_str::CompactString;
+
 use nox::{
-    alloc::arena_alloc::{ArenaAlloc, ArenaGuard},
+    alloc::arena::Arena,
     mem::{
-        vec_types::{GlobalVec, Vector},
-        Allocator,
+        vec::Vec32,
+        alloc::LocalAllocExt,
     },
     win,
     gpu,
+    error::*,
+    or_flag,
 };
-
-use rustc_hash::{FxHashMap, FxHashSet};
-
-use compact_str::CompactString;
-
 use nox_font::{RenderedText, CombinedRenderedText, text_segment};
-
 use nox_geom::{
     shapes::*, *
 };
@@ -26,21 +25,24 @@ use nox_geom::{
 use crate::{
     collapsing_header::*,
     surface::*,
-    error::*,
     *
 };
 
-pub struct WindowUpdateResult {
+pub struct WindowEndResult {
     pub cursor_in_window: bool,
-    pub requires_transfer_commands: bool,
 }
+
+type FnReactionMove = dyn FnMut(Option<NonNull<u8>>, &Arena) -> Option<NonNull<u8>>;
 
 struct ReactionData {
     ty: TypeId,
     ptr: Option<NonNull<u8>>,
-    move_fn: Box<dyn FnMut(Option<NonNull<u8>>, &ArenaAlloc) -> Option<NonNull<u8>>>,
+    move_fn: Box<FnReactionMove>,
     drop_fn: Box<dyn FnMut(Option<NonNull<u8>>)>,
 }
+
+unsafe impl Send for ReactionData {}
+unsafe impl Sync for ReactionData {}
 
 #[derive(Clone, Copy)]
 pub struct Row {
@@ -57,28 +59,28 @@ pub struct Window
     focused_stroke_vertex_range: Option<VertexRange>,
     stroke_vertex_range: Option<VertexRange>,
     title_stroke_vertex_range: Option<VertexRange>,
-    window_draw_info: gpu::DrawInfo,
-    content_draw_info: gpu::DrawInfo,
+    window_draw_info: gpu::IndexedDrawInfo,
+    content_draw_info: gpu::IndexedDrawInfo,
     position: Vec2,
     pub title: CompactString,
     pub title_text: Option<RenderedText>,
-    combined_text: CombinedRenderedText<BoundedTextInstance, GlobalVec<BoundedTextInstance>>,
-    vertices: GlobalVec<Vertex>,
-    indices: GlobalVec<u32>,
-    text: GlobalVec<SharedText>,
-    reactions: FxHashMap<ReactionId, Reaction>,
-    active_reactions: FxHashSet<ReactionId>,
-    prev_active_reactions: GlobalVec<ReactionId>,
-    reaction_data: FxHashMap<ReactionId, ReactionData>,
-    reaction_text: FxHashMap<ReactionId, (CompactString, SharedText)>,
-    animated_bools: FxHashMap<ReactionId, (f32, bool)>,
-    collapsing_headers: FxHashMap<CollapsingHeaderId, (u64, CollapsingHeader)>,
-    active_collapsing_headers: FxHashSet<CollapsingHeaderId>,
-    prev_active_collapsing_headers: GlobalVec<CollapsingHeaderId>,
+    combined_text: CombinedRenderedText<BoundedTextInstance>,
+    vertices: Vec32<Vertex>,
+    indices: Vec32<u32>,
+    text: Vec32<SharedText>,
+    reactions: AHashMap<ReactionId, Reaction>,
+    active_reactions: AHashSet<ReactionId>,
+    prev_active_reactions: Vec32<ReactionId>,
+    reaction_data: AHashMap<ReactionId, ReactionData>,
+    reaction_text: AHashMap<ReactionId, (CompactString, SharedText)>,
+    animated_bools: AHashMap<ReactionId, (f32, bool)>,
+    collapsing_headers: AHashMap<CollapsingHeaderId, (u64, CollapsingHeader)>,
+    active_collapsing_headers: AHashSet<CollapsingHeaderId>,
+    prev_active_collapsing_headers: Vec32<CollapsingHeaderId>,
     painter_storage: PainterStorage,
     hover_window: HoverWindow,
-    scroll_bar_vertices: GlobalVec<Vertex>,
-    scroll_bar_indices: GlobalVec<u32>,
+    scroll_bar_vertices: Vec32<Vertex>,
+    scroll_bar_indices: Vec32<u32>,
     ver_scroll_bar: VerScrollBar,
     hor_scroll_bar: HorScrollBar,
     last_triangulation: u64,
@@ -91,10 +93,8 @@ pub struct Window
     focused_stroke_thickness: f32,
     stroke_thickness: f32,
     distance_from_edge: Vec2,
-    signal_semaphore: Option<gpu::TimelineSemaphoreId>,
-    signal_semaphore_value: u64,
-    reaction_data_alloc_0: ArenaAlloc,
-    reaction_data_alloc_1: ArenaAlloc,
+    reaction_data_alloc_0: Arena,
+    reaction_data_alloc_1: Arena,
     flags: u32,
 }
 
@@ -117,11 +117,11 @@ impl Window
     const CLAMP_HEIGHT: u32 = 0x2000;
     const CLAMP_WIDTH: u32 = 0x4000;
     const VER_SCROLL_BAR_VISIBLE: u32 = 0x8000;
-    const HOR_SCROLL_BAR_VISIBLE: u32 = 0x1000_0;
-    const VER_SCROLL_BAR_RENDERABLE: u32 = 0x2000_0;
-    const HOR_SCROLL_BAR_RENDERABLE: u32 = 0x4000_0;
-    const CONTENT_HELD: u32 = 0x8000_0;
-    const USING_REACTION_DATA_ALLOC_1: u32 = 0x1000_00;
+    const HOR_SCROLL_BAR_VISIBLE: u32 = 0x0001_0000;
+    const VER_SCROLL_BAR_RENDERABLE: u32 = 0x0002_0000;
+    const HOR_SCROLL_BAR_RENDERABLE: u32 = 0x0004_0000;
+    const CONTENT_HELD: u32 = 0x0008_0000;
+    const USING_REACTION_DATA_ALLOC_1: u32 = 0x0010_0000;
 
     pub(crate) fn new(
         title: &str,
@@ -146,13 +146,13 @@ impl Window
             vertices: Default::default(),
             indices: Default::default(),
             text: Default::default(),
-            reactions: FxHashMap::default(),
-            active_reactions: FxHashSet::default(),
+            reactions: AHashMap::default(),
+            active_reactions: AHashSet::default(),
             prev_active_reactions: Default::default(),
-            reaction_data: FxHashMap::default(),
-            reaction_text: FxHashMap::default(),
-            animated_bools: FxHashMap::default(),
-            collapsing_headers: FxHashMap::default(),
+            reaction_data: AHashMap::default(),
+            reaction_text: AHashMap::default(),
+            animated_bools: AHashMap::default(),
+            collapsing_headers: AHashMap::default(),
             active_collapsing_headers: Default::default(),
             prev_active_collapsing_headers: Default::default(),
             painter_storage: PainterStorage::new(1 << 14),
@@ -171,10 +171,8 @@ impl Window
             focused_stroke_thickness: 0.0,
             stroke_thickness: 0.0,
             distance_from_edge: Default::default(),
-            signal_semaphore: None,
-            signal_semaphore_value: 0,
-            reaction_data_alloc_0: ArenaAlloc::new(1 << 20).unwrap(),
-            reaction_data_alloc_1: ArenaAlloc::new(1 << 20).unwrap(),
+            reaction_data_alloc_0: Arena::new(1 << 20).unwrap(),
+            reaction_data_alloc_1: Arena::new(1 << 20).unwrap(),
             flags:
                 Self::REQUIRES_TRIANGULATION |
                 Self::APPEARING |
@@ -369,44 +367,37 @@ impl Window
         self.painter_storage.begin();
     }
 
-    pub fn update(
+    pub fn end(
         &mut self,
-        win: &mut win::WindowContext,
-        gpu: &mut gpu::GpuContext,
-        style: &impl UiStyle,
-        text_renderer: &mut TextRenderer,
-        cursor_pos: Vec2,
-        delta_cursor_pos: Vec2,
-        cursor_in_other_window: bool,
-        win_size: Vec2,
-        aspect_ratio: f32,
-        unit_scale: f32,
-        tmp_alloc: &ArenaGuard,
-    ) -> Result<WindowUpdateResult>
+        rec: &mut RecordCmd<'_>,
+        style: &UiStyle,
+        cached_data: CachedUiData,
+    ) -> Result<WindowEndResult>
     {
-        let override_cursor = style.override_cursor();
+        let override_cursor = style.override_cursor;
         let mut cursor_in_this_window =
-            !cursor_in_other_window &&
-            self.bounding_rect(style.cursor_error_margin()).is_point_inside(cursor_pos);
+            !cached_data.cursor_in_other_window &&
+            self.bounding_rect(style.cursor_error_margin)
+                .is_point_inside(cached_data.cursor_pos);
         let mut title_bar_rect = self.title_bar_rect;
 
         let title_text = self.title_text.as_ref().unwrap();
-        let font_scale = style.font_scale();
+        let font_scale = style.font_scale;
         let title_text_box_size = style.calc_text_box_size_from_text_size(vec2(
-            title_text.text_width * font_scale * style.title_add_scale(),
-            title_text.row_height * font_scale * style.title_add_scale(),
+            title_text.text_width * font_scale * style.title_add_scale,
+            title_text.row_height * font_scale * style.title_add_scale,
         ));
         title_bar_rect.max.y = title_text_box_size.y;
-        let title_add_scale = style.title_add_scale();
+        let title_add_scale = style.title_add_scale;
         let size = self.size();
-        let item_pad_outer = style.item_pad_outer();
-        let item_pad_inner = style.item_pad_inner();
+        let item_pad_outer = style.item_pad_outer;
+        let item_pad_inner = style.item_pad_inner;
         let mut min_size = self.widget_rect_max.max(title_text_box_size + item_pad_outer);
         let mut widget_off = vec2(0.0, 0.0);
         self.flags &= !(Self::VER_SCROLL_BAR_VISIBLE | Self::HOR_SCROLL_BAR_VISIBLE);
-        let mut delta_lines = win.mouse_scroll_delta_lines();
-        let mut delta_pixels = win.mouse_scroll_pixel_delta();
-        if !style.natural_scroll() {
+        let mut delta_lines = cached_data.mouse_delta_lines;
+        let mut delta_pixels = cached_data.mouse_delta_pixels;
+        if !style.natural_scroll {
             delta_lines = (-delta_lines.0, -delta_lines.1);
             delta_pixels = (-delta_pixels.0, -delta_pixels.1);
         }
@@ -416,9 +407,9 @@ impl Window
                 if !self.ver_scroll_bar.held() {
                     let unit_delta =
                         if delta_lines.1 != 0.0 {
-                            delta_lines.1 * item_pad_outer.y * style.scroll_speed()
+                            delta_lines.1 * item_pad_outer.y * style.scroll_speed
                         } else {
-                            delta_pixels.1 as f32 / style.pixels_per_unit() * style.scroll_speed()
+                            delta_pixels.1 as f32 / style.pixels_per_unit * style.scroll_speed
                         };
                     self.scroll_y += unit_delta;
                 }
@@ -434,7 +425,7 @@ impl Window
                 self.scroll_y = 0.0;
                 self.ver_scroll_bar.deactivate();
             }
-            min_size.y = title_bar_rect.max.y + style.item_pad_outer().y;
+            min_size.y = title_bar_rect.max.y + item_pad_outer.y;
         }
         if !self.clamping_width() {
             if min_size.x > size.x {
@@ -442,9 +433,9 @@ impl Window
                 if !self.hor_scroll_bar.held() {
                     let unit_delta =
                         if delta_lines.0 != 0.0 {
-                            delta_lines.0 * item_pad_outer.y * style.scroll_speed()
+                            delta_lines.0 * item_pad_outer.y * style.scroll_speed
                         } else {
-                            delta_pixels.0 as f32 / style.pixels_per_unit() * style.scroll_speed()
+                            delta_pixels.0 as f32 / style.pixels_per_unit * style.scroll_speed
                         };
                     self.scroll_x += unit_delta;
                 }
@@ -461,8 +452,9 @@ impl Window
                 self.hor_scroll_bar.deactivate();
             }
             min_size.x = 
-                style.calc_text_box_width_from_text_width(title_text.text_width * font_scale * title_add_scale) +
-                item_pad_outer.x;
+                style.calc_text_box_width_from_text_width(
+                    title_text.text_width * font_scale * title_add_scale
+                ) + item_pad_outer.x;
         }
         let pos = self.position;
         self.prev_active_collapsing_headers.retain(|v| !self.active_collapsing_headers.contains(v));
@@ -483,31 +475,31 @@ impl Window
             self.ver_scroll_bar.held() ||
             self.hor_scroll_bar.held() ||
             self.content_held();
-        let mouse_left_state = win.mouse_button_state(win::MouseButton::Left);
+        let mouse_left_state = cached_data.mouse_button_left_state;
         if !self.held() && !self.any_resize() && !hover_blocked {
             if cursor_in_this_window {
                 let mut flags = self.flags;
                 flags &= !Self::RESIZE_BLOCKED_COL;
                 flags &= !Self::RESIZE_BLOCKED_ROW;
-                let error_margin = style.cursor_error_margin();
+                let error_margin = style.cursor_error_margin;
                 if self.is_resizeable() {
-                    if  cursor_pos.x >= self.position.x - error_margin &&
-                        cursor_pos.x <= self.position.x + error_margin
+                    if cached_data.cursor_pos.x >= self.position.x - error_margin &&
+                        cached_data.cursor_pos.x <= self.position.x + error_margin
                     {
                         flags |= Self::RESIZE_LEFT;
                     }
-                    if cursor_pos.x >= self.position.x + self.main_rect.max.x - error_margin &&
-                        cursor_pos.x <= self.position.x + self.main_rect.max.x + error_margin
+                    if cached_data.cursor_pos.x >= self.position.x + self.main_rect.max.x - error_margin &&
+                        cached_data.cursor_pos.x <= self.position.x + self.main_rect.max.x + error_margin
                     {
                         flags |= Self::RESIZE_RIGHT;
                     }
-                    if cursor_pos.y >= self.position.y - error_margin * 0.5 &&
-                        cursor_pos.y <= self.position.y + error_margin * 0.5
+                    if cached_data.cursor_pos.y >= self.position.y - error_margin * 0.5 &&
+                        cached_data.cursor_pos.y <= self.position.y + error_margin * 0.5
                     {
                         flags |= Self::RESIZE_TOP;
                     }
-                    if cursor_pos.y >= self.position.y + self.main_rect.max.y - error_margin &&
-                        cursor_pos.y <= self.position.y + self.main_rect.max.y + error_margin
+                    if cached_data.cursor_pos.y >= self.position.y + self.main_rect.max.y - error_margin &&
+                        cached_data.cursor_pos.y <= self.position.y + self.main_rect.max.y + error_margin
                     {
                         flags |= Self::RESIZE_BOTTOM;
                     }
@@ -517,42 +509,42 @@ impl Window
                 {
                     if BoundingRect
                         ::from_position_size(self.position, self.title_bar_rect.max)
-                        .is_point_inside(cursor_pos)
+                        .is_point_inside(cached_data.cursor_pos)
                     {
                         hover_blocked = true;
                         or_flag!(self.flags, Self::HELD, mouse_left_state.pressed());
                     }
                     if override_cursor {
-                        win.set_cursor(win::CursorIcon::Default);
+                        rec.set_cursor(win::CursorIcon::Default);
                     }
                 }
                 else {
                     hover_blocked = true;
                     if override_cursor {
                         if self.resize_nw() {
-                            win.set_cursor(win::CursorIcon::NwResize);
+                            rec.set_cursor(win::CursorIcon::NwResize);
                         }
                         else if self.resize_ne() {
-                            win.set_cursor(win::CursorIcon::NeResize);
+                            rec.set_cursor(win::CursorIcon::NeResize);
                         }
                         else if self.resize_sw() {
-                            win.set_cursor(win::CursorIcon::SwResize);
+                            rec.set_cursor(win::CursorIcon::SwResize);
                         }
                         else if self.resize_se() {
-                            win.set_cursor(win::CursorIcon::SeResize);
+                            rec.set_cursor(win::CursorIcon::SeResize);
                         }
                         else {
                             if self.resize_left() {
-                                win.set_cursor(win::CursorIcon::WResize);
+                                rec.set_cursor(win::CursorIcon::WResize);
                             }
                             if self.resize_right() {
-                                win.set_cursor(win::CursorIcon::EResize);
+                                rec.set_cursor(win::CursorIcon::EResize);
                             }
                             if self.resize_top() {
-                                win.set_cursor(win::CursorIcon::NResize);
+                                rec.set_cursor(win::CursorIcon::NResize);
                             }
                             if self.resize_bottom() {
-                                win.set_cursor(win::CursorIcon::SResize);
+                                rec.set_cursor(win::CursorIcon::SResize);
                             }
                         }
                     }
@@ -593,21 +585,20 @@ impl Window
         for &id in &self.active_reactions {
             let reaction = self.reactions.get_mut(&id).unwrap();
             reaction.offset += widget_off;
-            if reaction.animated_bool() {
-                if let Some((t, value)) = self.animated_bools.get_mut(&id) {
-                    if *value {
-                        *t = (*t + style.animation_speed() * win.delta_time_secs_f32()).clamp(0.0, 1.0);
-                    } else {
-                        *t = (*t - style.animation_speed() * win.delta_time_secs_f32()).clamp(0.0, 1.0);
-                    }
+            if reaction.animated_bool() &&
+                let Some((t, value)) = self.animated_bools.get_mut(&id)
+            {
+                if *value {
+                    *t = (*t + style.animation_speed * cached_data.delta_time).clamp(0.0, 1.0);
+                } else {
+                    *t = (*t - style.animation_speed * cached_data.delta_time).clamp(0.0, 1.0);
                 }
             }
             if let Some(data) = self.reaction_data.get_mut(&id) {
                 data.ptr = (data.move_fn)(data.ptr, reaction_data_alloc);
             }
             if let Some(text) = reaction.update(
-                    win,
-                    cursor_pos,
+                    &cached_data,
                     pos,
                     cursor_in_this_window,
                     reaction_blocked || scroll_bar_hovered ||
@@ -618,13 +609,13 @@ impl Window
                     },
                 )
             {
-                self.hover_window.update(style, text_renderer, cursor_pos, &text);
+                self.hover_window.update(rec, style, &cached_data, &text);
                 self.flags |= Self::HOVER_WINDOW_ACTIVE;
             }
-            if let Some(cursor_override) = reaction.take_cursor() {
-                if override_cursor {
-                    win.set_cursor(cursor_override);
-                }
+            if let Some(cursor_override) = reaction.take_cursor() &&
+                override_cursor
+            {
+                rec.set_cursor(cursor_override);
             }
         }
         let window_moving = self.held() || self.any_resize();
@@ -637,18 +628,16 @@ impl Window
             let (_, collapsing_header) = self.collapsing_headers.get_mut(collapsing_header).unwrap();
             collapsing_header.offset += widget_off;
             let width = collapsing_header.update(
-                win, pos,
-                content_area.0, content_area.1,
-                cursor_pos, style, window_moving,
+                &cached_data, pos, content_area, style,
+                window_moving,
                 |text, offset, bounded_text_instance| {
-                    self.combined_text.add_text(text, offset / font_scale, bounded_text_instance).unwrap();
+                    self.combined_text.add_text(text, offset / font_scale, bounded_text_instance);
                 }
             );
             if self.clamping_width() {
                 min_size.x = min_size.x.max(width);
             }
         }
-        let mut transfer_commands_required = false;
         self.widget_scroll_off = widget_off;
         let ver_scroll_bar_width = self.ver_scroll_bar.calc_width(style);
         let hor_scroll_bar_height = self.hor_scroll_bar.calc_height(style);
@@ -667,30 +656,33 @@ impl Window
             if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
             } else {
-                self.position += delta_cursor_pos;
+                self.position += cached_data.delta_cursor_pos;
             }
         }
         if !self.is_resizeable() {
             self.flags &= !(Self::RESIZE_LEFT | Self::RESIZE_RIGHT | Self::RESIZE_TOP | Self::RESIZE_BOTTOM);
         }
         if self.held() || self.appearing() {
-            let norm_pos = pos_to_norm_pos(self.position, unit_scale, aspect_ratio);
-            self.distance_from_edge = vec2(norm_pos.x * win_size.x, norm_pos.y * win_size.y);
+            let norm_pos = pos_to_norm_pos(self.position, cached_data.unit_scale, cached_data.aspect_ratio);
+            self.distance_from_edge = vec2(
+                norm_pos.x * cached_data.window_size.x,
+                norm_pos.y * cached_data.window_size.y
+            );
             self.flags &= !Self::APPEARING;
         }
         if self.resize_left() {
             if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_LEFT;
                 if override_cursor {
-                    win.set_cursor(win::CursorIcon::Default);
+                    rec.set_cursor(win::CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_col() {
-                    if cursor_pos.x <= self.position.x {
+                    if cached_data.cursor_pos.x <= self.position.x {
                         self.flags &= !Self::RESIZE_BLOCKED_COL;
                     }
                 } else {
-                    let delta_width = cursor_pos.x - self.position.x;
+                    let delta_width = cached_data.cursor_pos.x - self.position.x;
                     let new_width = main_rect_max.x - delta_width;
                     if new_width < min_size.x {
                         self.position.x += main_rect_max.x - min_size.x;
@@ -707,15 +699,15 @@ impl Window
             if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_RIGHT;
                 if override_cursor {
-                    win.set_cursor(win::CursorIcon::Default);
+                    rec.set_cursor(win::CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_col() {
-                    if cursor_pos.x - self.position.x >= min_size.x {
+                    if cached_data.cursor_pos.x - self.position.x >= min_size.x {
                         self.flags &= !Self::RESIZE_BLOCKED_COL;
                     }
                 } else {
-                    let new_width = cursor_pos.x - self.position.x;
+                    let new_width = cached_data.cursor_pos.x - self.position.x;
                     if new_width < min_size.x {
                         main_rect_max.x = min_size.x;
                         self.flags |= Self::RESIZE_BLOCKED_COL;
@@ -729,16 +721,16 @@ impl Window
             if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_TOP;
                 if override_cursor {
-                    win.set_cursor(win::CursorIcon::Default);
+                    rec.set_cursor(win::CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_row() {
-                    if cursor_pos.y <= self.position.y {
+                    if cached_data.cursor_pos.y <= self.position.y {
                         self.flags &= !Self::RESIZE_BLOCKED_ROW;
                     }
                 }
                 else {
-                    let delta_height = cursor_pos.y - self.position.y;
+                    let delta_height = cached_data.cursor_pos.y - self.position.y;
                     let new_height = main_rect_max.y - delta_height;
                     if new_height < min_size.y {
                         self.position.y += main_rect_max.y - min_size.y;
@@ -746,7 +738,7 @@ impl Window
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
                     } else {
                         main_rect_max.y = new_height;
-                        self.position.y = cursor_pos.y;
+                        self.position.y = cached_data.cursor_pos.y;
                     }
                 } 
             }
@@ -755,15 +747,15 @@ impl Window
             if !mouse_left_state.held() {
                 self.flags &= !Self::RESIZE_BOTTOM;
                 if override_cursor {
-                    win.set_cursor(win::CursorIcon::Default);
+                    rec.set_cursor(win::CursorIcon::Default);
                 }
             } else {
                 if self.resize_blocked_row() {
-                    if cursor_pos.y - self.position.y >= min_size.y {
+                    if cached_data.cursor_pos.y - self.position.y >= min_size.y {
                         self.flags &= !Self::RESIZE_BLOCKED_ROW;
                     }
                 } else {
-                    let new_height = cursor_pos.y - self.position.y;
+                    let new_height = cached_data.cursor_pos.y - self.position.y;
                     if new_height < min_size.y {
                         main_rect_max.y = min_size.y;
                         self.flags |= Self::RESIZE_BLOCKED_ROW;
@@ -774,7 +766,7 @@ impl Window
             }
         }
         title_bar_rect.max.x = self.main_rect.max.x; 
-        title_bar_rect.rounding = style.rounding(); 
+        title_bar_rect.rounding = style.rounding; 
         let title_text = self.title_text.as_ref().unwrap();
         self.combined_text
             .add_text(
@@ -786,16 +778,15 @@ impl Window
                     max_bounds: self.position + title_bar_rect.max,
                     color:
                         if self.held() || self.any_resize() {
-                            style.active_text_col()
+                            style.active_text_col
                         }
                         else if self.cursor_in_window() {
-                            style.focused_text_col()
+                            style.focused_text_col
                         } else {
-                            style.inactive_text_col()
+                            style.inactive_text_col
                         },
                 },
-            )
-            .unwrap();
+            );
         if main_rect_max.y < min_size.y {
             main_rect_max.y = min_size.y;
         }
@@ -803,16 +794,18 @@ impl Window
         let mut triangulate_scroll_bars = false;
         let content_held = self.content_held();
         if self.ver_scroll_bar_visible() {
-            let offset = vec2(title_bar_rect.max.x - item_pad_outer.x - ver_scroll_bar_width, title_bar_rect.max.y + item_pad_outer.y);
+            let offset = vec2(title_bar_rect.max.x - item_pad_outer.x -
+                ver_scroll_bar_width, title_bar_rect.max.y + item_pad_outer.y
+            );
             let height = main_rect_max.y - offset.y - item_pad_outer.y - if self.hor_scroll_bar_visible() {
                 hor_scroll_bar_height + item_pad_outer.y
             } else {
                 0.0
             };
             let res = self.ver_scroll_bar.update(
-                win, style,
+                style, &cached_data,
                 self.scroll_y, offset,
-                pos, cursor_pos, height,
+                pos, height,
                 self.widget_rect_max.y,
                 size.y,
                 false,
@@ -829,9 +822,9 @@ impl Window
                 0.0
             };
             let res = self.hor_scroll_bar.update(
-                win, style,
+                style, &cached_data,
                 self.scroll_x, offset,
-                pos, cursor_pos, width,
+                pos, width,
                 self.widget_rect_max.x,
                 size.x,
                 false,
@@ -848,15 +841,15 @@ impl Window
                 if
                     !self.ver_scroll_bar_visible() &&
                     !self.hor_scroll_bar_visible() &&
-                    !delta_cursor_pos.is_zero()
+                    !cached_data.delta_cursor_pos.is_zero()
                 {
                     self.flags |= Self::HELD;
                 } else {
                     if self.ver_scroll_bar_visible()  {
-                        self.scroll_y -= delta_cursor_pos.y / self.widget_rect_max.y;
+                        self.scroll_y -= cached_data.delta_cursor_pos.y / self.widget_rect_max.y;
                     }
                     if self.hor_scroll_bar_visible() {
-                        self.scroll_x -= delta_cursor_pos.x / self.widget_rect_max.x;
+                        self.scroll_x -= cached_data.delta_cursor_pos.x / self.widget_rect_max.x;
                     }
                 }
             }
@@ -869,14 +862,17 @@ impl Window
             self.flags |= Self::CONTENT_HELD;
         }
         if triangulate_scroll_bars {
-            let mut points = GlobalVec::new();
+            let mut points = Vec32::new();
             self.scroll_bar_vertices.clear();
             self.scroll_bar_indices.clear();
-            let mut indices_usize = GlobalVec::new();
             self.flags |= Self::VER_SCROLL_BAR_RENDERABLE | Self::HOR_SCROLL_BAR_RENDERABLE;
             self.ver_scroll_bar.triangulate(&mut points, |points| {
                 let vertex_offset = self.scroll_bar_vertices.len();
-                if !earcut::earcut(points, &[], false, &mut self.scroll_bar_vertices, &mut indices_usize).unwrap() {
+                if !earcut::earcut(
+                        points, &[], false, &mut self.scroll_bar_vertices,
+                        &mut self.scroll_bar_indices
+                    )
+                {
                     self.flags &= !Self::VER_SCROLL_BAR_RENDERABLE;
                 }
                 VertexRange::new(vertex_offset..self.scroll_bar_vertices.len())
@@ -884,54 +880,55 @@ impl Window
             points.clear();
             self.hor_scroll_bar.triangulate(&mut points, |points| {
                 let vertex_offset = self.scroll_bar_vertices.len();
-                if !earcut::earcut(points, &[], false, &mut self.scroll_bar_vertices, &mut indices_usize).unwrap() {
+                if !earcut::earcut(
+                        points, &[], false, &mut self.scroll_bar_vertices,
+                        &mut self.scroll_bar_indices
+                    )
+                {
                     self.flags &= !Self::HOR_SCROLL_BAR_RENDERABLE;
                 }
                 VertexRange::new(vertex_offset..self.scroll_bar_vertices.len())
             });
-            self.scroll_bar_indices.append_map(&indices_usize, |&i| i as u32);
         }
         for text in &self.text {
-            let text = text.as_mut();
+            let text = text.load();
             let offset = text.offset + widget_off;
             self.combined_text.add_text(
                 &text.text,
                 offset / font_scale,
                 BoundedTextInstance {
                     add_scale: text.scale,
-                    min_bounds: pos + (vec2(item_pad_inner.x, title_bar_rect.max.y + item_pad_inner.y).max(text.bounds.min + widget_off)),
+                    min_bounds: pos + (vec2(item_pad_inner.x, title_bar_rect.max.y + item_pad_inner.y)
+                        .max(text.bounds.min + widget_off)
+                    ),
                     max_bounds: pos + (main_rect_max - item_pad_inner).min(text.bounds.max + widget_off),
                     color: text.color, 
                 }
-            ).unwrap();
+            );
         }
         self.text.clear();
         let requires_triangulation =
-            (style.rounding() != self.main_rect.rounding ||
-            self.focused_stroke_thickness != style.focused_window_stroke_thickness() ||
-            self.stroke_thickness != style.window_stroke_thickness() ||
+            (style.rounding != self.main_rect.rounding ||
+            self.focused_stroke_thickness != style.focused_window_stroke_thickness ||
+            self.stroke_thickness != style.window_stroke_thickness ||
             main_rect_max != self.main_rect.max ||
             self.title_bar_rect != title_bar_rect
         ) as u32;
         self.flags |= Self::REQUIRES_TRIANGULATION * requires_triangulation;
-        self.main_rect.rounding = style.rounding();
+        self.main_rect.rounding = style.rounding;
         self.main_rect.max = main_rect_max;
         self.title_bar_rect = title_bar_rect;
-        self.stroke_thickness = style.window_stroke_thickness();
-        self.focused_stroke_thickness = style.focused_window_stroke_thickness();
+        self.stroke_thickness = style.window_stroke_thickness;
+        self.focused_stroke_thickness = style.focused_window_stroke_thickness;
         self.title_bar_rect = title_bar_rect;
-        let mut norm_size = self.main_rect.max * unit_scale;
-        norm_size.x /= aspect_ratio;
+        let mut norm_size = self.main_rect.max * cached_data.unit_scale;
+        norm_size.x /= cached_data.aspect_ratio;
         norm_size *= 0.5;
-        transfer_commands_required |= self.painter_storage.requires_transfer_commands();
-        if let Some(semaphore) = self.signal_semaphore {
-            self.painter_storage
-                .end((semaphore, self.signal_semaphore_value), gpu, tmp_alloc)
-                .context("failed to update painter storage")?;
-        }
-        Ok(WindowUpdateResult {
+        self.painter_storage
+            .end()
+            .context("failed to update painter storage")?;
+        Ok(WindowEndResult {
             cursor_in_window: cursor_in_this_window || self.any_resize(),
-            requires_transfer_commands: transfer_commands_required,
         })
     }
 
@@ -962,7 +959,7 @@ impl Window
                 self.main_rect.max = new_size;
                 norm_size = new_size * unit_scale;
                 norm_size.x /= aspect_ratio;
-                norm_size = norm_size * 0.5;
+                norm_size *= 0.5;
                 self.flags |= Self::REQUIRES_TRIANGULATION;
             }
         }
@@ -983,14 +980,13 @@ impl Window
             self.flags |= Self::RENDERABLE;
             self.vertices.clear();
             self.indices.clear();
-            let mut points = GlobalVec::new();
-            let mut indices_usize = GlobalVec::new();
+            let mut points = Vec32::new();
             self.main_rect.to_points(&mut |p| { points.push(p.into()); });
-            let mut helper_points = GlobalVec::new();
+            let mut helper_points = Vec32::new();
             outline_points(&points,
                 self.focused_stroke_thickness, false, &mut |p| { helper_points.push(p.into()); }
             );
-            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut self.indices) {
                 self.flags &= !Self::RENDERABLE;
             }
             self.focused_stroke_vertex_range = VertexRange::new(0..self.vertices.len());
@@ -999,12 +995,12 @@ impl Window
                 self.stroke_thickness, false, &mut |p| { helper_points.push(p.into()); }
             );
             let mut vertex_begin = self.vertices.len();
-            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut self.indices) {
                 self.flags &= !Self::RENDERABLE;
             }
             self.stroke_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
             vertex_begin = self.vertices.len();
-            if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+            if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut self.indices) {
                 self.flags &= !Self::RENDERABLE;
             }
             self.main_rect_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
@@ -1016,100 +1012,66 @@ impl Window
             outline_points(&points,
                 self.stroke_thickness, false, &mut |p| { helper_points.push(p.into()); });
             vertex_begin = self.vertices.len();
-            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+            if !earcut::earcut(&helper_points, &[], false, &mut self.vertices, &mut self.indices) {
                 self.flags &= !Self::RENDERABLE;
             }
             self.title_stroke_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
             vertex_begin = self.vertices.len();
-            if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut indices_usize).unwrap() {
+            if !earcut::earcut(&points, &[], false, &mut self.vertices, &mut self.indices) {
                 self.flags &= !Self::RENDERABLE;
             }
             self.title_bar_vertex_range = VertexRange::new(vertex_begin..self.vertices.len());
-            self.window_draw_info = gpu::DrawInfo {
+            self.window_draw_info = gpu::IndexedDrawInfo {
                 first_index: 0,
-                index_count: indices_usize.len() as u32,
+                index_count: self.indices.len(),
                 ..Default::default()
             };
-            let first_index = indices_usize.len() as u32;
+            let first_index = self.indices.len();
             for collapsing_headers in &self.active_collapsing_headers {
-                let (last_triangulation, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
+                let (last_triangulation, collapsing_headers)
+                    = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
                 *last_triangulation = new_triangulation;
                 self.vertices.append(&[Default::default(); 3]);
                 let n = self.vertices.len();
-                indices_usize.append(&[n - 3, n - 2, n - 1]);
+                self.indices.append(&[n - 3, n - 2, n - 1]);
                 collapsing_headers.symbol_vertex_range = VertexRange::new(n - 3..n);
                 self.vertices.append(&[Default::default(); 4]);
                 let n = self.vertices.len();
-                indices_usize.append(&[
+                self.indices.append(&[
                     n - 4, n - 1, n - 3,
                     n - 3, n - 1, n - 2,
                 ]);
                 collapsing_headers.beam_vertex_range = VertexRange::new(n - 4..n);
             }
             self.flags &= !Self::REQUIRES_TRIANGULATION;
-            self.indices.append_map(&indices_usize, |&i| i as u32);
             self.last_triangulation = new_triangulation;
-            self.content_draw_info = gpu::DrawInfo {
+            self.content_draw_info = gpu::IndexedDrawInfo {
                 first_index,
-                index_count: indices_usize.len() as u32 - first_index,
+                index_count: self.indices.len() - first_index,
                 ..Default::default()
             };
         }
         self.painter_storage.triangulate();
-    }
+    } 
 
-    pub fn render(
+    pub fn draw(
         &mut self,
-        frame_graph: &mut gpu::FrameGraph,
-        render_format: gpu::ColorFormat,
-        add_read: &mut impl FnMut(gpu::ReadInfo),
-        add_signal_semaphore: &mut impl FnMut(gpu::TimelineSemaphoreId, u64),
-    ) -> Result<()>
-    {
-        let signal_semaphore =
-            if let Some(id) = self.signal_semaphore {
-                id
-            } else {
-                *self.signal_semaphore.insert(frame_graph.gpu_mut().create_timeline_semaphore(0)?)
-            };
-        add_signal_semaphore(signal_semaphore, self.signal_semaphore_value + 1);
-        self.signal_semaphore_value += 1;
-        self.painter_storage.render(frame_graph, render_format, add_read)?;
-        Ok(())
-    }
-
-    pub fn render_work(
-        &mut self,
-        commands: &mut gpu::RenderCommands,
-        style: &impl UiStyle,
-        sampler: gpu::SamplerId,
-        _pass: gpu::PassId,
-        base_pipeline: gpu::GraphicsPipelineId,
-        text_pipeline: gpu::GraphicsPipelineId,
-        texture_pipeline: gpu::GraphicsPipelineId,
-        texture_pipeline_layout: gpu::PipelineLayoutId,
-        vertex_buffer: &mut RingBuf,
-        index_buffer: &mut RingBuf,
-        inv_aspect_ratio: f32,
-        unit_scale: f32,
-        tmp_alloc: &ArenaGuard,
-        get_custom_pipeline: &mut impl FnMut(&str) -> Option<gpu::GraphicsPipelineId>,
+        cmd: &mut gpu::DrawCommands,
+        rec: &mut RecordCmd<'_>,
+        cached_data: CachedUiData,
+        style: &UiStyle,
+        sampler: gpu::Sampler,
     ) -> Result<()>
     {
         if !self.renderable() {
             return Ok(())
         }
-        let item_pad_inner = style.item_pad_inner();
         let vert_total = self.vertices.len();
-        let vert_mem = unsafe {
-            vertex_buffer.allocate(commands, vert_total)?
-        };
+        let vert_mem = rec.allocate_vertices(vert_total)?;
         let idx_total = self.indices.len();
-        let idx_mem = unsafe {
-            index_buffer.allocate(commands, idx_total)?
-        };
-        let vert_id = vertex_buffer.id();
-        let idx_id = index_buffer.id();
+        let idx_mem = rec.allocate_indices(idx_total)?;
+        let vert_id = rec.vertex_buffer_id();
+        let idx_id = rec.index_buffer_id();
         if self.ver_scroll_bar_visible() {
             self.ver_scroll_bar.set_vertex_params(style, &mut self.scroll_bar_vertices);
         }
@@ -1120,62 +1082,55 @@ impl Window
             let (_, collapsing_headers) = self.collapsing_headers.get_mut(collapsing_headers).unwrap();
             collapsing_headers.set_vertex_params(style, &mut self.vertices);
         }
-        color_vertices(&mut self.vertices, self.main_rect_vertex_range, style.window_bg_col());
-        color_vertices(&mut self.vertices, self.title_bar_vertex_range, style.window_title_bar_col());
+        color_vertices(&mut self.vertices, self.main_rect_vertex_range, style.window_bg_col);
+        color_vertices(&mut self.vertices, self.title_bar_vertex_range, style.window_title_bar_col);
         let any_resize = self.any_resize();
         if self.cursor_in_window() || any_resize {
             let target_color = if any_resize || self.held() {
-                style.window_stroke_col()
+                style.window_stroke_col
             } else {
-                style.focused_window_stroke_col()
+                style.focused_window_stroke_col
             };
             color_vertices(&mut self.vertices, self.focused_stroke_vertex_range, target_color);
             color_vertices(&mut self.vertices, self.title_stroke_vertex_range, target_color);
             hide_vertices(&mut self.vertices, self.stroke_vertex_range);
         } else {
             hide_vertices(&mut self.vertices, self.focused_stroke_vertex_range);
-            color_vertices(&mut self.vertices, self.title_stroke_vertex_range, style.window_stroke_col());
-            color_vertices(&mut self.vertices, self.stroke_vertex_range, style.window_stroke_col());
+            color_vertices(&mut self.vertices, self.title_stroke_vertex_range, style.window_stroke_col);
+            color_vertices(&mut self.vertices, self.stroke_vertex_range, style.window_stroke_col);
         }
         unsafe {
             self.vertices
                 .as_ptr()
-                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_total);
+                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_total as usize);
             self.indices
                 .as_ptr()
-                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total);
+                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_total as usize);
         }
         let pos = self.position;
-        commands.bind_pipeline(base_pipeline)?;
+        let (viewport, scissor) = cached_data.viewport_and_scissor();
+        let mut pipeline_cmd = cmd.bind_pipeline(rec.base_pipeline(), &[viewport], &[scissor])?;
         let pc_vertex = push_constants_vertex(
             pos,
             vec2(1.0, 1.0),
-            inv_aspect_ratio,
-            unit_scale,
+            cached_data.inv_aspect_ratio,
+            cached_data.unit_scale,
         );
         let focused_stroke_thickness = self.focused_stroke_thickness;
         let pc_fragment = base_push_constants_fragment(
             pos - vec2(focused_stroke_thickness, focused_stroke_thickness),
             pos + self.main_rect.max + vec2(focused_stroke_thickness, focused_stroke_thickness),
         );
-        commands.push_constants(|pc| unsafe {
-            if pc.stage == gpu::ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        commands.draw_indexed(
+        pipeline_cmd.push_constants(pc_vertex.0, &[pc_vertex.1])?;
+        pipeline_cmd.push_constants(pc_fragment.0, &[pc_fragment.1])?;
+        pipeline_cmd.begin_drawing_indexed(
             self.window_draw_info,
-            [
-                gpu::DrawBufferInfo::new(vert_id, vert_mem.offset),
-            ],
-            gpu::DrawBufferInfo {
-                id: idx_id,
-                offset: idx_mem.offset,
-            },
+            gpu::IndexBufferInfo::new(idx_id, idx_mem.offset),
+            &[gpu::DrawBufferRange::new(vert_id, vert_mem.offset, vert_mem.size)],
+            None, |cmd| { cmd.draw_indexed()?; Ok(()) }
         )?;
         let size = self.size();
+        let item_pad_inner = style.item_pad_inner;
         let content_bounds = BoundingRect::from_min_max(
             pos + vec2(item_pad_inner.x, self.title_bar_rect.max.y + item_pad_inner.y),
             pos + size - item_pad_inner,
@@ -1184,124 +1139,77 @@ impl Window
             content_bounds.min,
             content_bounds.max,
         );
-        commands.push_constants(|pc| unsafe {
-            if pc.stage == gpu::ShaderStage::Vertex {
-                pc_vertex.as_bytes()
-            } else {
-                pc_fragment.as_bytes()
-            }
-        })?;
-        commands.draw_indexed(
+        pipeline_cmd.push_constants(pc_fragment.0, &[pc_fragment.1])?;
+        pipeline_cmd.begin_drawing_indexed(
             self.content_draw_info,
-            [
-                gpu::DrawBufferInfo::new(vertex_buffer.id(), vert_mem.offset),
-            ],
-            gpu::DrawBufferInfo {
-                id: index_buffer.id(),
-                offset: idx_mem.offset,
-            },
+            gpu::IndexBufferInfo::new(idx_id, idx_mem.offset),
+            &[gpu::DrawBufferRange::new(vert_id, vert_mem.offset, vert_mem.size)],
+            None, |cmd| { cmd.draw_indexed()?; Ok(()) }
         )?;
-        self.painter_storage.render_work(
-            commands,
-            sampler,
-            pos + self.widget_scroll_off,
-            content_bounds, base_pipeline,
-            text_pipeline, texture_pipeline,
-            texture_pipeline_layout, vertex_buffer,
-            index_buffer, inv_aspect_ratio,
-            unit_scale, tmp_alloc,
-            get_custom_pipeline
-        ).context("painter render work failed")?;
-        commands.bind_pipeline(text_pipeline)?;
-        let font_scale = style.font_scale();
+        self.painter_storage.draw(
+            cmd, rec, &cached_data, sampler.clone(),
+            pos + self.widget_scroll_off, content_bounds,
+        ).context("failed to draw painter")?;
+        let mut pipeline_cmd =  cmd.bind_pipeline(
+            rec.text_pipeline(),
+            &[viewport], &[scissor],
+        )?;
+        let font_scale = style.font_scale;
         let pc_vertex = push_constants_vertex(
             pos,
             vec2(font_scale, font_scale),
-            inv_aspect_ratio, unit_scale
+            cached_data.inv_aspect_ratio,
+            cached_data.unit_scale
         );
         render_text(
-            commands,
-            self.combined_text.iter().map(|(&c, (i, b))| (c, i, b.as_slice())),
-            pc_vertex,
-            vertex_buffer,
-            index_buffer,
+            &mut pipeline_cmd,
+            rec,
+            self.combined_text.iter(),
+            pc_vertex.1,
         ).context("failed to render text")?;
         if (self.ver_scroll_bar_visible() && self.ver_scroll_bar_renderable()) ||
             (self.hor_scroll_bar_visible() && self.hor_scroll_bar_renderable())
         {
-            commands.bind_pipeline(base_pipeline)?;
+            let mut pipeline_cmd = cmd.bind_pipeline(
+                rec.base_pipeline(),
+                &[(viewport)], &[scissor],
+            )?;
             let pc_vertex = push_constants_vertex(
                 pos,
                 vec2(1.0, 1.0),
-                inv_aspect_ratio,
-                unit_scale,
+                cached_data.inv_aspect_ratio,
+                cached_data.unit_scale,
             );
-            commands.push_constants(|pc| unsafe {
-                if pc.stage == gpu::ShaderStage::Vertex {
-                    pc_vertex.as_bytes()
-                } else {
-                    pc_fragment.as_bytes()
-                }
-            })?;
+            pipeline_cmd.push_constants(pc_vertex.0, &[pc_vertex.1])?;
+            pipeline_cmd.push_constants(pc_fragment.0, &[pc_fragment.1])?;
             let vert_count = self.scroll_bar_vertices.len();
             let idx_count = self.scroll_bar_indices.len();
-            let vert_mem = unsafe {
-                vertex_buffer.allocate(commands, vert_count)?
-            };
-            let idx_mem = unsafe {
-                index_buffer.allocate(commands, idx_count)?
-            };
+            let vert_mem = rec.allocate_vertices(vert_count)?;
+            let idx_mem = rec.allocate_indices(idx_count)?;
             unsafe {
                 self.scroll_bar_vertices
                     .as_ptr()
-                    .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count);
+                    .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count as usize);
                 self.scroll_bar_indices
                     .as_ptr()
-                    .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
+                    .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count as usize);
             }
-            commands.draw_indexed(
-                gpu::DrawInfo {
-                    first_index: 0,
-                    index_count: idx_count as u32,
-                    ..Default::default()
-                },
-                [
-                    gpu::DrawBufferInfo::new(vert_id, vert_mem.offset)
-                ],
-                gpu::DrawBufferInfo::new(idx_id, idx_mem.offset)
+            pipeline_cmd.begin_drawing_indexed(
+                gpu::IndexedDrawInfo
+                    ::default()
+                    .index_count(idx_count),
+                gpu::IndexBufferInfo::new(idx_id, idx_mem.offset),
+                &[gpu::DrawBufferRange::new(vert_id, vert_mem.offset, vert_mem.size)],
+                None,
+                |cmd| { cmd.draw_indexed()?; Ok(()) }
             )?;
         }
         if self.hover_window_active() {
             self.hover_window.set_vertex_params(style);
-            self.hover_window.render_work(
-                commands,
-                style,
-                base_pipeline,
-                text_pipeline,
-                vertex_buffer,
-                index_buffer,
-                inv_aspect_ratio,
-                unit_scale,
-            ).context("hover window render work failed")?;
+            self.hover_window
+                .draw(cmd, rec, style, &cached_data)
+                .context("hover window render work failed")?;
         }
-        Ok(())
-    }
-
-    pub fn transfer_work(
-        &mut self,
-        commands: &mut gpu::TransferCommands,
-        sampler: gpu::SamplerId,
-        texture_pipeline_layout: gpu::PipelineLayoutId,
-        tmp_alloc: &ArenaGuard,
-    ) -> Result<()> {
-        self.painter_storage.transfer_work(
-            commands,
-            self.signal_semaphore.map(|v| (v, self.signal_semaphore_value)).unwrap(),
-            sampler,
-            texture_pipeline_layout,
-            tmp_alloc
-        )?;
-        self.signal_semaphore_value += 1;
         Ok(())
     }
 }
@@ -1372,7 +1280,7 @@ impl UiSurface for Window
 
     fn reaction_text(
         &mut self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         text_renderer: &mut TextRenderer,
         id: ReactionId,
         text: &str,
@@ -1386,19 +1294,18 @@ impl UiSurface for Window
             let mut row = RowOffsets::new();
             let text = text_renderer
                 .render_and_collect_offsets(
-                    &[text_segment(text, style.font_regular())],
+                    &[text_segment(text, &style.regular_font)],
                     false,
                     0.0,
                     0.0,
                     |offset| {
                         row.offsets.push(offset);
                     }
-                )
-                .unwrap_or_default();
+                ).unwrap_or_default();
             row.row_height = text.row_height;
             entry.1 = SharedText::new(Text::new(
                 text,
-                GlobalVec::with_len(1, row),
+                Vec32::with_len(1, row),
                 Default::default(),
                 Default::default(),
                 vec2(1.0, 1.0),
@@ -1429,19 +1336,19 @@ impl UiSurface for Window
             .or_insert_with(|| {
                 let ptr = unsafe {
                     alloc
-                        .allocate_uninit::<T>(1)
+                        .alloc_uninit::<T>(1)
                 };
-                if let Some(ptr) = ptr {
+                if let Ok(ptr) = ptr {
                     unsafe {
                         ptr.write(f());
                     }
                 }
                 ReactionData {
                     ty,
-                    ptr: ptr.map(|v| v.cast()),
+                    ptr: ptr.ok().map(|v| v.cast()),
                     move_fn: Box::new(|ptr, alloc| unsafe {
                         let ptr = ptr?.cast::<T>();
-                        let new_ptr = alloc.allocate_uninit::<T>(1)?;
+                        let new_ptr = alloc.alloc_uninit::<T>(1).ok()?;
                         ptr.copy_to_nonoverlapping(new_ptr, 1);
                         Some(new_ptr.cast())
                     }),
@@ -1455,20 +1362,19 @@ impl UiSurface for Window
         if entry.ty != ty {
             (entry.drop_fn)(entry.ptr);
             let ptr = unsafe {
-                alloc
-                    .allocate_uninit::<T>(1)
+                alloc.alloc_uninit::<T>(1)
             };
-            if let Some(ptr) = ptr {
+            if let Ok(ptr) = ptr {
                 unsafe {
                     ptr.write(f());
                 }
             }
             *entry = ReactionData {
                 ty,
-                ptr: ptr.map(|v| v.cast()),
+                ptr: ptr.ok().map(|v| v.cast()),
                 move_fn: Box::new(|ptr, alloc| unsafe {
                     let ptr = ptr?.cast::<T>();
-                    let new_ptr = alloc.allocate_uninit::<T>(1)?;
+                    let new_ptr = alloc.alloc_uninit::<T>(1).ok()?;
                     ptr.copy_to_nonoverlapping(new_ptr, 1);
                     Some(new_ptr.cast())
                 }),
@@ -1486,15 +1392,15 @@ impl UiSurface for Window
     fn add_text(
         &mut self,
         text: SharedText,
-    ) -> usize
+    ) -> u32
     {
         self.text.push(text);
         self.text.len() - 1
     }
 
     #[inline(always)]
-    fn get_text(&mut self, index: usize) -> Option<SharedText> {
-        self.text.get(index).cloned()
+    fn get_text(&mut self, index: u32) -> Option<SharedText> {
+        self.text.get(index as usize).cloned()
     }
 
     #[inline(always)]
@@ -1525,7 +1431,7 @@ impl UiSurface for Window
                 &self.reaction_data_alloc_0
             };
         unsafe {
-            alloc.allocate_uninit(count)
+            alloc.alloc_uninit(count).ok()
         }
     }
 }
@@ -1542,12 +1448,12 @@ impl UiReactSurface for Window {
         self
     }
 
-    fn reaction_from_addr<'a, T: RefAddr>(
+    fn reaction_from_addr<T: RefAddr>(
         &mut self,
         value: T,
-        mut f: impl FnMut(&mut Self::Surface, &'a mut Reaction, T),
+        mut f: impl for<'a> FnMut(&mut Self::Surface, &'a mut Reaction, T),
     ) -> &mut Reaction {
-        let reaction = self.activate_reaction(&value) as *mut Reaction;
+        let reaction: *mut Reaction = self.activate_reaction(&value);
         f(self, unsafe { &mut *reaction }, value);
         unsafe { &mut *reaction }
     }

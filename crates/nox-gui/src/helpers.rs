@@ -1,68 +1,54 @@
-use nox::gpu;
-
+use nox::{gpu, error::*};
 use nox_geom::*;
-
 use nox_font::InstancedText;
 
 use crate::*;
-use crate::error::*;
 
 pub fn render_text<'a>(
-    commands: &mut gpu::RenderCommands,
+    cmd: &mut gpu::DrawPipelineCommands,
+    rec: &mut RecordCmd<'_>,
     text: impl IntoIterator<Item = (char, &'a InstancedText, &'a [BoundedTextInstance])>,
     pc_vertex: PushConstantsVertex,
-    vertex_buffer: &mut RingBuf,
-    index_buffer: &mut RingBuf,
 ) -> Result<()>
 {
-    commands.push_constants(|_| unsafe {
-        pc_vertex.as_bytes()
-    }).context("failed to push constants")?;
-    let vertex_buffer_id = vertex_buffer.id();
-    let index_buffer_id = index_buffer.id();
+    cmd.push_constants(0, &[pc_vertex])?;
+    let vertex_buffer_id = rec.vertex_buffer_id();
+    let index_buffer_id = rec.index_buffer_id();
     for (_ , text, bounded_instances) in text {
         let vert_count = text.trigs.vertices.len();
-        let instance_count = text.offsets.len();
+        let instance_count = text.offsets.len() as u32;
         let idx_count = text.trigs.indices.len();
-        let vert_mem = unsafe {
-            vertex_buffer.allocate(commands, vert_count)?
-        };
-        let vert_off_mem = unsafe {
-            vertex_buffer.allocate(commands, instance_count)?
-        };
-        let instance_mem = unsafe {
-            vertex_buffer.allocate(commands, instance_count)?
-        };
-        let idx_mem = unsafe {
-            index_buffer.allocate(commands, idx_count)?
-        };
+        let vert_mem = rec.allocate_vertices(vert_count)?;
+        let vert_off_mem = rec.allocate_vertices(instance_count)?;
+        let instance_mem = rec.allocate_vertices(instance_count)?;
+        let idx_mem = rec.allocate_indices(idx_count)?;
         unsafe {
             text.trigs.vertices
                 .as_ptr()
-                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count);
+                .copy_to_nonoverlapping(vert_mem.ptr.as_ptr(), vert_count as usize);
             text.offsets
                 .as_ptr()
-                .copy_to_nonoverlapping(vert_off_mem.ptr.as_ptr(), instance_count);
-            debug_assert!(bounded_instances.len() == instance_count);
+                .copy_to_nonoverlapping(vert_off_mem.ptr.as_ptr(), instance_count as usize);
+            debug_assert!(bounded_instances.len() == instance_count as usize);
             bounded_instances
                 .as_ptr()
-                .copy_to_nonoverlapping(instance_mem.ptr.as_ptr(), instance_count);
+                .copy_to_nonoverlapping(instance_mem.ptr.as_ptr(), instance_count as usize);
             text.trigs.indices
                 .as_ptr()
-                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count);
+                .copy_to_nonoverlapping(idx_mem.ptr.as_ptr(), idx_count as usize);
         }
-        commands.draw_indexed(
-            gpu::DrawInfo {
-                index_count: idx_count as u32,
-                instance_count: instance_count as u32,
-                ..Default::default()
-            },
-            [
-                gpu::DrawBufferInfo::new(vertex_buffer_id, vert_mem.offset),
-                gpu::DrawBufferInfo::new(vertex_buffer_id, vert_off_mem.offset),
-                gpu::DrawBufferInfo::new(vertex_buffer_id, instance_mem.offset),
-            ],
-            gpu::DrawBufferInfo::new(index_buffer_id, idx_mem.offset),
+        cmd.begin_drawing_indexed(
+            gpu::IndexedDrawInfo
+                ::default()
+                .index_count(idx_count)
+                .instance_count(instance_count),
+            gpu::IndexBufferInfo::new(index_buffer_id, idx_mem.offset),
+            &[
+                gpu::DrawBufferRange::new(vertex_buffer_id, vert_mem.offset, vert_mem.size),
+                gpu::DrawBufferRange::new(vertex_buffer_id, vert_off_mem.offset, vert_off_mem.size),
+                gpu::DrawBufferRange::new(vertex_buffer_id, instance_mem.offset, instance_mem.size),
+            ], None,
+            |cmd| { cmd.draw_indexed()?; Ok(()) }
         ).context("failed to draw text")?;
     }
     Ok(())
@@ -172,13 +158,8 @@ pub fn calc_texture_push_constants_vertex(
     size: Vec2,
     inv_aspect_ratio: f32,
     unit_scale: f32,
-) -> PushConstantsVertex {
-    PushConstantsVertex {
-        vert_off: pos,
-        scale: size,
-        inv_aspect_ratio,
-        unit_scale,
-    }
+) -> (u32, PushConstantsVertex) {
+    push_constants_vertex(pos, size, inv_aspect_ratio, unit_scale)
 }
 
 #[inline(always)]

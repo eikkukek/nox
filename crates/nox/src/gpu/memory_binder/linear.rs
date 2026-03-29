@@ -1,8 +1,6 @@
 use core::ptr;
 
-use compact_str::format_compact;
-
-use nox_mem::vec::{Vec32, FixedVec32};
+use nox_mem::vec::Vec32;
 use nox_ash::vk::{self, ptr_chain_iter_const, TaggedStructure};
 
 use crate::{
@@ -14,7 +12,7 @@ use super::*;
 use MemoryBinderError::{self, *};
 
 struct Allocation {
-    gpu: Gpu,
+    device: LogicalDevice,
     device_memory: nox_ash::prelude::VkResult<vk::DeviceMemory>,
     mapped_pointer: Option<RwLock<*mut ()>>,
     used: AtomicU64,
@@ -33,7 +31,7 @@ impl Allocation {
         if ptr.is_null() &&
             let Some(err) = ptr.with_upgraded(|ptr| unsafe
             {
-                match self.gpu.device().map_memory(
+                match self.device.map_memory(
                     self.device_memory.unwrap_unchecked(),
                     0, vk::WHOLE_SIZE,
                     vk::MemoryMapFlags::empty()
@@ -63,8 +61,7 @@ impl Allocation {
             ))
         }
         unsafe {
-            self.gpu
-                .device()
+            self.device
                 .unmap_memory(self.device_memory.unwrap_unchecked());
         }
         *guard = ptr::null_mut();
@@ -77,7 +74,7 @@ impl Drop for Allocation {
     fn drop(&mut self) {
         unsafe {
             if let Ok(mem) = self.device_memory {
-                self.gpu.device()
+                self.device
                     .free_memory(mem, None);
             }
         }
@@ -100,11 +97,12 @@ impl Block {
             allocation: OnceLock::new(),
         }
     }
-
+    
     #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
     unsafe fn alloc(
         &self,
-        gpu: &Gpu,
+        device: &LogicalDevice,
         memory_requirements: &vk::MemoryRequirements2,
         block_size: DeviceSize,
         memory_type_index: u32,
@@ -121,10 +119,10 @@ impl Block {
                 ..Default::default()
             };
             Arc::new(Allocation {
-                gpu: gpu.clone(),
+                device: device.clone(),
                 mapped_pointer: (coherency != HostCoherency::None).then(|| RwLock::new(ptr::null_mut())),
                 device_memory: unsafe {
-                    gpu.device().allocate_memory(&allocate_info, None)
+                    device.allocate_memory(&allocate_info, None)
                 },
                 used: AtomicU64::new(0),
             })
@@ -152,6 +150,7 @@ impl Block {
         Ok(Memory::new(
             allocation.clone(),
             offset,
+            block_size,
             memory_requirements.memory_requirements.size,
             coherency,
             is_optimal,
@@ -167,7 +166,7 @@ impl Block {
 }
 
 pub struct LinearBinder {
-    gpu: Gpu,
+    device: LogicalDevice,
     optimal_blocks: SwapLock<Vec32<(Vec32<Block>, u32, usize)>>,
     suboptimal_blocks: SwapLock<Vec32<(Vec32<Block>, u32, usize)>>,
     block_size: vk::DeviceSize,
@@ -177,7 +176,7 @@ pub struct LinearBinder {
 impl LinearBinder {
 
     pub fn new(
-        gpu: Gpu,
+        device: LogicalDevice,
         block_size: DeviceSize,
         optimal_properties: MemoryProperties,
         suboptimal_properties: MemoryProperties,
@@ -185,7 +184,7 @@ impl LinearBinder {
     {
         let optimal = optimal_properties.into();
         let suboptimal = suboptimal_properties.into();
-        let physical_device = gpu.device().physical_device();
+        let physical_device = device.physical_device();
         let memory_properties = physical_device.memory_properties();
         let mut optimal_blocks = Vec32::with_capacity(4);
         for (i, memory_type) in memory_properties.memory_types[..memory_properties.memory_type_count as usize]
@@ -206,8 +205,8 @@ impl LinearBinder {
             }
         }
         Ok(Self {
-            fallback: GlobalBinder::new(gpu.clone(), optimal_properties, suboptimal_properties),
-            gpu,
+            fallback: GlobalBinder::new(device.clone(), optimal_properties, suboptimal_properties),
+            device,
             optimal_blocks: SwapLock::new(optimal_blocks),
             suboptimal_blocks: SwapLock::new(suboptimal_blocks),
             block_size,
@@ -245,6 +244,7 @@ struct Memory {
     allocation: Arc<Allocation>,
     offset: DeviceSize,
     size: DeviceSize,
+    block_size: DeviceSize,
     coherency: HostCoherency,
     is_optimal: bool,
 }
@@ -258,6 +258,7 @@ impl Memory {
         allocation: Arc<Allocation>,
         offset: DeviceSize,
         size: DeviceSize,
+        block_size: DeviceSize,
         coherency: HostCoherency,
         is_optimal: bool,
     ) -> Self
@@ -266,6 +267,7 @@ impl Memory {
             allocation,
             offset,
             size,
+            block_size,
             coherency,
             is_optimal,
         }
@@ -278,6 +280,10 @@ unsafe impl DeviceMemory for Memory {
         unsafe {
             <_ as vk::Handle>::as_raw(self.allocation.device_memory.unwrap_unchecked())
         }
+    }
+
+    fn memory_size(&self) -> u64 {
+        self.block_size
     }
 
     fn offset(&self) -> DeviceSize {
@@ -295,113 +301,24 @@ unsafe impl DeviceMemory for Memory {
                 MemoryMap {
                     map: ptr.add(self.offset as usize),
                     size: self.size as usize,
-                    coherent: self.coherency == HostCoherency::Coherent,
+                    is_coherent: self.coherency == HostCoherency::Coherent,
                 }
             })
     }
 
     fn unmap_memory(&mut self) -> Result<()> {
         self.allocation.unmap()
-    }
-
-    fn flush_mapped_ranges(&self, memory_ranges: &[MappedMemoryRange]) -> Result<()> {
-        let Some(ptr) = &self.allocation.mapped_pointer else {
-            return Err(Error::just_context("memory is not mappable"))
-        };
-        let ptr = ptr.read();
-        if ptr.is_null() {
-            return Err(Error::just_context("memory is not mapped"))
-        }
-        let tmp_alloc = self.allocation.gpu.tmp_alloc();
-        let tmp_alloc = tmp_alloc.guard();
-        let mut vk_ranges = FixedVec32::with_capacity(memory_ranges.len() as u32, &tmp_alloc)?;
-        let memory = unsafe {
-            self.allocation.device_memory.unwrap_unchecked()
-        };
-        let non_coherent_atom_size = self.allocation.gpu.device_limits().non_coherent_atom_size();
-        vk_ranges.try_extend(memory_ranges.iter().map(|range| {
-            let offset = self.offset + range.offset;
-            if !offset.is_multiple_of(non_coherent_atom_size) {
-                return Err(Error::just_context(format_compact!(
-                    "range offset {} is not a multiple of non coherent atom size {}",
-                    offset, non_coherent_atom_size,
-                )))
-            }
-            if !range.size.is_multiple_of(non_coherent_atom_size)
-            {
-                return Err(Error::just_context(format_compact!(
-                    "range size {} is not amultiple of non coherent atom size {}",
-                    range.size, non_coherent_atom_size
-                )))
-            }
-            if range.offset + range.size > self.size {
-                return Err(Error::just_context(format_compact!(
-                    "range offset {} + size {} is greater than allocation size {}",
-                    range.offset, range.size, self.size,
-                )))
-            }
-            Ok(vk::MappedMemoryRange {
-                memory,
-                offset: range.offset,
-                size: range.size,
-                ..Default::default()
-            })
-        }))?;
-        unsafe {
-            self.allocation.gpu.device().flush_mapped_memory_ranges(&vk_ranges)
-        }.context("failed to flush mapped memory ranges")
-    }
-
-    fn invalidate_mapped_ranges(&self, memory_ranges: &[MappedMemoryRange]) -> Result<()> {
-        let Some(ptr) = &self.allocation.mapped_pointer else {
-            return Err(Error::just_context("memory is not mappable"))
-        };
-        let ptr = ptr.read();
-        if ptr.is_null() {
-            return Err(Error::just_context("memory is not mapped"))
-        }
-        let tmp_alloc = self.allocation.gpu.tmp_alloc();
-        let tmp_alloc = tmp_alloc.guard();
-        let mut vk_ranges = FixedVec32::with_capacity(memory_ranges.len() as u32, &tmp_alloc)?;
-        let memory = unsafe {
-            self.allocation.device_memory.unwrap_unchecked()
-        };
-        let non_coherent_atom_size = self.allocation.gpu.device_limits().non_coherent_atom_size();
-        vk_ranges.try_extend(memory_ranges.iter().map(|range| {
-            let offset = self.offset + range.offset;
-            if !offset.is_multiple_of(non_coherent_atom_size) {
-                return Err(Error::just_context(format_compact!(
-                    "range offset {} is not a multiple of non coherent atom size {}",
-                    offset, non_coherent_atom_size,
-                )))
-            }
-            if !range.size.is_multiple_of(non_coherent_atom_size)
-            {
-                return Err(Error::just_context(format_compact!(
-                    "range size {} is not amultiple of non coherent atom size {}",
-                    range.size, non_coherent_atom_size
-                )))
-            }
-            if range.offset + range.size > self.size {
-                return Err(Error::just_context(format_compact!(
-                    "range offset {} + size {} is greater than allocation size {}",
-                    range.offset, range.size, self.size,
-                )))
-            }
-            Ok(vk::MappedMemoryRange {
-                memory,
-                offset: range.offset,
-                size: range.size,
-                ..Default::default()
-            })
-        }))?;
-        unsafe {
-            self.allocation.gpu.device().invalidate_mapped_memory_ranges(&vk_ranges)
-        }.context("failed to flush mapped memory ranges")
-    }
+    } 
 
     fn is_optimal(&self) -> bool {
         self.is_optimal
+    }
+
+    fn is_mapped(&self) -> bool {
+        let Some(ptr) = &self.allocation.mapped_pointer else {
+            return false
+        };
+        !ptr.read().is_null()
     }
 }
 
@@ -413,13 +330,13 @@ unsafe impl MemoryBinder for LinearBinder {
     }
     
     #[inline]
-    fn optimal_coherency(&self) -> HostCoherency {
-        self.fallback.optimal_coherency()
+    fn optimal_host_coherency(&self) -> HostCoherency {
+        self.fallback.optimal_host_coherency()
     }
 
     #[inline]
-    fn suboptimal_coherency(&self) -> HostCoherency {
-        self.fallback.suboptimal_coherency()
+    fn suboptimal_host_coherency(&self) -> HostCoherency {
+        self.fallback.suboptimal_host_coherency()
     }
 
     unsafe fn alloc(
@@ -427,8 +344,7 @@ unsafe impl MemoryBinder for LinearBinder {
         memory_requirements: &vk::MemoryRequirements2,
     ) -> Result<DeviceMemoryObj> {
         let block_size = self.block_size;
-        let granularity = self.gpu
-            .device()
+        let granularity = self.device
             .physical_device()
             .limits().buffer_image_granularity;
         unsafe {
@@ -443,7 +359,7 @@ unsafe impl MemoryBinder for LinearBinder {
                 }
             }
         }
-        let coherency = self.optimal_coherency();
+        let coherency = self.optimal_host_coherency();
         for (i, (blocks, type_index, free_index)) in self.optimal_blocks.load().iter().enumerate() {
             if memory_requirements.memory_requirements.memory_type_bits & (1 << *type_index) != 0 {
                 if block_size < memory_requirements.memory_requirements.size {
@@ -453,7 +369,7 @@ unsafe impl MemoryBinder for LinearBinder {
                 }
                 let mut res = unsafe { blocks[*free_index]
                     .alloc(
-                        &self.gpu, memory_requirements,
+                        &self.device, memory_requirements,
                         self.block_size, *type_index,
                         granularity,
                         coherency,
@@ -471,7 +387,7 @@ unsafe impl MemoryBinder for LinearBinder {
                             *free_index
                         });
                         res = unsafe { self.optimal_blocks.load()[i].0[free_index].alloc(
-                            &self.gpu, memory_requirements, block_size,
+                            &self.device, memory_requirements, block_size,
                             *type_index, granularity,
                             coherency, true,
                         ) };
@@ -482,7 +398,7 @@ unsafe impl MemoryBinder for LinearBinder {
                 return Ok(DeviceMemoryObj::new(res.context("failed to allocate device memory")?))
             }
         }
-        let coherency = self.suboptimal_coherency();
+        let coherency = self.suboptimal_host_coherency();
         for (i, (blocks, type_index, free_index)) in self.suboptimal_blocks.load().iter().enumerate() {
             if memory_requirements.memory_requirements.memory_type_bits & (1 << *type_index) != 0 {
                 if block_size < memory_requirements.memory_requirements.size {
@@ -492,7 +408,7 @@ unsafe impl MemoryBinder for LinearBinder {
                 }
                 let mut res = unsafe { blocks[*free_index]
                     .alloc(
-                        &self.gpu, memory_requirements,
+                        &self.device, memory_requirements,
                         self.block_size, *type_index,
                         granularity,
                         coherency,
@@ -510,7 +426,7 @@ unsafe impl MemoryBinder for LinearBinder {
                             *free_index
                         });
                         res = unsafe { self.suboptimal_blocks.load()[i].0[free_index].alloc(
-                            &self.gpu, memory_requirements, block_size,
+                            &self.device, memory_requirements, block_size,
                             *type_index, granularity,
                             coherency, true,
                         ) };

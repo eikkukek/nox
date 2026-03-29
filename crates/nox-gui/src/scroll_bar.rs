@@ -1,4 +1,4 @@
-use nox::{mem::vec_types::{GlobalVec, Vector}, win};
+use nox::{mem::vec::Vec32, or_flag};
 
 use nox_geom::{
     shapes::*,
@@ -12,6 +12,7 @@ pub struct ScrollBarState {
     pub requires_triangulation: bool,
 }
 
+#[derive(Default)]
 pub struct VerScrollBar {
     t: f32,
     width_t: f32,
@@ -35,20 +36,7 @@ impl VerScrollBar {
 
     #[inline(always)]
     pub fn new() -> Self {
-        Self {
-            t: 0.0,
-            width_t: 0.0,
-            width: 0.0,
-            offset: Default::default(),
-            bar_rect_max: Default::default(),
-            handle_rect_max: Default::default(),
-            rounding: 0.0,
-            max_t: 0.0,
-            bar_vertex_range: None,
-            handle_vertex_range: None,
-            opacity: 0.0,
-            flags: 0,
-        }
+        Self::default()
     }
 
     #[inline(always)]
@@ -109,19 +97,19 @@ impl VerScrollBar {
     }
 
     #[inline(always)]
-    pub fn calc_width(&mut self, style: &impl UiStyle) -> f32 {
-        self.width = lerp(style.scroll_bar_width(), style.scroll_bar_fat_width(), self.width_t);
+    pub fn calc_width(&mut self, style: &UiStyle) -> f32 {
+        self.width = lerp(style.scroll_bar_width, style.scroll_bar_fat_width, self.width_t);
         self.width
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
-        win: &mut win::WindowContext,
-        style: &impl UiStyle,
+        style: &UiStyle,
+        cached_data: &CachedUiData,
         current_t: f32,
         offset: Vec2,
         window_pos: Vec2,
-        cursor_pos: Vec2,
         bar_height: f32,
         content_height: f32,
         window_height: f32,
@@ -136,36 +124,39 @@ impl VerScrollBar {
         let requires_triangulation =
             self.handle_rect_max != handle_rect_max ||
             self.bar_rect_max != bar_rect_max ||
-            self.rounding != style.rounding();
+            self.rounding != style.rounding;
         self.handle_rect_max = handle_rect_max;
         self.bar_rect_max = bar_rect_max;
-        self.rounding = style.rounding();
+        self.rounding = style.rounding;
         self.offset = offset;
         self.flags &= !Self::HOVERING;
-        let mouse_left_state = win.mouse_button_state(win::MouseButton::Left);
+        let mouse_left_state = cached_data.mouse_button_left_state;
         if self.held() {
             if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
             } else {
-                self.t = self.calc_t(cursor_pos, window_pos + offset);
+                self.t = self.calc_t(cached_data.cursor_pos, window_pos + offset);
             }
         } else {
             self.t = current_t;
-            let error_margin = style.cursor_error_margin();
+            let error_margin = style.cursor_error_margin;
             let bounding_rect = BoundingRect::from_position_size(
-                window_pos + offset - vec2(error_margin, 0.0), bar_rect_max + vec2(error_margin + error_margin, 0.0)
+                window_pos + offset - vec2(
+                    error_margin, 0.0),
+                    bar_rect_max + vec2(error_margin + error_margin, 0.0
+                )
             );
-            if !hover_blocked && !widget_active && bounding_rect.is_point_inside(cursor_pos) {
+            if !hover_blocked && !widget_active && bounding_rect.is_point_inside(cached_data.cursor_pos) {
                 self.flags |= Self::HOVERING;
                 if mouse_left_state.pressed() {
                     self.flags |= Self::HELD;
-                    self.t = self.calc_t(cursor_pos, window_pos + offset);
+                    self.t = self.calc_t(cached_data.cursor_pos, window_pos + offset);
                 }
             }
         }
         self.flags &= !Self::HIDING;
         or_flag!(self.flags, Self::HIDING, hover_blocked && !self.held());
-        let anim_delta = win.delta_time_secs_f32() * style.animation_speed();
+        let anim_delta = cached_data.delta_time * style.animation_speed;
         if self.hiding() {
             self.opacity = (self.opacity - anim_delta).clamp(0.0, 1.0);
         } else {
@@ -184,7 +175,7 @@ impl VerScrollBar {
 
     pub fn triangulate(
         &mut self,
-        points: &mut GlobalVec<[f32; 2]>,
+        points: &mut Vec32<[f32; 2]>,
         mut tri: impl FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     ) {
         rect(
@@ -204,16 +195,16 @@ impl VerScrollBar {
 
     pub fn set_vertex_params(
         &self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         vertices: &mut [Vertex],
     ) {
         let (mut bar_col, mut handle_col) =
             if self.held() {
-                (style.scroll_bar_col().scale_alpha(self.opacity), style.scroll_bar_handle_col())
+                (style.scroll_bar_col.scale_alpha(self.opacity), style.scroll_bar_handle_col)
             } else if self.hovering() {
-                (style.scroll_bar_col(), style.scroll_bar_handle_col().with_alpha(0.6))
+                (style.scroll_bar_col, style.scroll_bar_handle_col.with_alpha(0.6))
             } else {
-                (style.scroll_bar_col().with_alpha(0.7), style.scroll_bar_handle_col().with_alpha(0.2))
+                (style.scroll_bar_col.with_alpha(0.7), style.scroll_bar_handle_col.with_alpha(0.2))
             };
         bar_col = bar_col.scale_alpha(self.opacity);
         handle_col = handle_col.scale_alpha(self.opacity);
@@ -229,6 +220,7 @@ impl VerScrollBar {
     }
 }
 
+#[derive(Default)]
 pub struct HorScrollBar {
     t: f32,
     height_t: f32,
@@ -252,20 +244,7 @@ impl HorScrollBar {
 
     #[inline(always)]
     pub fn new() -> Self {
-        Self {
-            t: 0.0,
-            height_t: 0.0,
-            height: 0.0,
-            offset: Default::default(),
-            bar_rect_max: Default::default(),
-            handle_rect_max: Default::default(),
-            rounding: 0.0,
-            max_t: 0.0,
-            bar_vertex_range: Default::default(),
-            handle_vertex_range: Default::default(),
-            opacity: 0.0,
-            flags: 0,
-        }
+        Self::default()
     }
 
     #[inline(always)]
@@ -289,8 +268,8 @@ impl HorScrollBar {
     }
 
     #[inline(always)]
-    pub fn calc_height(&mut self, style: &impl UiStyle) -> f32 {
-        self.height = lerp(style.scroll_bar_width(), style.scroll_bar_fat_width(), self.height_t);
+    pub fn calc_height(&mut self, style: &UiStyle) -> f32 {
+        self.height = lerp(style.scroll_bar_width, style.scroll_bar_fat_width, self.height_t);
         self.height
     }
 
@@ -331,14 +310,14 @@ impl HorScrollBar {
         t.clamp(0.0, self.max_t)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update(
         &mut self,
-        win: &mut win::WindowContext,
-        style: &impl UiStyle,
+        style: &UiStyle,
+        cached_data: &CachedUiData,
         current_t: f32,
         offset: Vec2,
         window_pos: Vec2,
-        cursor_pos: Vec2,
         bar_width: f32,
         content_width: f32,
         window_width: f32,
@@ -353,36 +332,36 @@ impl HorScrollBar {
         let requires_triangulation =
             self.handle_rect_max != handle_rect_max ||
             self.bar_rect_max != bar_rect_max ||
-            self.rounding != style.rounding();
+            self.rounding != style.rounding;
         self.handle_rect_max = handle_rect_max;
         self.bar_rect_max = bar_rect_max;
-        self.rounding = style.rounding();
+        self.rounding = style.rounding;
         self.offset = offset;
         self.flags &= !Self::HOVERING;
-        let mouse_left_state = win.mouse_button_state(win::MouseButton::Left);
+        let mouse_left_state = cached_data.mouse_button_left_state;
         if self.held() {
             if !mouse_left_state.held() {
                 self.flags &= !Self::HELD;
             } else {
-                self.t = self.calc_t(cursor_pos, window_pos + offset);
+                self.t = self.calc_t(cached_data.cursor_pos, window_pos + offset);
             }
         } else {
             self.t = current_t;
-            let error_margin = style.cursor_error_margin();
+            let error_margin = style.cursor_error_margin;
             let bounding_rect = BoundingRect::from_position_size(
                 window_pos + offset - vec2(0.0, error_margin), bar_rect_max + vec2(0.0, error_margin + error_margin)
             );
-            if !hover_blocked && !widget_active && bounding_rect.is_point_inside(cursor_pos) {
+            if !hover_blocked && !widget_active && bounding_rect.is_point_inside(cached_data.cursor_pos) {
                 self.flags |= Self::HOVERING;
                 if mouse_left_state.pressed() {
                     self.flags |= Self::HELD;
-                    self.t = self.calc_t(cursor_pos, window_pos + offset);
+                    self.t = self.calc_t(cached_data.cursor_pos, window_pos + offset);
                 }
             }
         }
         self.flags &= !Self::HIDING;
         or_flag!(self.flags, Self::HIDING, hover_blocked && !self.held());
-        let anim_delta = win.delta_time_secs_f32() * style.animation_speed();
+        let anim_delta = cached_data.delta_time * style.animation_speed;
         if self.hiding() {
             self.opacity = (self.opacity - anim_delta).clamp(0.0, 1.0);
         } else {
@@ -401,7 +380,7 @@ impl HorScrollBar {
 
     pub fn triangulate(
         &mut self,
-        points: &mut GlobalVec<[f32; 2]>,
+        points: &mut Vec32<[f32; 2]>,
         mut tri: impl FnMut(&[[f32; 2]]) -> Option<VertexRange>,
     ) {
         rect(
@@ -421,16 +400,16 @@ impl HorScrollBar {
 
     pub fn set_vertex_params(
         &self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         vertices: &mut [Vertex],
     ) {
         let (mut bar_col, mut handle_col) =
             if self.held() {
-                (style.scroll_bar_col().scale_alpha(self.opacity), style.scroll_bar_handle_col())
+                (style.scroll_bar_col.scale_alpha(self.opacity), style.scroll_bar_handle_col)
             } else if self.hovering() {
-                (style.scroll_bar_col(), style.scroll_bar_handle_col().with_alpha(0.6))
+                (style.scroll_bar_col, style.scroll_bar_handle_col.with_alpha(0.6))
             } else {
-                (style.scroll_bar_col().with_alpha(0.7), style.scroll_bar_handle_col().with_alpha(0.2))
+                (style.scroll_bar_col.with_alpha(0.7), style.scroll_bar_handle_col.with_alpha(0.2))
             };
         bar_col = bar_col.scale_alpha(self.opacity);
         handle_col = handle_col.scale_alpha(self.opacity);

@@ -15,7 +15,7 @@ use nox_mem::vec::Vec32;
 use crate::{
     clipboard::Clipboard,
     or_flag,
-    sync::{Arc, atomic::{self, AtomicU32}},
+    sync::{Arc, atomic::{self, AtomicU64}},
     error::*,
 };
 
@@ -74,8 +74,7 @@ use winit::window::Window as WinitWindow;
 
 pub(super) struct WinitHandle {
     window: WinitWindow,
-    width: AtomicU32,
-    height: AtomicU32,
+    size: AtomicU64,
 }
 
 impl HasDisplayHandle for WinitHandle {
@@ -102,9 +101,10 @@ impl HasWindowHandle for WinitHandle {
 unsafe impl gpu::VulkanWindow for WinitHandle {
     
     fn inner_size(&self) -> (u32, u32) {
+        let size = self.size.load(atomic::Ordering::Acquire);
         (
-            self.width.load(atomic::Ordering::Acquire),
-            self.height.load(atomic::Ordering::Acquire),
+            size as u32,
+            (size >> 32) as u32,
         )
     }
 }
@@ -342,7 +342,7 @@ pub struct Window {
     pub(super) input_text: Vec32<(KeyCode, CompactString)>,
     size: (u32, u32),
     cursor_position: (f64, f64),
-    mouse_scroll_pixel_delta: (f64, f64),
+    mouse_scroll_delta_pixels: (f64, f64),
     mouse_scroll_line_delta: (f32, f32),
     pub(super) current_cursor: CursorIcon,
     pub(super) flags: u32,
@@ -368,8 +368,7 @@ impl Window {
         let size = window.inner_size();
         let window = Arc::new(WinitHandle {
             window,
-            width: AtomicU32::new(size.width),
-            height: AtomicU32::new(size.height),
+            size: AtomicU64::new(size.width as u64 | (size.height as u64) << 32),
         });
         let mut flags = 0;
         or_flag!(flags, Self::TRANSPARENT, is_transparent);
@@ -384,7 +383,7 @@ impl Window {
             input_text: Default::default(),
             size: (size.width, size.height),
             cursor_position: (0.0, 0.0),
-            mouse_scroll_pixel_delta: (0.0, 0.0),
+            mouse_scroll_delta_pixels: (0.0, 0.0),
             mouse_scroll_line_delta: (0.0, 0.0),
             current_cursor: CursorIcon::Default,
             flags,
@@ -394,7 +393,12 @@ impl Window {
     #[inline(always)]
     pub(super) fn should_close(&self) -> bool {
         self.flags & Self::SHOULD_CLOSE == Self::SHOULD_CLOSE
-    } 
+    }
+
+    #[inline]
+    pub fn surface_id(&self) -> gpu::SurfaceId {
+        self.surface_id
+    }
 
     /// Closes the window.
     ///
@@ -490,8 +494,8 @@ impl Window {
     }
 
     #[inline(always)]
-    pub fn mouse_scroll_pixel_delta(&self) -> (f64, f64) {
-        self.mouse_scroll_pixel_delta
+    pub fn mouse_scroll_delta_pixels(&self) -> (f64, f64) {
+        self.mouse_scroll_delta_pixels
     }
 
     #[inline(always)]
@@ -555,7 +559,7 @@ impl Window {
                         self.mouse_scroll_line_delta = (x, y);
                     },
                     MouseScrollDelta::PixelDelta(d) => {
-                        self.mouse_scroll_pixel_delta = (d.x, d.y);
+                        self.mouse_scroll_delta_pixels = (d.x, d.y);
                     }
                 };
             },
@@ -598,8 +602,10 @@ impl Window {
             },
             WindowEvent::Resized(size) => {
                 self.size = (size.width, size.height);
-                self.handle.width.store(size.width, atomic::Ordering::Release);
-                self.handle.height.store(size.height, atomic::Ordering::Release);
+                self.handle.size.store(
+                    size.width as u64 | (size.height as u64) << 32,
+                    atomic::Ordering::Release,
+                );
                 self.gpu.request_swapchain_update(
                     self.surface_id,
                     self.size,
@@ -610,7 +616,7 @@ impl Window {
     }
 
     pub(super) fn reset_input(&mut self) {
-        self.mouse_scroll_pixel_delta = (0.0, 0.0); 
+        self.mouse_scroll_delta_pixels = (0.0, 0.0); 
         self.mouse_scroll_line_delta = (0.0, 0.0);
         self.physical_keys.retain(|_, v| {
             v.pressed = false;

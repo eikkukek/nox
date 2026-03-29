@@ -33,13 +33,13 @@ pub trait UiSurface {
     fn add_text(
         &mut self,
         text: SharedText,
-    ) -> usize;
+    ) -> u32;
 
-    fn get_text(&mut self, index: usize) -> Option<SharedText>;
+    fn get_text(&mut self, index: u32) -> Option<SharedText>;
 
     fn reaction_text(
         &mut self,
-        style: &impl UiStyle,
+        style: &UiStyle,
         text_renderer: &mut TextRenderer,
         id: ReactionId,
         text: &str,
@@ -64,10 +64,10 @@ pub trait UiReactSurface {
 
     fn ui_surface_mut(&mut self) -> &mut Self::Surface;
 
-    fn reaction_from_addr<'a, T: RefAddr>(
+    fn reaction_from_addr<T: RefAddr>(
         &mut self,
         value: T,
-        f: impl FnMut(&mut Self::Surface, &'a mut Reaction, T),
+        f: impl for<'a> FnMut(&mut Self::Surface, &'a mut Reaction, T),
     ) -> &mut Reaction;
 
     fn get_reaction(&self, id: ReactionId) -> Option<&Reaction>;
@@ -80,14 +80,14 @@ pub trait RefAddr {
     fn addr(self) -> usize;
 }
 
-impl<'a, T: ?Sized> RefAddr for &'a T {
+impl<T: ?Sized> RefAddr for &T {
 
     fn addr(self) -> usize {
         (self as *const T).addr()
     }
 }
 
-impl<'a, T: ?Sized> RefAddr for &'a mut T {
+impl<T: ?Sized> RefAddr for &mut T {
 
     fn addr(self) -> usize {
         (self as *const T).addr()
