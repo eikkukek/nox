@@ -1,8 +1,9 @@
-# A data-oriented renderer for power users
-![Screenshot](https://i.imgur.com/FQmfXKH.png)
-*An example showcasing instanced drawing, depth stencil usage, and a compute shader effect*
+# A modern and faithful Vulkan backend
 
 ## Features
-- Linear framegraph based rendering with transient resource management
-- Efficient resource creation and termination
-- Resource management using custom allocators
+- Multithreaded command scheduling and resource creation with emphasis on safety,
+  efficiency and correctness
+- Control over device queues and synchronization
+- Custom device memory alocators and command interfaces
+- Headless/standalone usage of the Ggu, independent of any windowing system
+- Support for multiple surfaces
