@@ -8,4 +8,4 @@ mod inst_info;
 pub use common::*;
 pub use enums::*;
 pub use definitions::*;
-pub use inst_info::INST_INFOS;
+pub(crate) use inst_info::INST_INFOS;

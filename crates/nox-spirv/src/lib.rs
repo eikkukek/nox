@@ -1,4 +1,4 @@
-//! Compact SPIR-V reflection library written in pure-Rust, with zero dependencies and minimal
+//! Compact SPIR-V reflection library written in pure-Rust with zero dependencies and minimal
 //! allocations.
 //!
 //! # Allocation policy
@@ -19,8 +19,6 @@
 //! let spirv: &[u32] = ...;
 //! let module = Module::new(spirv);
 //! let mut reflector = Reflector::new(module).unwrap();
-//! // Must be set before reflecting resources.
-//! reflector.set_entry_point(c"main", op::ExecutionModel::FRAGMENT).unwrap();
 //! for ubo in reflector.resources_for_type(ResourceType::UniformBuffer).unwrap() {
 //!     match ubo {
 //!         Ok(ubo) => {
@@ -53,13 +51,11 @@
 //! }
 //! ```
 
+mod core;
 pub mod stream;
 pub mod op;
 mod module;
 pub mod reflect;
-
-
-mod core;
 
 pub use {
     core::*,

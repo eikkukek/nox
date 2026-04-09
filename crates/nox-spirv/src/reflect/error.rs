@@ -10,18 +10,12 @@ use super::*;
 /// The main error type for when reflection fails.
 #[derive(Debug)]
 pub enum ReflectError {
-    /// A [`CStr`] error.
+    /// A [`CStr`][1] error.
+    ///
+    /// [1]: core::ffi::CStr
     FromBytesWithNulError(FromBytesWithNulError),
     /// A parsing error.
     Parse(ParseError),
-    /// An error indicating no entry point is [`set`][1].
-    ///
-    /// [1]: Reflector::set_entry_point
-    NoEntryPointSet,
-    /// An error indicating that the [`specified`][1] entry point was not found.
-    ///
-    /// [1]: Reflector::set_entry_point
-    UnknownEntryPoint,
     /// An error indicating that a type with [`Id`] was not found.
     InvalidTypeId(Id),
     /// An error indicating that a constant with [`Id`] was not found.
@@ -65,8 +59,6 @@ impl Display for ReflectError {
         match self {
             Self::FromBytesWithNulError(_) => write!(f, "ffi string conversion error"),
             Self::Parse(_) => write!(f, "invalid spirv"),
-            Self::NoEntryPointSet => write!(f, "no entry point set"),
-            Self::UnknownEntryPoint => write!(f, "unknown entry point"),
             Self::InvalidTypeId(id) => write!(f, "invalid type id {id}"),
             Self::InvalidConstantId(id) => write!(f, "invalid constant id {id}"),
             Self::NonIntegerLiteral(literal) => write!(f, "non-integer litral {literal:?}"),

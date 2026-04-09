@@ -9,7 +9,7 @@ use crate::{
     module::*,
 };
 use super::*;
-/// Reference to an <id> representing the result's type of the enclosing instruction.
+/// Reference to an id representing the result's type of the enclosing instruction.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct IdResultType(pub(crate) u32);
 impl Display for IdResultType {
@@ -25,7 +25,7 @@ impl Word for IdResultType {
         Self(word)
     }
 }
-/// Reference to an <id> representing the result's type of the enclosing instruction.
+/// Reference to an id representing the result's type of the enclosing instruction.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct IdResult(pub(crate) u32);
 impl Display for IdResult {
@@ -41,7 +41,7 @@ impl Word for IdResult {
         Self(word)
     }
 }
-/// Reference to an <id> representing a 32-bit integer that is a mask from the MemorySemantics
+/// Reference to an id representing a 32-bit integer that is a mask from the MemorySemantics
 /// operand kind.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct IdMemorySemantics(pub(crate) u32);
@@ -58,7 +58,7 @@ impl Word for IdMemorySemantics {
         Self(word)
     }
 }
-/// Reference to an <id> representing a 32-bit integer that is a mask from the Scope operand kind.
+/// Reference to an id representing a 32-bit integer that is a mask from the Scope operand kind.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct IdScope(pub(crate) u32);
 impl Display for IdScope {
@@ -74,7 +74,7 @@ impl Word for IdScope {
         Self(word)
     }
 }
-/// Reference to an <id>.
+/// Reference to an id.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct IdRef(pub(crate) u32);
 impl Display for IdRef {

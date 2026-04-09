@@ -809,7 +809,7 @@ fn definition_gen(
         });
     let inst_infos = quote! {
         use super::*;
-        pub static INST_INFOS: [InstInfo; #len] = [
+        pub(crate) static INST_INFOS: [InstInfo; #len] = [
             #(#inst_infos),*
         ];
     };

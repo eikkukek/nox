@@ -12,8 +12,6 @@ use nox_spirv::reflect::{Reflector, ResourceType};
 let spirv: &[u32] = ...;
 let module = Module::new(spirv);
 let mut reflector = Reflector::new(module).unwrap();
-// Must be set before reflecting resources.
-reflector.set_entry_point(c"main", op::ExecutionModel::FRAGMENT).unwrap();
 for ubo in reflector.resources_for_type(ResourceType::UniformBuffer).unwrap() {
     match ubo {
         Ok(ubo) => {

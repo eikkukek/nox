@@ -5,7 +5,7 @@ use core::{
     ops::Deref,
 };
 
-/// A trait for types, which can be trivially converted from and to [`u32`].
+/// A trait for types, which can be trivially converted from a [`u32`].
 pub trait Word: Sized {
     
     fn from_word(word: u32) -> Self;
@@ -45,6 +45,7 @@ impl<'a> Deref for CompilerStr<'a> {
 
 impl<'a> CompilerStr<'a> {
 
+    /// Constructs a new string from words.
     pub fn new(words: &'a [u32]) -> Self {
         let bytes = slice_as_bytes(words);
         let len = bytes
@@ -57,6 +58,7 @@ impl<'a> CompilerStr<'a> {
         }
     }
 
+    /// Converts self to a [`CStr`].
     #[inline]
     pub fn to_cstr(&self) -> Result<&'a CStr, FromBytesWithNulError> {
         CStr::from_bytes_with_nul(
@@ -69,7 +71,7 @@ impl Display for CompilerStr<'_> {
 
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", str
-            ::from_utf8(&self.bytes[0..self.bytes.len()-1])
+            ::from_utf8(&self.bytes[0..self.bytes.len().saturating_sub(1)])
             .unwrap_or("<utf8-error>"
         ))
     }
@@ -78,22 +80,35 @@ impl Display for CompilerStr<'_> {
 /// Specifies the value of a literal constant.
 #[derive(Clone, Copy, Debug)]
 pub enum Literal {
+    /// 16-bit floating point literal.
+    ///
     /// Not representable in Rust without nightly.
     F16(u16),
+    /// 32-bit floating point literal.
     F32(f32),
+    /// 64-bit floating point literal.
     F64(f64),
+    /// 8-bit signed integer literal.
     I8(i8),
+    /// 16-bit signed integer literal.
     I16(i16),
+    /// 32-bit signed integer literal.
     I32(i32),
+    /// 64-bit signed integer literal.
     I64(i64),
+    /// 8-bit unsigned integer literal.
     U8(u8),
+    /// 16-bit unsigned integer literal.
     U16(u16),
+    /// 32-bit unsigned integer literal.
     U32(u32),
+    /// 64-bit unsigned integer literal.
     U64(u64),
 }
 
 impl Literal {
 
+    /// Converts self to an usize, if its an integer literal.
     #[inline]
     pub fn as_usize(self) -> Option<usize> {
         match self {

@@ -17,6 +17,7 @@ pub struct Stream<'a> {
 
 impl<'a> Stream<'a> {
 
+    /// Creates a new stream from SPIR-V words.
     #[inline(always)]
     pub fn new(spirv: &'a [u32]) -> Self {
         Self {
@@ -25,13 +26,14 @@ impl<'a> Stream<'a> {
         }
     }
 
+    /// Resets the stream's position to zero.
     #[inline(always)]
     pub fn reset(&mut self) {
         self.pos = 0;
     }
 }
 
-/// Represents a single SPIR-V instruction.
+/// Represents a single SPIR-V instruction stream.
 #[derive(Clone, Copy)]
 pub struct InstructionStream<'a> {
     op: op::Code,
@@ -41,21 +43,27 @@ pub struct InstructionStream<'a> {
 
 impl<'a> InstructionStream<'a> {
 
+    /// Returns the instruction's [`Code`][1].
+    ///
+    /// [1]: op::Code
     #[inline]
     pub fn code(&self) -> op::Code {
         self.op
     }
 
+    /// Returns whether the end of the stream has been reached.
     #[inline]
     pub fn is_eos(&self) -> bool {
         self.pos == self.words.len()
     }
 
+    /// Resets the stream's position to one.
     #[inline]
     pub fn reset(&mut self) {
         self.pos = 1;
     }
-
+    
+    /// Reads a word from the stream.
     #[inline]
     pub fn read(&mut self) -> ParseResult<u32> {
         let len = self.words.len();
@@ -67,6 +75,9 @@ impl<'a> InstructionStream<'a> {
         }
     }
 
+    /// Reads multiple words from the stream.
+    ///
+    /// Pass [`None`] for `count` to read until the end of the stream.
     #[inline]
     pub fn read_words(&mut self, count: Option<u32>) -> ParseResult<&'a [u32]> {
         let len = self.words.len();
@@ -84,13 +95,18 @@ impl<'a> InstructionStream<'a> {
         }
     }
 
+    /// Reads a [`string`][1].
+    ///
+    /// [1]: CompilerStr
     #[inline]
     pub fn read_string(&mut self) -> ParseResult<CompilerStr<'a>> {
         let pos = self.pos;
         if pos == self.words.len() { Err(ParseError::EndOfStream) }
         else {
             let str = CompilerStr::new(&self.words[pos..]);
-            self.pos = pos + str.len().div_ceil(8);
+            let div = str.len() / 4;
+            let mul = 4 * div;
+            self.pos = pos + div + if str.len() - mul != 0 { 1 } else { 0 };
             Ok(str)
         }
     }

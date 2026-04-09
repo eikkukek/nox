@@ -703,321 +703,1273 @@ impl Display for Code {
     }
 }
 #[derive(Clone, Copy)]
-pub struct InstMemoryModel {
-    pub addressing_model: AddressingModel,
-    pub memory_model: MemoryModel,
-}
-#[derive(Clone, Copy)]
-pub struct InstEntryPoint<'a> {
-    pub execution_model: ExecutionModel,
-    pub entry_point: IdRef,
-    pub name: LiteralString<'a>,
-    pub interface: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstExecutionMode {
-    pub entry_point: IdRef,
-    pub mode: ExecutionMode,
-}
-#[derive(Clone, Copy)]
-pub struct InstCapability {
-    pub capability: Capability,
-}
-#[derive(Clone, Copy)]
-pub struct InstExecutionModeId {
-    pub entry_point: IdRef,
-    pub mode: ExecutionMode,
-}
-#[derive(Clone, Copy)]
-pub struct InstConditionalEntryPointINTEL<'a> {
-    pub condition: IdRef,
-    pub execution_model: ExecutionModel,
-    pub entry_point: IdRef,
-    pub name: LiteralString<'a>,
-    pub interface: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstConditionalCapabilityINTEL {
-    pub condition: IdRef,
-    pub capability: Capability,
-}
-#[derive(Clone, Copy)]
-pub struct InstVariable {
+pub struct InstGroupNonUniformElect {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub storage_class: StorageClass,
-    pub initializer: Option<IdRef>,
+    pub execution: IdScope,
 }
 #[derive(Clone, Copy)]
-pub struct InstImageTexelPointer {
+pub struct InstGroupNonUniformAll {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub sample: IdRef,
+    pub execution: IdScope,
+    pub predicate: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstLoad {
+pub struct InstGroupNonUniformAny {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory_access: Option<MemoryAccess>,
+    pub execution: IdScope,
+    pub predicate: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAccessChain<'a> {
+pub struct InstGroupNonUniformAllEqual {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub base: IdRef,
-    pub indexes: &'a [IdRef],
+    pub execution: IdScope,
+    pub value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstInBoundsAccessChain<'a> {
+pub struct InstGroupNonUniformBroadcast {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub base: IdRef,
-    pub indexes: &'a [IdRef],
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub invocation_id: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstPtrAccessChain<'a> {
+pub struct InstGroupNonUniformBroadcastFirst {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub base: IdRef,
-    pub element: IdRef,
-    pub indexes: &'a [IdRef],
+    pub execution: IdScope,
+    pub value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstArrayLength {
+pub struct InstGroupNonUniformBallot {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub structure: IdRef,
-    pub array_member: LiteralInteger,
+    pub execution: IdScope,
+    pub predicate: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstGenericPtrMemSemantics {
+pub struct InstGroupNonUniformInverseBallot {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
+    pub execution: IdScope,
+    pub value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstInBoundsPtrAccessChain<'a> {
+pub struct InstGroupNonUniformBallotBitExtract {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub base: IdRef,
-    pub element: IdRef,
-    pub indexes: &'a [IdRef],
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub index: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstPtrEqual {
+pub struct InstGroupNonUniformBallotBitCount {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstPtrNotEqual {
+pub struct InstGroupNonUniformBallotFindLSB {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
+    pub execution: IdScope,
+    pub value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstPtrDiff {
+pub struct InstGroupNonUniformBallotFindMSB {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
+    pub execution: IdScope,
+    pub value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstUntypedVariableKHR {
+pub struct InstGroupNonUniformShuffle {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub storage_class: StorageClass,
-    pub data_type: Option<IdRef>,
-    pub initializer: Option<IdRef>,
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub invocation_id: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstUntypedAccessChainKHR<'a> {
+pub struct InstGroupNonUniformShuffleXor {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub base_type: IdRef,
-    pub base: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedInBoundsAccessChainKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base_type: IdRef,
-    pub base: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedPtrAccessChainKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base_type: IdRef,
-    pub base: IdRef,
-    pub element: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedInBoundsPtrAccessChainKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base_type: IdRef,
-    pub base: IdRef,
-    pub element: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedArrayLengthKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub structure: IdRef,
-    pub pointer: IdRef,
-    pub array_member: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixLoadKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory_layout: IdRef,
-    pub stride: Option<IdRef>,
-    pub memory_operand: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstBufferPointerEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub buffer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedImageTexelPointerEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image_type: IdRef,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub sample: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeVectorLoadNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub offset: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixLoadTensorNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub tensor_layout: IdRef,
-    pub memory_operand: MemoryAccess,
-    pub tensor_addressing_operands: TensorAddressingOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstRawAccessChainNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub byte_stride: IdRef,
-    pub element_index: IdRef,
-    pub byte_offset: IdRef,
-    pub raw_access_chain_operands: Option<RawAccessChainOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstVariableLengthArrayINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub length: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSaveMemoryINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedVariableLengthArrayINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub element_type: IdRef,
-    pub length: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMaskedGatherINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ptr_vector: IdRef,
-    pub alignment: LiteralInteger,
+    pub execution: IdScope,
+    pub value: IdRef,
     pub mask: IdRef,
-    pub fill_empty: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstStore {
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub memory_access: Option<MemoryAccess>,
+pub struct InstGroupNonUniformShuffleUp {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub delta: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstCopyMemory {
+pub struct InstGroupNonUniformShuffleDown {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub delta: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformIAdd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformFAdd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformIMul {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformFMul {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformSMin {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformUMin {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformFMin {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformSMax {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformUMax {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformFMax {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformBitwiseAnd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformBitwiseOr {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformBitwiseXor {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformLogicalAnd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformLogicalOr {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformLogicalXor {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub value: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformQuadBroadcast {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub index: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformQuadSwap {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub direction: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformQuadAllKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub predicate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformQuadAnyKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub predicate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformPartitionEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstString<'a> {
+    pub id_result: IdResult,
+    pub string: LiteralString<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstSourceContinued<'a> {
+    pub continued_source: LiteralString<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstSource<'a> {
+    pub source_language: SourceLanguage,
+    pub version: LiteralInteger,
+    pub file: Option<IdRef>,
+    pub source: Option<LiteralString<'a>>,
+}
+#[derive(Clone, Copy)]
+pub struct InstSourceExtension<'a> {
+    pub extension: LiteralString<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstName<'a> {
     pub target: IdRef,
-    pub source: IdRef,
-    pub memory_access_1: Option<MemoryAccess>,
-    pub memory_access_2: Option<MemoryAccess>,
+    pub name: LiteralString<'a>,
 }
 #[derive(Clone, Copy)]
-pub struct InstCopyMemorySized {
+pub struct InstMemberName<'a> {
+    pub ty: IdRef,
+    pub member: LiteralInteger,
+    pub name: LiteralString<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstLine {
+    pub file: IdRef,
+    pub line: LiteralInteger,
+    pub column: LiteralInteger,
+}
+#[derive(Clone, Copy)]
+pub struct InstNoLine;
+#[derive(Clone, Copy)]
+pub struct InstModuleProcessed<'a> {
+    pub process: LiteralString<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGraphConstantARM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub graph_constant_id: LiteralInteger,
+}
+#[derive(Clone, Copy)]
+pub struct InstGraphARM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+}
+#[derive(Clone, Copy)]
+pub struct InstGraphInputARM<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub input_index: IdRef,
+    pub element_index: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstGraphEntryPointARM<'a> {
+    pub graph: IdRef,
+    pub name: LiteralString<'a>,
+    pub interface: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstGraphSetOutputARM<'a> {
+    pub value: IdRef,
+    pub output_index: IdRef,
+    pub element_index: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstGraphEndARM;
+#[derive(Clone, Copy)]
+pub struct InstSampledImage {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub sampler: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleImplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleExplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: ImageOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleDrefImplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleDrefExplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: ImageOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleProjImplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleProjExplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: ImageOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleProjDrefImplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleProjDrefExplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: ImageOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageFetch {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageGather {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub component: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageDrefGather {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageRead {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImage {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageQueryFormat {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageQueryOrder {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageQuerySizeLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub level_of_detail: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageQuerySize {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageQueryLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageQueryLevels {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageQuerySamples {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseSampleImplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseSampleExplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: ImageOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseSampleDrefImplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseSampleDrefExplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: ImageOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseSampleProjImplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseSampleProjExplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: ImageOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseSampleProjDrefImplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseSampleProjDrefExplicitLod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: ImageOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseFetch {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseGather {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub component: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseDrefGather {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub dref: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseTexelsResident {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub resident_code: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSparseRead {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstColorAttachmentReadEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub attachment: IdRef,
+    pub sample: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstDepthAttachmentReadEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sample: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstStencilAttachmentReadEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sample: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleWeightedQCOM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub texture: IdRef,
+    pub coordinates: IdRef,
+    pub weights: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageBoxFilterQCOM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub texture: IdRef,
+    pub coordinates: IdRef,
+    pub box_size: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageBlockMatchSSDQCOM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
     pub target: IdRef,
+    pub target_coordinates: IdRef,
+    pub reference: IdRef,
+    pub reference_coordinates: IdRef,
+    pub block_size: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageBlockMatchSADQCOM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub target: IdRef,
+    pub target_coordinates: IdRef,
+    pub reference: IdRef,
+    pub reference_coordinates: IdRef,
+    pub block_size: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageBlockMatchWindowSSDQCOM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub target_sampled_image: IdRef,
+    pub target_coordinates: IdRef,
+    pub reference_sampled_image: IdRef,
+    pub reference_coordinates: IdRef,
+    pub block_size: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageBlockMatchWindowSADQCOM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub target_sampled_image: IdRef,
+    pub target_coordinates: IdRef,
+    pub reference_sampled_image: IdRef,
+    pub reference_coordinates: IdRef,
+    pub block_size: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageBlockMatchGatherSSDQCOM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub target_sampled_image: IdRef,
+    pub target_coordinates: IdRef,
+    pub reference_sampled_image: IdRef,
+    pub reference_coordinates: IdRef,
+    pub block_size: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageBlockMatchGatherSADQCOM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub target_sampled_image: IdRef,
+    pub target_coordinates: IdRef,
+    pub reference_sampled_image: IdRef,
+    pub reference_coordinates: IdRef,
+    pub block_size: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageSampleFootprintNV {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub sampled_image: IdRef,
+    pub coordinate: IdRef,
+    pub granularity: IdRef,
+    pub coarse: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstConvertHandleToImageINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstConvertHandleToSamplerINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstConvertHandleToSampledImageINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageWrite {
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub texel: IdRef,
+    pub image_operands: Option<ImageOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstFunction {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub function_control: FunctionControl,
+    pub function_type: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFunctionParameter {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+}
+#[derive(Clone, Copy)]
+pub struct InstFunctionCall<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub function: IdRef,
+    pub arguments: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeMatrixPerElementOpNV<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub matrix: IdRef,
+    pub func: IdRef,
+    pub operands: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstFunctionEnd;
+#[derive(Clone, Copy)]
+pub struct InstExtInstImport<'a> {
+    pub id_result: IdResult,
+    pub name: LiteralString<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstExtInst<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub set: IdRef,
+    pub instruction: LiteralExtInstInteger,
+    pub operands: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstExtInstWithForwardRefsKHR<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub set: IdRef,
+    pub instruction: LiteralExtInstInteger,
+    pub operands: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstExtension<'a> {
+    pub name: LiteralString<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstConditionalExtensionINTEL<'a> {
+    pub condition: IdRef,
+    pub name: LiteralString<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupAsyncCopy {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub destination: IdRef,
     pub source: IdRef,
-    pub size: IdRef,
-    pub memory_access_1: Option<MemoryAccess>,
-    pub memory_access_2: Option<MemoryAccess>,
+    pub num_elements: IdRef,
+    pub stride: IdRef,
+    pub event: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstUntypedPrefetchKHR {
-    pub pointer_type: IdRef,
-    pub num_bytes: IdRef,
-    pub rw: Option<IdRef>,
-    pub locality: Option<IdRef>,
-    pub cache_type: Option<IdRef>,
+pub struct InstGroupAll {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub predicate: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixStoreKHR {
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub memory_layout: IdRef,
-    pub stride: Option<IdRef>,
-    pub memory_operand: Option<MemoryAccess>,
+pub struct InstGroupAny {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub predicate: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstCooperativeVectorStoreNV {
-    pub pointer: IdRef,
-    pub offset: IdRef,
-    pub object: IdRef,
-    pub memory_access: Option<MemoryAccess>,
+pub struct InstGroupBroadcast {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub local_id: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixStoreTensorNV {
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub tensor_layout: IdRef,
-    pub memory_operand: MemoryAccess,
-    pub tensor_addressing_operands: TensorAddressingOperands,
+pub struct InstGroupIAdd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstRestoreMemoryINTEL {
+pub struct InstGroupFAdd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupFMin {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupUMin {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupSMin {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupFMax {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupUMax {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupSMax {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupBallotKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub predicate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupFirstInvocationKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupAllKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub predicate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupAnyKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub predicate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupAllEqualKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub predicate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupNonUniformRotateKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub value: IdRef,
+    pub delta: IdRef,
+    pub cluster_size: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupReadInvocationKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub value: IdRef,
+    pub index: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedGroupAsyncCopyKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdRef,
+    pub destination: IdRef,
+    pub source: IdRef,
+    pub element_num_bytes: IdRef,
+    pub num_elements: IdRef,
+    pub stride: IdRef,
+    pub event: IdRef,
+    pub destination_memory_operands: Option<MemoryAccess>,
+    pub source_memory_operands: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupIAddNonUniformAMD {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupFAddNonUniformAMD {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupFMinNonUniformAMD {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupUMinNonUniformAMD {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupSMinNonUniformAMD {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupFMaxNonUniformAMD {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupUMaxNonUniformAMD {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupSMaxNonUniformAMD {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupShuffleINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub data: IdRef,
+    pub invocation_id: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupShuffleDownINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub current: IdRef,
+    pub next: IdRef,
+    pub delta: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupShuffleUpINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub previous: IdRef,
+    pub current: IdRef,
+    pub delta: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupShuffleXorINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub data: IdRef,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupBlockReadINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
     pub ptr: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstMaskedScatterINTEL {
-    pub input_vector: IdRef,
-    pub ptr_vector: IdRef,
-    pub alignment: LiteralInteger,
-    pub mask: IdRef,
+pub struct InstSubgroupImageBlockReadINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub coordinate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupImageMediaBlockReadINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub width: IdRef,
+    pub height: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupMatrixMultiplyAccumulateINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub k_dim: IdRef,
+    pub matrix_a: IdRef,
+    pub matrix_b: IdRef,
+    pub matrix_c: IdRef,
+    pub matrix_multiply_accumulate_operands: Option<MatrixMultiplyAccumulateOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupIMulKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupFMulKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupBitwiseAndKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupBitwiseOrKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupBitwiseXorKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupLogicalAndKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupLogicalOrKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupLogicalXorKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub execution: IdScope,
+    pub operation: GroupOperation,
+    pub x: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupWaitEvents {
+    pub execution: IdScope,
+    pub num_events: IdRef,
+    pub events_list: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupBlockWriteINTEL {
+    pub ptr: IdRef,
+    pub data: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupImageBlockWriteINTEL {
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub data: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupImageMediaBlockWriteINTEL {
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub width: IdRef,
+    pub height: IdRef,
+    pub data: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroupBlockPrefetchINTEL {
+    pub ptr: IdRef,
+    pub num_bytes: IdRef,
+    pub memory_access: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroup2DBlockLoadINTEL {
+    pub element_size: IdRef,
+    pub block_width: IdRef,
+    pub block_height: IdRef,
+    pub block_count: IdRef,
+    pub src_base_pointer: IdRef,
+    pub memory_width: IdRef,
+    pub memory_height: IdRef,
+    pub memory_pitch: IdRef,
+    pub coordinate: IdRef,
+    pub dst_pointer: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroup2DBlockLoadTransformINTEL {
+    pub element_size: IdRef,
+    pub block_width: IdRef,
+    pub block_height: IdRef,
+    pub block_count: IdRef,
+    pub src_base_pointer: IdRef,
+    pub memory_width: IdRef,
+    pub memory_height: IdRef,
+    pub memory_pitch: IdRef,
+    pub coordinate: IdRef,
+    pub dst_pointer: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroup2DBlockLoadTransposeINTEL {
+    pub element_size: IdRef,
+    pub block_width: IdRef,
+    pub block_height: IdRef,
+    pub block_count: IdRef,
+    pub src_base_pointer: IdRef,
+    pub memory_width: IdRef,
+    pub memory_height: IdRef,
+    pub memory_pitch: IdRef,
+    pub coordinate: IdRef,
+    pub dst_pointer: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroup2DBlockPrefetchINTEL {
+    pub element_size: IdRef,
+    pub block_width: IdRef,
+    pub block_height: IdRef,
+    pub block_count: IdRef,
+    pub src_base_pointer: IdRef,
+    pub memory_width: IdRef,
+    pub memory_height: IdRef,
+    pub memory_pitch: IdRef,
+    pub coordinate: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSubgroup2DBlockStoreINTEL {
+    pub element_size: IdRef,
+    pub block_width: IdRef,
+    pub block_height: IdRef,
+    pub block_count: IdRef,
+    pub src_pointer: IdRef,
+    pub dst_base_pointer: IdRef,
+    pub memory_width: IdRef,
+    pub memory_height: IdRef,
+    pub memory_pitch: IdRef,
+    pub coordinate: IdRef,
 }
 #[derive(Clone, Copy)]
 pub struct InstConvertFToU {
@@ -1153,630 +2105,148 @@ pub struct InstRoundFToTF32INTEL {
     pub float_value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicLoad {
+pub struct InstReadPipe {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
+    pub pipe: IdRef,
     pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicExchange {
+pub struct InstWritePipe {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
+    pub pipe: IdRef,
     pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicCompareExchange {
+pub struct InstReservedReadPipe {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
+    pub pipe: IdRef,
+    pub reserve_id: IdRef,
+    pub index: IdRef,
     pub pointer: IdRef,
-    pub memory: IdScope,
-    pub equal: IdMemorySemantics,
-    pub unequal: IdMemorySemantics,
-    pub value: IdRef,
-    pub comparator: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicCompareExchangeWeak {
+pub struct InstReservedWritePipe {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
+    pub pipe: IdRef,
+    pub reserve_id: IdRef,
+    pub index: IdRef,
     pub pointer: IdRef,
-    pub memory: IdScope,
-    pub equal: IdMemorySemantics,
-    pub unequal: IdMemorySemantics,
-    pub value: IdRef,
-    pub comparator: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicIIncrement {
+pub struct InstReserveReadPipePackets {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
+    pub pipe: IdRef,
+    pub num_packets: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicIDecrement {
+pub struct InstReserveWritePipePackets {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
+    pub pipe: IdRef,
+    pub num_packets: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicIAdd {
+pub struct InstIsValidReserveId {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
+    pub reserve_id: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicISub {
+pub struct InstGetNumPipePackets {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
+    pub pipe: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicSMin {
+pub struct InstGetMaxPipePackets {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
+    pub pipe: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicUMin {
+pub struct InstGroupReserveReadPipePackets {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
+    pub execution: IdScope,
+    pub pipe: IdRef,
+    pub num_packets: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicSMax {
+pub struct InstGroupReserveWritePipePackets {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
+    pub execution: IdScope,
+    pub pipe: IdRef,
+    pub num_packets: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicUMax {
+pub struct InstConstantPipeStorage {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
+    pub packet_size: LiteralInteger,
+    pub packet_alignment: LiteralInteger,
+    pub capacity: LiteralInteger,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicAnd {
+pub struct InstCreatePipeFromPipeStorage {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
+    pub pipe_storage: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstAtomicOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFlagTestAndSet {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFMinEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFMaxEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFAddEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicStore {
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFlagClear {
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstString<'a> {
-    pub id_result: IdResult,
-    pub string: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSourceContinued<'a> {
-    pub continued_source: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSource<'a> {
-    pub source_language: SourceLanguage,
-    pub version: LiteralInteger,
-    pub file: Option<IdRef>,
-    pub source: Option<LiteralString<'a>>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSourceExtension<'a> {
-    pub extension: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstName<'a> {
-    pub target: IdRef,
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemberName<'a> {
-    pub ty: IdRef,
-    pub member: LiteralInteger,
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstLine {
-    pub file: IdRef,
-    pub line: LiteralInteger,
-    pub column: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstNoLine;
-#[derive(Clone, Copy)]
-pub struct InstModuleProcessed<'a> {
-    pub process: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSNegate {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFNegate {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstISub {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFSub {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIMul {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFMul {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUDiv {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSDiv {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFDiv {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUMod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSRem {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSMod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFRem {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFMod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstVectorTimesScalar {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector: IdRef,
-    pub scalar: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMatrixTimesScalar {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-    pub scalar: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstVectorTimesMatrix {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector: IdRef,
-    pub matrix: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMatrixTimesVector {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-    pub vector: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMatrixTimesMatrix {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub left_matrix: IdRef,
-    pub right_matrix: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstOuterProduct {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIAddCarry {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstISubBorrow {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUMulExtended {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSMulExtended {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFmaKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-    pub operand_3: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSDot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstUDot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSUDot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSDotAccSat {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstUDotAccSat {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSUDotAccSat {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixMulAddKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub a: IdRef,
-    pub b: IdRef,
-    pub c: IdRef,
-    pub cooperative_matrix_operands: Option<CooperativeMatrixOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixReduceNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-    pub reduce: CooperativeMatrixReduce,
-    pub combine_func: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstExtInstImport<'a> {
-    pub id_result: IdResult,
-    pub name: LiteralString<'a>,
+pub struct InstCommitReadPipe {
+    pub pipe: IdRef,
+    pub reserve_id: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstExtInst<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub set: IdRef,
-    pub instruction: LiteralExtInstInteger,
-    pub operands: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstExtInstWithForwardRefsKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub set: IdRef,
-    pub instruction: LiteralExtInstInteger,
-    pub operands: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstExtension<'a> {
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstConditionalExtensionINTEL<'a> {
-    pub condition: IdRef,
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstShiftRightLogical {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub shift: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstShiftRightArithmetic {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub shift: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstShiftLeftLogical {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub shift: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitwiseOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitwiseXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitwiseAnd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstNot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitFieldInsert {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub insert: IdRef,
-    pub offset: IdRef,
-    pub count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitFieldSExtract {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub offset: IdRef,
-    pub count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitFieldUExtract {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub offset: IdRef,
-    pub count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitReverse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitCount {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitwiseFunctionINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub a: IdRef,
-    pub b: IdRef,
-    pub c: IdRef,
-    pub lutindex: IdRef,
+pub struct InstCommitWritePipe {
+    pub pipe: IdRef,
+    pub reserve_id: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
-#[derive(Clone, Copy)]
-pub struct InstEmitVertex;
-#[derive(Clone, Copy)]
-pub struct InstEndPrimitive;
 #[derive(Clone, Copy)]
-pub struct InstEmitStreamVertex {
-    pub stream: IdRef,
+pub struct InstGroupCommitReadPipe {
+    pub execution: IdScope,
+    pub pipe: IdRef,
+    pub reserve_id: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstEndStreamPrimitive {
-    pub stream: IdRef,
+pub struct InstGroupCommitWritePipe {
+    pub execution: IdScope,
+    pub pipe: IdRef,
+    pub reserve_id: IdRef,
+    pub packet_size: IdRef,
+    pub packet_alignment: IdRef,
 }
 #[derive(Clone, Copy)]
 pub struct InstEnqueueMarker {
@@ -1902,53 +2372,6 @@ pub struct InstCaptureEventProfilingInfo {
     pub event: IdRef,
     pub profiling_info: IdRef,
     pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDecorationGroup {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstDecorate<'a> {
-    pub target: IdRef,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemberDecorate<'a> {
-    pub structure_type: IdRef,
-    pub member: LiteralInteger,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupDecorate<'a> {
-    pub decoration_group: IdRef,
-    pub targets: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupMemberDecorate<'a> {
-    pub decoration_group: IdRef,
-    pub targets: &'a [PairIdRefLiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstDecorateId<'a> {
-    pub target: IdRef,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemberDecorateIdEXT<'a> {
-    pub structure_type: IdRef,
-    pub member: LiteralInteger,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstDecorateString<'a> {
-    pub target: IdRef,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemberDecorateString<'a> {
-    pub struct_type: IdRef,
-    pub member: LiteralInteger,
-    pub decoration: Decoration<'a>,
 }
 #[derive(Clone, Copy)]
 pub struct InstConvertUToAccelerationStructureKHR {
@@ -3234,599 +3657,189 @@ pub struct InstLoopControlINTEL<'a> {
     pub loop_control_parameters: &'a [LiteralInteger],
 }
 #[derive(Clone, Copy)]
-pub struct InstUndef {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstSizeOf {
+pub struct InstAtomicLoad {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
     pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
 }
 #[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixLengthKHR {
+pub struct InstAtomicExchange {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub ty: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstPoisonKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstFreezeKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstExpectKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-    pub expected_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstArithmeticFenceEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstNop;
-#[derive(Clone, Copy)]
-pub struct InstAssumeTrueKHR {
-    pub condition: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdx {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdy {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFwidth {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdxFine {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdyFine {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFwidthFine {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdxCoarse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdyCoarse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFwidthCoarse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFunction {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub function_control: FunctionControl,
-    pub function_type: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFunctionParameter {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstFunctionCall<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub function: IdRef,
-    pub arguments: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixPerElementOpNV<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-    pub func: IdRef,
-    pub operands: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstFunctionEnd;
-#[derive(Clone, Copy)]
-pub struct InstSampledImage {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub sampler: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleDrefImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleDrefExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleProjImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleProjExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleProjDrefImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleProjDrefExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageFetch {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageGather {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub component: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageDrefGather {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageRead {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImage {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQueryFormat {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQueryOrder {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQuerySizeLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub level_of_detail: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQuerySize {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQueryLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQueryLevels {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQuerySamples {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleDrefImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleDrefExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleProjImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleProjExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleProjDrefImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleProjDrefExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseFetch {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseGather {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub component: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseDrefGather {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseTexelsResident {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub resident_code: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseRead {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstColorAttachmentReadEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub attachment: IdRef,
-    pub sample: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstDepthAttachmentReadEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sample: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstStencilAttachmentReadEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sample: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleWeightedQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub texture: IdRef,
-    pub coordinates: IdRef,
-    pub weights: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBoxFilterQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub texture: IdRef,
-    pub coordinates: IdRef,
-    pub box_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchSSDQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchSADQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchWindowSSDQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target_sampled_image: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference_sampled_image: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchWindowSADQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target_sampled_image: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference_sampled_image: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchGatherSSDQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target_sampled_image: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference_sampled_image: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchGatherSADQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target_sampled_image: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference_sampled_image: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleFootprintNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub granularity: IdRef,
-    pub coarse: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertHandleToImageINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertHandleToSamplerINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertHandleToSampledImageINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageWrite {
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub texel: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstPhi<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub variables: &'a [PairIdRefIdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstLabel {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstLoopMerge {
-    pub merge_block: IdRef,
-    pub continue_target: IdRef,
-    pub loop_control: LoopControl,
-}
-#[derive(Clone, Copy)]
-pub struct InstSelectionMerge {
-    pub merge_block: IdRef,
-    pub selection_control: SelectionControl,
-}
-#[derive(Clone, Copy)]
-pub struct InstBranch {
-    pub target_label: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBranchConditional<'a> {
-    pub condition: IdRef,
-    pub true_label: IdRef,
-    pub false_label: IdRef,
-    pub branch_weights: &'a [LiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstSwitch<'a> {
-    pub selector: IdRef,
-    pub default: IdRef,
-    pub target: &'a [PairLiteralIntegerIdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstKill;
-#[derive(Clone, Copy)]
-pub struct InstReturn;
-#[derive(Clone, Copy)]
-pub struct InstReturnValue {
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUnreachable;
-#[derive(Clone, Copy)]
-pub struct InstLifetimeStart {
     pub pointer: IdRef,
-    pub size: LiteralInteger,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstLifetimeStop {
+pub struct InstAtomicCompareExchange {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
     pub pointer: IdRef,
-    pub size: LiteralInteger,
+    pub memory: IdScope,
+    pub equal: IdMemorySemantics,
+    pub unequal: IdMemorySemantics,
+    pub value: IdRef,
+    pub comparator: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstTerminateInvocation;
-#[derive(Clone, Copy)]
-pub struct InstAbortKHR {
-    pub message_type: IdRef,
-    pub message: IdRef,
+pub struct InstAtomicCompareExchangeWeak {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub equal: IdMemorySemantics,
+    pub unequal: IdMemorySemantics,
+    pub value: IdRef,
+    pub comparator: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstDemoteToHelperInvocation;
+pub struct InstAtomicIIncrement {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicIDecrement {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicIAdd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicISub {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicSMin {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicUMin {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicSMax {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicUMax {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicAnd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicOr {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicXor {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicFlagTestAndSet {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicFMinEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicFMaxEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicFAddEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicStore {
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+    pub value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstAtomicFlagClear {
+    pub pointer: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
 #[derive(Clone, Copy)]
 pub struct InstVectorExtractDynamic {
     pub id_result_type: IdResultType,
@@ -3925,6 +3938,291 @@ pub struct InstConditionalCopyObjectINTEL<'a> {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
     pub conditions_and_operands_and: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstSNegate {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFNegate {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstIAdd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFAdd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstISub {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFSub {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstIMul {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFMul {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstUDiv {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSDiv {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFDiv {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstUMod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSRem {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSMod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFRem {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFMod {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstVectorTimesScalar {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector: IdRef,
+    pub scalar: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstMatrixTimesScalar {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub matrix: IdRef,
+    pub scalar: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstVectorTimesMatrix {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector: IdRef,
+    pub matrix: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstMatrixTimesVector {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub matrix: IdRef,
+    pub vector: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstMatrixTimesMatrix {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub left_matrix: IdRef,
+    pub right_matrix: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstOuterProduct {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector_1: IdRef,
+    pub vector_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstDot {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector_1: IdRef,
+    pub vector_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstIAddCarry {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstISubBorrow {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstUMulExtended {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSMulExtended {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFmaKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+    pub operand_3: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSDot {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector_1: IdRef,
+    pub vector_2: IdRef,
+    pub packed_vector_format: Option<PackedVectorFormat>,
+}
+#[derive(Clone, Copy)]
+pub struct InstUDot {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector_1: IdRef,
+    pub vector_2: IdRef,
+    pub packed_vector_format: Option<PackedVectorFormat>,
+}
+#[derive(Clone, Copy)]
+pub struct InstSUDot {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector_1: IdRef,
+    pub vector_2: IdRef,
+    pub packed_vector_format: Option<PackedVectorFormat>,
+}
+#[derive(Clone, Copy)]
+pub struct InstSDotAccSat {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector_1: IdRef,
+    pub vector_2: IdRef,
+    pub accumulator: IdRef,
+    pub packed_vector_format: Option<PackedVectorFormat>,
+}
+#[derive(Clone, Copy)]
+pub struct InstUDotAccSat {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector_1: IdRef,
+    pub vector_2: IdRef,
+    pub accumulator: IdRef,
+    pub packed_vector_format: Option<PackedVectorFormat>,
+}
+#[derive(Clone, Copy)]
+pub struct InstSUDotAccSat {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub vector_1: IdRef,
+    pub vector_2: IdRef,
+    pub accumulator: IdRef,
+    pub packed_vector_format: Option<PackedVectorFormat>,
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeMatrixMulAddKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub a: IdRef,
+    pub b: IdRef,
+    pub c: IdRef,
+    pub cooperative_matrix_operands: Option<CooperativeMatrixOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeMatrixReduceNV {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub matrix: IdRef,
+    pub reduce: CooperativeMatrixReduce,
+    pub combine_func: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstTensorReadARM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub tensor: IdRef,
+    pub coordinates: IdRef,
+    pub tensor_operands: Option<TensorOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstTensorQuerySizeARM {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub tensor: IdRef,
+    pub dimension: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstTensorWriteARM {
+    pub tensor: IdRef,
+    pub coordinates: IdRef,
+    pub object: IdRef,
+    pub tensor_operands: Option<TensorOperands>,
 }
 #[derive(Clone, Copy)]
 pub struct InstConstantTrue {
@@ -4050,39 +4348,90 @@ pub struct InstSpecConstantCompositeContinuedINTEL<'a> {
     pub constituents: &'a [IdRef],
 }
 #[derive(Clone, Copy)]
-pub struct InstNamedBarrierInitialize {
+pub struct InstUndef {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub subgroup_count: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstControlBarrier {
-    pub execution: IdScope,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
+pub struct InstSizeOf {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstMemoryBarrier {
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
+pub struct InstCooperativeMatrixLengthKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub ty: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstMemoryNamedBarrier {
-    pub named_barrier: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
+pub struct InstPoisonKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
 }
 #[derive(Clone, Copy)]
-pub struct InstControlBarrierArriveINTEL {
-    pub execution: IdScope,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
+pub struct InstFreezeKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub value: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstControlBarrierWaitINTEL {
-    pub execution: IdScope,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
+pub struct InstExpectKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub value: IdRef,
+    pub expected_value: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstArithmeticFenceEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub target: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstNop;
+#[derive(Clone, Copy)]
+pub struct InstAssumeTrueKHR {
+    pub condition: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstMemoryModel {
+    pub addressing_model: AddressingModel,
+    pub memory_model: MemoryModel,
+}
+#[derive(Clone, Copy)]
+pub struct InstEntryPoint<'a> {
+    pub execution_model: ExecutionModel,
+    pub entry_point: IdRef,
+    pub name: LiteralString<'a>,
+    pub interface: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstExecutionMode {
+    pub entry_point: IdRef,
+    pub mode: ExecutionMode,
+}
+#[derive(Clone, Copy)]
+pub struct InstCapability {
+    pub capability: Capability,
+}
+#[derive(Clone, Copy)]
+pub struct InstExecutionModeId {
+    pub entry_point: IdRef,
+    pub mode: ExecutionMode,
+}
+#[derive(Clone, Copy)]
+pub struct InstConditionalEntryPointINTEL<'a> {
+    pub condition: IdRef,
+    pub execution_model: ExecutionModel,
+    pub entry_point: IdRef,
+    pub name: LiteralString<'a>,
+    pub interface: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstConditionalCapabilityINTEL {
+    pub condition: IdRef,
+    pub capability: Capability,
 }
 #[derive(Clone, Copy)]
 pub struct InstTypeVoid {
@@ -4287,6 +4636,284 @@ pub struct InstTypeForwardPointer {
 #[derive(Clone, Copy)]
 pub struct InstTypeStructContinuedINTEL<'a> {
     pub member_types: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstVariable {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub storage_class: StorageClass,
+    pub initializer: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstImageTexelPointer {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub sample: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstLoad {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory_access: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstAccessChain<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub indexes: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstInBoundsAccessChain<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub indexes: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstPtrAccessChain<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub element: IdRef,
+    pub indexes: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstArrayLength {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub structure: IdRef,
+    pub array_member: LiteralInteger,
+}
+#[derive(Clone, Copy)]
+pub struct InstGenericPtrMemSemantics {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstInBoundsPtrAccessChain<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub element: IdRef,
+    pub indexes: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstPtrEqual {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstPtrNotEqual {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstPtrDiff {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedVariableKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub storage_class: StorageClass,
+    pub data_type: Option<IdRef>,
+    pub initializer: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedAccessChainKHR<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base_type: IdRef,
+    pub base: IdRef,
+    pub indexes: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedInBoundsAccessChainKHR<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base_type: IdRef,
+    pub base: IdRef,
+    pub indexes: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedPtrAccessChainKHR<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base_type: IdRef,
+    pub base: IdRef,
+    pub element: IdRef,
+    pub indexes: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedInBoundsPtrAccessChainKHR<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base_type: IdRef,
+    pub base: IdRef,
+    pub element: IdRef,
+    pub indexes: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedArrayLengthKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub structure: IdRef,
+    pub pointer: IdRef,
+    pub array_member: LiteralInteger,
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeMatrixLoadKHR {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub memory_layout: IdRef,
+    pub stride: Option<IdRef>,
+    pub memory_operand: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstBufferPointerEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub buffer: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedImageTexelPointerEXT {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub image_type: IdRef,
+    pub image: IdRef,
+    pub coordinate: IdRef,
+    pub sample: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeVectorLoadNV {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub offset: IdRef,
+    pub memory_access: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeMatrixLoadTensorNV {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub pointer: IdRef,
+    pub object: IdRef,
+    pub tensor_layout: IdRef,
+    pub memory_operand: MemoryAccess,
+    pub tensor_addressing_operands: TensorAddressingOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstRawAccessChainNV {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub byte_stride: IdRef,
+    pub element_index: IdRef,
+    pub byte_offset: IdRef,
+    pub raw_access_chain_operands: Option<RawAccessChainOperands>,
+}
+#[derive(Clone, Copy)]
+pub struct InstVariableLengthArrayINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub length: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstSaveMemoryINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedVariableLengthArrayINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub element_type: IdRef,
+    pub length: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstMaskedGatherINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub ptr_vector: IdRef,
+    pub alignment: LiteralInteger,
+    pub mask: IdRef,
+    pub fill_empty: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstStore {
+    pub pointer: IdRef,
+    pub object: IdRef,
+    pub memory_access: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstCopyMemory {
+    pub target: IdRef,
+    pub source: IdRef,
+    pub memory_access_1: Option<MemoryAccess>,
+    pub memory_access_2: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstCopyMemorySized {
+    pub target: IdRef,
+    pub source: IdRef,
+    pub size: IdRef,
+    pub memory_access_1: Option<MemoryAccess>,
+    pub memory_access_2: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstUntypedPrefetchKHR {
+    pub pointer_type: IdRef,
+    pub num_bytes: IdRef,
+    pub rw: Option<IdRef>,
+    pub locality: Option<IdRef>,
+    pub cache_type: Option<IdRef>,
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeMatrixStoreKHR {
+    pub pointer: IdRef,
+    pub object: IdRef,
+    pub memory_layout: IdRef,
+    pub stride: Option<IdRef>,
+    pub memory_operand: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeVectorStoreNV {
+    pub pointer: IdRef,
+    pub offset: IdRef,
+    pub object: IdRef,
+    pub memory_access: Option<MemoryAccess>,
+}
+#[derive(Clone, Copy)]
+pub struct InstCooperativeMatrixStoreTensorNV {
+    pub pointer: IdRef,
+    pub object: IdRef,
+    pub tensor_layout: IdRef,
+    pub memory_operand: MemoryAccess,
+    pub tensor_addressing_operands: TensorAddressingOperands,
+}
+#[derive(Clone, Copy)]
+pub struct InstRestoreMemoryINTEL {
+    pub ptr: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstMaskedScatterINTEL {
+    pub input_vector: IdRef,
+    pub ptr_vector: IdRef,
+    pub alignment: LiteralInteger,
+    pub mask: IdRef,
 }
 #[derive(Clone, Copy)]
 pub struct InstAny {
@@ -4548,938 +5175,311 @@ pub struct InstFUnordGreaterThanEqual {
     pub operand_2: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstGroupAsyncCopy {
+pub struct InstDPdx {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub execution: IdScope,
-    pub destination: IdRef,
-    pub source: IdRef,
-    pub num_elements: IdRef,
-    pub stride: IdRef,
-    pub event: IdRef,
+    pub p: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstGroupAll {
+pub struct InstDPdy {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
+    pub p: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstGroupAny {
+pub struct InstFwidth {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
+    pub p: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstGroupBroadcast {
+pub struct InstDPdxFine {
     pub id_result_type: IdResultType,
     pub id_result: IdResult,
+    pub p: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstDPdyFine {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub p: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFwidthFine {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub p: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstDPdxCoarse {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub p: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstDPdyCoarse {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub p: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstFwidthCoarse {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub p: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstDecorationGroup {
+    pub id_result: IdResult,
+}
+#[derive(Clone, Copy)]
+pub struct InstDecorate<'a> {
+    pub target: IdRef,
+    pub decoration: Decoration<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstMemberDecorate<'a> {
+    pub structure_type: IdRef,
+    pub member: LiteralInteger,
+    pub decoration: Decoration<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupDecorate<'a> {
+    pub decoration_group: IdRef,
+    pub targets: &'a [IdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstGroupMemberDecorate<'a> {
+    pub decoration_group: IdRef,
+    pub targets: &'a [PairIdRefLiteralInteger],
+}
+#[derive(Clone, Copy)]
+pub struct InstDecorateId<'a> {
+    pub target: IdRef,
+    pub decoration: Decoration<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstMemberDecorateIdEXT<'a> {
+    pub structure_type: IdRef,
+    pub member: LiteralInteger,
+    pub decoration: Decoration<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstDecorateString<'a> {
+    pub target: IdRef,
+    pub decoration: Decoration<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstMemberDecorateString<'a> {
+    pub struct_type: IdRef,
+    pub member: LiteralInteger,
+    pub decoration: Decoration<'a>,
+}
+#[derive(Clone, Copy)]
+pub struct InstShiftRightLogical {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub shift: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstShiftRightArithmetic {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub shift: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstShiftLeftLogical {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub shift: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitwiseOr {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitwiseXor {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitwiseAnd {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand_1: IdRef,
+    pub operand_2: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstNot {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub operand: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitFieldInsert {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub insert: IdRef,
+    pub offset: IdRef,
+    pub count: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitFieldSExtract {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub offset: IdRef,
+    pub count: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitFieldUExtract {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+    pub offset: IdRef,
+    pub count: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitReverse {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitCount {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub base: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBitwiseFunctionINTEL {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub a: IdRef,
+    pub b: IdRef,
+    pub c: IdRef,
+    pub lutindex: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstEmitVertex;
+#[derive(Clone, Copy)]
+pub struct InstEndPrimitive;
+#[derive(Clone, Copy)]
+pub struct InstEmitStreamVertex {
+    pub stream: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstEndStreamPrimitive {
+    pub stream: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstNamedBarrierInitialize {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub subgroup_count: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstControlBarrier {
     pub execution: IdScope,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
+#[derive(Clone, Copy)]
+pub struct InstMemoryBarrier {
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
+#[derive(Clone, Copy)]
+pub struct InstMemoryNamedBarrier {
+    pub named_barrier: IdRef,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
+#[derive(Clone, Copy)]
+pub struct InstControlBarrierArriveINTEL {
+    pub execution: IdScope,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
+#[derive(Clone, Copy)]
+pub struct InstControlBarrierWaitINTEL {
+    pub execution: IdScope,
+    pub memory: IdScope,
+    pub semantics: IdMemorySemantics,
+}
+#[derive(Clone, Copy)]
+pub struct InstPhi<'a> {
+    pub id_result_type: IdResultType,
+    pub id_result: IdResult,
+    pub variables: &'a [PairIdRefIdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstLabel {
+    pub id_result: IdResult,
+}
+#[derive(Clone, Copy)]
+pub struct InstLoopMerge {
+    pub merge_block: IdRef,
+    pub continue_target: IdRef,
+    pub loop_control: LoopControl,
+}
+#[derive(Clone, Copy)]
+pub struct InstSelectionMerge {
+    pub merge_block: IdRef,
+    pub selection_control: SelectionControl,
+}
+#[derive(Clone, Copy)]
+pub struct InstBranch {
+    pub target_label: IdRef,
+}
+#[derive(Clone, Copy)]
+pub struct InstBranchConditional<'a> {
+    pub condition: IdRef,
+    pub true_label: IdRef,
+    pub false_label: IdRef,
+    pub branch_weights: &'a [LiteralInteger],
+}
+#[derive(Clone, Copy)]
+pub struct InstSwitch<'a> {
+    pub selector: IdRef,
+    pub default: IdRef,
+    pub target: &'a [PairLiteralIntegerIdRef],
+}
+#[derive(Clone, Copy)]
+pub struct InstKill;
+#[derive(Clone, Copy)]
+pub struct InstReturn;
+#[derive(Clone, Copy)]
+pub struct InstReturnValue {
     pub value: IdRef,
-    pub local_id: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstGroupIAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
+pub struct InstUnreachable;
 #[derive(Clone, Copy)]
-pub struct InstGroupFAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupUMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupSMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupUMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupSMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupBallotKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupFirstInvocationKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupAllKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupAnyKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupAllEqualKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformRotateKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub delta: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupReadInvocationKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedGroupAsyncCopyKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdRef,
-    pub destination: IdRef,
-    pub source: IdRef,
-    pub element_num_bytes: IdRef,
-    pub num_elements: IdRef,
-    pub stride: IdRef,
-    pub event: IdRef,
-    pub destination_memory_operands: Option<MemoryAccess>,
-    pub source_memory_operands: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupIAddNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFAddNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMinNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupUMinNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupSMinNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMaxNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupUMaxNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupSMaxNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupShuffleINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub data: IdRef,
-    pub invocation_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupShuffleDownINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub current: IdRef,
-    pub next: IdRef,
-    pub delta: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupShuffleUpINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub previous: IdRef,
-    pub current: IdRef,
-    pub delta: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupShuffleXorINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub data: IdRef,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupBlockReadINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ptr: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupImageBlockReadINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupImageMediaBlockReadINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub width: IdRef,
-    pub height: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupMatrixMultiplyAccumulateINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub k_dim: IdRef,
-    pub matrix_a: IdRef,
-    pub matrix_b: IdRef,
-    pub matrix_c: IdRef,
-    pub matrix_multiply_accumulate_operands: Option<MatrixMultiplyAccumulateOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupIMulKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMulKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupBitwiseAndKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupBitwiseOrKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupBitwiseXorKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupLogicalAndKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupLogicalOrKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupLogicalXorKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupWaitEvents {
-    pub execution: IdScope,
-    pub num_events: IdRef,
-    pub events_list: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupBlockWriteINTEL {
-    pub ptr: IdRef,
-    pub data: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupImageBlockWriteINTEL {
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub data: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupImageMediaBlockWriteINTEL {
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub width: IdRef,
-    pub height: IdRef,
-    pub data: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupBlockPrefetchINTEL {
-    pub ptr: IdRef,
-    pub num_bytes: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockLoadINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-    pub dst_pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockLoadTransformINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-    pub dst_pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockLoadTransposeINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-    pub dst_pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockPrefetchINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockStoreINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_pointer: IdRef,
-    pub dst_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReadPipe {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
+pub struct InstLifetimeStart {
     pub pointer: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
+    pub size: LiteralInteger,
 }
 #[derive(Clone, Copy)]
-pub struct InstWritePipe {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
+pub struct InstLifetimeStop {
     pub pointer: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
+    pub size: LiteralInteger,
 }
 #[derive(Clone, Copy)]
-pub struct InstReservedReadPipe {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub index: IdRef,
-    pub pointer: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
+pub struct InstTerminateInvocation;
+#[derive(Clone, Copy)]
+pub struct InstAbortKHR {
+    pub message_type: IdRef,
+    pub message: IdRef,
 }
 #[derive(Clone, Copy)]
-pub struct InstReservedWritePipe {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub index: IdRef,
-    pub pointer: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReserveReadPipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub num_packets: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReserveWritePipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub num_packets: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIsValidReserveId {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub reserve_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetNumPipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetMaxPipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupReserveReadPipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub pipe: IdRef,
-    pub num_packets: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupReserveWritePipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub pipe: IdRef,
-    pub num_packets: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantPipeStorage {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub packet_size: LiteralInteger,
-    pub packet_alignment: LiteralInteger,
-    pub capacity: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstCreatePipeFromPipeStorage {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe_storage: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCommitReadPipe {
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCommitWritePipe {
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupCommitReadPipe {
-    pub execution: IdScope,
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupCommitWritePipe {
-    pub execution: IdScope,
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformElect {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformAll {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformAny {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformAllEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBroadcast {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub invocation_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBroadcastFirst {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformInverseBallot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallotBitExtract {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallotBitCount {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallotFindLSB {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallotFindMSB {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformShuffle {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub invocation_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformShuffleXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub mask: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformShuffleUp {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub delta: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformShuffleDown {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub delta: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformIAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformFAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformIMul {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformFMul {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformSMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformUMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformFMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformSMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformUMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformFMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBitwiseAnd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBitwiseOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBitwiseXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformLogicalAnd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformLogicalOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformLogicalXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformQuadBroadcast {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformQuadSwap {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub direction: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformQuadAllKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformQuadAnyKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformPartitionEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorReadARM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor: IdRef,
-    pub coordinates: IdRef,
-    pub tensor_operands: Option<TensorOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorQuerySizeARM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor: IdRef,
-    pub dimension: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorWriteARM {
-    pub tensor: IdRef,
-    pub coordinates: IdRef,
-    pub object: IdRef,
-    pub tensor_operands: Option<TensorOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphConstantARM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub graph_constant_id: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphARM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphInputARM<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub input_index: IdRef,
-    pub element_index: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphEntryPointARM<'a> {
-    pub graph: IdRef,
-    pub name: LiteralString<'a>,
-    pub interface: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphSetOutputARM<'a> {
-    pub value: IdRef,
-    pub output_index: IdRef,
-    pub element_index: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphEndARM;
+pub struct InstDemoteToHelperInvocation;

@@ -4,8 +4,6 @@
 
 mod error;
 
-use ::core::ffi::CStr;
-
 use crate::{
     core::*,
     op,
@@ -101,18 +99,6 @@ pub struct SpecConstant {
     pub id: Id,
 }
 
-/// Represents a shader resource.
-pub struct Resource<'a> {
-    /// The outer type of the resource.
-    pub type_id: Id,
-    /// The inner type of the resource.
-    pub base_type_id: Id,
-    /// The variable id of the resource.
-    pub variable_id: Id,
-    /// The variable name string of the resource.
-    pub name: Option<CompilerStr<'a>>,
-}
-
 /// A type specifying, which resources to [`reflect`][1].
 ///
 /// [1]: Reflector::resources_for_type
@@ -144,7 +130,7 @@ pub enum ResourceType {
 
 /// A hole created from the declaration of a runtime array.
 ///
-/// Can be [`resolved`][1] by giving the number of elements in the array.
+/// Can be resolved by giving the number of elements in the array.
 #[derive(Clone, Debug)]
 pub struct RuntimeArrayHole {
     stride: usize,
@@ -283,6 +269,51 @@ impl TypeSizeHint {
     } 
 }
 
+/// Represents resource count in [`Resource`].
+#[derive(Clone, Copy, Debug)]
+pub enum ResourceCount {
+    /// The size is known statically.
+    Static(usize),
+    /// The resource is in a runtime array.
+    Runtime {
+        /// The declared minimum count of resources.
+        declared: usize,
+    },
+}
+
+impl ResourceCount {
+
+    /// Gets the declared count.
+    #[inline]
+    pub fn declared(self) -> usize {
+        match self {
+            Self::Static(size) => size,
+            Self::Runtime { declared } => declared,
+        }
+    }
+}
+
+/// Represents a shader resource.
+#[derive(Clone, Copy)]
+pub struct Resource<'a> {
+    /// The outer type of the resource.
+    pub type_id: Id,
+    /// The inner type of the resource.
+    pub base_type_id: Id,
+    /// The variable id of the resource.
+    pub variable_id: Id,
+    /// The variable name string of the resource.
+    pub name: Option<CompilerStr<'a>>,
+    /// The number of [`base type`][1] values in an array.
+    ///
+    /// [1]: Self::base_type_id
+    pub count: ResourceCount,
+    /// Offset of the first member in a struct used for [`push constants`][1].
+    ///
+    /// [1]: ResourceType::PushConstant
+    pub offset: Option<u32>,
+}
+
 /// Describes a type.
 pub struct Type<'a> {
     /// The [`Id`] of the type.
@@ -339,7 +370,6 @@ pub struct Variable {
 /// let spirv: &[u32] = ...;
 /// let module = Module::new(spirv);
 /// let mut reflector = Reflector::new(module).unwrap();
-/// reflector.set_entry_point(c"main", op::ExecutionModel::FRAGMENT).unwrap();
 /// for push_constant in reflector.resources_for_type(ResourceType::PushConstant).unwrap() {
 ///     let push_constant = push_constant.unwrap();
 ///     let size = reflector
@@ -353,7 +383,6 @@ pub struct Variable {
 pub struct Reflector<'a> {
     module: Module<'a>,
     decorates: Vec<Decorate<'a>>,
-    current_entry_point: Option<op::InstEntryPoint<'a>>,
 }
 
 impl<'a> Reflector<'a> {
@@ -428,60 +457,25 @@ impl<'a> Reflector<'a> {
         Ok(Self {
             decorates,
             module,
-            current_entry_point: None,
         })
     }
 
-    /// Sets the entry point to reflect.
-    ///
-    /// This *must* be set before doing any reflection.
+    /// Returns an iterator over all variables.
     #[inline]
-    pub fn set_entry_point(
-        &mut self,
-        entry_point: &CStr,
-        execution_model: op::ExecutionModel,
-    ) -> ReflectResult<()> {
-        for mut stream in self.module.all_instructions() {
-            if stream.code() == op::Code::ENTRY_POINT {
-                let model = op::ExecutionModel::parse_one(&mut stream)?;
-                let entry_point_id = Id::parse_one(&mut stream)?;
-                let name = stream.read_string()?;
-                if name.to_cstr()? == entry_point && model == execution_model {
-                    self.current_entry_point = Some(op::InstEntryPoint {
-                        execution_model: model,
-                        entry_point: entry_point_id,
-                        name,
-                        interface: Id::parse_eos(&mut stream)?,
-                    });
-                    return Ok(())
-                }
-            }
-        }
-        Err(ReflectError::UnknownEntryPoint)
-    }
-
-    /// Returns an iterator over all variables contained in the [`current entry point`][1].
-    ///
-    /// [1]: Self::set_entry_point
-    #[inline]
-    pub fn variables(&self) -> ReflectResult<impl Iterator<Item = ReflectResult<Variable>>>
+    pub fn variables(&self) -> impl Iterator<Item = ReflectResult<Variable>>
     {
-        let Some(entry_point) = self.current_entry_point else {
-            return Err(ReflectError::NoEntryPointSet)
-        };
-        Ok(self.module
+        self.module
             .results()
             .map(|(_, mut stream)| {
                 if stream.code() == op::Code::VARIABLE {
                     let result_type = Id::parse_one(&mut stream)?;
                     let id_result = Id::parse_one(&mut stream)?;
-                    if entry_point.interface.contains(&id_result) {
-                        return Ok(Some(Variable {
-                            result_type,
-                            id_result,
-                            storage_class: op::StorageClass::parse_one(&mut stream)?,
-                        }))
-                    }
+                    let storage_class = op::StorageClass::parse_one(&mut stream)?;
+                    return Ok(Some(Variable {
+                        result_type,
+                        id_result,
+                        storage_class,
+                    }))
                 }
                 ReflectResult::Ok(None)
             }).filter_map(|variable| {
@@ -490,7 +484,6 @@ impl<'a> Reflector<'a> {
                     Err(err) => Some(Err(err)),
                 }
             })
-        )
     }
 
     fn names(&self) -> impl Iterator<Item = ReflectResult<Name<'a>>> {
@@ -678,11 +671,9 @@ impl<'a> Reflector<'a> {
             Ok(None)
         }
 
-        /// Returns an iterator over all resources used in the current [`entry point`][1] of
-        /// type [`ty`][2].
+        /// Returns an iterator over all resources of [`type`][1].
         ///
-        /// [1]: Self::set_entry_point
-        /// [2]: ResourceType
+        /// [1]: ResourceType
         pub fn resources_for_type(&self, ty: ResourceType) -> ReflectResult<
             impl Iterator<Item = ReflectResult<Resource<'a>>>
         >
@@ -700,16 +691,10 @@ impl<'a> Reflector<'a> {
                 | ResourceType::UniformTexelBuffer
                 | ResourceType::StorageTexelBuffer => op::StorageClass::UNIFORM_CONSTANT,
             };
-            Ok(self.variables()?.map(move |op_variable| {
+            Ok(self.variables().map(move |op_variable| {
                 let op_variable = op_variable?;
-                let name = self.names().find_map(|op_name| {
-                    if let Ok(name) = op_name &&
-                        name.target == op_variable.id_result
-                    {
-                        Some(name.name)
-                    } else { None }
-                });
                 let mut base_type = op_variable.result_type;
+                let mut count = ResourceCount::Static(1);
                 loop {
                     let mut stream = self.module
                         .get_result(base_type)
@@ -724,15 +709,54 @@ impl<'a> Reflector<'a> {
                             }
                             Id::parse_one(&mut stream)?
                         },
-                        op::Code::TYPE_ARRAY | op::Code::TYPE_RUNTIME_ARRAY => {
+                        op::Code::TYPE_ARRAY => {
                             let _ = stream.read()?;
+                            let id = Id::parse_one(&mut stream)?;
+                            let length = match self.constant(Id::parse_one(&mut stream)?)?
+                            {
+                                Constant::Constant(literal) => {
+                                    literal.as_usize()
+                                        .ok_or(ReflectError::NonIntegerLiteral(literal))?
+                                },
+                                Constant::SpecConstant(literal) => {
+                                    literal.as_usize()
+                                        .ok_or(ReflectError::NonIntegerLiteral(literal))?
+                                },
+                                x => return Err(ReflectError::ExpectedConstantLiteral {
+                                    found: format!("{x:?}")
+                                })
+                            };
+                            count = match count {
+                                ResourceCount::Static(count) =>
+                                    ResourceCount::Static(count * length),
+                                ResourceCount::Runtime { declared } =>
+                                    ResourceCount::Runtime { declared: declared * length },
+                            };
+                            id
+                        },
+                        op::Code::TYPE_RUNTIME_ARRAY => {
+                            let _ = stream.read()?;
+                            count = match count {
+                                ResourceCount::Static(count) =>
+                                    ResourceCount::Runtime { declared: count, },
+                                ResourceCount::Runtime { declared } =>
+                                    ResourceCount::Runtime { declared },
+
+                            };
                             Id::parse_one(&mut stream)?
-                        }
+                        },
                         _ => {
                             break
                         },
                     };
                 }
+                let name = self.names().find_map(|op_name| {
+                    if let Ok(name) = op_name &&
+                        name.target == op_variable.id_result
+                    {
+                        Some(name.name)
+                    } else { None }
+                }); 
                 if resource_class == op::StorageClass::UNIFORM_CONSTANT {
                     match ty {
                         ResourceType::InputAttachment => {
@@ -748,6 +772,8 @@ impl<'a> Reflector<'a> {
                                         base_type_id: base_type,
                                         variable_id: op_variable.id_result,
                                         name,
+                                        count,
+                                        offset: None,
                                     }))
                                 }
                             }
@@ -777,6 +803,8 @@ impl<'a> Reflector<'a> {
                                         base_type_id: base_type,
                                         variable_id: op_variable.id_result,
                                         name,
+                                        count,
+                                        offset: None,
                                     }))
                                 }
                             }
@@ -792,6 +820,8 @@ impl<'a> Reflector<'a> {
                                     base_type_id: base_type,
                                     variable_id: op_variable.id_result,
                                     name,
+                                    count,
+                                    offset: None,
                                 }))
                             } else { Ok(None) }
                         },
@@ -822,6 +852,8 @@ impl<'a> Reflector<'a> {
                                         base_type_id: base_type,
                                         variable_id: op_variable.id_result,
                                         name,
+                                        count,
+                                        offset: None,
                                     }))
                                 }
                             } 
@@ -837,6 +869,8 @@ impl<'a> Reflector<'a> {
                                     base_type_id: base_type,
                                     variable_id: op_variable.id_result,
                                     name,
+                                    count,
+                                    offset: None,
                                 }))
                             } else { Ok(None) }
                         },
@@ -855,6 +889,8 @@ impl<'a> Reflector<'a> {
                                         base_type_id: base_type,
                                         variable_id: op_variable.id_result, 
                                         name,
+                                        count,
+                                        offset: None,
                                     }))
                                 }
                             }
@@ -875,6 +911,8 @@ impl<'a> Reflector<'a> {
                                         base_type_id: base_type,
                                         variable_id: op_variable.id_result, 
                                         name,
+                                        count,
+                                        offset: None,
                                     }))
                                 }
                             }
@@ -883,12 +921,25 @@ impl<'a> Reflector<'a> {
                         _ => unreachable!()
                     }
                 } else {
+                    let offset = match ty {
+                        ResourceType::PushConstant => {
+                            self.decorations(base_type)
+                                .filter_map(|dec| {
+                                    if let op::Decoration::Offset { byte_offset } = dec.decoration {
+                                        Some(byte_offset)
+                                    } else { None }
+                                }).min()
+                        },
+                        _ => None
+                    };
                     Ok((op_variable.storage_class == resource_class).then_some(
                         Resource {
                             type_id: op_variable.result_type,
                             base_type_id: base_type,
                             variable_id: op_variable.id_result,
                             name,
+                            count,
+                            offset,
                         }
                     ))
                 }
@@ -948,7 +999,7 @@ impl<'a> Reflector<'a> {
                     Ok(Type {
                         id,
                         name,
-                        size_hint: TypeSizeHint::Static(width.div_ceil(8) as usize),
+                        size_hint: TypeSizeHint::Static(width as usize / 8),
                     })
                 },
                 op::Code::TYPE_VECTOR => {
@@ -963,7 +1014,7 @@ impl<'a> Reflector<'a> {
                         op::Code::TYPE_INT | op::Code::TYPE_FLOAT => {
                             let _ = stream.read()?;
                             let width = stream.read()?;
-                            (width.div_ceil(8) * component_count) as usize
+                            (width / 8 * component_count) as usize
                         },
                         x => return Err(ReflectError::ExpectedScalarType { found: x })
                     };
@@ -993,7 +1044,7 @@ impl<'a> Reflector<'a> {
                         op::Code::TYPE_BOOL => 4,
                         op::Code::TYPE_INT | op::Code::TYPE_FLOAT => {
                             let _ = stream.read()?;
-                            stream.read()?.div_ceil(8) as usize
+                            stream.read()? as usize / 8 
                         },
                         x => return Err(ReflectError::ExpectedScalarType {
                             found: x,
