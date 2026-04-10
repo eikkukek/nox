@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 use core::{
     fmt::{Display, self},
     error::Error,
@@ -10,6 +12,21 @@ use crate::{
     core::*,
 };
 
+/// SPIR_V version 1.0
+pub const VERSION_1_0: u32 = 0x00010000;
+/// SPIR_V version 1.1
+pub const VERSION_1_1: u32 = 0x00010100;
+/// SPIR_V version 1.2
+pub const VERSION_1_2: u32 = 0x00010200;
+/// SPIR_V version 1.3
+pub const VERSION_1_3: u32 = 0x00010300;
+/// SPIR_V version 1.4
+pub const VERSION_1_4: u32 = 0x00010400;
+/// SPIR_V version 1.5
+pub const VERSION_1_5: u32 = 0x00010500;
+/// SPIR_V version 1.6
+pub const VERSION_1_6: u32 = 0x00010600;
+
 /// Indicates that the SPIR-V code passed to a [`module`][1] is invalid.
 ///
 /// [1]: Module
@@ -17,6 +34,8 @@ use crate::{
 pub enum ParseError {
     /// Indicates that the end of the stream was reached prematurely.
     EndOfStream,
+    /// Indicates a wrong magic number for the module.
+    InvalidMagicNumber(u32),
     /// Indicates an invalid type.
     InvalidType {
         /// The expected type.
@@ -36,6 +55,13 @@ pub enum ParseError {
     InvalidIntLiteralWidth(u32),
     /// Indicates that an invalid floating point literal width was found.
     InvalidFloatLiteralWidth(u32),
+    /// Indicates that an id in SPIR-V was out of the set bounds.
+    IdOutOfBounds {
+        /// The set bound.
+        bound: u32,
+        /// The id.
+        id: op::IdResult,
+    },
     /// Indicates that an unknown variant was found.
     UnknownVariant {
         /// The enum type.
@@ -52,31 +78,32 @@ struct ResultStorage<'a> {
     data: Vec<Option<InstructionStream<'a>>>,
 }
 
-impl Default for ResultStorage<'_> {
-
-    #[inline]
-    fn default() -> Self {
-        Self {
-            data: vec![],
-        }
-    }
-}
-
 impl<'a> ResultStorage<'a>
 {
+
+    #[inline]
+    fn new(bound: u32) -> Self {
+        Self {
+            data: vec![None; bound as usize],
+        }
+    }
 
     #[inline]
     fn insert(&mut self,
         id: op::IdResult,
         mut stream: InstructionStream<'a>
-    )
+    ) -> ParseResult<()>
     {
         stream.reset();
         let idx = id.0 as usize;
         if idx >= self.data.len() {
-            self.data.resize_with(idx + 1, || None);
+            return Err(ParseError::IdOutOfBounds {
+                bound: self.data.len() as u32,
+                id
+            })
         }
         self.data[idx] = Some(stream);
+        Ok(())
     }
 
     #[inline]
@@ -100,11 +127,18 @@ impl<'a> Module<'a> {
 
     /// Creates a new module from SPIR-V words.
     #[inline]
-    pub fn new(spirv: &'a [u32]) -> Self {
-        Self {
-            stream: Stream::new(spirv),
-            results: Default::default(),
-        }
+    pub fn new(spirv: &'a [u32]) -> ParseResult<Self> {
+        let stream = Stream::new(spirv)?;
+        Ok(Self {
+            results: ResultStorage::new(stream.bound()),
+            stream,
+        })
+    }
+
+    /// The SPIR-V version of the module.
+    #[inline]
+    pub fn version(&self) -> u32 {
+        self.stream.version()
     }
 
     /// Tries to parse the next instruction.
@@ -124,7 +158,7 @@ impl<'a> Module<'a> {
             self.results.insert(
                 id,
                 instruction,
-            );
+            )?;
         }
         Ok(true)
     }
@@ -178,6 +212,9 @@ impl<'a> Module<'a> {
 /// A parse context used when parsing a [`Literal`].
 #[derive(Default, Clone, Copy)]
 pub struct ParseContext {
+    /// The optional [`result type`][1].
+    ///
+    /// [1]: op::IdResultType
     pub result_type: Option<op::IdResultType>,
 }
 
@@ -249,6 +286,7 @@ impl Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EndOfStream => write!(f, "end of stream"),
+            Self::InvalidMagicNumber(num) => write!(f, "invalid magic number {num}, expected 0x07230203"),
             Self::InvalidType { expected, found } => write!(f,
                 "invalid type; expected {expected}, found {found}",
             ),
@@ -263,6 +301,9 @@ impl Display for ParseError {
             ),
             Self::InvalidFloatLiteralWidth(width) => write!(f,
                 "invalid float literal width {width}",
+            ),
+            Self::IdOutOfBounds { bound, id } => write!(f,
+                "Id {id} is out of the set bound {bound}",
             ),
             Self::UnknownVariant { kind, value } => write!(f,
                 "unknown {kind} variant {value}",

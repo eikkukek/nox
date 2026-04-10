@@ -433,8 +433,6 @@ fn definition_gen(
         };
     };
     writeln!(definitions, "{header}")?;
-    let mut opcodes = vec![];
-    let mut opcode_display = vec![];
     #[derive(Clone, Copy)]
     struct Operand<'a> {
         needs_lifetime: bool,
@@ -447,6 +445,7 @@ fn definition_gen(
     struct Instruction<'a> {
         name: &'a str,
         code: u16,
+        code_idx: usize,
         operands: Vec<Operand<'a>>,
     }
     struct Class<'a> {
@@ -461,6 +460,8 @@ fn definition_gen(
     let parse_with_ctx: HashSet<_> =
         ["LiteralContextDependentNumber"]
         .into_iter().collect();
+    let mut opcodes = vec![];
+    let mut opcode_display = vec![];
     for member in parsed["instructions"].members() {
         let opname = member["opname"].as_str().unwrap();
         let class = member["class"].as_str().unwrap();
@@ -509,6 +510,7 @@ fn definition_gen(
             }
         }
         let upper_sc_name = upper_snake_case(opname.trim_start_matches("Op"));
+        let code_idx = opcodes.len();
         opcodes.push(quote! {
             pub const #upper_sc_name: Self = Self(#lit_opcode);
         });
@@ -521,6 +523,7 @@ fn definition_gen(
                 let instruction = Instruction {
                     name: opname,
                     code: opcode,
+                    code_idx,
                     operands: operands.clone(),
                 };
                 if has_result {
@@ -536,6 +539,7 @@ fn definition_gen(
                 let instruction = Instruction {
                     name: opname,
                     code: opcode,
+                    code_idx,
                     operands,
                 };
                 if has_result {
@@ -546,6 +550,207 @@ fn definition_gen(
                 class
             });
     }
+    let mut inst_infos = vec![];
+    for class in instruction_classes.values_mut() {
+        for instruction in &class.with_result {
+            let name = Ident::new(
+                instruction.name.trim_start_matches("Op"),
+                Span::call_site()
+            );
+            let mut fields = vec![];
+            let mut has_id_result_type = false;
+            let mut needs_lifetime = false;
+            for operand in &instruction.operands {
+                let name = if let Some(name) = operand.name {
+                    if let Some(dup) = operand.duplicate {
+                        field_name(&format!("{name}_{dup}"))
+                    } else {
+                        field_name(name)
+                    }
+                } else {
+                    if let Some(dup) = operand.duplicate {
+                        field_name(&format!("{}_{dup}", operand.kind))
+                    } else {
+                        field_name(operand.kind)
+                    }
+                };
+                has_id_result_type |= name == "id_result_type";
+                let kind = Ident::new(operand.kind, Span::call_site());
+                let mut operand_needs_lifetime = operand.needs_lifetime;
+                match operand.quantifier {
+                    None => {
+                        let mut field = format!("{name}: {kind}");
+                        if operand_needs_lifetime {
+                            field += "<'a>";
+                        }
+                        field += ",";
+                        fields.push(field);
+                    },
+                    Some('?') => {
+                        let mut field = format!("{name}: Option<{kind}");
+                        if operand_needs_lifetime {
+                            field += "<'a>";
+                        }
+                        field += ">,";
+                        fields.push(field);
+                    },
+                    Some('*') => {
+                        let mut field = format!("{name}: &'a [{kind}");
+                        if operand_needs_lifetime {
+                            field += "<'a>";
+                        }
+                        field += "],";
+                        fields.push(field);
+                        operand_needs_lifetime = true;
+                    },
+                    _ => unreachable!(),
+                }
+                if operand_needs_lifetime {
+                    needs_lifetime = true;
+                }
+            }
+            let mut struct_def_lines = vec![];
+            let mut first_line = format!("struct {name}");
+            if needs_lifetime {
+                first_line += "<'a>"
+            }
+            first_line += " {";
+            struct_def_lines.push(first_line);
+            for field in fields {
+                struct_def_lines.push(format!("  {field}"));
+            }
+            struct_def_lines.push("}".to_string());
+            let code = instruction.code;
+            if code as usize >= inst_infos.len() {
+                inst_infos.resize(code as usize + 1, ("", false, false));
+            }
+            inst_infos[code as usize] = (instruction.name, has_id_result_type, true);
+            let opcode = &mut opcodes[instruction.code_idx];
+            let docs = struct_def_lines
+                .iter()
+                .map(|line| {
+                    quote! {
+                        #[doc = #line]
+                    }
+                });
+            *opcode = quote! {
+                #[doc = "# Struct template"]
+                #[doc = "``` rust"]
+                #(#docs)*
+                #[doc = "```"]
+                #opcode
+            };
+        }
+        for instruction in &class.no_result {
+            let name = Ident::new(
+                instruction.name.trim_start_matches("Op"),
+                Span::call_site()
+            );
+            let mut fields = vec![];
+            let mut needs_lifetime = false;
+            for operand in &instruction.operands {
+                let name = if let Some(name) = operand.name {
+                    if let Some(dup) = operand.duplicate {
+                        field_name(&format!("{name}_{dup}"))
+                    } else {
+                        field_name(name)
+                    }
+                } else {
+                    if let Some(dup) = operand.duplicate {
+                        field_name(&format!("{}_{dup}", operand.kind))
+                    } else {
+                        field_name(operand.kind)
+                    }
+                };
+                let kind = Ident::new(operand.kind, Span::call_site());
+                let mut operand_needs_lifetime = operand.needs_lifetime; 
+                match operand.quantifier {
+                    None => {
+                        let mut field = format!("{name}: {kind}");
+                        if operand_needs_lifetime {
+                            field += "<'a>";
+                        }
+                        field += ",";
+                        fields.push(field);
+                    },
+                    Some('?') => {
+                        let mut field = format!("{name}: Option<{kind}");
+                        if operand_needs_lifetime {
+                            field += "<'a>";
+                        }
+                        field += ">,";
+                        fields.push(field);
+                    },
+                    Some('*') => {
+                        let mut field = format!("{name}: &'a [{kind}");
+                        if operand_needs_lifetime {
+                            field += "<'a>";
+                        }
+                        field += "],";
+                        fields.push(field);
+                        operand_needs_lifetime = true;
+                    },
+                    _ => unreachable!(),
+                }
+                if operand_needs_lifetime {
+                    needs_lifetime = true;
+                }
+            }
+            let mut struct_def_lines = vec![];
+            if !fields.is_empty() {
+                let mut first_line = format!("struct {name}");
+                if needs_lifetime {
+                    first_line += "<'a>"
+                }
+                first_line += " {";
+                struct_def_lines.push(first_line);
+                for field in fields {
+                    struct_def_lines.push(format!("  {field}"));
+                }
+                struct_def_lines.push("}".to_string());
+            } else {
+                struct_def_lines.push(format!("struct {name};"));
+            }
+            let code = instruction.code;
+            if code as usize >= inst_infos.len() {
+                inst_infos.resize(code as usize + 1, ("", false, false));
+            }
+            inst_infos[code as usize] = (instruction.name, false, false);
+            let opcode = &mut opcodes[instruction.code_idx];
+            let docs = struct_def_lines
+                .iter()
+                .map(|line| {
+                    quote! {
+                        #[doc = #line]
+                    }
+                });
+            *opcode = quote! {
+                #[doc = "# Struct template"]
+                #[doc = "``` rust"]
+                #(#docs)*
+                #[doc = "```"]
+                #opcode
+            };
+        }
+    }
+    let len = inst_infos.len();
+    let inst_infos = inst_infos
+        .iter()
+        .map(|(name, has_id_result_type, has_id_result)| {
+            quote! {
+                InstInfo {
+                    name: #name,
+                    has_id_result_type: #has_id_result_type,
+                    has_id_result: #has_id_result,
+                }
+            }
+        });
+    let inst_infos = quote! {
+        use super::*;
+        pub(crate) static INST_INFOS: [InstInfo; #len] = [
+            #(#inst_infos),*
+        ];
+    };
     let opcode_def = quote! {
         #[derive(Clone, Copy, PartialEq, Eq, Debug)]
         pub struct Code(pub(crate) u16);
@@ -570,249 +775,6 @@ fn definition_gen(
         }
     };
     write!(definitions, "{opcode_def}\n{opcode_display}\n")?;
-    let mut inst_infos = vec![];
-    for class in instruction_classes.values_mut() {
-        for instruction in &class.with_result {
-            let name = Ident::new(
-                &("Inst".to_string() + instruction.name.trim_start_matches("Op")),
-                Span::call_site()
-            );
-            let mut fields = vec![];
-            let mut field_names = vec![];
-            let mut parse = vec![];
-            let mut display_combined = vec![];
-            let mut display = vec![];
-            let mut has_id_result_type = false;
-            let mut needs_lifetime = false;
-            let mut parse_with_ctx = false;
-            for operand in &instruction.operands {
-                let name = if let Some(name) = operand.name {
-                    if let Some(dup) = operand.duplicate {
-                        field_name(&format!("{name}_{dup}"))
-                    } else {
-                        field_name(name)
-                    }
-                } else {
-                    if let Some(dup) = operand.duplicate {
-                        field_name(&format!("{}_{dup}", operand.kind))
-                    } else {
-                        field_name(operand.kind)
-                    }
-                };
-                has_id_result_type |= name == "id_result_type";
-                let kind = Ident::new(operand.kind, Span::call_site());
-                let lifetime = (operand.needs_lifetime).then(|| {
-                    needs_lifetime = true;
-                    quote! { <'a> }
-                });
-                match operand.quantifier {
-                    None => {
-                        let p = if operand.parse_with_ctx {
-                            parse_with_ctx = true;
-                            quote! {
-                                let #name = #kind::parse_one(parser, stream, ctx)?;
-                            }
-                        } else { quote! {
-                            let #name = #kind::parse_one(stream)?;
-                        }};
-                        fields.push(quote! {
-                            #name: #kind #lifetime,
-                        });
-                        parse.push(p);
-                        if operand.kind != "IdResult" {
-                            display_combined.push(name.clone());
-                        }
-                    },
-                    Some('?') => {
-                        let p = quote! {
-                            let #name = #kind::parse_optional(stream)?;
-                        };
-                        fields.push(quote! {
-                            #name: Option<#kind #lifetime>,
-                        });
-                        parse.push(p);
-                        display.push(quote! {
-                            if let Some(#name) = self.#name {
-                                write!(f, " {}", #name)?;
-                            }
-                        });
-                    },
-                    Some('*') => {
-                        let p = quote! {
-                            let #name = #kind::parse_eos(stream)?;
-                        };
-                        fields.push(quote! {
-                            #name: &'a [#kind #lifetime],
-                        });
-                        needs_lifetime = true;
-                        parse.push(p);
-                        display.push(quote! {
-                            for x in self.#name {
-                                write!(f, " {x}")?;
-                            }
-                        });
-                    },
-                    _ => unreachable!(),
-                }
-                field_names.push(name);
-            }
-            let opname = Ident::new(&format!("Op{}", name), Span::call_site());
-            let mut display_combined_fmt = format!("{{}} = {}", opname);
-            for _ in 0..display_combined.len() {
-                display_combined_fmt += " {}";
-            }
-            display.insert(0, quote! {
-                write!(f, #display_combined_fmt, self.id_result, #(self.#display_combined),*)?;
-            });
-            let lifetime = needs_lifetime.then(|| quote! { <'a> });
-            let struct_def = quote! {
-                #[derive(Clone, Copy)]
-                pub struct #name #lifetime {
-                    #(pub #fields)*
-                }
-            };
-            if has_id_result_type && parse_with_ctx {
-                let idx = instruction.operands
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, operand)| (operand.kind == "IdResultType").then_some(i))
-                    .unwrap();
-                parse.insert(idx + 1, quote! {
-                    ctx.result_type = Some(id_result_type);
-                });
-            }
-            writeln!(definitions, "{struct_def}")?;
-            let code = instruction.code;
-            if code as usize >= inst_infos.len() {
-                inst_infos.resize(code as usize + 1, ("", false, false));
-            }
-            inst_infos[code as usize] = (instruction.name, has_id_result_type, true);
-        }
-        for instruction in &class.no_result {
-            let name = Ident::new(
-                &("Inst".to_string() + instruction.name.trim_start_matches("Op")),
-                Span::call_site()
-            );
-            let mut fields = vec![];
-            let mut field_names = vec![];
-            let mut parse = vec![];
-            let mut display_combined = vec![];
-            let mut display = vec![];
-            let mut needs_lifetime = false;
-            for operand in &instruction.operands {
-                let name = if let Some(name) = operand.name {
-                    if let Some(dup) = operand.duplicate {
-                        field_name(&format!("{name}_{dup}"))
-                    } else {
-                        field_name(name)
-                    }
-                } else {
-                    if let Some(dup) = operand.duplicate {
-                        field_name(&format!("{}_{dup}", operand.kind))
-                    } else {
-                        field_name(operand.kind)
-                    }
-                };
-                let kind = Ident::new(operand.kind, Span::call_site());
-                let lifetime = (operand.needs_lifetime).then(|| {
-                    needs_lifetime = true;
-                    quote! { <'a> }
-                });
-                match operand.quantifier {
-                    None => {
-                        let p = quote! {
-                            #name: #kind::parse_one(stream)?,
-                        };
-                        fields.push(quote! {
-                            #name: #kind #lifetime,
-                        });
-                        parse.push(p);
-                        display_combined.push(name.clone());
-                    },
-                    Some('?') => {
-                        let p = quote! {
-                            #name: #kind::parse_optional(stream)?,
-                        };
-                        fields.push(quote! {
-                            #name: Option<#kind #lifetime>,
-                        });
-                        parse.push(p);
-                        display.push(quote! {
-                            if let Some(#name) = self.#name {
-                                write!(f, " {}", #name)?;
-                            }
-                        });
-                    },
-                    Some('*') => {
-                        let p = quote! {
-                            #name: #kind::parse_eos(stream)?,
-                        };
-                        fields.push(quote! {
-                            #name: &'a [#kind #lifetime],
-                        });
-                        needs_lifetime = true;
-                        parse.push(p);
-                        display.push(quote! {
-                            for x in self.#name {
-                                write!(f, " {x}")?;
-                            }
-                        });
-                    },
-                    _ => unreachable!(),
-                }
-                field_names.push(name);
-            }
-            let opname = Ident::new(&format!("Op{}", name), Span::call_site());
-            let mut display_combined_fmt = format!("{}", opname);
-            for _ in 0..display_combined.len() {
-                display_combined_fmt += " {}";
-            }
-            display.insert(0, quote! {
-                write!(f, #display_combined_fmt, #(self.#display_combined),*)?;
-            });
-            if !fields.is_empty() {
-                let lifetime = (needs_lifetime).then(|| {
-                    quote! { <'a> }
-                });
-                let struct_def = quote! {
-                    #[derive(Clone, Copy)]
-                    pub struct #name #lifetime {
-                        #(pub #fields)*
-                    }
-                };
-                writeln!(definitions, "{struct_def}")?;
-            } else {
-                let struct_def = quote! {
-                    #[derive(Clone, Copy)]
-                    pub struct #name;
-                };
-                writeln!(definitions, "{struct_def}")?;
-            }
-            let code = instruction.code;
-            if code as usize >= inst_infos.len() {
-                inst_infos.resize(code as usize + 1, ("", false, false));
-            }
-            inst_infos[code as usize] = (instruction.name, false, false);
-        }
-    }
-    let len = inst_infos.len();
-    let inst_infos = inst_infos
-        .iter()
-        .map(|(name, has_id_result_type, has_id_result)| {
-            quote! {
-                InstInfo {
-                    name: #name,
-                    has_id_result_type: #has_id_result_type,
-                    has_id_result: #has_id_result,
-                }
-            }
-        });
-    let inst_infos = quote! {
-        use super::*;
-        pub(crate) static INST_INFOS: [InstInfo; #len] = [
-            #(#inst_infos),*
-        ];
-    };
     write!(File::create(op_path.with_file_name("op/inst_info.rs"))?, "{inst_infos}")?;
     Ok(path)
 }

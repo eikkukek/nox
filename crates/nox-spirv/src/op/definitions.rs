@@ -6,689 +6,6836 @@ use core::fmt::{self, Display};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Code(pub(crate) u16);
 impl Code {
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Nop;"]
+    #[doc = "```"]
     pub const NOP: Self = Self(0);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Undef {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNDEF: Self = Self(1);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SourceContinued<'a> {"]
+    #[doc = "  continued_source: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SOURCE_CONTINUED: Self = Self(2);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Source<'a> {"]
+    #[doc = "  source_language: SourceLanguage,"]
+    #[doc = "  version: LiteralInteger,"]
+    #[doc = "  file: Option<IdRef>,"]
+    #[doc = "  source: Option<LiteralString<'a>>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SOURCE: Self = Self(3);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SourceExtension<'a> {"]
+    #[doc = "  extension: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SOURCE_EXTENSION: Self = Self(4);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Name<'a> {"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "  name: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const NAME: Self = Self(5);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MemberName<'a> {"]
+    #[doc = "  ty: IdRef,"]
+    #[doc = "  member: LiteralInteger,"]
+    #[doc = "  name: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MEMBER_NAME: Self = Self(6);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct String<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  string: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const STRING: Self = Self(7);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Line {"]
+    #[doc = "  file: IdRef,"]
+    #[doc = "  line: LiteralInteger,"]
+    #[doc = "  column: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LINE: Self = Self(8);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Extension<'a> {"]
+    #[doc = "  name: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXTENSION: Self = Self(10);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExtInstImport<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  name: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXT_INST_IMPORT: Self = Self(11);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExtInst<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  set: IdRef,"]
+    #[doc = "  instruction: LiteralExtInstInteger,"]
+    #[doc = "  operands: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXT_INST: Self = Self(12);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MemoryModel {"]
+    #[doc = "  addressing_model: AddressingModel,"]
+    #[doc = "  memory_model: MemoryModel,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MEMORY_MODEL: Self = Self(14);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EntryPoint<'a> {"]
+    #[doc = "  execution_model: ExecutionModel,"]
+    #[doc = "  entry_point: IdRef,"]
+    #[doc = "  name: LiteralString<'a>,"]
+    #[doc = "  interface: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ENTRY_POINT: Self = Self(15);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExecutionMode {"]
+    #[doc = "  entry_point: IdRef,"]
+    #[doc = "  mode: ExecutionMode,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXECUTION_MODE: Self = Self(16);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Capability {"]
+    #[doc = "  capability: Capability,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CAPABILITY: Self = Self(17);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeVoid {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_VOID: Self = Self(19);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeBool {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_BOOL: Self = Self(20);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeInt {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  width: LiteralInteger,"]
+    #[doc = "  signedness: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_INT: Self = Self(21);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeFloat {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  width: LiteralInteger,"]
+    #[doc = "  floating_point_encoding: Option<FPEncoding>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_FLOAT: Self = Self(22);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeVector {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  component_type: IdRef,"]
+    #[doc = "  component_count: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_VECTOR: Self = Self(23);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeMatrix {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  column_type: IdRef,"]
+    #[doc = "  column_count: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_MATRIX: Self = Self(24);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeImage {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_type: IdRef,"]
+    #[doc = "  dim: Dim,"]
+    #[doc = "  depth: LiteralInteger,"]
+    #[doc = "  arrayed: LiteralInteger,"]
+    #[doc = "  ms: LiteralInteger,"]
+    #[doc = "  sampled: LiteralInteger,"]
+    #[doc = "  image_format: ImageFormat,"]
+    #[doc = "  access_qualifier: Option<AccessQualifier>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_IMAGE: Self = Self(25);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeSampler {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_SAMPLER: Self = Self(26);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeSampledImage {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image_type: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_SAMPLED_IMAGE: Self = Self(27);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeArray {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  element_type: IdRef,"]
+    #[doc = "  length: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_ARRAY: Self = Self(28);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeRuntimeArray {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  element_type: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_RUNTIME_ARRAY: Self = Self(29);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeStruct<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  member_types: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_STRUCT: Self = Self(30);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeOpaque<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  the_name_of_the_opaque_type: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_OPAQUE: Self = Self(31);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypePointer {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  storage_class: StorageClass,"]
+    #[doc = "  ty: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_POINTER: Self = Self(32);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeFunction<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  return_type: IdRef,"]
+    #[doc = "  parameter_types: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_FUNCTION: Self = Self(33);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeEvent {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_EVENT: Self = Self(34);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeDeviceEvent {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_DEVICE_EVENT: Self = Self(35);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeReserveId {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_RESERVE_ID: Self = Self(36);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeQueue {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_QUEUE: Self = Self(37);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypePipe {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  qualifier: AccessQualifier,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_PIPE: Self = Self(38);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeForwardPointer {"]
+    #[doc = "  pointer_type: IdRef,"]
+    #[doc = "  storage_class: StorageClass,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_FORWARD_POINTER: Self = Self(39);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantTrue {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_TRUE: Self = Self(41);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantFalse {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_FALSE: Self = Self(42);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Constant {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: LiteralContextDependentNumber,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT: Self = Self(43);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantComposite<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  constituents: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_COMPOSITE: Self = Self(44);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantSampler {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampler_addressing_mode: SamplerAddressingMode,"]
+    #[doc = "  param: LiteralInteger,"]
+    #[doc = "  sampler_filter_mode: SamplerFilterMode,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_SAMPLER: Self = Self(45);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantNull {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_NULL: Self = Self(46);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantTrue {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_TRUE: Self = Self(48);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantFalse {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_FALSE: Self = Self(49);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstant {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: LiteralContextDependentNumber,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT: Self = Self(50);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantComposite<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  constituents: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_COMPOSITE: Self = Self(51);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantOp<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  opcode: LiteralSpecConstantOpInteger<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_OP: Self = Self(52);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Function {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  function_control: FunctionControl,"]
+    #[doc = "  function_type: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNCTION: Self = Self(54);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FunctionParameter {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNCTION_PARAMETER: Self = Self(55);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FunctionEnd;"]
+    #[doc = "```"]
     pub const FUNCTION_END: Self = Self(56);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FunctionCall<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  function: IdRef,"]
+    #[doc = "  arguments: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNCTION_CALL: Self = Self(57);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Variable {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  storage_class: StorageClass,"]
+    #[doc = "  initializer: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const VARIABLE: Self = Self(59);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageTexelPointer {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  sample: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_TEXEL_POINTER: Self = Self(60);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Load {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory_access: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LOAD: Self = Self(61);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Store {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  object: IdRef,"]
+    #[doc = "  memory_access: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const STORE: Self = Self(62);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CopyMemory {"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "  source: IdRef,"]
+    #[doc = "  memory_access_1: Option<MemoryAccess>,"]
+    #[doc = "  memory_access_2: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COPY_MEMORY: Self = Self(63);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CopyMemorySized {"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "  source: IdRef,"]
+    #[doc = "  size: IdRef,"]
+    #[doc = "  memory_access_1: Option<MemoryAccess>,"]
+    #[doc = "  memory_access_2: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COPY_MEMORY_SIZED: Self = Self(64);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AccessChain<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  indexes: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ACCESS_CHAIN: Self = Self(65);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct InBoundsAccessChain<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  indexes: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IN_BOUNDS_ACCESS_CHAIN: Self = Self(66);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct PtrAccessChain<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  element: IdRef,"]
+    #[doc = "  indexes: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const PTR_ACCESS_CHAIN: Self = Self(67);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ArrayLength {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  structure: IdRef,"]
+    #[doc = "  array_member: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ARRAY_LENGTH: Self = Self(68);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GenericPtrMemSemantics {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GENERIC_PTR_MEM_SEMANTICS: Self = Self(69);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct InBoundsPtrAccessChain<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  element: IdRef,"]
+    #[doc = "  indexes: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IN_BOUNDS_PTR_ACCESS_CHAIN: Self = Self(70);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Decorate<'a> {"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "  decoration: Decoration<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DECORATE: Self = Self(71);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MemberDecorate<'a> {"]
+    #[doc = "  structure_type: IdRef,"]
+    #[doc = "  member: LiteralInteger,"]
+    #[doc = "  decoration: Decoration<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MEMBER_DECORATE: Self = Self(72);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DecorationGroup {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DECORATION_GROUP: Self = Self(73);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupDecorate<'a> {"]
+    #[doc = "  decoration_group: IdRef,"]
+    #[doc = "  targets: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_DECORATE: Self = Self(74);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupMemberDecorate<'a> {"]
+    #[doc = "  decoration_group: IdRef,"]
+    #[doc = "  targets: &'a [PairIdRefLiteralInteger],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_MEMBER_DECORATE: Self = Self(75);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct VectorExtractDynamic {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector: IdRef,"]
+    #[doc = "  index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const VECTOR_EXTRACT_DYNAMIC: Self = Self(77);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct VectorInsertDynamic {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector: IdRef,"]
+    #[doc = "  component: IdRef,"]
+    #[doc = "  index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const VECTOR_INSERT_DYNAMIC: Self = Self(78);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct VectorShuffle<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  components: &'a [LiteralInteger],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const VECTOR_SHUFFLE: Self = Self(79);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CompositeConstruct<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  constituents: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMPOSITE_CONSTRUCT: Self = Self(80);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CompositeExtract<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  composite: IdRef,"]
+    #[doc = "  indexes: &'a [LiteralInteger],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMPOSITE_EXTRACT: Self = Self(81);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CompositeInsert<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  object: IdRef,"]
+    #[doc = "  composite: IdRef,"]
+    #[doc = "  indexes: &'a [LiteralInteger],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMPOSITE_INSERT: Self = Self(82);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CopyObject {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COPY_OBJECT: Self = Self(83);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Transpose {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TRANSPOSE: Self = Self(84);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SampledImage {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  sampler: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SAMPLED_IMAGE: Self = Self(86);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleImplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_IMPLICIT_LOD: Self = Self(87);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleExplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: ImageOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_EXPLICIT_LOD: Self = Self(88);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleDrefImplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_DREF_IMPLICIT_LOD: Self = Self(89);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleDrefExplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: ImageOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_DREF_EXPLICIT_LOD: Self = Self(90);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleProjImplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_PROJ_IMPLICIT_LOD: Self = Self(91);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleProjExplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: ImageOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_PROJ_EXPLICIT_LOD: Self = Self(92);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleProjDrefImplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_PROJ_DREF_IMPLICIT_LOD: Self = Self(93);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleProjDrefExplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: ImageOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_PROJ_DREF_EXPLICIT_LOD: Self = Self(94);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageFetch {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_FETCH: Self = Self(95);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageGather {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  component: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_GATHER: Self = Self(96);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageDrefGather {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_DREF_GATHER: Self = Self(97);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageRead {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_READ: Self = Self(98);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageWrite {"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  texel: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_WRITE: Self = Self(99);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Image {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE: Self = Self(100);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageQueryFormat {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_QUERY_FORMAT: Self = Self(101);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageQueryOrder {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_QUERY_ORDER: Self = Self(102);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageQuerySizeLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  level_of_detail: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_QUERY_SIZE_LOD: Self = Self(103);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageQuerySize {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_QUERY_SIZE: Self = Self(104);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageQueryLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_QUERY_LOD: Self = Self(105);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageQueryLevels {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_QUERY_LEVELS: Self = Self(106);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageQuerySamples {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_QUERY_SAMPLES: Self = Self(107);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertFToU {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  float_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_FTO_U: Self = Self(109);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertFToS {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  float_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_FTO_S: Self = Self(110);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertSToF {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  signed_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_STO_F: Self = Self(111);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertUToF {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  unsigned_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_UTO_F: Self = Self(112);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UConvert {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  unsigned_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UCONVERT: Self = Self(113);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SConvert {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  signed_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SCONVERT: Self = Self(114);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FConvert {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  float_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FCONVERT: Self = Self(115);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct QuantizeToF16 {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const QUANTIZE_TO_F16: Self = Self(116);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertPtrToU {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_PTR_TO_U: Self = Self(117);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SatConvertSToU {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  signed_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SAT_CONVERT_STO_U: Self = Self(118);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SatConvertUToS {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  unsigned_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SAT_CONVERT_UTO_S: Self = Self(119);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertUToPtr {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  integer_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_UTO_PTR: Self = Self(120);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct PtrCastToGeneric {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const PTR_CAST_TO_GENERIC: Self = Self(121);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GenericCastToPtr {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GENERIC_CAST_TO_PTR: Self = Self(122);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GenericCastToPtrExplicit {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  storage: StorageClass,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GENERIC_CAST_TO_PTR_EXPLICIT: Self = Self(123);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Bitcast {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BITCAST: Self = Self(124);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SNegate {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SNEGATE: Self = Self(126);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FNegate {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FNEGATE: Self = Self(127);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IAdd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IADD: Self = Self(128);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FAdd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FADD: Self = Self(129);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ISub {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ISUB: Self = Self(130);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FSub {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FSUB: Self = Self(131);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IMul {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMUL: Self = Self(132);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FMul {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FMUL: Self = Self(133);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UDiv {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UDIV: Self = Self(134);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SDiv {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SDIV: Self = Self(135);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FDiv {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FDIV: Self = Self(136);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UMod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UMOD: Self = Self(137);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SRem {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SREM: Self = Self(138);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SMod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SMOD: Self = Self(139);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FRem {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FREM: Self = Self(140);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FMod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FMOD: Self = Self(141);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct VectorTimesScalar {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector: IdRef,"]
+    #[doc = "  scalar: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const VECTOR_TIMES_SCALAR: Self = Self(142);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MatrixTimesScalar {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "  scalar: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MATRIX_TIMES_SCALAR: Self = Self(143);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct VectorTimesMatrix {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector: IdRef,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const VECTOR_TIMES_MATRIX: Self = Self(144);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MatrixTimesVector {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "  vector: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MATRIX_TIMES_VECTOR: Self = Self(145);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MatrixTimesMatrix {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  left_matrix: IdRef,"]
+    #[doc = "  right_matrix: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MATRIX_TIMES_MATRIX: Self = Self(146);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct OuterProduct {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const OUTER_PRODUCT: Self = Self(147);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Dot {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DOT: Self = Self(148);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IAddCarry {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IADD_CARRY: Self = Self(149);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ISubBorrow {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ISUB_BORROW: Self = Self(150);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UMulExtended {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UMUL_EXTENDED: Self = Self(151);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SMulExtended {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SMUL_EXTENDED: Self = Self(152);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Any {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ANY: Self = Self(154);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct All {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ALL: Self = Self(155);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IsNan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IS_NAN: Self = Self(156);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IsInf {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IS_INF: Self = Self(157);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IsFinite {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IS_FINITE: Self = Self(158);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IsNormal {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IS_NORMAL: Self = Self(159);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SignBitSet {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SIGN_BIT_SET: Self = Self(160);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LessOrGreater {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "  y: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LESS_OR_GREATER: Self = Self(161);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Ordered {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "  y: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ORDERED: Self = Self(162);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Unordered {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "  y: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNORDERED: Self = Self(163);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LogicalEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LOGICAL_EQUAL: Self = Self(164);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LogicalNotEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LOGICAL_NOT_EQUAL: Self = Self(165);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LogicalOr {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LOGICAL_OR: Self = Self(166);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LogicalAnd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LOGICAL_AND: Self = Self(167);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LogicalNot {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LOGICAL_NOT: Self = Self(168);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Select {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  condition: IdRef,"]
+    #[doc = "  object_1: IdRef,"]
+    #[doc = "  object_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SELECT: Self = Self(169);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IEQUAL: Self = Self(170);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct INotEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const INOT_EQUAL: Self = Self(171);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UGreaterThan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UGREATER_THAN: Self = Self(172);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SGreaterThan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SGREATER_THAN: Self = Self(173);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UGreaterThanEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UGREATER_THAN_EQUAL: Self = Self(174);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SGreaterThanEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SGREATER_THAN_EQUAL: Self = Self(175);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ULessThan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ULESS_THAN: Self = Self(176);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SLessThan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SLESS_THAN: Self = Self(177);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ULessThanEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ULESS_THAN_EQUAL: Self = Self(178);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SLessThanEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SLESS_THAN_EQUAL: Self = Self(179);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FOrdEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FORD_EQUAL: Self = Self(180);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FUnordEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNORD_EQUAL: Self = Self(181);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FOrdNotEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FORD_NOT_EQUAL: Self = Self(182);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FUnordNotEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNORD_NOT_EQUAL: Self = Self(183);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FOrdLessThan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FORD_LESS_THAN: Self = Self(184);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FUnordLessThan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNORD_LESS_THAN: Self = Self(185);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FOrdGreaterThan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FORD_GREATER_THAN: Self = Self(186);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FUnordGreaterThan {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNORD_GREATER_THAN: Self = Self(187);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FOrdLessThanEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FORD_LESS_THAN_EQUAL: Self = Self(188);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FUnordLessThanEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNORD_LESS_THAN_EQUAL: Self = Self(189);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FOrdGreaterThanEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FORD_GREATER_THAN_EQUAL: Self = Self(190);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FUnordGreaterThanEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FUNORD_GREATER_THAN_EQUAL: Self = Self(191);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ShiftRightLogical {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  shift: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SHIFT_RIGHT_LOGICAL: Self = Self(194);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ShiftRightArithmetic {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  shift: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SHIFT_RIGHT_ARITHMETIC: Self = Self(195);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ShiftLeftLogical {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  shift: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SHIFT_LEFT_LOGICAL: Self = Self(196);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitwiseOr {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BITWISE_OR: Self = Self(197);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitwiseXor {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BITWISE_XOR: Self = Self(198);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitwiseAnd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BITWISE_AND: Self = Self(199);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Not {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const NOT: Self = Self(200);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitFieldInsert {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  insert: IdRef,"]
+    #[doc = "  offset: IdRef,"]
+    #[doc = "  count: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BIT_FIELD_INSERT: Self = Self(201);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitFieldSExtract {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  offset: IdRef,"]
+    #[doc = "  count: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BIT_FIELD_SEXTRACT: Self = Self(202);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitFieldUExtract {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  offset: IdRef,"]
+    #[doc = "  count: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BIT_FIELD_UEXTRACT: Self = Self(203);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitReverse {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BIT_REVERSE: Self = Self(204);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitCount {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BIT_COUNT: Self = Self(205);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DPdx {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DPDX: Self = Self(207);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DPdy {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DPDY: Self = Self(208);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Fwidth {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FWIDTH: Self = Self(209);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DPdxFine {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DPDX_FINE: Self = Self(210);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DPdyFine {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DPDY_FINE: Self = Self(211);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FwidthFine {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FWIDTH_FINE: Self = Self(212);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DPdxCoarse {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DPDX_COARSE: Self = Self(213);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DPdyCoarse {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DPDY_COARSE: Self = Self(214);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FwidthCoarse {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  p: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FWIDTH_COARSE: Self = Self(215);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EmitVertex;"]
+    #[doc = "```"]
     pub const EMIT_VERTEX: Self = Self(218);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EndPrimitive;"]
+    #[doc = "```"]
     pub const END_PRIMITIVE: Self = Self(219);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EmitStreamVertex {"]
+    #[doc = "  stream: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EMIT_STREAM_VERTEX: Self = Self(220);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EndStreamPrimitive {"]
+    #[doc = "  stream: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const END_STREAM_PRIMITIVE: Self = Self(221);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ControlBarrier {"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONTROL_BARRIER: Self = Self(224);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MemoryBarrier {"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MEMORY_BARRIER: Self = Self(225);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicLoad {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_LOAD: Self = Self(227);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicStore {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_STORE: Self = Self(228);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicExchange {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_EXCHANGE: Self = Self(229);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicCompareExchange {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  equal: IdMemorySemantics,"]
+    #[doc = "  unequal: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  comparator: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_COMPARE_EXCHANGE: Self = Self(230);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicCompareExchangeWeak {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  equal: IdMemorySemantics,"]
+    #[doc = "  unequal: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  comparator: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_COMPARE_EXCHANGE_WEAK: Self = Self(231);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicIIncrement {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_IINCREMENT: Self = Self(232);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicIDecrement {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_IDECREMENT: Self = Self(233);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicIAdd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_IADD: Self = Self(234);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicISub {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_ISUB: Self = Self(235);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicSMin {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_SMIN: Self = Self(236);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicUMin {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_UMIN: Self = Self(237);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicSMax {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_SMAX: Self = Self(238);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicUMax {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_UMAX: Self = Self(239);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicAnd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_AND: Self = Self(240);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicOr {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_OR: Self = Self(241);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicXor {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_XOR: Self = Self(242);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Phi<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  variables: &'a [PairIdRefIdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const PHI: Self = Self(245);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LoopMerge {"]
+    #[doc = "  merge_block: IdRef,"]
+    #[doc = "  continue_target: IdRef,"]
+    #[doc = "  loop_control: LoopControl,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LOOP_MERGE: Self = Self(246);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SelectionMerge {"]
+    #[doc = "  merge_block: IdRef,"]
+    #[doc = "  selection_control: SelectionControl,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SELECTION_MERGE: Self = Self(247);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Label {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LABEL: Self = Self(248);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Branch {"]
+    #[doc = "  target_label: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BRANCH: Self = Self(249);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BranchConditional<'a> {"]
+    #[doc = "  condition: IdRef,"]
+    #[doc = "  true_label: IdRef,"]
+    #[doc = "  false_label: IdRef,"]
+    #[doc = "  branch_weights: &'a [LiteralInteger],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BRANCH_CONDITIONAL: Self = Self(250);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Switch<'a> {"]
+    #[doc = "  selector: IdRef,"]
+    #[doc = "  default: IdRef,"]
+    #[doc = "  target: &'a [PairLiteralIntegerIdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SWITCH: Self = Self(251);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Kill;"]
+    #[doc = "```"]
     pub const KILL: Self = Self(252);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Return;"]
+    #[doc = "```"]
     pub const RETURN: Self = Self(253);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReturnValue {"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RETURN_VALUE: Self = Self(254);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Unreachable;"]
+    #[doc = "```"]
     pub const UNREACHABLE: Self = Self(255);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LifetimeStart {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  size: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LIFETIME_START: Self = Self(256);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LifetimeStop {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  size: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LIFETIME_STOP: Self = Self(257);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupAsyncCopy {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  destination: IdRef,"]
+    #[doc = "  source: IdRef,"]
+    #[doc = "  num_elements: IdRef,"]
+    #[doc = "  stride: IdRef,"]
+    #[doc = "  event: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_ASYNC_COPY: Self = Self(259);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupWaitEvents {"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  num_events: IdRef,"]
+    #[doc = "  events_list: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_WAIT_EVENTS: Self = Self(260);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupAll {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_ALL: Self = Self(261);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupAny {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_ANY: Self = Self(262);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupBroadcast {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  local_id: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_BROADCAST: Self = Self(263);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupIAdd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_IADD: Self = Self(264);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupFAdd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_FADD: Self = Self(265);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupFMin {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_FMIN: Self = Self(266);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupUMin {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_UMIN: Self = Self(267);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupSMin {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_SMIN: Self = Self(268);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupFMax {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_FMAX: Self = Self(269);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupUMax {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_UMAX: Self = Self(270);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupSMax {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_SMAX: Self = Self(271);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReadPipe {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const READ_PIPE: Self = Self(274);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct WritePipe {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const WRITE_PIPE: Self = Self(275);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReservedReadPipe {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  reserve_id: IdRef,"]
+    #[doc = "  index: IdRef,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RESERVED_READ_PIPE: Self = Self(276);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReservedWritePipe {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  reserve_id: IdRef,"]
+    #[doc = "  index: IdRef,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RESERVED_WRITE_PIPE: Self = Self(277);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReserveReadPipePackets {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  num_packets: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RESERVE_READ_PIPE_PACKETS: Self = Self(278);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReserveWritePipePackets {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  num_packets: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RESERVE_WRITE_PIPE_PACKETS: Self = Self(279);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CommitReadPipe {"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  reserve_id: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMMIT_READ_PIPE: Self = Self(280);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CommitWritePipe {"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  reserve_id: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMMIT_WRITE_PIPE: Self = Self(281);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IsValidReserveId {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  reserve_id: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IS_VALID_RESERVE_ID: Self = Self(282);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetNumPipePackets {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_NUM_PIPE_PACKETS: Self = Self(283);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetMaxPipePackets {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_MAX_PIPE_PACKETS: Self = Self(284);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupReserveReadPipePackets {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  num_packets: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_RESERVE_READ_PIPE_PACKETS: Self = Self(285);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupReserveWritePipePackets {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  num_packets: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_RESERVE_WRITE_PIPE_PACKETS: Self = Self(286);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupCommitReadPipe {"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  reserve_id: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_COMMIT_READ_PIPE: Self = Self(287);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupCommitWritePipe {"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  pipe: IdRef,"]
+    #[doc = "  reserve_id: IdRef,"]
+    #[doc = "  packet_size: IdRef,"]
+    #[doc = "  packet_alignment: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_COMMIT_WRITE_PIPE: Self = Self(288);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EnqueueMarker {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  queue: IdRef,"]
+    #[doc = "  num_events: IdRef,"]
+    #[doc = "  wait_events: IdRef,"]
+    #[doc = "  ret_event: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ENQUEUE_MARKER: Self = Self(291);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EnqueueKernel<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  queue: IdRef,"]
+    #[doc = "  flags: IdRef,"]
+    #[doc = "  nd_range: IdRef,"]
+    #[doc = "  num_events: IdRef,"]
+    #[doc = "  wait_events: IdRef,"]
+    #[doc = "  ret_event: IdRef,"]
+    #[doc = "  invoke: IdRef,"]
+    #[doc = "  param: IdRef,"]
+    #[doc = "  param_size: IdRef,"]
+    #[doc = "  param_align: IdRef,"]
+    #[doc = "  local_size: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ENQUEUE_KERNEL: Self = Self(292);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetKernelNDrangeSubGroupCount {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  nd_range: IdRef,"]
+    #[doc = "  invoke: IdRef,"]
+    #[doc = "  param: IdRef,"]
+    #[doc = "  param_size: IdRef,"]
+    #[doc = "  param_align: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_KERNEL_NDRANGE_SUB_GROUP_COUNT: Self = Self(293);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetKernelNDrangeMaxSubGroupSize {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  nd_range: IdRef,"]
+    #[doc = "  invoke: IdRef,"]
+    #[doc = "  param: IdRef,"]
+    #[doc = "  param_size: IdRef,"]
+    #[doc = "  param_align: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_KERNEL_NDRANGE_MAX_SUB_GROUP_SIZE: Self = Self(294);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetKernelWorkGroupSize {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  invoke: IdRef,"]
+    #[doc = "  param: IdRef,"]
+    #[doc = "  param_size: IdRef,"]
+    #[doc = "  param_align: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_KERNEL_WORK_GROUP_SIZE: Self = Self(295);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetKernelPreferredWorkGroupSizeMultiple {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  invoke: IdRef,"]
+    #[doc = "  param: IdRef,"]
+    #[doc = "  param_size: IdRef,"]
+    #[doc = "  param_align: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: Self = Self(296);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RetainEvent {"]
+    #[doc = "  event: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RETAIN_EVENT: Self = Self(297);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReleaseEvent {"]
+    #[doc = "  event: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RELEASE_EVENT: Self = Self(298);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CreateUserEvent {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CREATE_USER_EVENT: Self = Self(299);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IsValidEvent {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  event: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IS_VALID_EVENT: Self = Self(300);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SetUserEventStatus {"]
+    #[doc = "  event: IdRef,"]
+    #[doc = "  status: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SET_USER_EVENT_STATUS: Self = Self(301);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CaptureEventProfilingInfo {"]
+    #[doc = "  event: IdRef,"]
+    #[doc = "  profiling_info: IdRef,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CAPTURE_EVENT_PROFILING_INFO: Self = Self(302);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetDefaultQueue {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_DEFAULT_QUEUE: Self = Self(303);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BuildNDRange {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  global_work_size: IdRef,"]
+    #[doc = "  local_work_size: IdRef,"]
+    #[doc = "  global_work_offset: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BUILD_NDRANGE: Self = Self(304);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseSampleImplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_SAMPLE_IMPLICIT_LOD: Self = Self(305);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseSampleExplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: ImageOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_SAMPLE_EXPLICIT_LOD: Self = Self(306);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseSampleDrefImplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_SAMPLE_DREF_IMPLICIT_LOD: Self = Self(307);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseSampleDrefExplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: ImageOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_SAMPLE_DREF_EXPLICIT_LOD: Self = Self(308);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseSampleProjImplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_SAMPLE_PROJ_IMPLICIT_LOD: Self = Self(309);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseSampleProjExplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: ImageOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_SAMPLE_PROJ_EXPLICIT_LOD: Self = Self(310);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseSampleProjDrefImplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_SAMPLE_PROJ_DREF_IMPLICIT_LOD: Self = Self(311);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseSampleProjDrefExplicitLod {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: ImageOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_SAMPLE_PROJ_DREF_EXPLICIT_LOD: Self = Self(312);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseFetch {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_FETCH: Self = Self(313);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseGather {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  component: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_GATHER: Self = Self(314);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseDrefGather {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dref: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_DREF_GATHER: Self = Self(315);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseTexelsResident {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  resident_code: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_TEXELS_RESIDENT: Self = Self(316);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct NoLine;"]
+    #[doc = "```"]
     pub const NO_LINE: Self = Self(317);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicFlagTestAndSet {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_FLAG_TEST_AND_SET: Self = Self(318);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicFlagClear {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_FLAG_CLEAR: Self = Self(319);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSparseRead {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SPARSE_READ: Self = Self(320);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SizeOf {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SIZE_OF: Self = Self(321);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypePipeStorage {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_PIPE_STORAGE: Self = Self(322);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantPipeStorage {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  packet_size: LiteralInteger,"]
+    #[doc = "  packet_alignment: LiteralInteger,"]
+    #[doc = "  capacity: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_PIPE_STORAGE: Self = Self(323);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CreatePipeFromPipeStorage {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pipe_storage: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CREATE_PIPE_FROM_PIPE_STORAGE: Self = Self(324);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetKernelLocalSizeForSubgroupCount {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  subgroup_count: IdRef,"]
+    #[doc = "  invoke: IdRef,"]
+    #[doc = "  param: IdRef,"]
+    #[doc = "  param_size: IdRef,"]
+    #[doc = "  param_align: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_KERNEL_LOCAL_SIZE_FOR_SUBGROUP_COUNT: Self = Self(325);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GetKernelMaxNumSubgroups {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  invoke: IdRef,"]
+    #[doc = "  param: IdRef,"]
+    #[doc = "  param_size: IdRef,"]
+    #[doc = "  param_align: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GET_KERNEL_MAX_NUM_SUBGROUPS: Self = Self(326);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeNamedBarrier {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_NAMED_BARRIER: Self = Self(327);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct NamedBarrierInitialize {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  subgroup_count: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const NAMED_BARRIER_INITIALIZE: Self = Self(328);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MemoryNamedBarrier {"]
+    #[doc = "  named_barrier: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MEMORY_NAMED_BARRIER: Self = Self(329);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ModuleProcessed<'a> {"]
+    #[doc = "  process: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MODULE_PROCESSED: Self = Self(330);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExecutionModeId {"]
+    #[doc = "  entry_point: IdRef,"]
+    #[doc = "  mode: ExecutionMode,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXECUTION_MODE_ID: Self = Self(331);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DecorateId<'a> {"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "  decoration: Decoration<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DECORATE_ID: Self = Self(332);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformElect {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_ELECT: Self = Self(333);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformAll {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_ALL: Self = Self(334);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformAny {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_ANY: Self = Self(335);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformAllEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_ALL_EQUAL: Self = Self(336);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBroadcast {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  invocation_id: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BROADCAST: Self = Self(337);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBroadcastFirst {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BROADCAST_FIRST: Self = Self(338);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBallot {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BALLOT: Self = Self(339);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformInverseBallot {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_INVERSE_BALLOT: Self = Self(340);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBallotBitExtract {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BALLOT_BIT_EXTRACT: Self = Self(341);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBallotBitCount {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BALLOT_BIT_COUNT: Self = Self(342);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBallotFindLSB {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BALLOT_FIND_LSB: Self = Self(343);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBallotFindMSB {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BALLOT_FIND_MSB: Self = Self(344);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformShuffle {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  invocation_id: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_SHUFFLE: Self = Self(345);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformShuffleXor {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  mask: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_SHUFFLE_XOR: Self = Self(346);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformShuffleUp {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  delta: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_SHUFFLE_UP: Self = Self(347);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformShuffleDown {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  delta: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_SHUFFLE_DOWN: Self = Self(348);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformIAdd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_IADD: Self = Self(349);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformFAdd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_FADD: Self = Self(350);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformIMul {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_IMUL: Self = Self(351);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformFMul {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_FMUL: Self = Self(352);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformSMin {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_SMIN: Self = Self(353);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformUMin {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_UMIN: Self = Self(354);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformFMin {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_FMIN: Self = Self(355);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformSMax {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_SMAX: Self = Self(356);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformUMax {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_UMAX: Self = Self(357);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformFMax {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_FMAX: Self = Self(358);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBitwiseAnd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BITWISE_AND: Self = Self(359);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBitwiseOr {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BITWISE_OR: Self = Self(360);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformBitwiseXor {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_BITWISE_XOR: Self = Self(361);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformLogicalAnd {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_LOGICAL_AND: Self = Self(362);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformLogicalOr {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_LOGICAL_OR: Self = Self(363);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformLogicalXor {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_LOGICAL_XOR: Self = Self(364);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformQuadBroadcast {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_QUAD_BROADCAST: Self = Self(365);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformQuadSwap {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_QUAD_SWAP: Self = Self(366);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CopyLogical {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COPY_LOGICAL: Self = Self(400);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct PtrEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const PTR_EQUAL: Self = Self(401);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct PtrNotEqual {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const PTR_NOT_EQUAL: Self = Self(402);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct PtrDiff {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const PTR_DIFF: Self = Self(403);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ColorAttachmentReadEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  attachment: IdRef,"]
+    #[doc = "  sample: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COLOR_ATTACHMENT_READ_EXT: Self = Self(4160);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DepthAttachmentReadEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sample: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DEPTH_ATTACHMENT_READ_EXT: Self = Self(4161);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct StencilAttachmentReadEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sample: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const STENCIL_ATTACHMENT_READ_EXT: Self = Self(4162);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeTensorARM {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  element_type: IdRef,"]
+    #[doc = "  rank: Option<IdRef>,"]
+    #[doc = "  shape: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_TENSOR_ARM: Self = Self(4163);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorReadARM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor: IdRef,"]
+    #[doc = "  coordinates: IdRef,"]
+    #[doc = "  tensor_operands: Option<TensorOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_READ_ARM: Self = Self(4164);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorWriteARM {"]
+    #[doc = "  tensor: IdRef,"]
+    #[doc = "  coordinates: IdRef,"]
+    #[doc = "  object: IdRef,"]
+    #[doc = "  tensor_operands: Option<TensorOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_WRITE_ARM: Self = Self(4165);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorQuerySizeARM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor: IdRef,"]
+    #[doc = "  dimension: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_QUERY_SIZE_ARM: Self = Self(4166);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GraphConstantARM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  graph_constant_id: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GRAPH_CONSTANT_ARM: Self = Self(4181);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GraphEntryPointARM<'a> {"]
+    #[doc = "  graph: IdRef,"]
+    #[doc = "  name: LiteralString<'a>,"]
+    #[doc = "  interface: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GRAPH_ENTRY_POINT_ARM: Self = Self(4182);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GraphARM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GRAPH_ARM: Self = Self(4183);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GraphInputARM<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  input_index: IdRef,"]
+    #[doc = "  element_index: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GRAPH_INPUT_ARM: Self = Self(4184);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GraphSetOutputARM<'a> {"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  output_index: IdRef,"]
+    #[doc = "  element_index: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GRAPH_SET_OUTPUT_ARM: Self = Self(4185);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GraphEndARM;"]
+    #[doc = "```"]
     pub const GRAPH_END_ARM: Self = Self(4186);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeGraphARM<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  num_inputs: LiteralInteger,"]
+    #[doc = "  in_out_types: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_GRAPH_ARM: Self = Self(4190);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TerminateInvocation;"]
+    #[doc = "```"]
     pub const TERMINATE_INVOCATION: Self = Self(4416);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeUntypedPointerKHR {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  storage_class: StorageClass,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_UNTYPED_POINTER_KHR: Self = Self(4417);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedVariableKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  storage_class: StorageClass,"]
+    #[doc = "  data_type: Option<IdRef>,"]
+    #[doc = "  initializer: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_VARIABLE_KHR: Self = Self(4418);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedAccessChainKHR<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base_type: IdRef,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  indexes: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_ACCESS_CHAIN_KHR: Self = Self(4419);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedInBoundsAccessChainKHR<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base_type: IdRef,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  indexes: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_IN_BOUNDS_ACCESS_CHAIN_KHR: Self = Self(4420);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupBallotKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_BALLOT_KHR: Self = Self(4421);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupFirstInvocationKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_FIRST_INVOCATION_KHR: Self = Self(4422);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedPtrAccessChainKHR<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base_type: IdRef,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  element: IdRef,"]
+    #[doc = "  indexes: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_PTR_ACCESS_CHAIN_KHR: Self = Self(4423);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedInBoundsPtrAccessChainKHR<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base_type: IdRef,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  element: IdRef,"]
+    #[doc = "  indexes: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_IN_BOUNDS_PTR_ACCESS_CHAIN_KHR: Self = Self(4424);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedArrayLengthKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  structure: IdRef,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  array_member: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_ARRAY_LENGTH_KHR: Self = Self(4425);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedPrefetchKHR {"]
+    #[doc = "  pointer_type: IdRef,"]
+    #[doc = "  num_bytes: IdRef,"]
+    #[doc = "  rw: Option<IdRef>,"]
+    #[doc = "  locality: Option<IdRef>,"]
+    #[doc = "  cache_type: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_PREFETCH_KHR: Self = Self(4426);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FmaKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "  operand_3: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FMA_KHR: Self = Self(4427);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupAllKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_ALL_KHR: Self = Self(4428);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupAnyKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_ANY_KHR: Self = Self(4429);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupAllEqualKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_ALL_EQUAL_KHR: Self = Self(4430);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformRotateKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  delta: IdRef,"]
+    #[doc = "  cluster_size: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_ROTATE_KHR: Self = Self(4431);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupReadInvocationKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_READ_INVOCATION_KHR: Self = Self(4432);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExtInstWithForwardRefsKHR<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  set: IdRef,"]
+    #[doc = "  instruction: LiteralExtInstInteger,"]
+    #[doc = "  operands: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXT_INST_WITH_FORWARD_REFS_KHR: Self = Self(4433);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedGroupAsyncCopyKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdRef,"]
+    #[doc = "  destination: IdRef,"]
+    #[doc = "  source: IdRef,"]
+    #[doc = "  element_num_bytes: IdRef,"]
+    #[doc = "  num_elements: IdRef,"]
+    #[doc = "  stride: IdRef,"]
+    #[doc = "  event: IdRef,"]
+    #[doc = "  destination_memory_operands: Option<MemoryAccess>,"]
+    #[doc = "  source_memory_operands: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_GROUP_ASYNC_COPY_KHR: Self = Self(4434);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TraceRayKHR {"]
+    #[doc = "  accel: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  sbt_offset: IdRef,"]
+    #[doc = "  sbt_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TRACE_RAY_KHR: Self = Self(4445);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExecuteCallableKHR {"]
+    #[doc = "  sbt_index: IdRef,"]
+    #[doc = "  callable_data: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXECUTE_CALLABLE_KHR: Self = Self(4446);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertUToAccelerationStructureKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  accel: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_UTO_ACCELERATION_STRUCTURE_KHR: Self = Self(4447);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IgnoreIntersectionKHR;"]
+    #[doc = "```"]
     pub const IGNORE_INTERSECTION_KHR: Self = Self(4448);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TerminateRayKHR;"]
+    #[doc = "```"]
     pub const TERMINATE_RAY_KHR: Self = Self(4449);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SDot {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  packed_vector_format: Option<PackedVectorFormat>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SDOT: Self = Self(4450);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UDot {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  packed_vector_format: Option<PackedVectorFormat>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UDOT: Self = Self(4451);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SUDot {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  packed_vector_format: Option<PackedVectorFormat>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUDOT: Self = Self(4452);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SDotAccSat {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  accumulator: IdRef,"]
+    #[doc = "  packed_vector_format: Option<PackedVectorFormat>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SDOT_ACC_SAT: Self = Self(4453);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UDotAccSat {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  accumulator: IdRef,"]
+    #[doc = "  packed_vector_format: Option<PackedVectorFormat>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UDOT_ACC_SAT: Self = Self(4454);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SUDotAccSat {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  accumulator: IdRef,"]
+    #[doc = "  packed_vector_format: Option<PackedVectorFormat>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUDOT_ACC_SAT: Self = Self(4455);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeCooperativeMatrixKHR {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  component_type: IdRef,"]
+    #[doc = "  scope: IdScope,"]
+    #[doc = "  rows: IdRef,"]
+    #[doc = "  columns: IdRef,"]
+    #[doc = "  using: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_COOPERATIVE_MATRIX_KHR: Self = Self(4456);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixLoadKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory_layout: IdRef,"]
+    #[doc = "  stride: Option<IdRef>,"]
+    #[doc = "  memory_operand: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_LOAD_KHR: Self = Self(4457);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixStoreKHR {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  object: IdRef,"]
+    #[doc = "  memory_layout: IdRef,"]
+    #[doc = "  stride: Option<IdRef>,"]
+    #[doc = "  memory_operand: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_STORE_KHR: Self = Self(4458);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixMulAddKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  a: IdRef,"]
+    #[doc = "  b: IdRef,"]
+    #[doc = "  c: IdRef,"]
+    #[doc = "  cooperative_matrix_operands: Option<CooperativeMatrixOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_MUL_ADD_KHR: Self = Self(4459);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixLengthKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ty: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_LENGTH_KHR: Self = Self(4460);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantCompositeReplicateEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_COMPOSITE_REPLICATE_EXT: Self = Self(4461);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantCompositeReplicateEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_COMPOSITE_REPLICATE_EXT: Self = Self(4462);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CompositeConstructReplicateEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMPOSITE_CONSTRUCT_REPLICATE_EXT: Self = Self(4463);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeRayQueryKHR {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_RAY_QUERY_KHR: Self = Self(4472);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryInitializeKHR {"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  accel: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_INITIALIZE_KHR: Self = Self(4473);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryTerminateKHR {"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_TERMINATE_KHR: Self = Self(4474);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGenerateIntersectionKHR {"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  hit_t: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GENERATE_INTERSECTION_KHR: Self = Self(4475);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryConfirmIntersectionKHR {"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_CONFIRM_INTERSECTION_KHR: Self = Self(4476);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryProceedKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_PROCEED_KHR: Self = Self(4477);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionTypeKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_TYPE_KHR: Self = Self(4479);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleWeightedQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  texture: IdRef,"]
+    #[doc = "  coordinates: IdRef,"]
+    #[doc = "  weights: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_WEIGHTED_QCOM: Self = Self(4480);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageBoxFilterQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  texture: IdRef,"]
+    #[doc = "  coordinates: IdRef,"]
+    #[doc = "  box_size: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_BOX_FILTER_QCOM: Self = Self(4481);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageBlockMatchSSDQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "  target_coordinates: IdRef,"]
+    #[doc = "  reference: IdRef,"]
+    #[doc = "  reference_coordinates: IdRef,"]
+    #[doc = "  block_size: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_BLOCK_MATCH_SSDQCOM: Self = Self(4482);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageBlockMatchSADQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "  target_coordinates: IdRef,"]
+    #[doc = "  reference: IdRef,"]
+    #[doc = "  reference_coordinates: IdRef,"]
+    #[doc = "  block_size: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_BLOCK_MATCH_SADQCOM: Self = Self(4483);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitCastArrayQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  source_array: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BIT_CAST_ARRAY_QCOM: Self = Self(4497);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageBlockMatchWindowSSDQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  target_sampled_image: IdRef,"]
+    #[doc = "  target_coordinates: IdRef,"]
+    #[doc = "  reference_sampled_image: IdRef,"]
+    #[doc = "  reference_coordinates: IdRef,"]
+    #[doc = "  block_size: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_BLOCK_MATCH_WINDOW_SSDQCOM: Self = Self(4500);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageBlockMatchWindowSADQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  target_sampled_image: IdRef,"]
+    #[doc = "  target_coordinates: IdRef,"]
+    #[doc = "  reference_sampled_image: IdRef,"]
+    #[doc = "  reference_coordinates: IdRef,"]
+    #[doc = "  block_size: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_BLOCK_MATCH_WINDOW_SADQCOM: Self = Self(4501);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageBlockMatchGatherSSDQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  target_sampled_image: IdRef,"]
+    #[doc = "  target_coordinates: IdRef,"]
+    #[doc = "  reference_sampled_image: IdRef,"]
+    #[doc = "  reference_coordinates: IdRef,"]
+    #[doc = "  block_size: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_BLOCK_MATCH_GATHER_SSDQCOM: Self = Self(4502);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageBlockMatchGatherSADQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  target_sampled_image: IdRef,"]
+    #[doc = "  target_coordinates: IdRef,"]
+    #[doc = "  reference_sampled_image: IdRef,"]
+    #[doc = "  reference_coordinates: IdRef,"]
+    #[doc = "  block_size: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_BLOCK_MATCH_GATHER_SADQCOM: Self = Self(4503);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CompositeConstructCoopMatQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  source_array: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMPOSITE_CONSTRUCT_COOP_MAT_QCOM: Self = Self(4540);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CompositeExtractCoopMatQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  source_cooperative_matrix: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMPOSITE_EXTRACT_COOP_MAT_QCOM: Self = Self(4541);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExtractSubArrayQCOM {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  source_array: IdRef,"]
+    #[doc = "  index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXTRACT_SUB_ARRAY_QCOM: Self = Self(4542);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupIAddNonUniformAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_IADD_NON_UNIFORM_AMD: Self = Self(5000);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupFAddNonUniformAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_FADD_NON_UNIFORM_AMD: Self = Self(5001);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupFMinNonUniformAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_FMIN_NON_UNIFORM_AMD: Self = Self(5002);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupUMinNonUniformAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_UMIN_NON_UNIFORM_AMD: Self = Self(5003);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupSMinNonUniformAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_SMIN_NON_UNIFORM_AMD: Self = Self(5004);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupFMaxNonUniformAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_FMAX_NON_UNIFORM_AMD: Self = Self(5005);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupUMaxNonUniformAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_UMAX_NON_UNIFORM_AMD: Self = Self(5006);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupSMaxNonUniformAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_SMAX_NON_UNIFORM_AMD: Self = Self(5007);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FragmentMaskFetchAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FRAGMENT_MASK_FETCH_AMD: Self = Self(5011);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FragmentFetchAMD {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  fragment_index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FRAGMENT_FETCH_AMD: Self = Self(5012);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReadClockKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  scope: IdScope,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const READ_CLOCK_KHR: Self = Self(5056);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AllocateNodePayloadsAMDX {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  visibility: IdScope,"]
+    #[doc = "  payload_count: IdRef,"]
+    #[doc = "  node_index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ALLOCATE_NODE_PAYLOADS_AMDX: Self = Self(5074);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EnqueueNodePayloadsAMDX {"]
+    #[doc = "  payload_array: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ENQUEUE_NODE_PAYLOADS_AMDX: Self = Self(5075);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeNodePayloadArrayAMDX {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  payload_type: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_NODE_PAYLOAD_ARRAY_AMDX: Self = Self(5076);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FinishWritingNodePayloadAMDX {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FINISH_WRITING_NODE_PAYLOAD_AMDX: Self = Self(5078);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct NodePayloadArrayLengthAMDX {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  payload_array: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const NODE_PAYLOAD_ARRAY_LENGTH_AMDX: Self = Self(5090);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IsNodePayloadValidAMDX {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  payload_type: IdRef,"]
+    #[doc = "  node_index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IS_NODE_PAYLOAD_VALID_AMDX: Self = Self(5101);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantStringAMDX<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  literal_string: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_STRING_AMDX: Self = Self(5103);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantStringAMDX<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  literal_string: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_STRING_AMDX: Self = Self(5104);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformQuadAllKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_QUAD_ALL_KHR: Self = Self(5110);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformQuadAnyKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  predicate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_QUAD_ANY_KHR: Self = Self(5111);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeBufferEXT {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  storage_class: StorageClass,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_BUFFER_EXT: Self = Self(5115);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BufferPointerEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  buffer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BUFFER_POINTER_EXT: Self = Self(5119);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AbortKHR {"]
+    #[doc = "  message_type: IdRef,"]
+    #[doc = "  message: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ABORT_KHR: Self = Self(5121);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedImageTexelPointerEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image_type: IdRef,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  sample: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_IMAGE_TEXEL_POINTER_EXT: Self = Self(5126);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MemberDecorateIdEXT<'a> {"]
+    #[doc = "  structure_type: IdRef,"]
+    #[doc = "  member: LiteralInteger,"]
+    #[doc = "  decoration: Decoration<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MEMBER_DECORATE_ID_EXT: Self = Self(5127);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantSizeOfEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ty: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_SIZE_OF_EXT: Self = Self(5129);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantDataKHR<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  data: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_DATA_KHR: Self = Self(5147);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantDataKHR<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  data: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_DATA_KHR: Self = Self(5148);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct PoisonKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const POISON_KHR: Self = Self(5158);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FreezeKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FREEZE_KHR: Self = Self(5159);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordHitMotionNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  instance_id: IdRef,"]
+    #[doc = "  primitive_id: IdRef,"]
+    #[doc = "  geometry_index: IdRef,"]
+    #[doc = "  hit_kind: IdRef,"]
+    #[doc = "  sbt_record_offset: IdRef,"]
+    #[doc = "  sbt_record_stride: IdRef,"]
+    #[doc = "  origin: IdRef,"]
+    #[doc = "  tmin: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "  tmax: IdRef,"]
+    #[doc = "  current_time: IdRef,"]
+    #[doc = "  hit_object_attributes: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_HIT_MOTION_NV: Self = Self(5249);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordHitWithIndexMotionNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  instance_id: IdRef,"]
+    #[doc = "  primitive_id: IdRef,"]
+    #[doc = "  geometry_index: IdRef,"]
+    #[doc = "  hit_kind: IdRef,"]
+    #[doc = "  sbt_record_index: IdRef,"]
+    #[doc = "  origin: IdRef,"]
+    #[doc = "  tmin: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "  tmax: IdRef,"]
+    #[doc = "  current_time: IdRef,"]
+    #[doc = "  hit_object_attributes: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_HIT_WITH_INDEX_MOTION_NV: Self = Self(5250);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordMissMotionNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  sbt_index: IdRef,"]
+    #[doc = "  origin: IdRef,"]
+    #[doc = "  tmin: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "  tmax: IdRef,"]
+    #[doc = "  current_time: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_MISS_MOTION_NV: Self = Self(5251);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetWorldToObjectNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_WORLD_TO_OBJECT_NV: Self = Self(5252);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetObjectToWorldNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_OBJECT_TO_WORLD_NV: Self = Self(5253);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetObjectRayDirectionNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_OBJECT_RAY_DIRECTION_NV: Self = Self(5254);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetObjectRayOriginNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_OBJECT_RAY_ORIGIN_NV: Self = Self(5255);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectTraceRayMotionNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cullmask: IdRef,"]
+    #[doc = "  sbt_record_offset: IdRef,"]
+    #[doc = "  sbt_record_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  origin: IdRef,"]
+    #[doc = "  tmin: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "  tmax: IdRef,"]
+    #[doc = "  time: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_TRACE_RAY_MOTION_NV: Self = Self(5256);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetShaderRecordBufferHandleNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_SHADER_RECORD_BUFFER_HANDLE_NV: Self = Self(5257);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetShaderBindingTableRecordIndexNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_SHADER_BINDING_TABLE_RECORD_INDEX_NV: Self = Self(5258);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordEmptyNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_EMPTY_NV: Self = Self(5259);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectTraceRayNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cullmask: IdRef,"]
+    #[doc = "  sbt_record_offset: IdRef,"]
+    #[doc = "  sbt_record_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  origin: IdRef,"]
+    #[doc = "  tmin: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "  tmax: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_TRACE_RAY_NV: Self = Self(5260);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordHitNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  instance_id: IdRef,"]
+    #[doc = "  primitive_id: IdRef,"]
+    #[doc = "  geometry_index: IdRef,"]
+    #[doc = "  hit_kind: IdRef,"]
+    #[doc = "  sbt_record_offset: IdRef,"]
+    #[doc = "  sbt_record_stride: IdRef,"]
+    #[doc = "  origin: IdRef,"]
+    #[doc = "  tmin: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "  tmax: IdRef,"]
+    #[doc = "  hit_object_attributes: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_HIT_NV: Self = Self(5261);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordHitWithIndexNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  instance_id: IdRef,"]
+    #[doc = "  primitive_id: IdRef,"]
+    #[doc = "  geometry_index: IdRef,"]
+    #[doc = "  hit_kind: IdRef,"]
+    #[doc = "  sbt_record_index: IdRef,"]
+    #[doc = "  origin: IdRef,"]
+    #[doc = "  tmin: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "  tmax: IdRef,"]
+    #[doc = "  hit_object_attributes: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_HIT_WITH_INDEX_NV: Self = Self(5262);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordMissNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  sbt_index: IdRef,"]
+    #[doc = "  origin: IdRef,"]
+    #[doc = "  tmin: IdRef,"]
+    #[doc = "  direction: IdRef,"]
+    #[doc = "  tmax: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_MISS_NV: Self = Self(5263);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectExecuteShaderNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_EXECUTE_SHADER_NV: Self = Self(5264);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetCurrentTimeNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_CURRENT_TIME_NV: Self = Self(5265);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetAttributesNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  hit_object_attribute: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_ATTRIBUTES_NV: Self = Self(5266);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetHitKindNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_HIT_KIND_NV: Self = Self(5267);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetPrimitiveIndexNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_PRIMITIVE_INDEX_NV: Self = Self(5268);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetGeometryIndexNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_GEOMETRY_INDEX_NV: Self = Self(5269);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetInstanceIdNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_INSTANCE_ID_NV: Self = Self(5270);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetInstanceCustomIndexNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_INSTANCE_CUSTOM_INDEX_NV: Self = Self(5271);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetWorldRayDirectionNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_WORLD_RAY_DIRECTION_NV: Self = Self(5272);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetWorldRayOriginNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_WORLD_RAY_ORIGIN_NV: Self = Self(5273);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetRayTMaxNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_RAY_TMAX_NV: Self = Self(5274);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetRayTMinNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_RAY_TMIN_NV: Self = Self(5275);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectIsEmptyNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_IS_EMPTY_NV: Self = Self(5276);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectIsHitNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_IS_HIT_NV: Self = Self(5277);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectIsMissNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_IS_MISS_NV: Self = Self(5278);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReorderThreadWithHitObjectNV {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  hint: Option<IdRef>,"]
+    #[doc = "  bits: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const REORDER_THREAD_WITH_HIT_OBJECT_NV: Self = Self(5279);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReorderThreadWithHintNV {"]
+    #[doc = "  hint: IdRef,"]
+    #[doc = "  bits: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const REORDER_THREAD_WITH_HINT_NV: Self = Self(5280);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeHitObjectNV {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_HIT_OBJECT_NV: Self = Self(5281);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ImageSampleFootprintNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  sampled_image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  granularity: IdRef,"]
+    #[doc = "  coarse: IdRef,"]
+    #[doc = "  image_operands: Option<ImageOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMAGE_SAMPLE_FOOTPRINT_NV: Self = Self(5283);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeVectorIdEXT {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  component_type: IdRef,"]
+    #[doc = "  component_count: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_VECTOR_ID_EXT: Self = Self(5288);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeVectorMatrixMulNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  input: IdRef,"]
+    #[doc = "  input_interpretation: IdRef,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "  matrix_offset: IdRef,"]
+    #[doc = "  matrix_interpretation: IdRef,"]
+    #[doc = "  m: IdRef,"]
+    #[doc = "  k: IdRef,"]
+    #[doc = "  memory_layout: IdRef,"]
+    #[doc = "  transpose: IdRef,"]
+    #[doc = "  matrix_stride: Option<IdRef>,"]
+    #[doc = "  cooperative_matrix_operands: Option<CooperativeMatrixOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_VECTOR_MATRIX_MUL_NV: Self = Self(5289);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeVectorOuterProductAccumulateNV {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  offset: IdRef,"]
+    #[doc = "  a: IdRef,"]
+    #[doc = "  b: IdRef,"]
+    #[doc = "  memory_layout: IdRef,"]
+    #[doc = "  matrix_interpretation: IdRef,"]
+    #[doc = "  matrix_stride: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_VECTOR_OUTER_PRODUCT_ACCUMULATE_NV: Self = Self(5290);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeVectorReduceSumAccumulateNV {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  offset: IdRef,"]
+    #[doc = "  v: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_VECTOR_REDUCE_SUM_ACCUMULATE_NV: Self = Self(5291);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeVectorMatrixMulAddNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  input: IdRef,"]
+    #[doc = "  input_interpretation: IdRef,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "  matrix_offset: IdRef,"]
+    #[doc = "  matrix_interpretation: IdRef,"]
+    #[doc = "  bias: IdRef,"]
+    #[doc = "  bias_offset: IdRef,"]
+    #[doc = "  bias_interpretation: IdRef,"]
+    #[doc = "  m: IdRef,"]
+    #[doc = "  k: IdRef,"]
+    #[doc = "  memory_layout: IdRef,"]
+    #[doc = "  transpose: IdRef,"]
+    #[doc = "  matrix_stride: Option<IdRef>,"]
+    #[doc = "  cooperative_matrix_operands: Option<CooperativeMatrixOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_VECTOR_MATRIX_MUL_ADD_NV: Self = Self(5292);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixConvertNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_CONVERT_NV: Self = Self(5293);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EmitMeshTasksEXT {"]
+    #[doc = "  group_count_x: IdRef,"]
+    #[doc = "  group_count_y: IdRef,"]
+    #[doc = "  group_count_z: IdRef,"]
+    #[doc = "  payload: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EMIT_MESH_TASKS_EXT: Self = Self(5294);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SetMeshOutputsEXT {"]
+    #[doc = "  vertex_count: IdRef,"]
+    #[doc = "  primitive_count: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SET_MESH_OUTPUTS_EXT: Self = Self(5295);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupNonUniformPartitionEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_NON_UNIFORM_PARTITION_EXT: Self = Self(5296);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct WritePackedPrimitiveIndices4x8NV {"]
+    #[doc = "  index_offset: IdRef,"]
+    #[doc = "  packed_indices: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const WRITE_PACKED_PRIMITIVE_INDICES4X8_NV: Self = Self(5299);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FetchMicroTriangleVertexPositionNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  accel: IdRef,"]
+    #[doc = "  instance_id: IdRef,"]
+    #[doc = "  geometry_index: IdRef,"]
+    #[doc = "  primitive_index: IdRef,"]
+    #[doc = "  barycentric: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FETCH_MICRO_TRIANGLE_VERTEX_POSITION_NV: Self = Self(5300);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FetchMicroTriangleVertexBarycentricNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  accel: IdRef,"]
+    #[doc = "  instance_id: IdRef,"]
+    #[doc = "  geometry_index: IdRef,"]
+    #[doc = "  primitive_index: IdRef,"]
+    #[doc = "  barycentric: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FETCH_MICRO_TRIANGLE_VERTEX_BARYCENTRIC_NV: Self = Self(5301);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeVectorLoadNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  offset: IdRef,"]
+    #[doc = "  memory_access: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_VECTOR_LOAD_NV: Self = Self(5302);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeVectorStoreNV {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  offset: IdRef,"]
+    #[doc = "  object: IdRef,"]
+    #[doc = "  memory_access: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_VECTOR_STORE_NV: Self = Self(5303);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordFromQueryEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  sbt_record_index: IdRef,"]
+    #[doc = "  hit_object_attributes: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_FROM_QUERY_EXT: Self = Self(5304);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordMissEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_MISS_EXT: Self = Self(5305);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordMissMotionEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  current_time: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_MISS_MOTION_EXT: Self = Self(5306);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetIntersectionTriangleVertexPositionsEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_INTERSECTION_TRIANGLE_VERTEX_POSITIONS_EXT: Self = Self(5307);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetRayFlagsEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_RAY_FLAGS_EXT: Self = Self(5308);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectSetShaderBindingTableRecordIndexEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  sbt_record_index: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_SET_SHADER_BINDING_TABLE_RECORD_INDEX_EXT: Self = Self(5309);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectReorderExecuteShaderEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "  hint: Option<IdRef>,"]
+    #[doc = "  bits: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_REORDER_EXECUTE_SHADER_EXT: Self = Self(5310);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectTraceReorderExecuteEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  sbt_offset: IdRef,"]
+    #[doc = "  sbt_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "  hint: Option<IdRef>,"]
+    #[doc = "  bits: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_TRACE_REORDER_EXECUTE_EXT: Self = Self(5311);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectTraceMotionReorderExecuteEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  sbt_offset: IdRef,"]
+    #[doc = "  sbt_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  current_time: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "  hint: Option<IdRef>,"]
+    #[doc = "  bits: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_TRACE_MOTION_REORDER_EXECUTE_EXT: Self = Self(5312);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeHitObjectEXT {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_HIT_OBJECT_EXT: Self = Self(5313);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReorderThreadWithHintEXT {"]
+    #[doc = "  hint: IdRef,"]
+    #[doc = "  bits: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const REORDER_THREAD_WITH_HINT_EXT: Self = Self(5314);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReorderThreadWithHitObjectEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  hint: Option<IdRef>,"]
+    #[doc = "  bits: Option<IdRef>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const REORDER_THREAD_WITH_HIT_OBJECT_EXT: Self = Self(5315);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectTraceRayEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  sbt_offset: IdRef,"]
+    #[doc = "  sbt_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_TRACE_RAY_EXT: Self = Self(5316);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectTraceRayMotionEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  acceleration_structure: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  sbt_offset: IdRef,"]
+    #[doc = "  sbt_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  current_time: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_TRACE_RAY_MOTION_EXT: Self = Self(5317);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectRecordEmptyEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_RECORD_EMPTY_EXT: Self = Self(5318);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectExecuteShaderEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_EXECUTE_SHADER_EXT: Self = Self(5319);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetCurrentTimeEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_CURRENT_TIME_EXT: Self = Self(5320);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetAttributesEXT {"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "  hit_object_attribute: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_ATTRIBUTES_EXT: Self = Self(5321);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetHitKindEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_HIT_KIND_EXT: Self = Self(5322);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetPrimitiveIndexEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_PRIMITIVE_INDEX_EXT: Self = Self(5323);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetGeometryIndexEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_GEOMETRY_INDEX_EXT: Self = Self(5324);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetInstanceIdEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_INSTANCE_ID_EXT: Self = Self(5325);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetInstanceCustomIndexEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_INSTANCE_CUSTOM_INDEX_EXT: Self = Self(5326);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetObjectRayOriginEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_OBJECT_RAY_ORIGIN_EXT: Self = Self(5327);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetObjectRayDirectionEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_OBJECT_RAY_DIRECTION_EXT: Self = Self(5328);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetWorldRayDirectionEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_WORLD_RAY_DIRECTION_EXT: Self = Self(5329);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetWorldRayOriginEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_WORLD_RAY_ORIGIN_EXT: Self = Self(5330);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetObjectToWorldEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_OBJECT_TO_WORLD_EXT: Self = Self(5331);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetWorldToObjectEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_WORLD_TO_OBJECT_EXT: Self = Self(5332);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetRayTMaxEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_RAY_TMAX_EXT: Self = Self(5333);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ReportIntersectionKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit: IdRef,"]
+    #[doc = "  hit_kind: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const REPORT_INTERSECTION_KHR: Self = Self(5334);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IgnoreIntersectionNV;"]
+    #[doc = "```"]
     pub const IGNORE_INTERSECTION_NV: Self = Self(5335);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TerminateRayNV;"]
+    #[doc = "```"]
     pub const TERMINATE_RAY_NV: Self = Self(5336);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TraceNV {"]
+    #[doc = "  accel: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  sbt_offset: IdRef,"]
+    #[doc = "  sbt_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  payload_id: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TRACE_NV: Self = Self(5337);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TraceMotionNV {"]
+    #[doc = "  accel: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  sbt_offset: IdRef,"]
+    #[doc = "  sbt_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  time: IdRef,"]
+    #[doc = "  payload_id: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TRACE_MOTION_NV: Self = Self(5338);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TraceRayMotionNV {"]
+    #[doc = "  accel: IdRef,"]
+    #[doc = "  ray_flags: IdRef,"]
+    #[doc = "  cull_mask: IdRef,"]
+    #[doc = "  sbt_offset: IdRef,"]
+    #[doc = "  sbt_stride: IdRef,"]
+    #[doc = "  miss_index: IdRef,"]
+    #[doc = "  ray_origin: IdRef,"]
+    #[doc = "  ray_tmin: IdRef,"]
+    #[doc = "  ray_direction: IdRef,"]
+    #[doc = "  ray_tmax: IdRef,"]
+    #[doc = "  time: IdRef,"]
+    #[doc = "  payload: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TRACE_RAY_MOTION_NV: Self = Self(5339);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionTriangleVertexPositionsKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_TRIANGLE_VERTEX_POSITIONS_KHR: Self = Self(5340);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeAccelerationStructureKHR {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_ACCELERATION_STRUCTURE_KHR: Self = Self(5341);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExecuteCallableNV {"]
+    #[doc = "  sbt_index: IdRef,"]
+    #[doc = "  callable_data_id: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXECUTE_CALLABLE_NV: Self = Self(5344);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionClusterIdNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_CLUSTER_ID_NV: Self = Self(5345);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetClusterIdNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_CLUSTER_ID_NV: Self = Self(5346);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetRayTMinEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_RAY_TMIN_EXT: Self = Self(5347);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetShaderBindingTableRecordIndexEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_SHADER_BINDING_TABLE_RECORD_INDEX_EXT: Self = Self(5348);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetShaderRecordBufferHandleEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_SHADER_RECORD_BUFFER_HANDLE_EXT: Self = Self(5349);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectIsEmptyEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_IS_EMPTY_EXT: Self = Self(5350);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectIsHitEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_IS_HIT_EXT: Self = Self(5351);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectIsMissEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_IS_MISS_EXT: Self = Self(5352);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeCooperativeMatrixNV {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  component_type: IdRef,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  rows: IdRef,"]
+    #[doc = "  columns: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_COOPERATIVE_MATRIX_NV: Self = Self(5358);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixLoadNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  stride: IdRef,"]
+    #[doc = "  column_major: IdRef,"]
+    #[doc = "  memory_access: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_LOAD_NV: Self = Self(5359);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixStoreNV {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  object: IdRef,"]
+    #[doc = "  stride: IdRef,"]
+    #[doc = "  column_major: IdRef,"]
+    #[doc = "  memory_access: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_STORE_NV: Self = Self(5360);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixMulAddNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  a: IdRef,"]
+    #[doc = "  b: IdRef,"]
+    #[doc = "  c: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_MUL_ADD_NV: Self = Self(5361);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixLengthNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ty: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_LENGTH_NV: Self = Self(5362);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BeginInvocationInterlockEXT;"]
+    #[doc = "```"]
     pub const BEGIN_INVOCATION_INTERLOCK_EXT: Self = Self(5364);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct EndInvocationInterlockEXT;"]
+    #[doc = "```"]
     pub const END_INVOCATION_INTERLOCK_EXT: Self = Self(5365);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixReduceNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "  reduce: CooperativeMatrixReduce,"]
+    #[doc = "  combine_func: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_REDUCE_NV: Self = Self(5366);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixLoadTensorNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  object: IdRef,"]
+    #[doc = "  tensor_layout: IdRef,"]
+    #[doc = "  memory_operand: MemoryAccess,"]
+    #[doc = "  tensor_addressing_operands: TensorAddressingOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_LOAD_TENSOR_NV: Self = Self(5367);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixStoreTensorNV {"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  object: IdRef,"]
+    #[doc = "  tensor_layout: IdRef,"]
+    #[doc = "  memory_operand: MemoryAccess,"]
+    #[doc = "  tensor_addressing_operands: TensorAddressingOperands,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_STORE_TENSOR_NV: Self = Self(5368);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixPerElementOpNV<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "  func: IdRef,"]
+    #[doc = "  operands: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_PER_ELEMENT_OP_NV: Self = Self(5369);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeTensorLayoutNV {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  dim: IdRef,"]
+    #[doc = "  clamp_mode: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_TENSOR_LAYOUT_NV: Self = Self(5370);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeTensorViewNV<'a> {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  dim: IdRef,"]
+    #[doc = "  has_dimensions: IdRef,"]
+    #[doc = "  p: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_TENSOR_VIEW_NV: Self = Self(5371);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CreateTensorLayoutNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CREATE_TENSOR_LAYOUT_NV: Self = Self(5372);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorLayoutSetDimensionNV<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor_layout: IdRef,"]
+    #[doc = "  dim: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_LAYOUT_SET_DIMENSION_NV: Self = Self(5373);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorLayoutSetStrideNV<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor_layout: IdRef,"]
+    #[doc = "  stride: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_LAYOUT_SET_STRIDE_NV: Self = Self(5374);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorLayoutSliceNV<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor_layout: IdRef,"]
+    #[doc = "  operands: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_LAYOUT_SLICE_NV: Self = Self(5375);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorLayoutSetClampValueNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor_layout: IdRef,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_LAYOUT_SET_CLAMP_VALUE_NV: Self = Self(5376);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CreateTensorViewNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CREATE_TENSOR_VIEW_NV: Self = Self(5377);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorViewSetDimensionNV<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor_view: IdRef,"]
+    #[doc = "  dim: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_VIEW_SET_DIMENSION_NV: Self = Self(5378);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorViewSetStrideNV<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor_view: IdRef,"]
+    #[doc = "  stride: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_VIEW_SET_STRIDE_NV: Self = Self(5379);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DemoteToHelperInvocation;"]
+    #[doc = "```"]
     pub const DEMOTE_TO_HELPER_INVOCATION: Self = Self(5380);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IsHelperInvocationEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IS_HELPER_INVOCATION_EXT: Self = Self(5381);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorViewSetClipNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor_view: IdRef,"]
+    #[doc = "  clip_row_offset: IdRef,"]
+    #[doc = "  clip_row_span: IdRef,"]
+    #[doc = "  clip_col_offset: IdRef,"]
+    #[doc = "  clip_col_span: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_VIEW_SET_CLIP_NV: Self = Self(5382);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TensorLayoutSetBlockSizeNV<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  tensor_layout: IdRef,"]
+    #[doc = "  block_size: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TENSOR_LAYOUT_SET_BLOCK_SIZE_NV: Self = Self(5384);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CooperativeMatrixTransposeNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  matrix: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COOPERATIVE_MATRIX_TRANSPOSE_NV: Self = Self(5390);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertUToImageNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_UTO_IMAGE_NV: Self = Self(5391);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertUToSamplerNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_UTO_SAMPLER_NV: Self = Self(5392);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertImageToUNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_IMAGE_TO_UNV: Self = Self(5393);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertSamplerToUNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_SAMPLER_TO_UNV: Self = Self(5394);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertUToSampledImageNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_UTO_SAMPLED_IMAGE_NV: Self = Self(5395);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertSampledImageToUNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_SAMPLED_IMAGE_TO_UNV: Self = Self(5396);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SamplerImageAddressingModeNV {"]
+    #[doc = "  bit_width: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SAMPLER_IMAGE_ADDRESSING_MODE_NV: Self = Self(5397);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RawAccessChainNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  base: IdRef,"]
+    #[doc = "  byte_stride: IdRef,"]
+    #[doc = "  element_index: IdRef,"]
+    #[doc = "  byte_offset: IdRef,"]
+    #[doc = "  raw_access_chain_operands: Option<RawAccessChainOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAW_ACCESS_CHAIN_NV: Self = Self(5398);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionSpherePositionNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_SPHERE_POSITION_NV: Self = Self(5427);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionSphereRadiusNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_SPHERE_RADIUS_NV: Self = Self(5428);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionLSSPositionsNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_LSSPOSITIONS_NV: Self = Self(5429);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionLSSRadiiNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_LSSRADII_NV: Self = Self(5430);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionLSSHitValueNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_LSSHIT_VALUE_NV: Self = Self(5431);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetSpherePositionNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_SPHERE_POSITION_NV: Self = Self(5432);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetSphereRadiusNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_SPHERE_RADIUS_NV: Self = Self(5433);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetLSSPositionsNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_LSSPOSITIONS_NV: Self = Self(5434);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectGetLSSRadiiNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_GET_LSSRADII_NV: Self = Self(5435);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectIsSphereHitNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_IS_SPHERE_HIT_NV: Self = Self(5436);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct HitObjectIsLSSHitNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  hit_object: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const HIT_OBJECT_IS_LSSHIT_NV: Self = Self(5437);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryIsSphereHitNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_IS_SPHERE_HIT_NV: Self = Self(5438);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryIsLSSHitNV {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_IS_LSSHIT_NV: Self = Self(5439);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupShuffleINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  data: IdRef,"]
+    #[doc = "  invocation_id: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_SHUFFLE_INTEL: Self = Self(5571);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupShuffleDownINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  current: IdRef,"]
+    #[doc = "  next: IdRef,"]
+    #[doc = "  delta: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_SHUFFLE_DOWN_INTEL: Self = Self(5572);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupShuffleUpINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  previous: IdRef,"]
+    #[doc = "  current: IdRef,"]
+    #[doc = "  delta: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_SHUFFLE_UP_INTEL: Self = Self(5573);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupShuffleXorINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  data: IdRef,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_SHUFFLE_XOR_INTEL: Self = Self(5574);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupBlockReadINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ptr: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_BLOCK_READ_INTEL: Self = Self(5575);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupBlockWriteINTEL {"]
+    #[doc = "  ptr: IdRef,"]
+    #[doc = "  data: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_BLOCK_WRITE_INTEL: Self = Self(5576);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupImageBlockReadINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_IMAGE_BLOCK_READ_INTEL: Self = Self(5577);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupImageBlockWriteINTEL {"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  data: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_IMAGE_BLOCK_WRITE_INTEL: Self = Self(5578);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupImageMediaBlockReadINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  width: IdRef,"]
+    #[doc = "  height: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_IMAGE_MEDIA_BLOCK_READ_INTEL: Self = Self(5580);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupImageMediaBlockWriteINTEL {"]
+    #[doc = "  image: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  width: IdRef,"]
+    #[doc = "  height: IdRef,"]
+    #[doc = "  data: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_IMAGE_MEDIA_BLOCK_WRITE_INTEL: Self = Self(5581);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UCountLeadingZerosINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UCOUNT_LEADING_ZEROS_INTEL: Self = Self(5585);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UCountTrailingZerosINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UCOUNT_TRAILING_ZEROS_INTEL: Self = Self(5586);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AbsISubINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ABS_ISUB_INTEL: Self = Self(5587);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AbsUSubINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ABS_USUB_INTEL: Self = Self(5588);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IAddSatINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IADD_SAT_INTEL: Self = Self(5589);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UAddSatINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UADD_SAT_INTEL: Self = Self(5590);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IAverageINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IAVERAGE_INTEL: Self = Self(5591);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UAverageINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UAVERAGE_INTEL: Self = Self(5592);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IAverageRoundedINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IAVERAGE_ROUNDED_INTEL: Self = Self(5593);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UAverageRoundedINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UAVERAGE_ROUNDED_INTEL: Self = Self(5594);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ISubSatINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ISUB_SAT_INTEL: Self = Self(5595);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct USubSatINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const USUB_SAT_INTEL: Self = Self(5596);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct IMul32x16INTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const IMUL32X16_INTEL: Self = Self(5597);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UMul32x16INTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand_1: IdRef,"]
+    #[doc = "  operand_2: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UMUL32X16_INTEL: Self = Self(5598);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicFMinEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_FMIN_EXT: Self = Self(5614);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicFMaxEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_FMAX_EXT: Self = Self(5615);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AssumeTrueKHR {"]
+    #[doc = "  condition: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ASSUME_TRUE_KHR: Self = Self(5630);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ExpectKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "  expected_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const EXPECT_KHR: Self = Self(5631);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct DecorateString<'a> {"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "  decoration: Decoration<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const DECORATE_STRING: Self = Self(5632);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MemberDecorateString<'a> {"]
+    #[doc = "  struct_type: IdRef,"]
+    #[doc = "  member: LiteralInteger,"]
+    #[doc = "  decoration: Decoration<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MEMBER_DECORATE_STRING: Self = Self(5633);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct VariableLengthArrayINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  length: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const VARIABLE_LENGTH_ARRAY_INTEL: Self = Self(5818);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SaveMemoryINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SAVE_MEMORY_INTEL: Self = Self(5819);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RestoreMemoryINTEL {"]
+    #[doc = "  ptr: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RESTORE_MEMORY_INTEL: Self = Self(5820);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct LoopControlINTEL<'a> {"]
+    #[doc = "  loop_control_parameters: &'a [LiteralInteger],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const LOOP_CONTROL_INTEL: Self = Self(5887);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetRayTMinKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_RAY_TMIN_KHR: Self = Self(6016);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetRayFlagsKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_RAY_FLAGS_KHR: Self = Self(6017);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionTKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_TKHR: Self = Self(6018);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionInstanceCustomIndexKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_INSTANCE_CUSTOM_INDEX_KHR: Self = Self(6019);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionInstanceIdKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_INSTANCE_ID_KHR: Self = Self(6020);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_INSTANCE_SHADER_BINDING_TABLE_RECORD_OFFSET_KHR: Self =
         Self(6021);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionGeometryIndexKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_GEOMETRY_INDEX_KHR: Self = Self(6022);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionPrimitiveIndexKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_PRIMITIVE_INDEX_KHR: Self = Self(6023);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionBarycentricsKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_BARYCENTRICS_KHR: Self = Self(6024);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionFrontFaceKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_FRONT_FACE_KHR: Self = Self(6025);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionCandidateAABBOpaqueKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_CANDIDATE_AABBOPAQUE_KHR: Self = Self(6026);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionObjectRayDirectionKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_OBJECT_RAY_DIRECTION_KHR: Self = Self(6027);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionObjectRayOriginKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_OBJECT_RAY_ORIGIN_KHR: Self = Self(6028);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetWorldRayDirectionKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_WORLD_RAY_DIRECTION_KHR: Self = Self(6029);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetWorldRayOriginKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_WORLD_RAY_ORIGIN_KHR: Self = Self(6030);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionObjectToWorldKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_OBJECT_TO_WORLD_KHR: Self = Self(6031);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RayQueryGetIntersectionWorldToObjectKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ray_query: IdRef,"]
+    #[doc = "  intersection: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const RAY_QUERY_GET_INTERSECTION_WORLD_TO_OBJECT_KHR: Self = Self(6032);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct AtomicFAddEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  pointer: IdRef,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "  value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ATOMIC_FADD_EXT: Self = Self(6035);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeBufferSurfaceINTEL {"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  access_qualifier: AccessQualifier,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_BUFFER_SURFACE_INTEL: Self = Self(6086);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct TypeStructContinuedINTEL<'a> {"]
+    #[doc = "  member_types: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const TYPE_STRUCT_CONTINUED_INTEL: Self = Self(6090);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConstantCompositeContinuedINTEL<'a> {"]
+    #[doc = "  constituents: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONSTANT_COMPOSITE_CONTINUED_INTEL: Self = Self(6091);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantCompositeContinuedINTEL<'a> {"]
+    #[doc = "  constituents: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_COMPOSITE_CONTINUED_INTEL: Self = Self(6092);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct CompositeConstructContinuedINTEL<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  constituents: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const COMPOSITE_CONSTRUCT_CONTINUED_INTEL: Self = Self(6096);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertFToBF16INTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  float_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_FTO_BF16_INTEL: Self = Self(6116);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertBF16ToFINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  bfloat16_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_BF16_TO_FINTEL: Self = Self(6117);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ControlBarrierArriveINTEL {"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONTROL_BARRIER_ARRIVE_INTEL: Self = Self(6142);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ControlBarrierWaitINTEL {"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  memory: IdScope,"]
+    #[doc = "  semantics: IdMemorySemantics,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONTROL_BARRIER_WAIT_INTEL: Self = Self(6143);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ArithmeticFenceEXT {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  target: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ARITHMETIC_FENCE_EXT: Self = Self(6145);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupBlockPrefetchINTEL {"]
+    #[doc = "  ptr: IdRef,"]
+    #[doc = "  num_bytes: IdRef,"]
+    #[doc = "  memory_access: Option<MemoryAccess>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_BLOCK_PREFETCH_INTEL: Self = Self(6221);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Subgroup2DBlockLoadINTEL {"]
+    #[doc = "  element_size: IdRef,"]
+    #[doc = "  block_width: IdRef,"]
+    #[doc = "  block_height: IdRef,"]
+    #[doc = "  block_count: IdRef,"]
+    #[doc = "  src_base_pointer: IdRef,"]
+    #[doc = "  memory_width: IdRef,"]
+    #[doc = "  memory_height: IdRef,"]
+    #[doc = "  memory_pitch: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dst_pointer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP2_DBLOCK_LOAD_INTEL: Self = Self(6231);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Subgroup2DBlockLoadTransformINTEL {"]
+    #[doc = "  element_size: IdRef,"]
+    #[doc = "  block_width: IdRef,"]
+    #[doc = "  block_height: IdRef,"]
+    #[doc = "  block_count: IdRef,"]
+    #[doc = "  src_base_pointer: IdRef,"]
+    #[doc = "  memory_width: IdRef,"]
+    #[doc = "  memory_height: IdRef,"]
+    #[doc = "  memory_pitch: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dst_pointer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP2_DBLOCK_LOAD_TRANSFORM_INTEL: Self = Self(6232);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Subgroup2DBlockLoadTransposeINTEL {"]
+    #[doc = "  element_size: IdRef,"]
+    #[doc = "  block_width: IdRef,"]
+    #[doc = "  block_height: IdRef,"]
+    #[doc = "  block_count: IdRef,"]
+    #[doc = "  src_base_pointer: IdRef,"]
+    #[doc = "  memory_width: IdRef,"]
+    #[doc = "  memory_height: IdRef,"]
+    #[doc = "  memory_pitch: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "  dst_pointer: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP2_DBLOCK_LOAD_TRANSPOSE_INTEL: Self = Self(6233);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Subgroup2DBlockPrefetchINTEL {"]
+    #[doc = "  element_size: IdRef,"]
+    #[doc = "  block_width: IdRef,"]
+    #[doc = "  block_height: IdRef,"]
+    #[doc = "  block_count: IdRef,"]
+    #[doc = "  src_base_pointer: IdRef,"]
+    #[doc = "  memory_width: IdRef,"]
+    #[doc = "  memory_height: IdRef,"]
+    #[doc = "  memory_pitch: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP2_DBLOCK_PREFETCH_INTEL: Self = Self(6234);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct Subgroup2DBlockStoreINTEL {"]
+    #[doc = "  element_size: IdRef,"]
+    #[doc = "  block_width: IdRef,"]
+    #[doc = "  block_height: IdRef,"]
+    #[doc = "  block_count: IdRef,"]
+    #[doc = "  src_pointer: IdRef,"]
+    #[doc = "  dst_base_pointer: IdRef,"]
+    #[doc = "  memory_width: IdRef,"]
+    #[doc = "  memory_height: IdRef,"]
+    #[doc = "  memory_pitch: IdRef,"]
+    #[doc = "  coordinate: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP2_DBLOCK_STORE_INTEL: Self = Self(6235);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SubgroupMatrixMultiplyAccumulateINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  k_dim: IdRef,"]
+    #[doc = "  matrix_a: IdRef,"]
+    #[doc = "  matrix_b: IdRef,"]
+    #[doc = "  matrix_c: IdRef,"]
+    #[doc = "  matrix_multiply_accumulate_operands: Option<MatrixMultiplyAccumulateOperands>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SUBGROUP_MATRIX_MULTIPLY_ACCUMULATE_INTEL: Self = Self(6237);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct BitwiseFunctionINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  a: IdRef,"]
+    #[doc = "  b: IdRef,"]
+    #[doc = "  c: IdRef,"]
+    #[doc = "  lutindex: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const BITWISE_FUNCTION_INTEL: Self = Self(6242);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct UntypedVariableLengthArrayINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  element_type: IdRef,"]
+    #[doc = "  length: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const UNTYPED_VARIABLE_LENGTH_ARRAY_INTEL: Self = Self(6244);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConditionalExtensionINTEL<'a> {"]
+    #[doc = "  condition: IdRef,"]
+    #[doc = "  name: LiteralString<'a>,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONDITIONAL_EXTENSION_INTEL: Self = Self(6248);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConditionalEntryPointINTEL<'a> {"]
+    #[doc = "  condition: IdRef,"]
+    #[doc = "  execution_model: ExecutionModel,"]
+    #[doc = "  entry_point: IdRef,"]
+    #[doc = "  name: LiteralString<'a>,"]
+    #[doc = "  interface: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONDITIONAL_ENTRY_POINT_INTEL: Self = Self(6249);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConditionalCapabilityINTEL {"]
+    #[doc = "  condition: IdRef,"]
+    #[doc = "  capability: Capability,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONDITIONAL_CAPABILITY_INTEL: Self = Self(6250);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantTargetINTEL<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  target: LiteralInteger,"]
+    #[doc = "  features: &'a [LiteralInteger],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_TARGET_INTEL: Self = Self(6251);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantArchitectureINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  category: LiteralInteger,"]
+    #[doc = "  family: LiteralInteger,"]
+    #[doc = "  opcode: LiteralInteger,"]
+    #[doc = "  architecture: LiteralInteger,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_ARCHITECTURE_INTEL: Self = Self(6252);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct SpecConstantCapabilitiesINTEL<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  capabilities: &'a [Capability],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const SPEC_CONSTANT_CAPABILITIES_INTEL: Self = Self(6253);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConditionalCopyObjectINTEL<'a> {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  conditions_and_operands_and: &'a [IdRef],"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONDITIONAL_COPY_OBJECT_INTEL: Self = Self(6254);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupIMulKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_IMUL_KHR: Self = Self(6401);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupFMulKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_FMUL_KHR: Self = Self(6402);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupBitwiseAndKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_BITWISE_AND_KHR: Self = Self(6403);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupBitwiseOrKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_BITWISE_OR_KHR: Self = Self(6404);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupBitwiseXorKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_BITWISE_XOR_KHR: Self = Self(6405);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupLogicalAndKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_LOGICAL_AND_KHR: Self = Self(6406);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupLogicalOrKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_LOGICAL_OR_KHR: Self = Self(6407);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct GroupLogicalXorKHR {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  execution: IdScope,"]
+    #[doc = "  operation: GroupOperation,"]
+    #[doc = "  x: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const GROUP_LOGICAL_XOR_KHR: Self = Self(6408);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct RoundFToTF32INTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  float_value: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const ROUND_FTO_TF32_INTEL: Self = Self(6426);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MaskedGatherINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  ptr_vector: IdRef,"]
+    #[doc = "  alignment: LiteralInteger,"]
+    #[doc = "  mask: IdRef,"]
+    #[doc = "  fill_empty: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MASKED_GATHER_INTEL: Self = Self(6428);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct MaskedScatterINTEL {"]
+    #[doc = "  input_vector: IdRef,"]
+    #[doc = "  ptr_vector: IdRef,"]
+    #[doc = "  alignment: LiteralInteger,"]
+    #[doc = "  mask: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const MASKED_SCATTER_INTEL: Self = Self(6429);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertHandleToImageINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_HANDLE_TO_IMAGE_INTEL: Self = Self(6529);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertHandleToSamplerINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_HANDLE_TO_SAMPLER_INTEL: Self = Self(6530);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct ConvertHandleToSampledImageINTEL {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  operand: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const CONVERT_HANDLE_TO_SAMPLED_IMAGE_INTEL: Self = Self(6531);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FDot2MixAcc32VALVE {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  accumulator: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FDOT2_MIX_ACC32_VALVE: Self = Self(6916);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FDot2MixAcc16VALVE {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  accumulator: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FDOT2_MIX_ACC16_VALVE: Self = Self(6917);
+    #[doc = "# Struct template"]
+    #[doc = "``` rust"]
+    #[doc = "struct FDot4MixAcc32VALVE {"]
+    #[doc = "  id_result_type: IdResultType,"]
+    #[doc = "  id_result: IdResult,"]
+    #[doc = "  vector_1: IdRef,"]
+    #[doc = "  vector_2: IdRef,"]
+    #[doc = "  accumulator: IdRef,"]
+    #[doc = "}"]
+    #[doc = "```"]
     pub const FDOT4_MIX_ACC32_VALVE: Self = Self(6918);
 }
 impl Word for Code {
@@ -702,4784 +6849,3 @@ impl Display for Code {
         write!(f, "{}", INST_INFOS[self.0 as usize].name)
     }
 }
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformElect {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformAll {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformAny {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformAllEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBroadcast {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub invocation_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBroadcastFirst {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformInverseBallot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallotBitExtract {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallotBitCount {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallotFindLSB {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBallotFindMSB {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformShuffle {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub invocation_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformShuffleXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub mask: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformShuffleUp {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub delta: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformShuffleDown {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub delta: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformIAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformFAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformIMul {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformFMul {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformSMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformUMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformFMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformSMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformUMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformFMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBitwiseAnd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBitwiseOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformBitwiseXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformLogicalAnd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformLogicalOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformLogicalXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub value: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformQuadBroadcast {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformQuadSwap {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub direction: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformQuadAllKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformQuadAnyKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformPartitionEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstString<'a> {
-    pub id_result: IdResult,
-    pub string: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSourceContinued<'a> {
-    pub continued_source: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSource<'a> {
-    pub source_language: SourceLanguage,
-    pub version: LiteralInteger,
-    pub file: Option<IdRef>,
-    pub source: Option<LiteralString<'a>>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSourceExtension<'a> {
-    pub extension: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstName<'a> {
-    pub target: IdRef,
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemberName<'a> {
-    pub ty: IdRef,
-    pub member: LiteralInteger,
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstLine {
-    pub file: IdRef,
-    pub line: LiteralInteger,
-    pub column: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstNoLine;
-#[derive(Clone, Copy)]
-pub struct InstModuleProcessed<'a> {
-    pub process: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphConstantARM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub graph_constant_id: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphARM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphInputARM<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub input_index: IdRef,
-    pub element_index: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphEntryPointARM<'a> {
-    pub graph: IdRef,
-    pub name: LiteralString<'a>,
-    pub interface: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphSetOutputARM<'a> {
-    pub value: IdRef,
-    pub output_index: IdRef,
-    pub element_index: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGraphEndARM;
-#[derive(Clone, Copy)]
-pub struct InstSampledImage {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub sampler: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleDrefImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleDrefExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleProjImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleProjExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleProjDrefImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleProjDrefExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageFetch {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageGather {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub component: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageDrefGather {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageRead {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImage {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQueryFormat {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQueryOrder {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQuerySizeLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub level_of_detail: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQuerySize {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQueryLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQueryLevels {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageQuerySamples {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleDrefImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleDrefExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleProjImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleProjExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleProjDrefImplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseSampleProjDrefExplicitLod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: ImageOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseFetch {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseGather {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub component: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseDrefGather {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub dref: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseTexelsResident {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub resident_code: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSparseRead {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstColorAttachmentReadEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub attachment: IdRef,
-    pub sample: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstDepthAttachmentReadEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sample: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstStencilAttachmentReadEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sample: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleWeightedQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub texture: IdRef,
-    pub coordinates: IdRef,
-    pub weights: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBoxFilterQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub texture: IdRef,
-    pub coordinates: IdRef,
-    pub box_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchSSDQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchSADQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchWindowSSDQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target_sampled_image: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference_sampled_image: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchWindowSADQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target_sampled_image: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference_sampled_image: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchGatherSSDQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target_sampled_image: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference_sampled_image: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageBlockMatchGatherSADQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target_sampled_image: IdRef,
-    pub target_coordinates: IdRef,
-    pub reference_sampled_image: IdRef,
-    pub reference_coordinates: IdRef,
-    pub block_size: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageSampleFootprintNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampled_image: IdRef,
-    pub coordinate: IdRef,
-    pub granularity: IdRef,
-    pub coarse: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertHandleToImageINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertHandleToSamplerINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertHandleToSampledImageINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageWrite {
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub texel: IdRef,
-    pub image_operands: Option<ImageOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstFunction {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub function_control: FunctionControl,
-    pub function_type: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFunctionParameter {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstFunctionCall<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub function: IdRef,
-    pub arguments: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixPerElementOpNV<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-    pub func: IdRef,
-    pub operands: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstFunctionEnd;
-#[derive(Clone, Copy)]
-pub struct InstExtInstImport<'a> {
-    pub id_result: IdResult,
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstExtInst<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub set: IdRef,
-    pub instruction: LiteralExtInstInteger,
-    pub operands: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstExtInstWithForwardRefsKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub set: IdRef,
-    pub instruction: LiteralExtInstInteger,
-    pub operands: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstExtension<'a> {
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstConditionalExtensionINTEL<'a> {
-    pub condition: IdRef,
-    pub name: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupAsyncCopy {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub destination: IdRef,
-    pub source: IdRef,
-    pub num_elements: IdRef,
-    pub stride: IdRef,
-    pub event: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupAll {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupAny {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupBroadcast {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub local_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupIAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupUMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupSMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupUMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupSMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupBallotKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupFirstInvocationKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupAllKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupAnyKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupAllEqualKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub predicate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupNonUniformRotateKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub value: IdRef,
-    pub delta: IdRef,
-    pub cluster_size: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupReadInvocationKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedGroupAsyncCopyKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdRef,
-    pub destination: IdRef,
-    pub source: IdRef,
-    pub element_num_bytes: IdRef,
-    pub num_elements: IdRef,
-    pub stride: IdRef,
-    pub event: IdRef,
-    pub destination_memory_operands: Option<MemoryAccess>,
-    pub source_memory_operands: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupIAddNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFAddNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMinNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupUMinNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupSMinNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMaxNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupUMaxNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupSMaxNonUniformAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupShuffleINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub data: IdRef,
-    pub invocation_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupShuffleDownINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub current: IdRef,
-    pub next: IdRef,
-    pub delta: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupShuffleUpINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub previous: IdRef,
-    pub current: IdRef,
-    pub delta: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupShuffleXorINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub data: IdRef,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupBlockReadINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ptr: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupImageBlockReadINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupImageMediaBlockReadINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub width: IdRef,
-    pub height: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupMatrixMultiplyAccumulateINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub k_dim: IdRef,
-    pub matrix_a: IdRef,
-    pub matrix_b: IdRef,
-    pub matrix_c: IdRef,
-    pub matrix_multiply_accumulate_operands: Option<MatrixMultiplyAccumulateOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupIMulKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupFMulKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupBitwiseAndKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupBitwiseOrKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupBitwiseXorKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupLogicalAndKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupLogicalOrKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupLogicalXorKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub operation: GroupOperation,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupWaitEvents {
-    pub execution: IdScope,
-    pub num_events: IdRef,
-    pub events_list: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupBlockWriteINTEL {
-    pub ptr: IdRef,
-    pub data: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupImageBlockWriteINTEL {
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub data: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupImageMediaBlockWriteINTEL {
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub width: IdRef,
-    pub height: IdRef,
-    pub data: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroupBlockPrefetchINTEL {
-    pub ptr: IdRef,
-    pub num_bytes: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockLoadINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-    pub dst_pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockLoadTransformINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-    pub dst_pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockLoadTransposeINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-    pub dst_pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockPrefetchINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSubgroup2DBlockStoreINTEL {
-    pub element_size: IdRef,
-    pub block_width: IdRef,
-    pub block_height: IdRef,
-    pub block_count: IdRef,
-    pub src_pointer: IdRef,
-    pub dst_base_pointer: IdRef,
-    pub memory_width: IdRef,
-    pub memory_height: IdRef,
-    pub memory_pitch: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertFToU {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub float_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertFToS {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub float_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertSToF {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub signed_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertUToF {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub unsigned_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUConvert {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub unsigned_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSConvert {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub signed_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFConvert {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub float_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstQuantizeToF16 {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertPtrToU {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSatConvertSToU {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub signed_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSatConvertUToS {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub unsigned_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertUToPtr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub integer_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstPtrCastToGeneric {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGenericCastToPtr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGenericCastToPtrExplicit {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub storage: StorageClass,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitcast {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitCastArrayQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub source_array: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixConvertNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixTransposeNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertFToBF16INTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub float_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertBF16ToFINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub bfloat16_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRoundFToTF32INTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub float_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReadPipe {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub pointer: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstWritePipe {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub pointer: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReservedReadPipe {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub index: IdRef,
-    pub pointer: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReservedWritePipe {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub index: IdRef,
-    pub pointer: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReserveReadPipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub num_packets: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReserveWritePipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub num_packets: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIsValidReserveId {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub reserve_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetNumPipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetMaxPipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupReserveReadPipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub pipe: IdRef,
-    pub num_packets: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupReserveWritePipePackets {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub execution: IdScope,
-    pub pipe: IdRef,
-    pub num_packets: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantPipeStorage {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub packet_size: LiteralInteger,
-    pub packet_alignment: LiteralInteger,
-    pub capacity: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstCreatePipeFromPipeStorage {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pipe_storage: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCommitReadPipe {
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCommitWritePipe {
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupCommitReadPipe {
-    pub execution: IdScope,
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupCommitWritePipe {
-    pub execution: IdScope,
-    pub pipe: IdRef,
-    pub reserve_id: IdRef,
-    pub packet_size: IdRef,
-    pub packet_alignment: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstEnqueueMarker {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub queue: IdRef,
-    pub num_events: IdRef,
-    pub wait_events: IdRef,
-    pub ret_event: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstEnqueueKernel<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub queue: IdRef,
-    pub flags: IdRef,
-    pub nd_range: IdRef,
-    pub num_events: IdRef,
-    pub wait_events: IdRef,
-    pub ret_event: IdRef,
-    pub invoke: IdRef,
-    pub param: IdRef,
-    pub param_size: IdRef,
-    pub param_align: IdRef,
-    pub local_size: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGetKernelNDrangeSubGroupCount {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub nd_range: IdRef,
-    pub invoke: IdRef,
-    pub param: IdRef,
-    pub param_size: IdRef,
-    pub param_align: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetKernelNDrangeMaxSubGroupSize {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub nd_range: IdRef,
-    pub invoke: IdRef,
-    pub param: IdRef,
-    pub param_size: IdRef,
-    pub param_align: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetKernelWorkGroupSize {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub invoke: IdRef,
-    pub param: IdRef,
-    pub param_size: IdRef,
-    pub param_align: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetKernelPreferredWorkGroupSizeMultiple {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub invoke: IdRef,
-    pub param: IdRef,
-    pub param_size: IdRef,
-    pub param_align: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCreateUserEvent {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstIsValidEvent {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub event: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetDefaultQueue {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstBuildNDRange {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub global_work_size: IdRef,
-    pub local_work_size: IdRef,
-    pub global_work_offset: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetKernelLocalSizeForSubgroupCount {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub subgroup_count: IdRef,
-    pub invoke: IdRef,
-    pub param: IdRef,
-    pub param_size: IdRef,
-    pub param_align: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstGetKernelMaxNumSubgroups {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub invoke: IdRef,
-    pub param: IdRef,
-    pub param_size: IdRef,
-    pub param_align: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRetainEvent {
-    pub event: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReleaseEvent {
-    pub event: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSetUserEventStatus {
-    pub event: IdRef,
-    pub status: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCaptureEventProfilingInfo {
-    pub event: IdRef,
-    pub profiling_info: IdRef,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertUToAccelerationStructureKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub accel: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryProceedKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionTypeKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFragmentMaskFetchAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFragmentFetchAMD {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub fragment_index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReadClockKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub scope: IdScope,
-}
-#[derive(Clone, Copy)]
-pub struct InstAllocateNodePayloadsAMDX {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub visibility: IdScope,
-    pub payload_count: IdRef,
-    pub node_index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeNodePayloadArrayAMDX {
-    pub id_result: IdResult,
-    pub payload_type: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFinishWritingNodePayloadAMDX {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstNodePayloadArrayLengthAMDX {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub payload_array: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIsNodePayloadValidAMDX {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub payload_type: IdRef,
-    pub node_index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantStringAMDX<'a> {
-    pub id_result: IdResult,
-    pub literal_string: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantStringAMDX<'a> {
-    pub id_result: IdResult,
-    pub literal_string: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetWorldToObjectNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetObjectToWorldNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetObjectRayDirectionNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetObjectRayOriginNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetShaderRecordBufferHandleNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetShaderBindingTableRecordIndexNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetCurrentTimeNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetHitKindNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetPrimitiveIndexNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetGeometryIndexNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetInstanceIdNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetInstanceCustomIndexNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetWorldRayDirectionNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetWorldRayOriginNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetRayTMaxNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetRayTMinNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectIsEmptyNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectIsHitNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectIsMissNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeVectorMatrixMulNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub input: IdRef,
-    pub input_interpretation: IdRef,
-    pub matrix: IdRef,
-    pub matrix_offset: IdRef,
-    pub matrix_interpretation: IdRef,
-    pub m: IdRef,
-    pub k: IdRef,
-    pub memory_layout: IdRef,
-    pub transpose: IdRef,
-    pub matrix_stride: Option<IdRef>,
-    pub cooperative_matrix_operands: Option<CooperativeMatrixOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeVectorMatrixMulAddNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub input: IdRef,
-    pub input_interpretation: IdRef,
-    pub matrix: IdRef,
-    pub matrix_offset: IdRef,
-    pub matrix_interpretation: IdRef,
-    pub bias: IdRef,
-    pub bias_offset: IdRef,
-    pub bias_interpretation: IdRef,
-    pub m: IdRef,
-    pub k: IdRef,
-    pub memory_layout: IdRef,
-    pub transpose: IdRef,
-    pub matrix_stride: Option<IdRef>,
-    pub cooperative_matrix_operands: Option<CooperativeMatrixOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstFetchMicroTriangleVertexPositionNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub accel: IdRef,
-    pub instance_id: IdRef,
-    pub geometry_index: IdRef,
-    pub primitive_index: IdRef,
-    pub barycentric: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFetchMicroTriangleVertexBarycentricNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub accel: IdRef,
-    pub instance_id: IdRef,
-    pub geometry_index: IdRef,
-    pub primitive_index: IdRef,
-    pub barycentric: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetIntersectionTriangleVertexPositionsEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetRayFlagsEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetCurrentTimeEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetHitKindEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetPrimitiveIndexEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetGeometryIndexEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetInstanceIdEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetInstanceCustomIndexEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetObjectRayOriginEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetObjectRayDirectionEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetWorldRayDirectionEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetWorldRayOriginEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetObjectToWorldEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetWorldToObjectEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetRayTMaxEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReportIntersectionKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit: IdRef,
-    pub hit_kind: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionTriangleVertexPositionsKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionClusterIdNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetClusterIdNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetRayTMinEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetShaderBindingTableRecordIndexEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetShaderRecordBufferHandleEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectIsEmptyEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectIsHitEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectIsMissEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixLoadNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub stride: IdRef,
-    pub column_major: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixMulAddNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub a: IdRef,
-    pub b: IdRef,
-    pub c: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixLengthNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ty: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCreateTensorLayoutNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorLayoutSetDimensionNV<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor_layout: IdRef,
-    pub dim: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorLayoutSetStrideNV<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor_layout: IdRef,
-    pub stride: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorLayoutSliceNV<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor_layout: IdRef,
-    pub operands: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorLayoutSetClampValueNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor_layout: IdRef,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCreateTensorViewNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorViewSetDimensionNV<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor_view: IdRef,
-    pub dim: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorViewSetStrideNV<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor_view: IdRef,
-    pub stride: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstIsHelperInvocationEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorViewSetClipNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor_view: IdRef,
-    pub clip_row_offset: IdRef,
-    pub clip_row_span: IdRef,
-    pub clip_col_offset: IdRef,
-    pub clip_col_span: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorLayoutSetBlockSizeNV<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor_layout: IdRef,
-    pub block_size: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertUToImageNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertUToSamplerNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertImageToUNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertSamplerToUNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertUToSampledImageNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConvertSampledImageToUNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionSpherePositionNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionSphereRadiusNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionLSSPositionsNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionLSSRadiiNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionLSSHitValueNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetSpherePositionNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetSphereRadiusNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetLSSPositionsNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetLSSRadiiNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectIsSphereHitNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectIsLSSHitNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryIsSphereHitNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryIsLSSHitNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUCountLeadingZerosINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUCountTrailingZerosINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAbsISubINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAbsUSubINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIAddSatINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUAddSatINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIAverageINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUAverageINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIAverageRoundedINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUAverageRoundedINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstISubSatINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUSubSatINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIMul32x16INTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUMul32x16INTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetRayTMinKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetRayFlagsKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionTKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionInstanceCustomIndexKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionInstanceIdKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionGeometryIndexKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionPrimitiveIndexKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionBarycentricsKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionFrontFaceKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionCandidateAABBOpaqueKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionObjectRayDirectionKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionObjectRayOriginKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetWorldRayDirectionKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetWorldRayOriginKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionObjectToWorldKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGetIntersectionWorldToObjectKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ray_query: IdRef,
-    pub intersection: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFDot2MixAcc32VALVE {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFDot2MixAcc16VALVE {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFDot4MixAcc32VALVE {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTraceRayKHR {
-    pub accel: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub sbt_offset: IdRef,
-    pub sbt_stride: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstExecuteCallableKHR {
-    pub sbt_index: IdRef,
-    pub callable_data: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIgnoreIntersectionKHR;
-#[derive(Clone, Copy)]
-pub struct InstTerminateRayKHR;
-#[derive(Clone, Copy)]
-pub struct InstRayQueryInitializeKHR {
-    pub ray_query: IdRef,
-    pub accel: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryTerminateKHR {
-    pub ray_query: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryGenerateIntersectionKHR {
-    pub ray_query: IdRef,
-    pub hit_t: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstRayQueryConfirmIntersectionKHR {
-    pub ray_query: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstEnqueueNodePayloadsAMDX {
-    pub payload_array: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordHitMotionNV {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub instance_id: IdRef,
-    pub primitive_id: IdRef,
-    pub geometry_index: IdRef,
-    pub hit_kind: IdRef,
-    pub sbt_record_offset: IdRef,
-    pub sbt_record_stride: IdRef,
-    pub origin: IdRef,
-    pub tmin: IdRef,
-    pub direction: IdRef,
-    pub tmax: IdRef,
-    pub current_time: IdRef,
-    pub hit_object_attributes: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordHitWithIndexMotionNV {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub instance_id: IdRef,
-    pub primitive_id: IdRef,
-    pub geometry_index: IdRef,
-    pub hit_kind: IdRef,
-    pub sbt_record_index: IdRef,
-    pub origin: IdRef,
-    pub tmin: IdRef,
-    pub direction: IdRef,
-    pub tmax: IdRef,
-    pub current_time: IdRef,
-    pub hit_object_attributes: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordMissMotionNV {
-    pub hit_object: IdRef,
-    pub sbt_index: IdRef,
-    pub origin: IdRef,
-    pub tmin: IdRef,
-    pub direction: IdRef,
-    pub tmax: IdRef,
-    pub current_time: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectTraceRayMotionNV {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub ray_flags: IdRef,
-    pub cullmask: IdRef,
-    pub sbt_record_offset: IdRef,
-    pub sbt_record_stride: IdRef,
-    pub miss_index: IdRef,
-    pub origin: IdRef,
-    pub tmin: IdRef,
-    pub direction: IdRef,
-    pub tmax: IdRef,
-    pub time: IdRef,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordEmptyNV {
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectTraceRayNV {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub ray_flags: IdRef,
-    pub cullmask: IdRef,
-    pub sbt_record_offset: IdRef,
-    pub sbt_record_stride: IdRef,
-    pub miss_index: IdRef,
-    pub origin: IdRef,
-    pub tmin: IdRef,
-    pub direction: IdRef,
-    pub tmax: IdRef,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordHitNV {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub instance_id: IdRef,
-    pub primitive_id: IdRef,
-    pub geometry_index: IdRef,
-    pub hit_kind: IdRef,
-    pub sbt_record_offset: IdRef,
-    pub sbt_record_stride: IdRef,
-    pub origin: IdRef,
-    pub tmin: IdRef,
-    pub direction: IdRef,
-    pub tmax: IdRef,
-    pub hit_object_attributes: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordHitWithIndexNV {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub instance_id: IdRef,
-    pub primitive_id: IdRef,
-    pub geometry_index: IdRef,
-    pub hit_kind: IdRef,
-    pub sbt_record_index: IdRef,
-    pub origin: IdRef,
-    pub tmin: IdRef,
-    pub direction: IdRef,
-    pub tmax: IdRef,
-    pub hit_object_attributes: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordMissNV {
-    pub hit_object: IdRef,
-    pub sbt_index: IdRef,
-    pub origin: IdRef,
-    pub tmin: IdRef,
-    pub direction: IdRef,
-    pub tmax: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectExecuteShaderNV {
-    pub hit_object: IdRef,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetAttributesNV {
-    pub hit_object: IdRef,
-    pub hit_object_attribute: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReorderThreadWithHitObjectNV {
-    pub hit_object: IdRef,
-    pub hint: Option<IdRef>,
-    pub bits: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstReorderThreadWithHintNV {
-    pub hint: IdRef,
-    pub bits: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeVectorOuterProductAccumulateNV {
-    pub pointer: IdRef,
-    pub offset: IdRef,
-    pub a: IdRef,
-    pub b: IdRef,
-    pub memory_layout: IdRef,
-    pub matrix_interpretation: IdRef,
-    pub matrix_stride: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeVectorReduceSumAccumulateNV {
-    pub pointer: IdRef,
-    pub offset: IdRef,
-    pub v: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstEmitMeshTasksEXT {
-    pub group_count_x: IdRef,
-    pub group_count_y: IdRef,
-    pub group_count_z: IdRef,
-    pub payload: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSetMeshOutputsEXT {
-    pub vertex_count: IdRef,
-    pub primitive_count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstWritePackedPrimitiveIndices4x8NV {
-    pub index_offset: IdRef,
-    pub packed_indices: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordFromQueryEXT {
-    pub hit_object: IdRef,
-    pub ray_query: IdRef,
-    pub sbt_record_index: IdRef,
-    pub hit_object_attributes: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordMissEXT {
-    pub hit_object: IdRef,
-    pub ray_flags: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordMissMotionEXT {
-    pub hit_object: IdRef,
-    pub ray_flags: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub current_time: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectSetShaderBindingTableRecordIndexEXT {
-    pub hit_object: IdRef,
-    pub sbt_record_index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectReorderExecuteShaderEXT {
-    pub hit_object: IdRef,
-    pub payload: IdRef,
-    pub hint: Option<IdRef>,
-    pub bits: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectTraceReorderExecuteEXT {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub sbt_offset: IdRef,
-    pub sbt_stride: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub payload: IdRef,
-    pub hint: Option<IdRef>,
-    pub bits: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectTraceMotionReorderExecuteEXT {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub sbt_offset: IdRef,
-    pub sbt_stride: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub current_time: IdRef,
-    pub payload: IdRef,
-    pub hint: Option<IdRef>,
-    pub bits: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstReorderThreadWithHintEXT {
-    pub hint: IdRef,
-    pub bits: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstReorderThreadWithHitObjectEXT {
-    pub hit_object: IdRef,
-    pub hint: Option<IdRef>,
-    pub bits: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectTraceRayEXT {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub sbt_offset: IdRef,
-    pub sbt_stride: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectTraceRayMotionEXT {
-    pub hit_object: IdRef,
-    pub acceleration_structure: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub sbt_offset: IdRef,
-    pub sbt_stride: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub current_time: IdRef,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectRecordEmptyEXT {
-    pub hit_object: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectExecuteShaderEXT {
-    pub hit_object: IdRef,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstHitObjectGetAttributesEXT {
-    pub hit_object: IdRef,
-    pub hit_object_attribute: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIgnoreIntersectionNV;
-#[derive(Clone, Copy)]
-pub struct InstTerminateRayNV;
-#[derive(Clone, Copy)]
-pub struct InstTraceNV {
-    pub accel: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub sbt_offset: IdRef,
-    pub sbt_stride: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub payload_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTraceMotionNV {
-    pub accel: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub sbt_offset: IdRef,
-    pub sbt_stride: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub time: IdRef,
-    pub payload_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTraceRayMotionNV {
-    pub accel: IdRef,
-    pub ray_flags: IdRef,
-    pub cull_mask: IdRef,
-    pub sbt_offset: IdRef,
-    pub sbt_stride: IdRef,
-    pub miss_index: IdRef,
-    pub ray_origin: IdRef,
-    pub ray_tmin: IdRef,
-    pub ray_direction: IdRef,
-    pub ray_tmax: IdRef,
-    pub time: IdRef,
-    pub payload: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstExecuteCallableNV {
-    pub sbt_index: IdRef,
-    pub callable_data_id: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixStoreNV {
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub stride: IdRef,
-    pub column_major: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstBeginInvocationInterlockEXT;
-#[derive(Clone, Copy)]
-pub struct InstEndInvocationInterlockEXT;
-#[derive(Clone, Copy)]
-pub struct InstSamplerImageAddressingModeNV {
-    pub bit_width: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstLoopControlINTEL<'a> {
-    pub loop_control_parameters: &'a [LiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicLoad {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicExchange {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicCompareExchange {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub equal: IdMemorySemantics,
-    pub unequal: IdMemorySemantics,
-    pub value: IdRef,
-    pub comparator: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicCompareExchangeWeak {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub equal: IdMemorySemantics,
-    pub unequal: IdMemorySemantics,
-    pub value: IdRef,
-    pub comparator: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicIIncrement {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicIDecrement {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicIAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicISub {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicSMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicUMin {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicSMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicUMax {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicAnd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFlagTestAndSet {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFMinEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFMaxEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFAddEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicStore {
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAtomicFlagClear {
-    pub pointer: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstVectorExtractDynamic {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstVectorInsertDynamic {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector: IdRef,
-    pub component: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstVectorShuffle<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub components: &'a [LiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstCompositeConstruct<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub constituents: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstCompositeExtract<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub composite: IdRef,
-    pub indexes: &'a [LiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstCompositeInsert<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub object: IdRef,
-    pub composite: IdRef,
-    pub indexes: &'a [LiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstCopyObject {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTranspose {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCopyLogical {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCompositeConstructReplicateEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCompositeConstructCoopMatQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub source_array: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCompositeExtractCoopMatQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub source_cooperative_matrix: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstExtractSubArrayQCOM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub source_array: IdRef,
-    pub index: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCompositeConstructContinuedINTEL<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub constituents: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstConditionalCopyObjectINTEL<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub conditions_and_operands_and: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstSNegate {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFNegate {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFAdd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstISub {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFSub {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIMul {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFMul {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUDiv {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSDiv {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFDiv {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUMod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSRem {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSMod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFRem {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFMod {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstVectorTimesScalar {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector: IdRef,
-    pub scalar: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMatrixTimesScalar {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-    pub scalar: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstVectorTimesMatrix {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector: IdRef,
-    pub matrix: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMatrixTimesVector {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-    pub vector: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMatrixTimesMatrix {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub left_matrix: IdRef,
-    pub right_matrix: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstOuterProduct {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIAddCarry {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstISubBorrow {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUMulExtended {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSMulExtended {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFmaKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-    pub operand_3: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSDot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstUDot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSUDot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSDotAccSat {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstUDotAccSat {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSUDotAccSat {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector_1: IdRef,
-    pub vector_2: IdRef,
-    pub accumulator: IdRef,
-    pub packed_vector_format: Option<PackedVectorFormat>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixMulAddKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub a: IdRef,
-    pub b: IdRef,
-    pub c: IdRef,
-    pub cooperative_matrix_operands: Option<CooperativeMatrixOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixReduceNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub matrix: IdRef,
-    pub reduce: CooperativeMatrixReduce,
-    pub combine_func: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorReadARM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor: IdRef,
-    pub coordinates: IdRef,
-    pub tensor_operands: Option<TensorOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorQuerySizeARM {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub tensor: IdRef,
-    pub dimension: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTensorWriteARM {
-    pub tensor: IdRef,
-    pub coordinates: IdRef,
-    pub object: IdRef,
-    pub tensor_operands: Option<TensorOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantTrue {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantFalse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstant {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: LiteralContextDependentNumber,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantComposite<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub constituents: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantSampler {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub sampler_addressing_mode: SamplerAddressingMode,
-    pub param: LiteralInteger,
-    pub sampler_filter_mode: SamplerFilterMode,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantNull {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantTrue {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantFalse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstant {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: LiteralContextDependentNumber,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantComposite<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub constituents: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantOp<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub opcode: LiteralSpecConstantOpInteger<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantCompositeReplicateEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantCompositeReplicateEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantSizeOfEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ty: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantDataKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub data: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantDataKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub data: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantTargetINTEL<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target: LiteralInteger,
-    pub features: &'a [LiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantArchitectureINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub category: LiteralInteger,
-    pub family: LiteralInteger,
-    pub opcode: LiteralInteger,
-    pub architecture: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantCapabilitiesINTEL<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub capabilities: &'a [Capability],
-}
-#[derive(Clone, Copy)]
-pub struct InstConstantCompositeContinuedINTEL<'a> {
-    pub constituents: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstSpecConstantCompositeContinuedINTEL<'a> {
-    pub constituents: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUndef {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstSizeOf {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixLengthKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ty: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstPoisonKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstFreezeKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstExpectKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub value: IdRef,
-    pub expected_value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstArithmeticFenceEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub target: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstNop;
-#[derive(Clone, Copy)]
-pub struct InstAssumeTrueKHR {
-    pub condition: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemoryModel {
-    pub addressing_model: AddressingModel,
-    pub memory_model: MemoryModel,
-}
-#[derive(Clone, Copy)]
-pub struct InstEntryPoint<'a> {
-    pub execution_model: ExecutionModel,
-    pub entry_point: IdRef,
-    pub name: LiteralString<'a>,
-    pub interface: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstExecutionMode {
-    pub entry_point: IdRef,
-    pub mode: ExecutionMode,
-}
-#[derive(Clone, Copy)]
-pub struct InstCapability {
-    pub capability: Capability,
-}
-#[derive(Clone, Copy)]
-pub struct InstExecutionModeId {
-    pub entry_point: IdRef,
-    pub mode: ExecutionMode,
-}
-#[derive(Clone, Copy)]
-pub struct InstConditionalEntryPointINTEL<'a> {
-    pub condition: IdRef,
-    pub execution_model: ExecutionModel,
-    pub entry_point: IdRef,
-    pub name: LiteralString<'a>,
-    pub interface: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstConditionalCapabilityINTEL {
-    pub condition: IdRef,
-    pub capability: Capability,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeVoid {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeBool {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeInt {
-    pub id_result: IdResult,
-    pub width: LiteralInteger,
-    pub signedness: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeFloat {
-    pub id_result: IdResult,
-    pub width: LiteralInteger,
-    pub floating_point_encoding: Option<FPEncoding>,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeVector {
-    pub id_result: IdResult,
-    pub component_type: IdRef,
-    pub component_count: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeMatrix {
-    pub id_result: IdResult,
-    pub column_type: IdRef,
-    pub column_count: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeImage {
-    pub id_result: IdResult,
-    pub sampled_type: IdRef,
-    pub dim: Dim,
-    pub depth: LiteralInteger,
-    pub arrayed: LiteralInteger,
-    pub ms: LiteralInteger,
-    pub sampled: LiteralInteger,
-    pub image_format: ImageFormat,
-    pub access_qualifier: Option<AccessQualifier>,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeSampler {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeSampledImage {
-    pub id_result: IdResult,
-    pub image_type: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeArray {
-    pub id_result: IdResult,
-    pub element_type: IdRef,
-    pub length: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeRuntimeArray {
-    pub id_result: IdResult,
-    pub element_type: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeStruct<'a> {
-    pub id_result: IdResult,
-    pub member_types: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeOpaque<'a> {
-    pub id_result: IdResult,
-    pub the_name_of_the_opaque_type: LiteralString<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypePointer {
-    pub id_result: IdResult,
-    pub storage_class: StorageClass,
-    pub ty: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeFunction<'a> {
-    pub id_result: IdResult,
-    pub return_type: IdRef,
-    pub parameter_types: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeEvent {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeDeviceEvent {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeReserveId {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeQueue {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypePipe {
-    pub id_result: IdResult,
-    pub qualifier: AccessQualifier,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypePipeStorage {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeNamedBarrier {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeTensorARM {
-    pub id_result: IdResult,
-    pub element_type: IdRef,
-    pub rank: Option<IdRef>,
-    pub shape: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeGraphARM<'a> {
-    pub id_result: IdResult,
-    pub num_inputs: LiteralInteger,
-    pub in_out_types: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeUntypedPointerKHR {
-    pub id_result: IdResult,
-    pub storage_class: StorageClass,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeCooperativeMatrixKHR {
-    pub id_result: IdResult,
-    pub component_type: IdRef,
-    pub scope: IdScope,
-    pub rows: IdRef,
-    pub columns: IdRef,
-    pub using: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeRayQueryKHR {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeBufferEXT {
-    pub id_result: IdResult,
-    pub storage_class: StorageClass,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeHitObjectNV {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeVectorIdEXT {
-    pub id_result: IdResult,
-    pub component_type: IdRef,
-    pub component_count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeHitObjectEXT {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeAccelerationStructureKHR {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeCooperativeMatrixNV {
-    pub id_result: IdResult,
-    pub component_type: IdRef,
-    pub execution: IdScope,
-    pub rows: IdRef,
-    pub columns: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeTensorLayoutNV {
-    pub id_result: IdResult,
-    pub dim: IdRef,
-    pub clamp_mode: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeTensorViewNV<'a> {
-    pub id_result: IdResult,
-    pub dim: IdRef,
-    pub has_dimensions: IdRef,
-    pub p: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeBufferSurfaceINTEL {
-    pub id_result: IdResult,
-    pub access_qualifier: AccessQualifier,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeForwardPointer {
-    pub pointer_type: IdRef,
-    pub storage_class: StorageClass,
-}
-#[derive(Clone, Copy)]
-pub struct InstTypeStructContinuedINTEL<'a> {
-    pub member_types: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstVariable {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub storage_class: StorageClass,
-    pub initializer: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstImageTexelPointer {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub sample: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstLoad {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstAccessChain<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstInBoundsAccessChain<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstPtrAccessChain<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub element: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstArrayLength {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub structure: IdRef,
-    pub array_member: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstGenericPtrMemSemantics {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstInBoundsPtrAccessChain<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub element: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstPtrEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstPtrNotEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstPtrDiff {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedVariableKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub storage_class: StorageClass,
-    pub data_type: Option<IdRef>,
-    pub initializer: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedAccessChainKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base_type: IdRef,
-    pub base: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedInBoundsAccessChainKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base_type: IdRef,
-    pub base: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedPtrAccessChainKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base_type: IdRef,
-    pub base: IdRef,
-    pub element: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedInBoundsPtrAccessChainKHR<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base_type: IdRef,
-    pub base: IdRef,
-    pub element: IdRef,
-    pub indexes: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedArrayLengthKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub structure: IdRef,
-    pub pointer: IdRef,
-    pub array_member: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixLoadKHR {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub memory_layout: IdRef,
-    pub stride: Option<IdRef>,
-    pub memory_operand: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstBufferPointerEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub buffer: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedImageTexelPointerEXT {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub image_type: IdRef,
-    pub image: IdRef,
-    pub coordinate: IdRef,
-    pub sample: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeVectorLoadNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub offset: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixLoadTensorNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub tensor_layout: IdRef,
-    pub memory_operand: MemoryAccess,
-    pub tensor_addressing_operands: TensorAddressingOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstRawAccessChainNV {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub byte_stride: IdRef,
-    pub element_index: IdRef,
-    pub byte_offset: IdRef,
-    pub raw_access_chain_operands: Option<RawAccessChainOperands>,
-}
-#[derive(Clone, Copy)]
-pub struct InstVariableLengthArrayINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub length: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSaveMemoryINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedVariableLengthArrayINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub element_type: IdRef,
-    pub length: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMaskedGatherINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub ptr_vector: IdRef,
-    pub alignment: LiteralInteger,
-    pub mask: IdRef,
-    pub fill_empty: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstStore {
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCopyMemory {
-    pub target: IdRef,
-    pub source: IdRef,
-    pub memory_access_1: Option<MemoryAccess>,
-    pub memory_access_2: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCopyMemorySized {
-    pub target: IdRef,
-    pub source: IdRef,
-    pub size: IdRef,
-    pub memory_access_1: Option<MemoryAccess>,
-    pub memory_access_2: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstUntypedPrefetchKHR {
-    pub pointer_type: IdRef,
-    pub num_bytes: IdRef,
-    pub rw: Option<IdRef>,
-    pub locality: Option<IdRef>,
-    pub cache_type: Option<IdRef>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixStoreKHR {
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub memory_layout: IdRef,
-    pub stride: Option<IdRef>,
-    pub memory_operand: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeVectorStoreNV {
-    pub pointer: IdRef,
-    pub offset: IdRef,
-    pub object: IdRef,
-    pub memory_access: Option<MemoryAccess>,
-}
-#[derive(Clone, Copy)]
-pub struct InstCooperativeMatrixStoreTensorNV {
-    pub pointer: IdRef,
-    pub object: IdRef,
-    pub tensor_layout: IdRef,
-    pub memory_operand: MemoryAccess,
-    pub tensor_addressing_operands: TensorAddressingOperands,
-}
-#[derive(Clone, Copy)]
-pub struct InstRestoreMemoryINTEL {
-    pub ptr: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstMaskedScatterINTEL {
-    pub input_vector: IdRef,
-    pub ptr_vector: IdRef,
-    pub alignment: LiteralInteger,
-    pub mask: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAny {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstAll {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub vector: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIsNan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIsInf {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIsFinite {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIsNormal {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSignBitSet {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub x: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstLessOrGreater {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub x: IdRef,
-    pub y: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstOrdered {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub x: IdRef,
-    pub y: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUnordered {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub x: IdRef,
-    pub y: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstLogicalEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstLogicalNotEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstLogicalOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstLogicalAnd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstLogicalNot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSelect {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub condition: IdRef,
-    pub object_1: IdRef,
-    pub object_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstIEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstINotEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUGreaterThan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSGreaterThan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUGreaterThanEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSGreaterThanEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstULessThan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSLessThan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstULessThanEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstSLessThanEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFOrdEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFUnordEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFOrdNotEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFUnordNotEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFOrdLessThan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFUnordLessThan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFOrdGreaterThan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFUnordGreaterThan {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFOrdLessThanEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFUnordLessThanEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFOrdGreaterThanEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFUnordGreaterThanEqual {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdx {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdy {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFwidth {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdxFine {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdyFine {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFwidthFine {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdxCoarse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDPdyCoarse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstFwidthCoarse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub p: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDecorationGroup {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstDecorate<'a> {
-    pub target: IdRef,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemberDecorate<'a> {
-    pub structure_type: IdRef,
-    pub member: LiteralInteger,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupDecorate<'a> {
-    pub decoration_group: IdRef,
-    pub targets: &'a [IdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstGroupMemberDecorate<'a> {
-    pub decoration_group: IdRef,
-    pub targets: &'a [PairIdRefLiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstDecorateId<'a> {
-    pub target: IdRef,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemberDecorateIdEXT<'a> {
-    pub structure_type: IdRef,
-    pub member: LiteralInteger,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstDecorateString<'a> {
-    pub target: IdRef,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemberDecorateString<'a> {
-    pub struct_type: IdRef,
-    pub member: LiteralInteger,
-    pub decoration: Decoration<'a>,
-}
-#[derive(Clone, Copy)]
-pub struct InstShiftRightLogical {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub shift: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstShiftRightArithmetic {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub shift: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstShiftLeftLogical {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub shift: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitwiseOr {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitwiseXor {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitwiseAnd {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand_1: IdRef,
-    pub operand_2: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstNot {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub operand: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitFieldInsert {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub insert: IdRef,
-    pub offset: IdRef,
-    pub count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitFieldSExtract {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub offset: IdRef,
-    pub count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitFieldUExtract {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-    pub offset: IdRef,
-    pub count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitReverse {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitCount {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub base: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBitwiseFunctionINTEL {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub a: IdRef,
-    pub b: IdRef,
-    pub c: IdRef,
-    pub lutindex: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstEmitVertex;
-#[derive(Clone, Copy)]
-pub struct InstEndPrimitive;
-#[derive(Clone, Copy)]
-pub struct InstEmitStreamVertex {
-    pub stream: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstEndStreamPrimitive {
-    pub stream: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstNamedBarrierInitialize {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub subgroup_count: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstControlBarrier {
-    pub execution: IdScope,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemoryBarrier {
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstMemoryNamedBarrier {
-    pub named_barrier: IdRef,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstControlBarrierArriveINTEL {
-    pub execution: IdScope,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstControlBarrierWaitINTEL {
-    pub execution: IdScope,
-    pub memory: IdScope,
-    pub semantics: IdMemorySemantics,
-}
-#[derive(Clone, Copy)]
-pub struct InstPhi<'a> {
-    pub id_result_type: IdResultType,
-    pub id_result: IdResult,
-    pub variables: &'a [PairIdRefIdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstLabel {
-    pub id_result: IdResult,
-}
-#[derive(Clone, Copy)]
-pub struct InstLoopMerge {
-    pub merge_block: IdRef,
-    pub continue_target: IdRef,
-    pub loop_control: LoopControl,
-}
-#[derive(Clone, Copy)]
-pub struct InstSelectionMerge {
-    pub merge_block: IdRef,
-    pub selection_control: SelectionControl,
-}
-#[derive(Clone, Copy)]
-pub struct InstBranch {
-    pub target_label: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstBranchConditional<'a> {
-    pub condition: IdRef,
-    pub true_label: IdRef,
-    pub false_label: IdRef,
-    pub branch_weights: &'a [LiteralInteger],
-}
-#[derive(Clone, Copy)]
-pub struct InstSwitch<'a> {
-    pub selector: IdRef,
-    pub default: IdRef,
-    pub target: &'a [PairLiteralIntegerIdRef],
-}
-#[derive(Clone, Copy)]
-pub struct InstKill;
-#[derive(Clone, Copy)]
-pub struct InstReturn;
-#[derive(Clone, Copy)]
-pub struct InstReturnValue {
-    pub value: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstUnreachable;
-#[derive(Clone, Copy)]
-pub struct InstLifetimeStart {
-    pub pointer: IdRef,
-    pub size: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstLifetimeStop {
-    pub pointer: IdRef,
-    pub size: LiteralInteger,
-}
-#[derive(Clone, Copy)]
-pub struct InstTerminateInvocation;
-#[derive(Clone, Copy)]
-pub struct InstAbortKHR {
-    pub message_type: IdRef,
-    pub message: IdRef,
-}
-#[derive(Clone, Copy)]
-pub struct InstDemoteToHelperInvocation;

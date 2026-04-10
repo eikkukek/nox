@@ -135,13 +135,11 @@ impl<'a> LiteralContextDependentNumber {
             .ok_or(ParseError::InvalidIdResult(result_type.into()))?;
         match ty_stream.code() {
             Code::TYPE_INT => {
-                let int = InstTypeInt {
-                    id_result: IdResult::parse_one(&mut ty_stream)?,
-                    width: ty_stream.read()?,
-                    signedness: ty_stream.read()?,
-                };
-                Ok(if int.signedness == 1 {
-                    match int.width {
+                ty_stream.advance(1)?;
+                let width = ty_stream.read()?;
+                let signedness = ty_stream.read()?;
+                Ok(if signedness == 1 {
+                    match width {
                         8 => Literal::I8(u8::cast_signed(
                             stream.read()? as u8
                         )),
@@ -160,7 +158,7 @@ impl<'a> LiteralContextDependentNumber {
                         )
                     }
                 } else {
-                    match int.width {
+                    match width {
                         8 => Literal::U8(stream.read()? as u8),
                         16 => Literal::U16(stream.read()? as u16),
                         32 => Literal::U32(stream.read()?),
@@ -175,12 +173,9 @@ impl<'a> LiteralContextDependentNumber {
                 })
             },
             Code::TYPE_FLOAT => {
-                let float = InstTypeFloat {
-                    id_result: IdResult::parse_one(&mut ty_stream)?,
-                    width: ty_stream.read()?,
-                    floating_point_encoding: FPEncoding::parse_optional(&mut ty_stream)?,
-                };
-                Ok(match float.width {
+                ty_stream.advance(1)?;
+                let width = ty_stream.read()?;
+                Ok(match width {
                     16 => Literal::F16(stream.read()? as u16),
                     32 => Literal::F32(f32::from_bits(stream.read()?)),
                     64 => Literal::F64(f64::from_bits(

@@ -12,6 +12,8 @@ use crate::{
 #[derive(Clone, Copy)]
 pub struct Stream<'a> {
     spirv: &'a [u32],
+    version: u32,
+    bound: u32,
     pos: usize,
 }
 
@@ -19,17 +21,36 @@ impl<'a> Stream<'a> {
 
     /// Creates a new stream from SPIR-V words.
     #[inline(always)]
-    pub fn new(spirv: &'a [u32]) -> Self {
-        Self {
-            spirv: &spirv[5..],
-            pos: 0,
+    pub fn new(spirv: &'a [u32]) -> ParseResult<Self> {
+        if spirv.len() < 5 { return Err(ParseError::EndOfStream) }
+        let magic_number = spirv[0];
+        if magic_number != 0x07230203 {
+            return Err(ParseError::InvalidMagicNumber(magic_number))
         }
+        Ok(Self {
+            spirv: &spirv[5..],
+            version: spirv[1],
+            bound: spirv[3],
+            pos: 0,
+        })
     }
 
     /// Resets the stream's position to zero.
     #[inline(always)]
     pub fn reset(&mut self) {
         self.pos = 0;
+    }
+
+    /// The version of the SPIR-V passed to this stream.
+    #[inline(always)]
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// The bound, where all ids are guaranteed to satisfy 0 < id < bound.
+    #[inline(always)]
+    pub fn bound(&self) -> u32 {
+        self.bound
     }
 }
 
@@ -61,6 +82,17 @@ impl<'a> InstructionStream<'a> {
     #[inline]
     pub fn reset(&mut self) {
         self.pos = 1;
+    }
+
+    /// Advances the streams position without reading.
+    #[inline]
+    pub fn advance(&mut self, count: u32) -> ParseResult<()> {
+        let end = self.pos + count as usize;
+        if end > self.words.len() { Err(ParseError::EndOfStream) }
+        else {
+            self.pos = end;
+            Ok(())
+        }
     }
     
     /// Reads a word from the stream.

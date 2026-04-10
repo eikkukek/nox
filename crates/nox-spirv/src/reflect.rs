@@ -4,6 +4,8 @@
 
 mod error;
 
+use core::ffi::CStr;
+
 use crate::{
     core::*,
     op,
@@ -359,6 +361,13 @@ pub struct Variable {
     pub storage_class: op::StorageClass,
 }
 
+#[derive(Clone, Copy)]
+struct EntryPoint<'a> {
+    _execution_model: op::ExecutionModel,
+    _name: CompilerStr<'a>,
+    interface: &'a [Id],
+}
+
 /// Reflects SPIR-V code through a [`module`][1].
 ///
 /// # Example
@@ -383,6 +392,7 @@ pub struct Variable {
 pub struct Reflector<'a> {
     module: Module<'a>,
     decorates: Vec<Decorate<'a>>,
+    current_entry_point: Option<EntryPoint<'a>>,
 }
 
 impl<'a> Reflector<'a> {
@@ -399,64 +409,31 @@ impl<'a> Reflector<'a> {
     {
         module.parse_full()?;
         let mut decorates = vec![];
-        for mut stream in module.all_instructions() { 
-            if stream.code() == op::Code::DECORATE {
-                let decorate = op::InstDecorate {
+        for mut stream in module.all_instructions() {
+            if matches!(
+                stream.code(),
+                op::Code::DECORATE | op::Code::DECORATE_ID | op::Code::DECORATE_STRING,
+            ) {
+                decorates.push(Decorate {
                     target: Id::parse_one(&mut stream)?,
-                    decoration: op::Decoration::parse_one(&mut stream)?,
-                };
-                decorates.push(Decorate {
-                    target: decorate.target,
                     member: None,
-                    decoration: decorate.decoration,
+                    decoration: op::Decoration::parse_one(&mut stream)?,
                 });
-            } else if stream.code() == op::Code::DECORATE_ID {
-                let decorate = op::InstDecorateId {
+            } else if matches!(
+                stream.code(),
+                op::Code::MEMBER_DECORATE | op::Code::MEMBER_DECORATE_STRING,
+            ) {
+                decorates.push(Decorate {
                     target: Id::parse_one(&mut stream)?,
+                    member: Some(stream.read()?),
                     decoration: op::Decoration::parse_one(&mut stream)?,
-                };
-                decorates.push(Decorate {
-                    target: decorate.target,
-                    member: None,
-                    decoration: decorate.decoration,
-                });
-            } else if stream.code() == op::Code::DECORATE_STRING {
-                let decorate = op::InstDecorateString {
-                    target: Id::parse_one(&mut stream)?,
-                    decoration: op::Decoration::parse_one(&mut stream)?,
-                };
-                decorates.push(Decorate {
-                    target: decorate.target,
-                    member: None,
-                    decoration: decorate.decoration,
-                });
-            } else if stream.code() == op::Code::MEMBER_DECORATE {
-                let decorate = op::InstMemberDecorate {
-                    structure_type: Id::parse_one(&mut stream)?,
-                    member: stream.read()?,
-                    decoration: op::Decoration::parse_one(&mut stream)?,
-                };
-                decorates.push(Decorate {
-                    target: decorate.structure_type,
-                    member: Some(decorate.member),
-                    decoration: decorate.decoration,
-                });
-            } else if stream.code() == op::Code::MEMBER_DECORATE_STRING {
-                let decorate = op::InstMemberDecorateString {
-                    struct_type: Id::parse_one(&mut stream)?,
-                    member: stream.read()?,
-                    decoration: op::Decoration::parse_one(&mut stream)?,
-                };
-                decorates.push(Decorate {
-                    target: decorate.struct_type,
-                    member: Some(decorate.member),
-                    decoration: decorate.decoration,
                 });
             }
         }
         Ok(Self {
             decorates,
             module,
+            current_entry_point: None,
         })
     }
 
@@ -486,711 +463,747 @@ impl<'a> Reflector<'a> {
             })
     }
 
+    /// Sets the entry point to reflect.
+    ///
+    /// This *must* be set before [`reflecting any resources`][1].
+    ///
+    /// [1]: Self::resources_for_type
+    #[inline]
+    pub fn set_entry_point(
+        &mut self,
+        name: &CStr,
+        execution_model: op::ExecutionModel,
+    ) -> ReflectResult<()>
+    {
+        for mut stream in self.module.all_instructions() {
+            if stream.code() == op::Code::ENTRY_POINT {
+                let exec_model = op::ExecutionModel::parse_one(&mut stream)?;
+                if exec_model == execution_model {
+                    stream.advance(1)?;
+                    let cname = stream.read_string()?;
+                    if name == cname.to_cstr()? {
+                        self.current_entry_point = Some(EntryPoint {
+                            _execution_model: exec_model,
+                            _name: cname,
+                            interface: Id::parse_eos(&mut stream)?,
+                        });
+                        return Ok(())
+                    }
+                }
+            }
+        }
+        Err(ReflectError::EntryPointNotFound(name.to_owned(), execution_model))
+    }
+
     fn names(&self) -> impl Iterator<Item = ReflectResult<Name<'a>>> {
         self.module
             .all_instructions()
             .filter(|stream| matches!(stream.code(), op::Code::NAME | op::Code::MEMBER_NAME))
             .map(|mut stream| {
                 if stream.code() == op::Code::NAME {
-                    let name = op::InstName {
-                        target: Id::parse_one(&mut stream)?,
-                        name: stream.read_string()?,
-                    };
                     Ok(Name {
-                        target: name.target,
+                        target: Id::parse_one(&mut stream)?,
                         member: None,
-                        name: name.name,
+                        name: stream.read_string()?,
                     })
                 } else if stream.code() == op::Code::MEMBER_NAME {
-                    let name = op::InstMemberName {
-                        ty: Id::parse_one(&mut stream)?,
-                        member: stream.read()?,
-                        name: stream.read_string()?,
-                    };
                     Ok(Name {
-                        target: name.ty,
-                        member: Some(name.member),
-                        name: name.name,
+                        target: Id::parse_one(&mut stream)?,
+                        member: Some(stream.read()?),
+                        name: stream.read_string()?,
                     })
                 } else { unreachable!() }
             })
         }
 
-        /// Returns an iterator over the statically known values and constant ids of all
-        /// specialization constants.
-        #[inline]
-        pub fn spec_constants(&self) -> impl Iterator<Item = ReflectResult<SpecConstant>> {
-            self.module
-                .results()
-                .filter_map(|(id, stream)| 
-                    if matches!(
-                        stream.code(),
-                        op::Code::SPEC_CONSTANT_TRUE
-                        | op::Code::SPEC_CONSTANT_FALSE
-                        | op::Code::SPEC_CONSTANT
-                    ) {
-                        self.decorates
-                            .iter()
-                            .find_map(|&decorate|
-                                if decorate.target == id &&
-                                    let op::Decoration::SpecId { specialization_constant_id } =
-                                    decorate.decoration
-                                {
-                                    Some(specialization_constant_id)
-                                } else { None }
-                            ).map(|constant_id| (constant_id, id, stream))
-                    } else { None }
-                )
-                .map(|(constant_id, id, mut stream)| {
-                    match stream.code() {
-                        op::Code::SPEC_CONSTANT_TRUE | op::Code::SPEC_CONSTANT_FALSE => {
-                            Ok(SpecConstant {
-                                ty: ScalarType::Bool,
-                                constant_id,
-                                id,
-                            })
-                        },
-                        op::Code::SPEC_CONSTANT => {
-                            let result_type = op::IdResultType::parse_one(&mut stream)?;
-                            let _ = stream.read()?;
-                            let ctx = &mut ParseContext {
-                                result_type: Some(result_type)
-                            };
-                            let value = Literal::parse_one(&self.module, &mut stream, ctx)?;
-                            let ty = match value {
-                                Literal::F16(_) => ScalarType::Float { width: 2, },
-                                Literal::F32(_) => ScalarType::Float { width: 4, },
-                                Literal::F64(_) => ScalarType::Float { width: 8, },
-                                Literal::I8(_) => ScalarType::Int { width: 1, is_signed: true, },
-                                Literal::I16(_) => ScalarType::Int { width: 2, is_signed: true, },
-                                Literal::I32(_) => ScalarType::Int { width: 4, is_signed: true, },
-                                Literal::I64(_) => ScalarType::Int { width: 8, is_signed: true, },
-                                Literal::U8(_) => ScalarType::Int { width: 1, is_signed: false, },
-                                Literal::U16(_) => ScalarType::Int { width: 2, is_signed: false, },
-                                Literal::U32(_) => ScalarType::Int { width: 4, is_signed: false, },
-                                Literal::U64(_) => ScalarType::Int { width: 8, is_signed: false, },
-                            };
-                            Ok(SpecConstant {
-                                ty,
-                                constant_id,
-                                id,
-                            })
-                        },
-                        _ => unreachable!(),
-                    }
-                })
-        }
-
-        /// Gets a specific constant with `id`.
-        pub fn constant(
-            &self,
-            id: Id,
-        ) -> ReflectResult<Constant<'a>>
-        {
-            let mut stream = self.module.get_result(id).ok_or(ReflectError::InvalidConstantId(id))?;
-            match stream.code() {
-                op::Code::CONSTANT_TRUE => {
-                    Ok(Constant::Bool(true))
-                },
-                op::Code::CONSTANT_FALSE => {
-                    Ok(Constant::Bool(false))
-                },
-                op::Code::CONSTANT => {
-                    let result_type = op::IdResultType::parse_one(&mut stream)?;
-                    let _ = stream.read()?;
-                    let ctx = &mut ParseContext {
-                        result_type: Some(result_type)
-                    };
-                    let value = Literal::parse_one(&self.module, &mut stream, ctx)?;
-                    Ok(Constant::Constant(value))
-                },
-                op::Code::CONSTANT_COMPOSITE => {
-                    let ty = Id::parse_one(&mut stream)?;
-                    let _ = stream.read()?;
-                    Ok(Constant::Composite {
-                        ty,
-                        constituents: Id::parse_eos(&mut stream)?,
-                    })
-                },
-                op::Code::CONSTANT_SAMPLER => {
-                    let _ = stream.read()?;
-                    let _ = stream.read()?;
-                    let addressing_mode = op::SamplerAddressingMode::parse_one(&mut stream)?;
-                    let is_normalized = stream.read()? == 1;
-                    let filter_mode = op::SamplerFilterMode::parse_one(&mut stream)?;
-                    Ok(Constant::Sampler { addressing_mode, is_normalized, filter_mode })
-                },
-                op::Code::CONSTANT_NULL => {
-                    let ty = Id::parse_one(&mut stream)?;
-                    Ok(Constant::Null { ty })
-                },
-                op::Code::SPEC_CONSTANT_TRUE => {
-                    Ok(Constant::SpecBool(true))
-                },
-                op::Code::SPEC_CONSTANT_FALSE => {
-                    Ok(Constant::SpecBool(false))
-                },
-                op::Code::SPEC_CONSTANT => {
-                    let result_type = op::IdResultType::parse_one(&mut stream)?;
-                    let _ = stream.read()?;
-                    let ctx = &mut ParseContext {
-                        result_type: Some(result_type)
-                    };
-                    let value = Literal::parse_one(&self.module, &mut stream, ctx)?;
-                    Ok(Constant::SpecConstant(value))
-                },
-                op::Code::SPEC_CONSTANT_COMPOSITE => {
-                    let ty = Id::parse_one(&mut stream)?;
-                    let _ = stream.read()?;
-                    Ok(Constant::SpecConstantComposite {
-                        ty,
-                        constituents: Id::parse_eos(&mut stream)?,
-                    })
-                },
-                op::Code::SPEC_CONSTANT_OP => {
-                    let ty = Id::parse_one(&mut stream)?;
-                    let _ = stream.read()?;
-                    let code = op::LiteralSpecConstantOpInteger::parse_one(&mut stream)?;
-                    Ok(Constant::SpecConstantOp { ty, opcode: code.code, operands: code.operands })
-                },
-                _ => Err(ReflectError::InvalidConstantId(id))
-            }
-        }
-
-        #[inline]
-        /// Returns a name assigned to an [`Id`], or optionally to a struct member of a struct.
-        pub fn name(&self, id: Id, struct_member: Option<u32>) -> ReflectResult<Option<CompilerStr<'a>>> {
-            for name in self.names() {
-                let name = name?;
-                if name.target == id &&
-                    name.member == struct_member
-                {
-                    return Ok(Some(name.name))
-                }
-            }
-            Ok(None)
-        }
-
-        /// Returns an iterator over all resources of [`type`][1].
-        ///
-        /// [1]: ResourceType
-        pub fn resources_for_type(&self, ty: ResourceType) -> ReflectResult<
-            impl Iterator<Item = ReflectResult<Resource<'a>>>
-        >
-        {
-            let resource_class = match ty {
-                ResourceType::UniformBuffer => op::StorageClass::UNIFORM,
-                ResourceType::StorageBuffer => op::StorageClass::STORAGE_BUFFER,
-                ResourceType::PushConstant => op::StorageClass::PUSH_CONSTANT,
-                ResourceType::AtomicCounter => op::StorageClass::ATOMIC_COUNTER,
-                ResourceType::InputAttachment
-                | ResourceType::StorageImage
-                | ResourceType::CombinedImageSampler
-                | ResourceType::SeparateImage
-                | ResourceType::SeparateSampler
-                | ResourceType::UniformTexelBuffer
-                | ResourceType::StorageTexelBuffer => op::StorageClass::UNIFORM_CONSTANT,
-            };
-            Ok(self.variables().map(move |op_variable| {
-                let op_variable = op_variable?;
-                let mut base_type = op_variable.result_type;
-                let mut count = ResourceCount::Static(1);
-                loop {
-                    let mut stream = self.module
-                        .get_result(base_type)
-                        .ok_or(ReflectError::InvalidTypeId(base_type))?;
-                    base_type = match stream.code()
-                    {
-                        op::Code::TYPE_POINTER => {
-                            let _ = stream.read()?;
-                            let storage_class = op::StorageClass::parse_one(&mut stream)?;
-                            if storage_class != resource_class {
-                                return Ok(None)
-                            }
-                            Id::parse_one(&mut stream)?
-                        },
-                        op::Code::TYPE_ARRAY => {
-                            let _ = stream.read()?;
-                            let id = Id::parse_one(&mut stream)?;
-                            let length = match self.constant(Id::parse_one(&mut stream)?)?
+    /// Returns an iterator over the statically known values and constant ids of all
+    /// specialization constants.
+    #[inline]
+    pub fn spec_constants(&self) -> impl Iterator<Item = ReflectResult<SpecConstant>> {
+        self.module
+            .results()
+            .filter_map(|(id, stream)| 
+                if matches!(
+                    stream.code(),
+                    op::Code::SPEC_CONSTANT_TRUE
+                    | op::Code::SPEC_CONSTANT_FALSE
+                    | op::Code::SPEC_CONSTANT
+                ) {
+                    self.decorates
+                        .iter()
+                        .find_map(|&decorate|
+                            if decorate.target == id &&
+                                let op::Decoration::SpecId { specialization_constant_id } =
+                                decorate.decoration
                             {
-                                Constant::Constant(literal) => {
-                                    literal.as_usize()
-                                        .ok_or(ReflectError::NonIntegerLiteral(literal))?
-                                },
-                                Constant::SpecConstant(literal) => {
-                                    literal.as_usize()
-                                        .ok_or(ReflectError::NonIntegerLiteral(literal))?
-                                },
-                                x => return Err(ReflectError::ExpectedConstantLiteral {
-                                    found: format!("{x:?}")
-                                })
-                            };
-                            count = match count {
-                                ResourceCount::Static(count) =>
-                                    ResourceCount::Static(count * length),
-                                ResourceCount::Runtime { declared } =>
-                                    ResourceCount::Runtime { declared: declared * length },
-                            };
-                            id
-                        },
-                        op::Code::TYPE_RUNTIME_ARRAY => {
-                            let _ = stream.read()?;
-                            count = match count {
-                                ResourceCount::Static(count) =>
-                                    ResourceCount::Runtime { declared: count, },
-                                ResourceCount::Runtime { declared } =>
-                                    ResourceCount::Runtime { declared },
+                                Some(specialization_constant_id)
+                            } else { None }
+                        ).map(|constant_id| (constant_id, id, stream))
+                } else { None }
+            )
+            .map(|(constant_id, id, mut stream)| {
+                match stream.code() {
+                    op::Code::SPEC_CONSTANT_TRUE | op::Code::SPEC_CONSTANT_FALSE => {
+                        Ok(SpecConstant {
+                            ty: ScalarType::Bool,
+                            constant_id,
+                            id,
+                        })
+                    },
+                    op::Code::SPEC_CONSTANT => {
+                        let result_type = op::IdResultType::parse_one(&mut stream)?;
+                        stream.advance(1)?;
+                        let ctx = &mut ParseContext {
+                            result_type: Some(result_type)
+                        };
+                        let value = Literal::parse_one(&self.module, &mut stream, ctx)?;
+                        let ty = match value {
+                            Literal::F16(_) => ScalarType::Float { width: 2, },
+                            Literal::F32(_) => ScalarType::Float { width: 4, },
+                            Literal::F64(_) => ScalarType::Float { width: 8, },
+                            Literal::I8(_) => ScalarType::Int { width: 1, is_signed: true, },
+                            Literal::I16(_) => ScalarType::Int { width: 2, is_signed: true, },
+                            Literal::I32(_) => ScalarType::Int { width: 4, is_signed: true, },
+                            Literal::I64(_) => ScalarType::Int { width: 8, is_signed: true, },
+                            Literal::U8(_) => ScalarType::Int { width: 1, is_signed: false, },
+                            Literal::U16(_) => ScalarType::Int { width: 2, is_signed: false, },
+                            Literal::U32(_) => ScalarType::Int { width: 4, is_signed: false, },
+                            Literal::U64(_) => ScalarType::Int { width: 8, is_signed: false, },
+                        };
+                        Ok(SpecConstant {
+                            ty,
+                            constant_id,
+                            id,
+                        })
+                    },
+                    _ => unreachable!(),
+                }
+            })
+    }
 
-                            };
-                            Id::parse_one(&mut stream)?
-                        },
-                        _ => {
-                            break
-                        },
-                    };
-                }
-                let name = self.names().find_map(|op_name| {
-                    if let Ok(name) = op_name &&
-                        name.target == op_variable.id_result
-                    {
-                        Some(name.name)
-                    } else { None }
-                }); 
-                if resource_class == op::StorageClass::UNIFORM_CONSTANT {
-                    match ty {
-                        ResourceType::InputAttachment => {
-                            let mut stream = self.module
-                                .get_result(base_type)
-                                .ok_or(ReflectError::InvalidTypeId(base_type))?;
-                            if matches!(stream.code(), op::Code::TYPE_IMAGE) {
-                                let _ = stream.read_words(Some(2))?;
-                                let dim = op::Dim::parse_one(&mut stream)?;
-                                if dim == op::Dim::SUBPASS_DATA {
-                                    return Ok(Some(Resource {
-                                        type_id: op_variable.result_type,
-                                        base_type_id: base_type,
-                                        variable_id: op_variable.id_result,
-                                        name,
-                                        count,
-                                        offset: None,
-                                    }))
-                                }
-                            }
-                            Ok(None)
-                        },
-                        ResourceType::StorageImage => {
-                            let mut stream = self.module
-                                .get_result(base_type)
-                                .ok_or(ReflectError::InvalidTypeId(base_type))?;
-                            if matches!(stream.code(), op::Code::TYPE_IMAGE) {
-                                let _ = stream.read_words(Some(2))?;
-                                let dim = op::Dim::parse_one(&mut stream)?;
-                                let _ = stream.read_words(Some(3))?;
-                                let sampled = stream.read()?;
-                                if sampled == 2 &&
-                                    matches!(
-                                        dim,
-                                        op::Dim::TYPE_1D
-                                        | op::Dim::TYPE_2D
-                                        | op::Dim::TYPE_3D
-                                        | op::Dim::CUBE
-                                        | op::Dim::RECT
-                                    )
-                                {
-                                    return Ok(Some(Resource {
-                                        type_id: op_variable.result_type,
-                                        base_type_id: base_type,
-                                        variable_id: op_variable.id_result,
-                                        name,
-                                        count,
-                                        offset: None,
-                                    }))
-                                }
-                            }
-                            Ok(None)
-                        },
-                        ResourceType::CombinedImageSampler => {
-                            let stream = self.module
-                                .get_result(base_type)
-                                .ok_or(ReflectError::InvalidTypeId(base_type))?;
-                            if matches!(stream.code(), op::Code::TYPE_SAMPLED_IMAGE) {
-                                Ok(Some(Resource {
-                                    type_id: op_variable.result_type,
-                                    base_type_id: base_type,
-                                    variable_id: op_variable.id_result,
-                                    name,
-                                    count,
-                                    offset: None,
-                                }))
-                            } else { Ok(None) }
-                        },
-                        ResourceType::SeparateImage => {
-                            let mut stream = self.module
-                                .get_result(base_type)
-                                .ok_or(ReflectError::InvalidTypeId(base_type))?;
-                            if matches!(
-                                stream.code(),
-                                op::Code::TYPE_IMAGE,
-                            ) {
-                                let _ = stream.read_words(Some(2))?;
-                                let dim = op::Dim::parse_one(&mut stream)?;
-                                let _ = stream.read_words(Some(3))?;
-                                let sampled = stream.read()?;
-                                if sampled != 2 &&
-                                    matches!(
-                                        dim,
-                                        op::Dim::TYPE_1D
-                                        | op::Dim::TYPE_2D
-                                        | op::Dim::TYPE_3D
-                                        | op::Dim::CUBE
-                                        | op::Dim::RECT
-                                    )
-                                {
-                                    return Ok(Some(Resource {
-                                        type_id: op_variable.result_type,
-                                        base_type_id: base_type,
-                                        variable_id: op_variable.id_result,
-                                        name,
-                                        count,
-                                        offset: None,
-                                    }))
-                                }
-                            } 
-                            Ok(None)
-                        },
-                        ResourceType::SeparateSampler => {
-                            let stream = self.module
-                                .get_result(base_type)
-                                .ok_or(ReflectError::InvalidTypeId(base_type))?;
-                            if matches!(stream.code(), op::Code::TYPE_SAMPLER) {
-                                Ok(Some(Resource {
-                                    type_id: op_variable.result_type,
-                                    base_type_id: base_type,
-                                    variable_id: op_variable.id_result,
-                                    name,
-                                    count,
-                                    offset: None,
-                                }))
-                            } else { Ok(None) }
-                        },
-                        ResourceType::UniformTexelBuffer => {
-                            let mut stream = self.module
-                                .get_result(base_type)
-                                .ok_or(ReflectError::InvalidTypeId(base_type))?;
-                            if matches!(stream.code(), op::Code::TYPE_IMAGE) {
-                                let _ = stream.read_words(Some(2))?;
-                                let dim = op::Dim::parse_one(&mut stream)?;
-                                let _ = stream.read_words(Some(3))?;
-                                let sampled = stream.read()?;
-                                if sampled != 2 && dim == op::Dim::BUFFER {
-                                    return  Ok(Some(Resource {
-                                        type_id: op_variable.result_type,
-                                        base_type_id: base_type,
-                                        variable_id: op_variable.id_result, 
-                                        name,
-                                        count,
-                                        offset: None,
-                                    }))
-                                }
-                            }
-                            Ok(None)
-                        },
-                        ResourceType::StorageTexelBuffer => {
-                            let mut stream = self.module
-                                .get_result(base_type)
-                                .ok_or(ReflectError::InvalidTypeId(base_type))?;
-                            if matches!(stream.code(), op::Code::TYPE_IMAGE) {
-                                let _ = stream.read_words(Some(2))?;
-                                let dim = op::Dim::parse_one(&mut stream)?;
-                                let _ = stream.read_words(Some(3))?;
-                                let sampled = stream.read()?;
-                                if sampled == 2 && dim == op::Dim::BUFFER {
-                                    return  Ok(Some(Resource {
-                                        type_id: op_variable.result_type,
-                                        base_type_id: base_type,
-                                        variable_id: op_variable.id_result, 
-                                        name,
-                                        count,
-                                        offset: None,
-                                    }))
-                                }
-                            }
-                            Ok(None)
-                        },
-                        _ => unreachable!()
-                    }
-                } else {
-                    let offset = match ty {
-                        ResourceType::PushConstant => {
-                            self.decorations(base_type)
-                                .filter_map(|dec| {
-                                    if let op::Decoration::Offset { byte_offset } = dec.decoration {
-                                        Some(byte_offset)
-                                    } else { None }
-                                }).min()
-                        },
-                        _ => None
-                    };
-                    Ok((op_variable.storage_class == resource_class).then_some(
-                        Resource {
-                            type_id: op_variable.result_type,
-                            base_type_id: base_type,
-                            variable_id: op_variable.id_result,
-                            name,
-                            count,
-                            offset,
-                        }
-                    ))
-                }
-            }).filter_map(|resource| {
-                match resource {
-                    Ok(res) => res.map(Ok),
-                    Err(err) => Some(Err(err)),
-                }
-            }))
-        } 
-
-        /// Returns all [`decorations`][1] added to a given [`Id`].
-        ///
-        /// [1]: op::Decoration
-        #[inline]
-        pub fn decorations(
-            &self,
-            target_id: Id,
-        ) -> impl Iterator<Item = Decorate<'a>>
-        {
-            self.decorates
-                .iter()
-                .filter_map(move |&dec|
-                    (dec.target == target_id).then_some(
-                        dec
-                    )
-                )
+    /// Gets a specific constant with `id`.
+    pub fn constant(
+        &self,
+        id: Id,
+    ) -> ReflectResult<Constant<'a>>
+    {
+        let mut stream = self.module.get_result(id).ok_or(ReflectError::InvalidConstantId(id))?;
+        match stream.code() {
+            op::Code::CONSTANT_TRUE => {
+                Ok(Constant::Bool(true))
+            },
+            op::Code::CONSTANT_FALSE => {
+                Ok(Constant::Bool(false))
+            },
+            op::Code::CONSTANT => {
+                let result_type = op::IdResultType::parse_one(&mut stream)?;
+                stream.advance(1)?;
+                let ctx = &mut ParseContext {
+                    result_type: Some(result_type)
+                };
+                let value = Literal::parse_one(&self.module, &mut stream, ctx)?;
+                Ok(Constant::Constant(value))
+            },
+            op::Code::CONSTANT_COMPOSITE => {
+                let ty = Id::parse_one(&mut stream)?;
+                stream.advance(1)?;
+                Ok(Constant::Composite {
+                    ty,
+                    constituents: Id::parse_eos(&mut stream)?,
+                })
+            },
+            op::Code::CONSTANT_SAMPLER => {
+                stream.advance(2)?;
+                let addressing_mode = op::SamplerAddressingMode::parse_one(&mut stream)?;
+                let is_normalized = stream.read()? == 1;
+                let filter_mode = op::SamplerFilterMode::parse_one(&mut stream)?;
+                Ok(Constant::Sampler { addressing_mode, is_normalized, filter_mode })
+            },
+            op::Code::CONSTANT_NULL => {
+                let ty = Id::parse_one(&mut stream)?;
+                Ok(Constant::Null { ty })
+            },
+            op::Code::SPEC_CONSTANT_TRUE => {
+                Ok(Constant::SpecBool(true))
+            },
+            op::Code::SPEC_CONSTANT_FALSE => {
+                Ok(Constant::SpecBool(false))
+            },
+            op::Code::SPEC_CONSTANT => {
+                let result_type = op::IdResultType::parse_one(&mut stream)?;
+                stream.advance(1)?;
+                let ctx = &mut ParseContext {
+                    result_type: Some(result_type)
+                };
+                let value = Literal::parse_one(&self.module, &mut stream, ctx)?;
+                Ok(Constant::SpecConstant(value))
+            },
+            op::Code::SPEC_CONSTANT_COMPOSITE => {
+                let ty = Id::parse_one(&mut stream)?;
+                stream.advance(1)?;
+                Ok(Constant::SpecConstantComposite {
+                    ty,
+                    constituents: Id::parse_eos(&mut stream)?,
+                })
+            },
+            op::Code::SPEC_CONSTANT_OP => {
+                let ty = Id::parse_one(&mut stream)?;
+                stream.advance(1)?;
+                let code = op::LiteralSpecConstantOpInteger::parse_one(&mut stream)?;
+                Ok(Constant::SpecConstantOp { ty, opcode: code.code, operands: code.operands })
+            },
+            _ => Err(ReflectError::InvalidConstantId(id))
         }
+    }
 
-        /// Gets a [`type description`][1] of a given [`Id`] pointing to a type.
-        ///
-        /// The description notably contains a [`hint`][2] of its size, which can be resolved to a
-        /// known size when needed.
-        ///
-        /// [1]: Type
-        /// [2]: TypeSizeHint
-        pub fn type_description(&self, id: Id) -> ReflectResult<Type<'a>> {
-            let mut stream = self.module
-                .get_result(id)
-                .ok_or(ReflectError::InvalidTypeId(id))?;
-            let name = self.names().find_map(|name| {
-                if let Ok(name) = name &&
-                    name.target == id
+    #[inline]
+    /// Returns a name assigned to an [`Id`], or optionally to a struct member of a struct.
+    pub fn name(&self, id: Id, struct_member: Option<u32>) -> ReflectResult<Option<CompilerStr<'a>>> {
+        for name in self.names() {
+            let name = name?;
+            if name.target == id &&
+                name.member == struct_member
+            {
+                return Ok(Some(name.name))
+            }
+        }
+        Ok(None)
+    }
+
+    /// Returns an iterator over all resources of [`type`][1].
+    ///
+    /// Entry point *must* be [`set`][2] before calling this function.
+    ///
+    /// If the SPIR-V version is >= 1.4, the resources are filtered to only include ones used by
+    /// the current entry point.
+    ///
+    /// [1]: ResourceType
+    /// [2]: Self::set_entry_point
+    pub fn resources_for_type(&self, ty: ResourceType) -> ReflectResult<
+        impl Iterator<Item = ReflectResult<Resource<'a>>>
+    >
+    {
+        let Some(entry_point) = self.current_entry_point else {
+            return Err(ReflectError::EntryPointNotSet)
+        };
+        let resource_class = match ty {
+            ResourceType::UniformBuffer => op::StorageClass::UNIFORM,
+            ResourceType::StorageBuffer => op::StorageClass::STORAGE_BUFFER,
+            ResourceType::PushConstant => op::StorageClass::PUSH_CONSTANT,
+            ResourceType::AtomicCounter => op::StorageClass::ATOMIC_COUNTER,
+            ResourceType::InputAttachment
+            | ResourceType::StorageImage
+            | ResourceType::CombinedImageSampler
+            | ResourceType::SeparateImage
+            | ResourceType::SeparateSampler
+            | ResourceType::UniformTexelBuffer
+            | ResourceType::StorageTexelBuffer => op::StorageClass::UNIFORM_CONSTANT,
+        };
+        Ok(self.variables().map(move |op_variable| {
+            let op_variable = op_variable?;
+            if self.module.version() >= VERSION_1_4 &&
+                !entry_point.interface.contains(&op_variable.id_result)
+            {
+                return Ok(None)
+            }
+            let mut base_type = op_variable.result_type;
+            let mut count = ResourceCount::Static(1);
+            loop {
+                let mut stream = self.module
+                    .get_result(base_type)
+                    .ok_or(ReflectError::InvalidTypeId(base_type))?;
+                base_type = match stream.code()
+                {
+                    op::Code::TYPE_POINTER => {
+                        stream.advance(1)?;
+                        let storage_class = op::StorageClass::parse_one(&mut stream)?;
+                        if storage_class != resource_class {
+                            return Ok(None)
+                        }
+                        Id::parse_one(&mut stream)?
+                    },
+                    op::Code::TYPE_ARRAY => {
+                        stream.advance(1)?;
+                        let id = Id::parse_one(&mut stream)?;
+                        let length = match self.constant(Id::parse_one(&mut stream)?)?
+                        {
+                            Constant::Constant(literal) => {
+                                literal.as_usize()
+                                    .ok_or(ReflectError::NonIntegerLiteral(literal))?
+                            },
+                            Constant::SpecConstant(literal) => {
+                                literal.as_usize()
+                                    .ok_or(ReflectError::NonIntegerLiteral(literal))?
+                            },
+                            x => return Err(ReflectError::ExpectedConstantLiteral {
+                                found: format!("{x:?}")
+                            })
+                        };
+                        count = match count {
+                            ResourceCount::Static(count) =>
+                                ResourceCount::Static(count * length),
+                            ResourceCount::Runtime { declared } =>
+                                ResourceCount::Runtime { declared: declared * length },
+                        };
+                        id
+                    },
+                    op::Code::TYPE_RUNTIME_ARRAY => {
+                        stream.advance(1)?;
+                        count = match count {
+                            ResourceCount::Static(count) =>
+                                ResourceCount::Runtime { declared: count, },
+                            ResourceCount::Runtime { declared } =>
+                                ResourceCount::Runtime { declared },
+
+                        };
+                        Id::parse_one(&mut stream)?
+                    },
+                    _ => {
+                        break
+                    },
+                };
+            }
+            let name = self.names().find_map(|op_name| {
+                if let Ok(name) = op_name &&
+                    name.target == op_variable.id_result
                 {
                     Some(name.name)
                 } else { None }
-            });
-            match stream.code() {
-                op::Code::TYPE_BOOL => Ok(Type {
-                    id,
-                    name,
-                    size_hint: TypeSizeHint::Static(4),
-                }),
-                op::Code::TYPE_INT | op::Code::TYPE_FLOAT => {
-                    let _ = stream.read()?;
-                    let width = stream.read()?;
-                    Ok(Type {
-                        id,
-                        name,
-                        size_hint: TypeSizeHint::Static(width as usize / 8),
-                    })
-                },
-                op::Code::TYPE_VECTOR => {
-                    let _ = stream.read()?;
-                    let component_type = Id::parse_one(&mut stream)?;
-                    let component_count = stream.read()?;
-                    let mut stream = self.module
-                        .get_result(component_type)
-                        .ok_or(ReflectError::InvalidTypeId(id))?;
-                    let size = match stream.code() {
-                        op::Code::TYPE_BOOL => 4 * component_count as usize,
-                        op::Code::TYPE_INT | op::Code::TYPE_FLOAT => {
-                            let _ = stream.read()?;
-                            let width = stream.read()?;
-                            (width / 8 * component_count) as usize
-                        },
-                        x => return Err(ReflectError::ExpectedScalarType { found: x })
-                    };
-                    Ok(Type {
-                        id,
-                        name,
-                        size_hint: TypeSizeHint::Static(size),
-                    })
-                }
-                op::Code::TYPE_MATRIX => {
-                    let _ = stream.read()?;
-                    let column_type = Id::parse_one(&mut stream)?;
-                    let column_count = stream.read()?;
-                    let mut stream = self.module
-                        .get_result(column_type)
-                        .ok_or(ReflectError::InvalidTypeId(id))?;
-                    if !matches!(stream.code(), op::Code::TYPE_VECTOR) {
-                        return Err(ReflectError::ExpectedVectorType { found: stream.code() })
-                    }
-                    let _ = stream.read()?;
-                    let component_type = Id::parse_one(&mut stream)?;
-                    let component_count = stream.read()?;
-                    let mut stream = self.module
-                        .get_result(component_type)
-                        .ok_or(ReflectError::InvalidTypeId(id))?;
-                    let column_size = match stream.code() {
-                        op::Code::TYPE_BOOL => 4,
-                        op::Code::TYPE_INT | op::Code::TYPE_FLOAT => {
-                            let _ = stream.read()?;
-                            stream.read()? as usize / 8 
-                        },
-                        x => return Err(ReflectError::ExpectedScalarType {
-                            found: x,
-                        })
-                    };
-                    Ok(Type {
-                        id,
-                        name,
-                        size_hint: TypeSizeHint::Matrix(MatrixStrideHole {
-                            columns: column_count,
-                            rows: component_count,
-                            declared: column_size * (column_count as usize),
-                        }),
-                    })
-                },
-                op::Code::TYPE_ARRAY => {
-                    let _ = stream.read()?;
-                    let element_type = Id::parse_one(&mut stream)?;
-                    let length = Id::parse_one(&mut stream)?;
-                    let count = {
-                        let constant = self.constant(length)?;
-                        match constant {
-                            Constant::Constant(literal) =>
-                                literal.as_usize().ok_or(ReflectError::NonIntegerLiteral(literal))?,
-                            Constant::SpecConstant(literal) =>
-                                literal.as_usize().ok_or(ReflectError::NonIntegerLiteral(literal))?,
-                            x => return Err(ReflectError::ExpectedConstantLiteral {
-                                found: format!("{x:?}"),
-                            })
-                        }
-                    };
-                    let size_hint = {
-                        if let Some(stride) =
-                            self.decorations(id)
-                            .find_map(|dec| {
-                                let op::Decoration::ArrayStride { array_stride } = dec.decoration else {
-                                    return None
-                                };
-                                Some(array_stride as usize)
-                            })
-                        {
-                            TypeSizeHint::Static(count * stride)
-                        } else {
-                            let element_size_hint = self.type_description(element_type)?.size_hint;
-                            match element_size_hint {
-                                TypeSizeHint::Static(size) => TypeSizeHint::Static(count * size),
-                                TypeSizeHint::Matrix(_) | TypeSizeHint::UnknownArrayStride(_)
-                                    => TypeSizeHint::UnknownArrayStride(
-                                    UnknownArrayStrideHole {
-                                        element: Box::new(element_size_hint),
-                                        count,
-                                    }),
-                                TypeSizeHint::RuntimeArray(_) | TypeSizeHint::Struct(_)
-                                    => return Err(ReflectError::InvalidRuntimeArray),
+            }); 
+            if resource_class == op::StorageClass::UNIFORM_CONSTANT {
+                match ty {
+                    ResourceType::InputAttachment => {
+                        let mut stream = self.module
+                            .get_result(base_type)
+                            .ok_or(ReflectError::InvalidTypeId(base_type))?;
+                        if matches!(stream.code(), op::Code::TYPE_IMAGE) {
+                            stream.advance(2)?;
+                            let dim = op::Dim::parse_one(&mut stream)?;
+                            if dim == op::Dim::SUBPASS_DATA {
+                                return Ok(Some(Resource {
+                                    type_id: op_variable.result_type,
+                                    base_type_id: base_type,
+                                    variable_id: op_variable.id_result,
+                                    name,
+                                    count,
+                                    offset: None,
+                                }))
                             }
                         }
-                    };
-                    Ok(Type {
-                        id,
+                        Ok(None)
+                    },
+                    ResourceType::StorageImage => {
+                        let mut stream = self.module
+                            .get_result(base_type)
+                            .ok_or(ReflectError::InvalidTypeId(base_type))?;
+                        if matches!(stream.code(), op::Code::TYPE_IMAGE) {
+                            stream.advance(2)?;
+                            let dim = op::Dim::parse_one(&mut stream)?;
+                            stream.advance(3)?;
+                            let sampled = stream.read()?;
+                            if sampled == 2 &&
+                                matches!(
+                                    dim,
+                                    op::Dim::TYPE_1D
+                                    | op::Dim::TYPE_2D
+                                    | op::Dim::TYPE_3D
+                                    | op::Dim::CUBE
+                                    | op::Dim::RECT
+                                )
+                            {
+                                return Ok(Some(Resource {
+                                    type_id: op_variable.result_type,
+                                    base_type_id: base_type,
+                                    variable_id: op_variable.id_result,
+                                    name,
+                                    count,
+                                    offset: None,
+                                }))
+                            }
+                        }
+                        Ok(None)
+                    },
+                    ResourceType::CombinedImageSampler => {
+                        let stream = self.module
+                            .get_result(base_type)
+                            .ok_or(ReflectError::InvalidTypeId(base_type))?;
+                        if matches!(stream.code(), op::Code::TYPE_SAMPLED_IMAGE) {
+                            Ok(Some(Resource {
+                                type_id: op_variable.result_type,
+                                base_type_id: base_type,
+                                variable_id: op_variable.id_result,
+                                name,
+                                count,
+                                offset: None,
+                            }))
+                        } else { Ok(None) }
+                    },
+                    ResourceType::SeparateImage => {
+                        let mut stream = self.module
+                            .get_result(base_type)
+                            .ok_or(ReflectError::InvalidTypeId(base_type))?;
+                        if matches!(
+                            stream.code(),
+                            op::Code::TYPE_IMAGE,
+                        ) {
+                            stream.advance(2)?;
+                            let dim = op::Dim::parse_one(&mut stream)?;
+                            stream.advance(3)?;
+                            let sampled = stream.read()?;
+                            if sampled != 2 &&
+                                matches!(
+                                    dim,
+                                    op::Dim::TYPE_1D
+                                    | op::Dim::TYPE_2D
+                                    | op::Dim::TYPE_3D
+                                    | op::Dim::CUBE
+                                    | op::Dim::RECT
+                                )
+                            {
+                                return Ok(Some(Resource {
+                                    type_id: op_variable.result_type,
+                                    base_type_id: base_type,
+                                    variable_id: op_variable.id_result,
+                                    name,
+                                    count,
+                                    offset: None,
+                                }))
+                            }
+                        } 
+                        Ok(None)
+                    },
+                    ResourceType::SeparateSampler => {
+                        let stream = self.module
+                            .get_result(base_type)
+                            .ok_or(ReflectError::InvalidTypeId(base_type))?;
+                        if matches!(stream.code(), op::Code::TYPE_SAMPLER) {
+                            Ok(Some(Resource {
+                                type_id: op_variable.result_type,
+                                base_type_id: base_type,
+                                variable_id: op_variable.id_result,
+                                name,
+                                count,
+                                offset: None,
+                            }))
+                        } else { Ok(None) }
+                    },
+                    ResourceType::UniformTexelBuffer => {
+                        let mut stream = self.module
+                            .get_result(base_type)
+                            .ok_or(ReflectError::InvalidTypeId(base_type))?;
+                        if matches!(stream.code(), op::Code::TYPE_IMAGE) {
+                            stream.advance(2)?;
+                            let dim = op::Dim::parse_one(&mut stream)?;
+                            stream.advance(3)?;
+                            let sampled = stream.read()?;
+                            if sampled != 2 && dim == op::Dim::BUFFER {
+                                return  Ok(Some(Resource {
+                                    type_id: op_variable.result_type,
+                                    base_type_id: base_type,
+                                    variable_id: op_variable.id_result, 
+                                    name,
+                                    count,
+                                    offset: None,
+                                }))
+                            }
+                        }
+                        Ok(None)
+                    },
+                    ResourceType::StorageTexelBuffer => {
+                        let mut stream = self.module
+                            .get_result(base_type)
+                            .ok_or(ReflectError::InvalidTypeId(base_type))?;
+                        if matches!(stream.code(), op::Code::TYPE_IMAGE) {
+                            stream.advance(2)?;
+                            let dim = op::Dim::parse_one(&mut stream)?;
+                            stream.advance(3)?;
+                            let sampled = stream.read()?;
+                            if sampled == 2 && dim == op::Dim::BUFFER {
+                                return  Ok(Some(Resource {
+                                    type_id: op_variable.result_type,
+                                    base_type_id: base_type,
+                                    variable_id: op_variable.id_result, 
+                                    name,
+                                    count,
+                                    offset: None,
+                                }))
+                            }
+                        }
+                        Ok(None)
+                    },
+                    _ => unreachable!()
+                }
+            } else {
+                let offset = match ty {
+                    ResourceType::PushConstant => {
+                        self.decorations(base_type)
+                            .filter_map(|dec| {
+                                if let op::Decoration::Offset { byte_offset } = dec.decoration {
+                                    Some(byte_offset)
+                                } else { None }
+                            }).min()
+                    },
+                    _ => None
+                };
+                Ok((op_variable.storage_class == resource_class).then_some(
+                    Resource {
+                        type_id: op_variable.result_type,
+                        base_type_id: base_type,
+                        variable_id: op_variable.id_result,
                         name,
-                        size_hint
+                        count,
+                        offset,
+                    }
+                ))
+            }
+        }).filter_map(|resource| {
+            match resource {
+                Ok(res) => res.map(Ok),
+                Err(err) => Some(Err(err)),
+            }
+        }))
+    } 
+
+    /// Returns all [`decorations`][1] added to a given [`Id`].
+    ///
+    /// [1]: op::Decoration
+    #[inline]
+    pub fn decorations(
+        &self,
+        target_id: Id,
+    ) -> impl Iterator<Item = Decorate<'a>>
+    {
+        self.decorates
+            .iter()
+            .filter_map(move |&dec|
+                (dec.target == target_id).then_some(
+                    dec
+                )
+            )
+    }
+
+    /// Gets a [`type description`][1] of a given [`Id`] pointing to a type.
+    ///
+    /// The description notably contains a [`hint`][2] of its size, which can be resolved to a
+    /// known size when needed.
+    ///
+    /// [1]: Type
+    /// [2]: TypeSizeHint
+    pub fn type_description(&self, id: Id) -> ReflectResult<Type<'a>> {
+        let mut stream = self.module
+            .get_result(id)
+            .ok_or(ReflectError::InvalidTypeId(id))?;
+        let name = self.names().find_map(|name| {
+            if let Ok(name) = name &&
+                name.target == id
+            {
+                Some(name.name)
+            } else { None }
+        });
+        match stream.code() {
+            op::Code::TYPE_BOOL => Ok(Type {
+                id,
+                name,
+                size_hint: TypeSizeHint::Static(4),
+            }),
+            op::Code::TYPE_INT | op::Code::TYPE_FLOAT => {
+                stream.advance(1)?;
+                let width = stream.read()?;
+                Ok(Type {
+                    id,
+                    name,
+                    size_hint: TypeSizeHint::Static(width as usize / 8),
+                })
+            },
+            op::Code::TYPE_VECTOR => {
+                stream.advance(1)?;
+                let component_type = Id::parse_one(&mut stream)?;
+                let component_count = stream.read()?;
+                let mut stream = self.module
+                    .get_result(component_type)
+                    .ok_or(ReflectError::InvalidTypeId(id))?;
+                let size = match stream.code() {
+                    op::Code::TYPE_BOOL => 4 * component_count as usize,
+                    op::Code::TYPE_INT | op::Code::TYPE_FLOAT => {
+                        stream.advance(1)?;
+                        let width = stream.read()?;
+                        (width / 8 * component_count) as usize
+                    },
+                    x => return Err(ReflectError::ExpectedScalarType { found: x })
+                };
+                Ok(Type {
+                    id,
+                    name,
+                    size_hint: TypeSizeHint::Static(size),
+                })
+            }
+            op::Code::TYPE_MATRIX => {
+                stream.advance(1)?;
+                let column_type = Id::parse_one(&mut stream)?;
+                let column_count = stream.read()?;
+                let mut stream = self.module
+                    .get_result(column_type)
+                    .ok_or(ReflectError::InvalidTypeId(id))?;
+                if !matches!(stream.code(), op::Code::TYPE_VECTOR) {
+                    return Err(ReflectError::ExpectedVectorType { found: stream.code() })
+                }
+                stream.advance(1)?;
+                let component_type = Id::parse_one(&mut stream)?;
+                let component_count = stream.read()?;
+                let mut stream = self.module
+                    .get_result(component_type)
+                    .ok_or(ReflectError::InvalidTypeId(id))?;
+                let column_size = match stream.code() {
+                    op::Code::TYPE_BOOL => 4,
+                    op::Code::TYPE_INT | op::Code::TYPE_FLOAT => {
+                        stream.advance(1)?;
+                        stream.read()? as usize / 8 
+                    },
+                    x => return Err(ReflectError::ExpectedScalarType {
+                        found: x,
                     })
-                },
-                op::Code::TYPE_RUNTIME_ARRAY => {
-                    let stride = self
-                        .decorations(id)
+                };
+                Ok(Type {
+                    id,
+                    name,
+                    size_hint: TypeSizeHint::Matrix(MatrixStrideHole {
+                        columns: column_count,
+                        rows: component_count,
+                        declared: column_size * (column_count as usize),
+                    }),
+                })
+            },
+            op::Code::TYPE_ARRAY => {
+                stream.advance(1)?;
+                let element_type = Id::parse_one(&mut stream)?;
+                let length = Id::parse_one(&mut stream)?;
+                let count = {
+                    let constant = self.constant(length)?;
+                    match constant {
+                        Constant::Constant(literal) =>
+                            literal.as_usize().ok_or(ReflectError::NonIntegerLiteral(literal))?,
+                        Constant::SpecConstant(literal) =>
+                            literal.as_usize().ok_or(ReflectError::NonIntegerLiteral(literal))?,
+                        x => return Err(ReflectError::ExpectedConstantLiteral {
+                            found: format!("{x:?}"),
+                        })
+                    }
+                };
+                let size_hint = {
+                    if let Some(stride) =
+                        self.decorations(id)
                         .find_map(|dec| {
                             let op::Decoration::ArrayStride { array_stride } = dec.decoration else {
                                 return None
                             };
                             Some(array_stride as usize)
-                        }).ok_or(ReflectError::MissingRequiredDecoration("ArrayStride"))?;
-                    Ok(Type {
-                        id,
-                        name,
-                        size_hint: TypeSizeHint::RuntimeArray(RuntimeArrayHole { stride }),
-                    })
-                }
-                op::Code::TYPE_STRUCT => {
-                    let _ = stream.read()?;
-                    let member_types = Id::parse_eos(&mut stream)?;
-                    let mut min = u32::MAX;
-                    let (desc, member, offset) = self.decorations(id)
-                        .filter_map(|dec| {
-                            if let Some(member) = dec.member &&
-                                let op::Decoration::Offset { byte_offset } = dec.decoration &&
-                                let Some(&ty) = member_types.get(member as usize) &&
-                                let Ok(desc) = self.type_description(ty)
-                            {
-                                Some((desc, member, byte_offset))
-                            } else { None }
-                        }).max_by_key(|(_, _, offset)| {
-                            min = min.min(*offset);
-                            *offset
-                        }).ok_or(ReflectError::MissingRequiredDecoration("Offset"))?;
-                    let offset = (offset - min) as usize;
-                    let size_hint = match desc.size_hint {
-                        TypeSizeHint::Static(size) => TypeSizeHint::Static(offset + size),
-                        TypeSizeHint::RuntimeArray(hole) => TypeSizeHint::Struct(StructHole {
-                            last_offset: offset,
-                            hole,
-                        }),
-                        TypeSizeHint::Matrix(hole) => {
-                            let mut stride = None;
-                            let mut is_row_major = false;
-                            for dec in self.decorations(id) {
-                                if let Some(dec_member) = dec.member &&
-                                    dec_member == member
-                                {
-                                    if let op::Decoration::MatrixStride { matrix_stride } = dec.decoration {
-                                        stride = Some(matrix_stride)
-                                    } else if let op::Decoration::RowMajor = dec.decoration {
-                                        is_row_major = true
-                                    }
-                                }
-                            }
-                            TypeSizeHint::Static(offset + hole
-                                .resolve(
-                                    stride.ok_or(
-                                        ReflectError::MissingRequiredDecoration("MatrixStride")
-                                    )? as usize,
-                                    is_row_major
-                                ))
-                        },
-                        TypeSizeHint::UnknownArrayStride(_) => return Err(
-                            ReflectError::MissingRequiredDecoration("ArrayStride")
-                        ),
-                        TypeSizeHint::Struct(_) => return Err(
-                            ReflectError::InvalidRuntimeArray
-                        ),
-                    };
-                    Ok(Type {
-                        id,
-                        name,
-                        size_hint,
-                    })
-                },
-                op::Code::TYPE_POINTER => {
-                    let _ = stream.read_words(Some(2));
-                    self.type_description(Id::parse_one(&mut stream)?)
-                },
-                _ => Ok(Type {
+                        })
+                    {
+                        TypeSizeHint::Static(count * stride)
+                    } else {
+                        let element_size_hint = self.type_description(element_type)?.size_hint;
+                        match element_size_hint {
+                            TypeSizeHint::Static(size) => TypeSizeHint::Static(count * size),
+                            TypeSizeHint::Matrix(_) | TypeSizeHint::UnknownArrayStride(_)
+                                => TypeSizeHint::UnknownArrayStride(
+                                UnknownArrayStrideHole {
+                                    element: Box::new(element_size_hint),
+                                    count,
+                                }),
+                            TypeSizeHint::RuntimeArray(_) | TypeSizeHint::Struct(_)
+                                => return Err(ReflectError::InvalidRuntimeArray),
+                        }
+                    }
+                };
+                Ok(Type {
                     id,
                     name,
-                    size_hint: TypeSizeHint::Static(0),
+                    size_hint
+                })
+            },
+            op::Code::TYPE_RUNTIME_ARRAY => {
+                let stride = self
+                    .decorations(id)
+                    .find_map(|dec| {
+                        let op::Decoration::ArrayStride { array_stride } = dec.decoration else {
+                            return None
+                        };
+                        Some(array_stride as usize)
+                    }).ok_or(ReflectError::MissingRequiredDecoration("ArrayStride"))?;
+                Ok(Type {
+                    id,
+                    name,
+                    size_hint: TypeSizeHint::RuntimeArray(RuntimeArrayHole { stride }),
                 })
             }
+            op::Code::TYPE_STRUCT => {
+                stream.advance(1)?;
+                let member_types = Id::parse_eos(&mut stream)?;
+                let mut min = u32::MAX;
+                let (desc, member, offset) = self.decorations(id)
+                    .filter_map(|dec| {
+                        if let Some(member) = dec.member &&
+                            let op::Decoration::Offset { byte_offset } = dec.decoration &&
+                            let Some(&ty) = member_types.get(member as usize) &&
+                            let Ok(desc) = self.type_description(ty)
+                        {
+                            Some((desc, member, byte_offset))
+                        } else { None }
+                    }).max_by_key(|(_, _, offset)| {
+                        min = min.min(*offset);
+                        *offset
+                    }).ok_or(ReflectError::MissingRequiredDecoration("Offset"))?;
+                let offset = (offset - min) as usize;
+                let size_hint = match desc.size_hint {
+                    TypeSizeHint::Static(size) => TypeSizeHint::Static(offset + size),
+                    TypeSizeHint::RuntimeArray(hole) => TypeSizeHint::Struct(StructHole {
+                        last_offset: offset,
+                        hole,
+                    }),
+                    TypeSizeHint::Matrix(hole) => {
+                        let mut stride = None;
+                        let mut is_row_major = false;
+                        for dec in self.decorations(id) {
+                            if let Some(dec_member) = dec.member &&
+                                dec_member == member
+                            {
+                                if let op::Decoration::MatrixStride { matrix_stride } = dec.decoration {
+                                    stride = Some(matrix_stride)
+                                } else if let op::Decoration::RowMajor = dec.decoration {
+                                    is_row_major = true
+                                }
+                            }
+                        }
+                        TypeSizeHint::Static(offset + hole
+                            .resolve(
+                                stride.ok_or(
+                                    ReflectError::MissingRequiredDecoration("MatrixStride")
+                                )? as usize,
+                                is_row_major
+                            ))
+                    },
+                    TypeSizeHint::UnknownArrayStride(_) => return Err(
+                        ReflectError::MissingRequiredDecoration("ArrayStride")
+                    ),
+                    TypeSizeHint::Struct(_) => return Err(
+                        ReflectError::InvalidRuntimeArray
+                    ),
+                };
+                Ok(Type {
+                    id,
+                    name,
+                    size_hint,
+                })
+            },
+            op::Code::TYPE_POINTER => {
+                stream.advance(2)?;
+                self.type_description(Id::parse_one(&mut stream)?)
+            },
+            _ => Ok(Type {
+                id,
+                name,
+                size_hint: TypeSizeHint::Static(0),
+            })
         }
+    }
 }
