@@ -1,23 +1,65 @@
+//! Fast, safe and atomic arena allocator implementing [`LocalAlloc`].
+
 mod guard;
 
-pub use core::{
+use core::{
     sync::atomic::{self, AtomicUsize, AtomicBool},
     ptr::NonNull,
     marker::PhantomData,
+    error,
+    fmt::{self, Display},
 };
 
-pub use nox_mem::{
+use crate::{
     conditional::{Conditional, True, False},
     alloc::{
         Layout, alloc, dealloc,
-        StdAlloc, LocalAlloc,
+        LocalAlloc,
     },
     align_up,
 };
-use nox_error::{Result, Context};
-pub use nox_error::{Error};
 
 pub use guard::ArenaGuard;
+
+/// The allocation error used by [`Arena`].
+#[derive(Debug)]
+pub enum Error {
+    /// Indicates that [`GlobalAlloc`][1] failed.
+    ///
+    /// [1]: alloc
+    GlobalAllocFailed,
+    /// Indicates that an allocation exceeded [`max_align`].
+    MaximumAlignmentExceeded {
+        /// The requested alignment.
+        requested: usize,
+    },
+    /// Indicates that the arena is full.
+    ArenaFull {
+        /// The capacity of the arena.
+        capacity: usize,
+    },
+    /// Indicates invalid usage of the arena while a guard is active.
+    GuardActive,
+}
+
+impl Display for Error {
+
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::GlobalAllocFailed => write!(f, "global alloc failed"),
+            Self::MaximumAlignmentExceeded { requested } =>
+                write!(f, "maximum supported alignment for arenas {} exceeded with {requested}",
+                    max_align()
+                ),
+            Self::ArenaFull { capacity } => write!(f, "arena is full with capacity {capacity}"),
+            Self::GuardActive => write!(f, "a guard is active"),
+        }
+    }
+}
+
+impl error::Error for Error {}
+
+type Result<T> = core::result::Result<T, Error>;
 
 /// Gets the alignment used when allocating an arena.
 ///
@@ -29,6 +71,29 @@ pub const fn max_align() -> usize {
 /// Fast, safe and atomic arena allocator implementing [`LocalAlloc`].
 ///
 /// Is [`Send`] and [`Sync`].
+///
+/// # Examples
+/// ``` rust
+/// use nox_mem::alloc::LocalAlloc;
+/// use nox_mem::arena::Arena;
+/// use nox_mem::vec::FixedVec;
+///
+/// let arena = Arena::new(64).unwrap();
+/// {
+///     let guard = arena.guard();
+///     let mut vec = FixedVec::with_capacity(5, &guard).unwrap();
+///     vec.extend([0, 1, 2, 3, 4]);
+///     assert_eq!(arena.used(), 5 * size_of::<i32>());
+///     // Guard already active
+///     assert!(arena.try_guard().is_none());
+///     unsafe {
+///         // Guard active
+///         assert!(arena.alloc_raw(Layout::new::<i32>()).is_err())
+///     }
+/// }
+/// // Guard dropped
+/// assert_eq!(arena.used(), 0);
+/// ```
 pub struct Arena<F: Conditional = False> {
     data: NonNull<u8>,
     size: usize,
@@ -39,15 +104,16 @@ pub struct Arena<F: Conditional = False> {
 
 impl Arena {
 
+    /// Creates a new arena with `size`.
     pub fn new(size: usize) -> Result<Self> {
         let layout = Layout
             ::from_size_align(size, max_align())
-            .context("layout error")?;
+            .unwrap();
         let ptr = unsafe { alloc(layout) };
         Ok(Self {
             data: NonNull
                 ::new(ptr)
-                .ok_or_else(|| Error::just_context("global alloc failed"))?,
+                .ok_or(Error::GlobalAllocFailed)?,
             size,
             pos: AtomicUsize::new(0),
             active_guard: AtomicBool::new(false),
@@ -58,15 +124,18 @@ impl Arena {
 
 impl Arena<True> {
 
+    /// Creates a new arena with a fallback to [`GlobalAlloc`][1].
+    ///
+    /// [1]: std::alloc::alloc
     pub fn with_fallback(size: usize) -> Result<Self> {
         let layout = Layout
             ::from_size_align(size, max_align())
-            .context("layout error")?;
+            .unwrap();
         let ptr = unsafe { alloc(layout) };
         Ok(Self {
             data: NonNull
                 ::new(ptr)
-                .ok_or_else(|| Error::just_context("global alloc failed"))?,
+                .ok_or(Error::GlobalAllocFailed)?,
             size,
             pos: AtomicUsize::new(0),
             active_guard: AtomicBool::new(false),
@@ -77,16 +146,19 @@ impl Arena<True> {
 
 impl<F: Conditional> Arena<F> { 
 
+    /// Returns the total size of the arena.
     #[inline]
     pub fn size(&self) -> usize {
         self.size
     }
 
+    /// Returns how many bytes have been already used.
     #[inline]
     pub fn used(&self) -> usize {
         self.pos.load(atomic::Ordering::Relaxed)
     }
 
+    /// Returns how much space is remaining.
     #[inline]
     pub fn remaining(&self) -> usize {
         self.size - self.pos.load(atomic::Ordering::Relaxed)
@@ -109,6 +181,7 @@ impl<F: Conditional> Arena<F> {
         self.pos.store(0, atomic::Ordering::Release);
     }
 
+    /// Consumes self, and returns the inner raw pointer and size of the arena.
     #[inline]
     pub fn into_raw_parts(self) -> (NonNull<u8>, usize) {
         let s = core::mem::ManuallyDrop::new(self);
@@ -120,7 +193,7 @@ impl<F: Conditional> Arena<F> {
     ///
     /// Once a guard is active, all allocations made directly from this arena will return an error.
     ///
-    /// Only one guard can be active at a time and this will panic if that's true.
+    /// Only one guard can be active at a time and this will panic if a guard is already active.
     ///
     /// [1]: ArenaGuard
     #[inline]
@@ -128,12 +201,13 @@ impl<F: Conditional> Arena<F> {
         self.try_guard().expect("guard already active")
     }
 
-    /// Creates an [`arena guard`][1], which resets the position to the current position when it's
-    /// dropped.
+    /// Tries to creates an [`arena guard`][1], which resets the position to the current position
+    /// when it's dropped.
     ///
     /// Once a guard is active, all allocations made directly from this arena will return an error.
     ///
-    /// Only one guard can be active at a time and this will return [`None`] if that's true.
+    /// Only one guard can be active at a time and this will return [`None`] if a guard is already
+    /// active.
     ///
     /// [1]: ArenaGuard
     #[inline]
@@ -174,27 +248,17 @@ impl<F: Conditional> Arena<F> {
 
 impl Arena { 
 
-    /// Allocates memory from the arena without fallback.
-    ///
-    /// # Safety
-    /// The pointer becomes invalid immediately after the arena is dropped.
     unsafe fn alloc_raw_internal(
         &self,
         layout: Layout,
     ) -> Result<NonNull<u8>>
     {
         if layout.align() > max_align() {
-            Err(Error::just_context(format!(
-                "maximum supported alignment for arenas on this platform is {}, requested alignment was {}",
-                max_align(), layout.align(),
-            )))
+            Err(Error::MaximumAlignmentExceeded { requested: layout.align() })
         } else {
             unsafe {
                 self.alloc_unhecked(layout)
-                    .ok_or_else(|| Error::just_context(format!(
-                        "arena was full with maximum capacity of {}",
-                        self.size
-                    )))
+                    .ok_or(Error::ArenaFull { capacity: self.size })
             }
         }
     } 
@@ -202,11 +266,6 @@ impl Arena {
 
 impl Arena<True> {
 
-    /// Allocates memory from the arena with a fallback to [`GlobalAlloc`].
-    ///
-    /// # Safety
-    /// If the pointer didn't come from the fallback, it becomes immediately invalid after the
-    /// arena is dropped. You should not use pointers after the arena is freed.
     unsafe fn alloc_raw_internal(
         &self,
         layout: Layout,
@@ -214,16 +273,16 @@ impl Arena<True> {
     {
         if layout.align() > max_align() {
             unsafe {
-                StdAlloc.alloc_raw(layout)
-                    .context("arena fallback allocation failed")
+                NonNull::new(alloc(layout))
+                    .ok_or(Error::GlobalAllocFailed)
             }
         } else {
             unsafe {
                 if let Some(ptr) = self.alloc_unhecked(layout) {
                     Ok(ptr)
                 } else {
-                    StdAlloc.alloc_raw(layout)
-                        .context("arena fallback allocation failed")
+                    NonNull::new(alloc(layout))
+                        .ok_or(Error::GlobalAllocFailed)
                 }
             }
         }
@@ -234,7 +293,7 @@ impl Arena<True> {
         let data_addr = self.data.as_ptr() as usize;
         if ptr_addr < data_addr || ptr_addr > data_addr + self.size {
             unsafe {
-                StdAlloc.free_raw(ptr, layout);
+                dealloc(ptr.as_ptr(), layout);
             }
         }
     }
@@ -247,7 +306,7 @@ unsafe impl LocalAlloc for Arena {
     #[inline]
     unsafe fn alloc_raw(&self, layout: Layout) -> core::result::Result<NonNull<u8>, Self::Error> {
         if self.active_guard.load(atomic::Ordering::Acquire) {
-            return Err(Error::just_context("a guard is active"))
+            return Err(Error::GuardActive)
         }
         unsafe {
             self.alloc_raw_internal(layout)
@@ -265,7 +324,7 @@ unsafe impl LocalAlloc for Arena<True> {
     #[inline]
     unsafe fn alloc_raw(&self, layout: Layout) -> std::result::Result<NonNull<u8>, Self::Error> {
         if self.active_guard.load(atomic::Ordering::Acquire) {
-            return Err(Error::just_context("a guard is active"))
+            return Err(Error::GuardActive)
         }
         unsafe {
             self.alloc_raw_internal(layout)

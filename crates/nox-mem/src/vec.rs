@@ -1,3 +1,16 @@
+//! New allocator-aware vector types.
+//!
+//! # New types
+//! - [`AllocVecBase`] and its derivatives: A new vector type, which uses [`LocalAlloc`][1] for its
+//!   allocations.
+//! - [`NonNullVec`] and [`NonNullVec32`]: Two vector types, which are just wrappers around a
+//!   pointer.
+//! - [`Vec32`]: A new vector type, which stores its capacity and length as [`u32`]. Requires the
+//!   "std" feature.
+//! - [`ArrayVec`]: A wrapper around an array, interpreted as a vector.
+//!
+//! [1]: crate::alloc::LocalAlloc
+
 mod pointer;
 mod alloc_vec;
 mod array_vec;
@@ -8,11 +21,11 @@ pub use alloc_vec::{
     AllocVecBase,
     DynVec, DynVec32,
     FixedVec, FixedVec32,
-    DynPolicy, FixedPolicy,
-    DynPolicy32, FixedPolicy32,
 };
-pub use non_null::{NonNullVecBase, NonNullVec, NonNullVec32};
+pub use non_null::{NonNullVec, NonNullVec32};
 pub use array_vec::ArrayVec;
+
+pub(crate) use alloc_vec::FixedPolicy32;
 
 #[cfg(feature = "std")]
 mod std_features {
@@ -36,7 +49,7 @@ mod std_features {
         };
     }
 
-    pub use super::alloc_vec::{StdVecBase, StdVec, Vec32};
+    pub use super::alloc_vec::Vec32;
 }
 
 #[cfg(feature = "std")]

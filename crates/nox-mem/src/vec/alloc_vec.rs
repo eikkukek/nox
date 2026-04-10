@@ -10,16 +10,15 @@ use core::{
 };
 
 use crate::{
-    collections::{TryReserveError, ReservePolicy},
-    num::{Integer, FromUsize, IntoUsize},
+    reserve::*,
+    int::{FromUsize, IntoUsize},
     alloc::{LocalAlloc, LocalAllocExt, LocalAllocWrap},
     conditional::{Conditional, False},
-    impl_traits,
 };
 
 use super::{
     Pointer,
-    NonNullVecBase,
+    non_null::NonNullVecBase,
 };
 
 pub struct DynPolicy;
@@ -32,7 +31,7 @@ unsafe impl ReservePolicy for DynPolicy {
     }
 
     #[inline]
-    fn grow(current: usize, required: usize) -> Result<usize, TryReserveError<()>> {
+    fn grow(current: usize, required: usize) -> Result<usize, ReserveError<()>> {
         let power_of_2 = required.next_power_of_two().max(2);
         if power_of_2 < current { Ok(current) }
         else { Ok(power_of_2) }
@@ -56,11 +55,11 @@ unsafe impl ReservePolicy for FixedPolicy {
     }
 
     #[inline]
-    fn grow(current: usize, requested: usize) -> Result<usize, TryReserveError<()>> {
+    fn grow(current: usize, requested: usize) -> Result<usize, ReserveError<()>> {
         if requested <= current {
             Ok(current)
         } else {
-            Err(TryReserveError::max_capacity_exceeded(current, requested, ()))
+            Err(ReserveError::max_capacity_exceeded(current, requested, ()))
         }
     }
 
@@ -82,10 +81,10 @@ unsafe impl ReservePolicy<u32> for DynPolicy32 {
     }
 
     #[inline]
-    fn grow(current: u32, required: usize) -> core::result::Result<u32, TryReserveError<()>> {
+    fn grow(current: u32, required: usize) -> core::result::Result<u32, ReserveError<()>> {
         let power_of_2 = required.next_power_of_two().max(2);
         if power_of_2 > u32::MAX as usize {
-            Err(TryReserveError::max_capacity_exceeded(u32::MAX as usize, power_of_2, ()))
+            Err(ReserveError::max_capacity_exceeded(u32::MAX as usize, power_of_2, ()))
         } else if power_of_2 <= current as usize {
             Ok(current)
         } else { Ok(power_of_2.max(2) as u32) }
@@ -110,11 +109,11 @@ unsafe impl ReservePolicy<u32> for FixedPolicy32 {
     }
 
     #[inline]
-    fn grow(current: u32, requested: usize) -> Result<u32, TryReserveError<()>> {
+    fn grow(current: u32, requested: usize) -> Result<u32, ReserveError<()>> {
         if requested <= current as usize {
             Ok(current)
         } else {
-            Err(TryReserveError::max_capacity_exceeded(current, requested, ()))
+            Err(ReserveError::max_capacity_exceeded(current, requested, ()))
         }
     }
 
@@ -140,13 +139,48 @@ pub struct AllocVec<T, Alloc, ReservePol, IsStd, SizeType = usize>
     _markers: PhantomData<(ReservePol, IsStd)>,
 }
 
+/// A vector type, which uses a [`local, owned allocator`][1] for its allocations.
+///
+/// It is recommended to use one of its derivatives ([`DynVec`], [`FixedVec`], [`DynVec32`] and
+/// [`FixedVec32`]) when using it with a local allocator.
+///
+/// # Examples
+/// ``` rust
+/// use nox_mem::arena::Arena;
+/// use nox_mem::vec::FixedVec;
+///
+/// let arena = Arena::new(64).unwrap();
+/// let mut vec = FixedVec::with_capacity(5, &arena).unwrap();
+/// vec.push(1);
+/// vec.append(&[2, 3]);
+/// vec.extend(4..6);
+/// assert_eq!(vec, [1, 2, 3, 4, 5]);
+/// ```
+///
+/// [1]: LocalAlloc
 pub type AllocVecBase<T, SizeType, Alloc, ReservePol> =
     AllocVec<T, Alloc, ReservePol, False, SizeType>;
 
+/// A vector using [`LocalAlloc`], which can reallocate.
+///
+/// See [`AllocVecBase`] for full description and examples.
 pub type DynVec<'a, T, Alloc> = AllocVecBase<T, usize, LocalAllocWrap<Alloc, &'a Alloc>, DynPolicy>;
+/// A vector using [`LocalAlloc`], which can reallocate.
+///
+/// Stores its capacity and length as [`u32`].
+///
+/// See [`AllocVecBase`] for full description and examples.
 pub type DynVec32<'a, T, Alloc> = AllocVecBase<T, u32, LocalAllocWrap<Alloc, &'a Alloc>, DynPolicy32>;
 
+/// A vector using [`LocalAlloc`], which won't reallocate.
+///
+/// See [`AllocVecBase`] for full description and examples.
 pub type FixedVec<'a, T, Alloc> = AllocVecBase<T, usize, LocalAllocWrap<Alloc, &'a Alloc>, FixedPolicy>;
+/// A vector using [`LocalAlloc`], which won't reallocate.
+///
+/// Stores its capacity and length as [`u32`].
+///
+/// See [`AllocVecBase`] for full description and examples.
 pub type FixedVec32<'a, T, Alloc> = AllocVecBase<T, u32, LocalAllocWrap<Alloc, &'a Alloc>, FixedPolicy32>;
 
 impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wrap>, ReservePol, False, SizeType>
@@ -231,7 +265,7 @@ impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wra
             .into()
         };
         for i in 0..len.into_usize() {
-            unsafe { data.add(i).write(f(SizeType::from_usize_unchecked(i))) };
+            unsafe { data.add(i).write(f(SizeType::from_usize(i))) };
         }
         Ok(Self {
             data,
@@ -245,7 +279,7 @@ impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wra
     pub fn flattened<U>(
         slices: &[U],
         alloc: Wrap,
-    ) -> Result<Self, TryReserveError<()>>
+    ) -> Result<Self, ReserveError<()>>
         where
             U: AsRef<[T]>,
             T: Clone,
@@ -255,12 +289,12 @@ impl<T, Alloc, Wrap, ReservePol, SizeType> AllocVec<T, LocalAllocWrap<Alloc, Wra
             .map(|s| s.as_ref().len())
             .sum();
         let capacity = ReservePol::grow(
-            SizeType::from_usize_unchecked(capacity),
+            SizeType::from_usize(capacity),
             capacity,
         )?;
         let data: Pointer<T, SizeType> = unsafe { alloc
             .alloc_uninit(capacity.into_usize())
-            .map_err(|err| TryReserveError::alloc_error(err, ()))?
+            .map_err(|err| ReserveError::alloc_error(err, ()))?
             .into()
         };
         let mut res = Self {
@@ -372,7 +406,7 @@ impl<T, SizeType, Alloc> Iterator for IterAllocVec<T, SizeType, Alloc>
             let t = unsafe {
                 self.data.add(self.start.into_usize()).read()
             };
-            self.start = self.start.step_forward();
+            self.start += SizeType::ONE;
             Some(t)
         } else {
             None
@@ -393,7 +427,7 @@ impl<T, SizeType, Alloc> DoubleEndedIterator for IterAllocVec<T, SizeType, Alloc
 
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.start != self.end {
-            self.end = self.end.step_backward();
+            self.end -= SizeType::ONE;
             let t = unsafe {
                 self.data.add(self.end.into_usize()).read()
             };
@@ -552,7 +586,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     /// Use [`try_reserve_exact`][1] to allocate an exact capacity.
     ///
     /// [1]: Self::try_reserve_exact
-    pub fn try_reserve(&mut self, capacity: SizeType) -> Result<(), TryReserveError<()>> {
+    pub fn try_reserve(&mut self, capacity: SizeType) -> Result<(), ReserveError<()>> {
         let capacity = ReservePol::grow(
             self.capacity, capacity.into_usize()
         )?;
@@ -561,16 +595,16 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
 
     /// Tries to reserve space for the vector exactly up to `capacity`, returning an error if the
     /// vector has a fixed capacity or if an allocation fails.
-    pub fn try_reserve_exact(&mut self, capacity: SizeType) -> Result<(), TryReserveError<()>> {
+    pub fn try_reserve_exact(&mut self, capacity: SizeType) -> Result<(), ReserveError<()>> {
         if capacity <= self.capacity { return Ok(()) }
         if !ReservePol::can_grow() {
-            return Err(TryReserveError::max_capacity_exceeded(
+            return Err(ReserveError::max_capacity_exceeded(
                 self.capacity, capacity.into_usize(), (),
             ))
         }
         let tmp = unsafe {
             self.alloc.alloc_uninit(capacity.into_usize())
-        }.map_err(|err| TryReserveError::alloc_error(err, ()))?.into();
+        }.map_err(|err| ReserveError::alloc_error(err, ()))?.into();
         debug_assert!(self.len <= self.capacity);
         unsafe {
             self.data.move_elements(tmp, self.len);
@@ -682,7 +716,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     pub fn push(&mut self, value: T) {
         if self.len >= self.capacity {
             if self.capacity == SizeType::ZERO {
-                self.reserve(SizeType::from_usize_unchecked(2));
+                self.reserve(SizeType::from_usize(2));
             }
             else {
                 let capacity = ReservePol
@@ -694,7 +728,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
             }
         }
         unsafe { self.data.add(self.len.into_usize()).write(value) };
-        self.len = self.len.step_forward();
+        self.len += SizeType::ONE;
     }
 
     /// Inserts an element to the specified index.
@@ -718,7 +752,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
         }
         unsafe {
             self.data.insert_element(value, index, self.len);
-            self.len = self.len.step_forward();
+            self.len += SizeType::ONE;
         }
     }
 
@@ -745,10 +779,10 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
                 .unwrap()
                 .clone_elements(
                     self.data.add(self.len.into_usize()),
-                    FromUsize::from_usize_unchecked(slice.len()),
+                    FromUsize::from_usize(slice.len()),
                 );
         }
-        self.len = SizeType::from_usize_unchecked(len);
+        self.len = SizeType::from_usize(len);
     }
 
     /// Appends a slice to the end of the vector by [`copying`][1] the values.
@@ -774,56 +808,11 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
                 .unwrap()
                 .fast_clone_elements(
                     self.data.add(self.len.into_usize()),
-                    FromUsize::from_usize_unchecked(slice.len()),
+                    FromUsize::from_usize(slice.len()),
                 );
         }
-        self.len = SizeType::from_usize_unchecked(len);
-    }
-    
-    /// Extends the vector with an iterator.
-    ///
-    /// This may panic if [`reserve`][1] fails.
-    ///
-    /// [1]: Self::reserve
-    pub fn extend<I>(&mut self, iter: I)
-        where I: IntoIterator<Item = T>
-    {
-        let iter = iter.into_iter();
-        if let (_, Some(len)) = iter.size_hint() {
-            self.reserve_exact(ReservePol::grow_infallible(
-                self.capacity,
-                self.len.into_usize() + len
-            ));
-        }
-        for item in iter {
-            self.push(item);
-        }
-    }
-
-    /// Extends the vector with an iterator over [`Result`], returning an error if any item in the
-    /// iterator is [`Err`].
-    ///
-    /// This may panic if [`reserve`][1] fails.
-    ///
-    /// [1]: Self::reserve
-    pub fn try_extend<I, E>(
-        &mut self,
-        iter: I,
-    ) -> Result<(), E>
-        where I: IntoIterator<Item = Result<T, E>>
-    {
-        let iter = iter.into_iter();
-        if let (_, Some(len)) = iter.size_hint() {
-            self.reserve_exact(ReservePol::grow_infallible(
-                self.capacity,
-                self.len.into_usize() + len
-            ));
-        }
-        for item in iter {
-            self.push(item?);
-        }
-        Ok(())
-    }
+        self.len = SizeType::from_usize(len);
+    } 
 
     /// Returns a reference to the last element of the vector, or [`None`] if the vector is empty.
     #[inline]
@@ -866,7 +855,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
                 self.data.add(i + 1).read()
             )}
         }
-        self.len = self.len.step_backward();
+        self.len -= SizeType::ONE;
         removed
     }
     
@@ -885,7 +874,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
             )
         }
         let removed = unsafe { self.data.add(index.into_usize()).read() };
-        self.len = self.len.step_backward();
+        self.len -= SizeType::ONE;
         if index != self.len {
             unsafe { self.data.add(index.into_usize()).write(
                 self.data.add(self.len.into_usize()).read()
@@ -897,7 +886,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     /// Removes the last element of the vector and returns it, or [`None`] if the vector is empty.
     pub fn pop(&mut self) -> Option<T> {
         if self.len == SizeType::ZERO { return None }
-        self.len = self.len.step_backward();
+        self.len -= SizeType::ONE;
         let ptr = unsafe { self.data.add(self.len.into_usize()) };
         Some(unsafe { ptr.read() })
     } 
@@ -972,7 +961,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     {
         for i in (0..self.len.into_usize().saturating_sub(1)).rev() {
             if self[i] == self[i + 1] {
-                self.remove(SizeType::from_usize_unchecked(i + 1));
+                self.remove(SizeType::from_usize(i + 1));
             }
         }
     }
@@ -984,7 +973,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     {
         for i in (0..self.len.into_usize().saturating_sub(1)).rev() {
             if p(&self[i], &self[i + 1]) {
-                self.remove(SizeType::from_usize_unchecked(i + 1));
+                self.remove(SizeType::from_usize(i + 1));
             }
         }
     }
@@ -997,7 +986,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     {
         for i in (0..self.len.into_usize().saturating_sub(1)).rev() {
             if key(&self[i]) == key(&self[i + 1]) {
-                self.remove(SizeType::from_usize_unchecked(i + 1));
+                self.remove(SizeType::from_usize(i + 1));
             }
         }
     }
@@ -1015,7 +1004,7 @@ impl<T, Alloc, ReservePol, IsStd, SizeType> AllocVec<T, Alloc, ReservePol, IsStd
     }
 }
 
-impl_traits!{
+crate::macros::impl_traits!{
     for AllocVec<
         T: [Sized],
         Alloc: [LocalAlloc],
@@ -1143,7 +1132,7 @@ impl_traits!{
                 return Ok(())
             }
             <char as Display>::fmt(&'[', f)?;
-            for value in &self[0..self.len.into_usize().step_backward()] {
+            for value in &self[0..self.len.into_usize() - 1] {
                 value.fmt(f)?;
                 <str as Display>::fmt(", ", f)?;
             }
@@ -1151,6 +1140,29 @@ impl_traits!{
             <char as Display>::fmt(&']', f)
         }
     ,
+}
+
+impl<A, Alloc, ReservePol, IsStd, SizeType> Extend<A>
+    for AllocVec<A, Alloc, ReservePol, IsStd, SizeType>
+    where
+        Alloc: LocalAlloc,
+        ReservePol: ReservePolicy<SizeType>,
+        IsStd: Conditional,
+        SizeType: IntoUsize + FromUsize,
+{
+
+    fn extend<T: IntoIterator<Item = A>>(&mut self, iter: T) {
+        let iter = iter.into_iter();
+        if let (_, Some(len)) = iter.size_hint() {
+            self.reserve_exact(ReservePol::grow_infallible(
+                self.capacity,
+                self.len.into_usize() + len
+            ));
+        }
+        for item in iter {
+            self.push(item);
+        }
+    }
 }
 
 impl<T, A, Alloc, ReservePol, IsStd, SizeType> PartialEq<T> 
@@ -1226,23 +1238,20 @@ mod std_features {
 
     pub type StdVecBase<T, SizeType, ReservePol> = AllocVec<T, StdAlloc, ReservePol, True, SizeType>;
 
-    /// A vec that uses [`GlobalAlloc`].
-    pub type StdVec<T> = StdVecBase<T, usize, DynPolicy>;
-
-    /// A vec type with a tiny footprint on 64-bit systems, backed by [`GlobalAlloc`].
+    /// A vector that stores its capacity and length as [`u32`] instead of [`usize`] resulting in the
+    /// struct taking only 16 bytes on the stack on 64-bit systems.
     ///
-    /// Stores capacity and length as [`u32`] instead of [`usize`] resulting in the struct taking
-    /// only 16 bytes on the stack on 64-bit systems.
-    ///
-    ///
-    /// On 64-bit systems the size of [`Vec32<T>`] is equal to the size of [`Box<\[T\]>`];
+    /// On 64-bit systems the size of [`Vec32<T>`] is equal to the size of [`Box<[T]>`][2].
     ///
     /// This was mainly made for Vulkan usage, since Vulkan often uses u32 for counts.
     ///
     /// Maximum capacity is restricted to be equal to [`u32::MAX`].
+    ///
+    /// [1]: std::alloc::alloc
+    /// [2]: std::boxed::Box
     pub type Vec32<T> = StdVecBase<T, u32, DynPolicy32>;
 
-    impl_traits!{
+    crate::macros::impl_traits!{
         for StdVecBase<T, SizeType: [IntoUsize + FromUsize], ReservePol: [ReservePolicy<SizeType>]>
         Default =>
             #[inline]
@@ -1264,7 +1273,7 @@ mod std_features {
         From<&[T]> where T: Clone =>
             
             fn from(value: &[T]) -> Self {
-                let len =  SizeType::from_usize_unchecked(value.len());
+                let len =  SizeType::from_usize(value.len());
                 let mut vec = StdVecBase::with_capacity(len);
                 unsafe {
                     Pointer
@@ -1286,7 +1295,7 @@ mod std_features {
     {
         
         fn from(value: [T; N]) -> Self {
-            let mut vec = StdVecBase::with_capacity(SizeType::from_usize(N).unwrap());
+            let mut vec = StdVecBase::with_capacity(SizeType::from_usize(N));
             for v in value {
                 vec.push(v);
             }
@@ -1439,7 +1448,7 @@ mod std_features {
                 .expect("global alloc failed").into()
             };
             for i in 0..len.into_usize() {
-                unsafe { data.add(i).write(f(SizeType::from_usize_unchecked(i))) };
+                unsafe { data.add(i).write(f(SizeType::from_usize(i))) };
             }
             Self {
                 data,

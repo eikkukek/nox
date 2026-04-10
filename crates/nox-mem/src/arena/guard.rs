@@ -1,8 +1,6 @@
 use super::*;
 
-/// An arena guard returned by [`Arena::guard`] methods.
-///
-/// This also implements [`Arena`], but nested guards can only be created via [`Arena::guard_mut`].
+/// An arena guard returned by [`Arena`] guard methods.
 pub struct ArenaGuard<'a, F = False>
     where F: Conditional,
 {
@@ -22,6 +20,7 @@ impl<'a, F> ArenaGuard<'a, F>
         }
     }
 
+    /// Returns the total size of the parent arena.
     #[inline]
     pub fn size(&self) -> usize {
         self.arena.size()
@@ -33,6 +32,7 @@ impl<'a, F> ArenaGuard<'a, F>
         self.arena.used() - self.pos_rollback
     }
 
+    /// Returns how many bytes remaining in the parent arena.
     #[inline]
     pub fn remaining(&self) -> usize {
         self.arena.remaining()

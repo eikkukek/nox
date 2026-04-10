@@ -1,24 +1,23 @@
 //! A compact slot map implementation with support for custom allocators.
 //!
 //! Slot map is a data structure that associates values with *opaque, stable handles* (indices).
+//!
 //! Unlike `Vec`, removal doesn't shift elements, and re-insertion may reuse free slots.
 //!
-//! This module provides:
-//!
-//! [`DynSlotMap`]: a slot map using a local allocator
-//! [`FixedSlotMap`]: [`DynSlotMap`] with a fixed-capacity
-//! and if the `std` feature is enabled
-//! [`SlotMap`]: a slot map using [`StdAlloc`]
+//! # New Types
+//! - [`SlotMap`]: A slot map using [`GlobalAlloc`][1]. Requires the "std feature".
+//! - [`DynSlotMap`]: A slot map using a local allocator.
+//! - [`FixedSlotMap`]: [`DynSlotMap`] with a fixed-capacity.
 //!
 //! # Features
 //!
 //! - Constant-time insertion, removal and lookup
 //! - Stable handles
 //! - Custom allocators
-//! - No 'unsafe' in public API
+//!
+//! [1]: std::alloc::alloc
 //!
 //! # Examples
-//!
 //! ```rust
 //! use nox_mem::slot_map::SlotMap;
 //!
@@ -35,60 +34,88 @@ use core::{
     marker::PhantomData,
     mem::MaybeUninit,
     ops::{Index, IndexMut, Deref},
-    fmt::{self, Formatter},
+    fmt::{self, Debug, Display},
+    error::Error,
 };
-
-use nox_proc::{Error, Display};
 
 use crate::{
     conditional::{Conditional, False, True},
     alloc::{LocalAlloc, LocalAllocExt, LocalAllocWrap},
     vec::Pointer,
-    collections::{TryReserveError, ReservePolicy},
-    impl_traits,
-    num::{UInteger, NonZeroInteger},
+    reserve::*,
+    int::{UInteger, NonZeroInteger},
 };
 
-#[derive(Debug, Error)]
+/// An error indicating that a [`SlotIndex`] is invalid.
+#[derive(Debug)]
 pub enum IndexError<IndexType: UInteger = u32> {
-    #[display("stale slot map index {index}, slot version was {slot_version}")]
-    StaleIndex { index: SlotIndex<(), IndexType>, slot_version: IndexType, },
-    #[display("index {index} was out of bounds with capacity {capacity}")]
-    IndexOutOfBounds { index: SlotIndex<(), IndexType>, capacity: u32, },
+    /// Indicates that the index is stale.
+    StaleIndex {
+        /// The index that is stale.
+        index: SlotIndex<(), IndexType>,
+        /// The version of the slot.
+        slot_version: IndexType,
+    },
+    /// Indicates that the index is out of bounds.
+    IndexOutOfBounds {
+        /// The index that is out of bounds.
+        index: SlotIndex<(), IndexType>,
+        /// The capacity of the slot map.
+        capacity: u32,
+    },
 }
 
-use IndexError::{StaleIndex, IndexOutOfBounds};
+impl<IndexType: UInteger> Display for IndexError<IndexType> {
 
-pub struct DynPolicy;
-
-unsafe impl ReservePolicy<u32> for DynPolicy {
-
-    fn can_grow() -> bool {
-        true
-    }
-
-    fn grow(current: u32, required: usize) -> core::result::Result<u32, TryReserveError<()>> {
-        let power_of_2 = required.next_power_of_two().max(2);
-        if power_of_2 > u32::MAX as usize {
-            Err(TryReserveError::max_capacity_exceeded(u32::MAX as usize, power_of_2, ()))
-        } else if power_of_2 <= current as usize {
-            Ok(current)
-        } else { Ok(power_of_2.max(2) as u32) }
-    }
-
-    fn grow_infallible(current: u32, required: usize) -> u32 {
-        let power_of_2 = required.next_power_of_two().max(2);
-        if power_of_2 <= current as usize {
-            current
-        } else if power_of_2 > u32::MAX as usize {
-            panic!("maximum capacity {} reached", u32::MAX)
-        } else {
-            power_of_2.max(2) as u32
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StaleIndex { index, slot_version } =>
+                write!(f, "stale slot map index {index}, slot version is {slot_version}"),
+            Self::IndexOutOfBounds { index, capacity } =>
+                write!(f, "index {index} is out of bounds with capacity {capacity}")
         }
     }
 }
 
-pub type FixedPolicy = crate::vec::FixedPolicy32;
+impl<IndexType: UInteger> Error for IndexError<IndexType> {}
+
+use IndexError::{StaleIndex, IndexOutOfBounds};
+
+mod policy {
+
+    use super::*;
+
+    pub struct Dyn;
+
+    unsafe impl ReservePolicy<u32> for Dyn {
+
+        fn can_grow() -> bool {
+            true
+        }
+
+        fn grow(current: u32, required: usize) -> core::result::Result<u32, ReserveError<()>> {
+            let power_of_2 = required.next_power_of_two().max(2);
+            if power_of_2 > u32::MAX as usize {
+                Err(ReserveError::max_capacity_exceeded(u32::MAX as usize, power_of_2, ()))
+            } else if power_of_2 <= current as usize {
+                Ok(current)
+            } else { Ok(power_of_2.max(2) as u32) }
+        }
+
+        fn grow_infallible(current: u32, required: usize) -> u32 {
+            let power_of_2 = required.next_power_of_two().max(2);
+            if power_of_2 <= current as usize {
+                current
+            } else if power_of_2 > u32::MAX as usize {
+                panic!("maximum capacity {} reached", u32::MAX)
+            } else {
+                power_of_2.max(2) as u32
+            }
+        }
+    }
+
+    pub type Fixed = crate::vec::FixedPolicy32;
+}
 
 struct Slot<T, IndexType: UInteger> {
     value: MaybeUninit<T>,
@@ -126,15 +153,26 @@ impl<T, IndexType: UInteger> Slot<T, IndexType> {
     }
 }
 
+/// A slot index returned by a slot map.
+///
+/// Contains a version and an index.
 #[must_use]
-#[derive(Display)] #[display("(version {version}, index: {index})")]
 pub struct SlotIndex<T, IndexType = u32>
-    where
-        IndexType: UInteger,
+    where IndexType: UInteger,
 {
     version: IndexType::NonZero,
     index: u32,
     _marker: PhantomData<T>,
+}
+
+impl<T, IndexType> Display for SlotIndex<T, IndexType>
+    where IndexType: UInteger
+{
+
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(version: {}, index {})", self.version, self.index)
+    }
 }
 
 impl<T, IndexType> SlotIndex<T, IndexType>
@@ -167,14 +205,13 @@ impl<T, IndexType> SlotIndex<T, IndexType>
 unsafe impl<T, IndexType: UInteger> Send for SlotIndex<T, IndexType> {}
 unsafe impl<T, IndexType: UInteger> Sync for SlotIndex<T, IndexType> {}
 
-impl<T, IndexType: UInteger> fmt::Debug for SlotIndex<T, IndexType> {
+impl<T, IndexType: UInteger> Debug for SlotIndex<T, IndexType> {
 
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        "SlotIndex { version: ".fmt(f)?;
-        self.version.fmt(f)?;
-        ", index: ".fmt(f)?;
-        self.index.fmt(f)?;
-        "}".fmt(f)
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SlotIndex")
+            .field("version", &self.version)
+            .field("index", &self.index)
+            .finish()
     }
 }
 
@@ -221,19 +258,24 @@ impl<T, IndexType: UInteger> core::hash::Hash for SlotIndex<T, IndexType> {
     }
 }
 
-pub struct AllocSlotMap<T, Alloc, ReservePol, IsStd, IndexType = u32>
-    where
-        Alloc: LocalAlloc,
-        ReservePol: ReservePolicy<u32>,
-        IsStd: Conditional,
-        IndexType: UInteger,
-{
-    data: Pointer<Slot<T, IndexType>, u32>,
-    capacity: u32,
-    len: u32,
-    free_head: Option<u32>,
-    alloc: Alloc,
-    _marker: PhantomData<(IsStd, ReservePol)>,
+mod base {
+
+    use super::*;
+
+    pub struct Map<T, Alloc, ReservePol, IsStd, IndexType = u32>
+        where
+            Alloc: LocalAlloc,
+            ReservePol: ReservePolicy<u32>,
+            IsStd: Conditional,
+            IndexType: UInteger,
+    {
+        pub(super) data: Pointer<Slot<T, IndexType>, u32>,
+        pub(super) capacity: u32,
+        pub(super) len: u32,
+        pub(super) free_head: Option<u32>,
+        pub(super) alloc: Alloc,
+        pub(super) _marker: PhantomData<(IsStd, ReservePol)>,
+    }
 }
 
 /// A dynamic slot map storing values of type `T`, backed by allocator 'Alloc'.
@@ -241,7 +283,7 @@ pub struct AllocSlotMap<T, Alloc, ReservePol, IsStd, IndexType = u32>
 /// Provides stable, opaque handles for accessing values. Removal leaves versioned
 /// empty slots and insertions reuse free slots.
 ///
-/// See also [`SlotMap`] for a version using [`GlobalAlloc`].
+/// See also [`SlotMap`] for a version using [`GlobalAlloc`][1].
 ///
 /// # Type parameters
 ///
@@ -260,14 +302,15 @@ pub struct AllocSlotMap<T, Alloc, ReservePol, IsStd, IndexType = u32>
 /// The allocator must return valid pointers that are aligned to the requested alignment
 /// and that are not freed or overwritten as long as the slot map uses them.
 ///
-/// # Example
+/// [1]: std::alloc::alloc
 ///
+/// # Examples
 /// ```rust
 /// let allocator = MyLocalAlloc::default();
 /// let mut map = DynSlotMap::new(&allocator);
 /// let key = map.insert("value").unwrap();
 /// map.remove(key);
-pub type DynSlotMap<T, Alloc, Wrap> = AllocSlotMap<T, LocalAllocWrap<Alloc, Wrap>, DynPolicy, False>;
+pub type DynSlotMap<T, Alloc, Wrap> = base::Map<T, LocalAllocWrap<Alloc, Wrap>, policy::Dyn, False>;
 
 /// A fixed-capacity slot map storing values of type `T`, backed by allocator `Alloc`.
 ///
@@ -302,10 +345,10 @@ pub type DynSlotMap<T, Alloc, Wrap> = AllocSlotMap<T, LocalAllocWrap<Alloc, Wrap
 /// let key = map.insert("value").unwrap();
 /// map.remove(key);
 /// ```
-pub type FixedSlotMap<T, Alloc, Wrap> = AllocSlotMap<T, LocalAllocWrap<Alloc, Wrap>, FixedPolicy, False>;
+pub type FixedSlotMap<T, Alloc, Wrap> = base::Map<T, LocalAllocWrap<Alloc, Wrap>, policy::Fixed, False>;
 
 impl<T, Alloc, Wrap, ReservePol, IndexType>
-    AllocSlotMap<T, LocalAllocWrap<Alloc, Wrap>, ReservePol, False, IndexType>
+    base::Map<T, LocalAllocWrap<Alloc, Wrap>, ReservePol, False, IndexType>
     where
         Alloc: LocalAlloc,
         Wrap: Deref<Target = Alloc>,
@@ -313,6 +356,9 @@ impl<T, Alloc, Wrap, ReservePol, IndexType>
         ReservePol: ReservePolicy<u32>,
 {
 
+    /// Creates an empty map with an [`allocator`][1].
+    ///
+    /// [1]: LocalAlloc
     pub fn new(alloc: Wrap) -> Self {
         Self {
             data: Pointer::dangling(),
@@ -324,14 +370,19 @@ impl<T, Alloc, Wrap, ReservePol, IndexType>
         }
     }
 
-    pub fn with_capacity(capacity: u32, alloc: Wrap) -> Result<Self, TryReserveError<()>> {
+    /// Creates a map with `capacity` and an [`allocator`][1].
+    ///
+    /// Returns an error if the allocation fails.
+    ///
+    /// [1]: LocalAlloc
+    pub fn with_capacity(capacity: u32, alloc: Wrap) -> Result<Self, ReserveError<()>> {
         if capacity == 0 {
             return Ok(Self::new(alloc))
         }
         let capacity = ReservePol::grow(capacity, capacity as usize)?;
         let data: Pointer<Slot<T, IndexType>, u32> = unsafe { alloc
             .alloc_uninit(capacity as usize)
-            .map_err(|err| TryReserveError::alloc_error(err, ()))?
+            .map_err(|err| ReserveError::alloc_error(err, ()))?
             .into()
         };
         for i in 0..capacity  - 1 {
@@ -350,13 +401,22 @@ impl<T, Alloc, Wrap, ReservePol, IndexType>
         })
     }
 
+    /// Inserts a value to the map.
+    ///
+    /// May panic if an allocation fails.
     #[inline]
-    pub fn insert(&mut self, value: T) -> Result<SlotIndex<T, IndexType>, TryReserveError<T>> {
+    pub fn insert(&mut self, value: T) -> SlotIndex<T, IndexType> {
+        self.insert_internal(value).unwrap()
+    }
+
+    /// Tries to insert a value to the map, returning an error if an allocation fails.
+    #[inline]
+    pub fn try_insert(&mut self, value: T) -> Result<SlotIndex<T, IndexType>, ReserveError<T>> {
         self.insert_internal(value)
     }
 }
 
-impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, IsStd, IndexType>
+impl<T, Alloc, ReservePol, IsStd, IndexType> base::Map<T, Alloc, ReservePol, IsStd, IndexType>
     where
         Alloc: LocalAlloc,
         ReservePol: ReservePolicy<u32>,
@@ -364,21 +424,33 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         IndexType: UInteger,
 {
 
+    /// Returns the number of elements contained in the map.
     #[inline]
     pub fn len(&self) -> u32 {
         self.len
     }
 
+    /// Returns whether the map is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    /// Returns the map's internal capacity.
     #[inline]
     pub fn capacity(&self) -> u32 {
         self.capacity
     }
 
+    /// Reserves more slots.
+    ///
+    /// Does nothing if `capacity` is less than or equal to the current capacity.
+    ///
+    /// This may reserve more slots than specified, see [`reserve_exact`][1] for reserving exact
+    /// amount of slots.
+    ///
+    /// [1]: Self::reserve_exact
+    #[inline]
     pub fn reserve(&mut self, capacity: u32) {
         let capacity = ReservePol
             ::grow(self.capacity, capacity as usize)
@@ -386,25 +458,35 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         self.reserve_internal(capacity).unwrap();
     }
 
+    /// Reserves an exact amount of slots.
+    ///
+    /// Does nothing if `capacity` is less than or equal to the current capacity.
+    #[inline]
     pub fn reserve_exact(&mut self, capacity: u32) {
         self.reserve_internal(capacity).unwrap();
     }
 
-    pub fn try_reserve(&mut self, capacity: u32) -> Result<(), TryReserveError<()>> {
+    /// Tries to reserve more slots, returning an error if maximum capacity is reached, or if an
+    /// allocation fails.
+    #[inline]
+    pub fn try_reserve(&mut self, capacity: u32) -> Result<(), ReserveError<()>> {
         let capacity = ReservePol
             ::grow(self.capacity, capacity as usize)?;
         self.reserve_internal(capacity)
     }
 
-    pub fn try_reserve_exact(&mut self, capacity: u32) -> Result<(), TryReserveError<()>> {
+    /// Tries to reserve an exact amount of slots, returning an error if maximum capacity is reached,
+    /// or if an allocation fails.
+    #[inline]
+    pub fn try_reserve_exact(&mut self, capacity: u32) -> Result<(), ReserveError<()>> {
         self.reserve_internal(capacity)
     }
 
-    fn reserve_internal(&mut self, capacity: u32) -> Result<(), TryReserveError<()>> {
-        if capacity == self.capacity { return Ok(()) }
+    fn reserve_internal(&mut self, capacity: u32) -> Result<(), ReserveError<()>> {
+        if capacity <= self.capacity { return Ok(()) }
         let tmp: Pointer<Slot<T, IndexType>, u32> = unsafe { self.alloc
             .alloc_uninit(capacity as usize)
-            .map_err(|err| TryReserveError::alloc_error(err, ()))?
+            .map_err(|err| ReserveError::alloc_error(err, ()))?
             .into()
         };
         unsafe {
@@ -431,12 +513,12 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         Ok(())
     }
 
-    fn insert_internal(&mut self, value: T) -> Result<SlotIndex<T, IndexType>, TryReserveError<T>>
+    fn insert_internal(&mut self, value: T) -> Result<SlotIndex<T, IndexType>, ReserveError<T>>
     {
         if self.free_head.is_none() {
             let capacity = self.capacity as usize * 2;
             if capacity > u32::MAX as usize {
-                return Err(TryReserveError::max_capacity_exceeded(u32::MAX, capacity, value))
+                return Err(ReserveError::max_capacity_exceeded(u32::MAX, capacity, value))
             }
             if let Err(err) = self.try_reserve(capacity as u32) {
                 return Err(err.with_value(value))
@@ -455,6 +537,8 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         })
     }
 
+    /// Removes a value from the slot map, returning an error if the index is stale or otherwise
+    /// invalid.
     pub fn remove(&mut self, index: SlotIndex<T, IndexType>) -> Result<T, IndexError<IndexType>>
     {
         if index.index >= self.capacity {
@@ -488,6 +572,7 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         Ok(value)
     }
 
+    /// Returns whether the map contains `index`.
     pub fn contains(&self, index: SlotIndex<T, IndexType>) -> bool {
         if index.index >= self.capacity {
             return false
@@ -497,6 +582,8 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         slot.version == index_version
     }
 
+    /// Gets a reference to a value at `index`, returning an error if the index is stale or othewise
+    /// invalid.
     pub fn get(&self, index: SlotIndex<T, IndexType>) -> Result<&T, IndexError<IndexType>> {
         if index.index >= self.capacity {
             return Err(IndexOutOfBounds {
@@ -518,6 +605,8 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         }
     }
 
+    /// Gets a mutable reference to a value at `index`, returning an error if the index is stale or
+    /// otherwise invalid.
     pub fn get_mut(&mut self, index: SlotIndex<T, IndexType>) -> Result<&mut T, IndexError<IndexType>> {
         if index.index >= self.capacity {
             return Err(IndexOutOfBounds {
@@ -566,6 +655,7 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         }
     }
 
+    /// Clears all slots in the map.
     pub fn clear(&mut self) {
         for i in 0..self.capacity() {
             unsafe {
@@ -582,6 +672,7 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         self.len = 0;
     }
 
+    /// Returns an iterator over all indices and values.
     #[inline]
     pub fn iter(&self) -> Iter<'_, T, IndexType> {
         unsafe {
@@ -589,13 +680,15 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         }
     }
 
+    /// Returns an iterator over all indices.
     #[inline]
-    pub fn keys(&self) -> IterKeys<'_, T, IndexType> {
+    pub fn indices(&self) -> IterIndices<'_, T, IndexType> {
         unsafe {
-            IterKeys::new(self.data, self.data.add(self.capacity() as usize))
+            IterIndices::new(self.data, self.data.add(self.capacity() as usize))
         }
     }
 
+    /// Returns an iterator over all values.
     #[inline]
     pub fn values(&self) -> IterValues<'_, T, IndexType> {
         unsafe {
@@ -603,6 +696,8 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         }
     }
 
+    /// Returns an iterator over all indices and values, with the values returned as mutable
+    /// references.
     #[inline]
     pub fn iter_mut(&mut self) -> IterMut<'_, T, IndexType> {
         unsafe {
@@ -610,6 +705,7 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> AllocSlotMap<T, Alloc, ReservePol, 
         }
     }
 
+    /// Returns an iterator over all values as mutable references.
     #[inline]
     pub fn values_mut(&self) -> IterValuesMut<'_, T, IndexType> {
         unsafe {
@@ -622,8 +718,8 @@ mod iter {
 
     use super::*;
 
-    pub struct KeyValue;
-    pub struct Keys;
+    pub struct IndexValue;
+    pub struct Indices;
     pub struct Values;
 
     pub struct Base<'a, T, IndexType, IsMut, Type>
@@ -668,11 +764,16 @@ mod iter {
     }
 }
 
-pub type Iter<'a, T, IndexType> = iter::Base<'a, T, IndexType, False, iter::KeyValue>;
-pub type IterKeys<'a, T, IndexType> = iter::Base<'a, T, IndexType, False, iter::Keys>;
+/// An iterator over indices and values.
+pub type Iter<'a, T, IndexType> = iter::Base<'a, T, IndexType, False, iter::IndexValue>;
+/// An iterator over indices.
+pub type IterIndices<'a, T, IndexType> = iter::Base<'a, T, IndexType, False, iter::Indices>;
+/// An iterator over values.
 pub type IterValues<'a, T, IndexType> = iter::Base<'a, T, IndexType, False, iter::Values>;
 
-pub type IterMut<'a, T, IndexType> = iter::Base<'a, T, IndexType, True, iter::KeyValue>;
+/// An iterator over indices and values, where the values are mutable references.
+pub type IterMut<'a, T, IndexType> = iter::Base<'a, T, IndexType, True, iter::IndexValue>;
+/// An iterator over values as mutable references.
 pub type IterValuesMut<'a, T, IndexType> = iter::Base<'a, T, IndexType, True, iter::Values>;
 
 impl<'a, T, IndexType> Iterator for Iter<'a, T, IndexType>
@@ -714,7 +815,7 @@ impl<'a, T, IndexType> Iterator for Iter<'a, T, IndexType>
     }
 }
 
-impl<'a, T, IndexType> Iterator for IterKeys<'a, T, IndexType>
+impl<'a, T, IndexType> Iterator for IterIndices<'a, T, IndexType>
     where IndexType: UInteger
 {
 
@@ -857,6 +958,9 @@ impl<'a, T, IndexType> Iterator for IterValuesMut<'a, T, IndexType>
     }
 }
 
+/// An iterator, which owns the slot map.
+///
+/// Acquired by calling [`IntoIterator`].
 pub struct IterMove<T, Alloc, ReservePol, IsStd, IndexType>
     where
         Alloc: LocalAlloc,
@@ -864,7 +968,7 @@ pub struct IterMove<T, Alloc, ReservePol, IsStd, IndexType>
         IsStd: Conditional,
         IndexType: UInteger,
 {
-    slot_map: AllocSlotMap<T, Alloc, ReservePol, IsStd, IndexType>,
+    slot_map: base::Map<T, Alloc, ReservePol, IsStd, IndexType>,
     off: u32,
 }
 
@@ -890,8 +994,10 @@ impl<T, Alloc, ReservePol, IsStd, IndexType> Iterator for IterMove<T, Alloc, Res
     }
 }
 
-impl_traits!(
-    for AllocSlotMap<T, Alloc: [LocalAlloc], ReservePol: [ReservePolicy<u32>], IsStd: [Conditional], IndexType: [UInteger]>
+use base::Map;
+
+crate::macros::impl_traits!(
+    for Map<T, Alloc: [LocalAlloc], ReservePol: [ReservePolicy<u32>], IsStd: [Conditional], IndexType: [UInteger]>
     Index<SlotIndex<T, IndexType>> =>
 
         type Output = T;
@@ -985,14 +1091,14 @@ unsafe impl<
     Alloc: LocalAlloc + Send,
     ReservePol: ReservePolicy<u32>,
     IsStd: Conditional,
-> Send for AllocSlotMap<T, Alloc, ReservePol, IsStd> {}
+> Send for base::Map<T, Alloc, ReservePol, IsStd> {}
 
 unsafe impl<
     T: Sync,
     Alloc: LocalAlloc + Sync,
     ReservePol: ReservePolicy<u32>,
     IsStd: Conditional,
-> Sync for AllocSlotMap<T, Alloc, ReservePol, IsStd> {}
+> Sync for base::Map<T, Alloc, ReservePol, IsStd> {}
 
 #[cfg(feature = "std")]
 mod std_features {
@@ -1001,11 +1107,13 @@ mod std_features {
 
     use crate::alloc::StdAlloc;
 
-    /// A dynamic slot map storing values of type `T`, backed by [`GlobalAlloc`].
+    /// A dynamic slot map storing values of type `T`, backed by [`GlobalAlloc`][1].
     ///
     /// # Type parameters
     ///
-    /// - `T`: value type
+    /// - `T`: the value type
+    ///
+    /// [1]: std::alloc::alloc
     ///
     /// # Example
     ///
@@ -1020,12 +1128,13 @@ mod std_features {
     /// assert_eq!(map.get(key1).ok(), None);
     /// assert_eq!(map.get(key2).ok(), Some(&"world"));
     /// ```
-    pub type SlotMap<T, IndexType = u32> = AllocSlotMap<T, StdAlloc, DynPolicy, True, IndexType>;
+    pub type SlotMap<T, IndexType = u32> = base::Map<T, StdAlloc, policy::Dyn, True, IndexType>;
 
     impl<T, IndexType> SlotMap<T, IndexType>
         where IndexType: UInteger
     {
 
+        /// Creates an empty map.
         pub fn new() -> Self {
             Self {
                 data: Pointer::dangling(),
@@ -1037,11 +1146,12 @@ mod std_features {
             }
         }
 
+        /// Creates a new map with `capacity`.
         pub fn with_capacity(capacity: u32) -> Self {
             if capacity == 0 {
                 return Self::new()
             }
-            let capacity = DynPolicy::grow(0, capacity as usize).unwrap();
+            let capacity = policy::Dyn::grow(0, capacity as usize).unwrap();
             let data: Pointer<Slot<T, IndexType>, u32> = unsafe { StdAlloc
                 .alloc_uninit(capacity as usize)
                 .expect("global alloc failed")
@@ -1062,7 +1172,8 @@ mod std_features {
                 _marker: PhantomData,
             }
         }
-
+        
+        /// Inserts a value to the map.
         pub fn insert(&mut self, value: T) -> SlotIndex<T, IndexType> {
             self.insert_internal(value).unwrap()
         }

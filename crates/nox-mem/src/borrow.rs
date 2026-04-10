@@ -1,8 +1,12 @@
-#[cfg(feature = "std")]
-mod cow;
+//! An extension of [`borrow`][1].
+//!
+//! # New types
+//! - [`CowMut`]: A new smart pointer similar to [`Cow`]. Requires the "std" feature.
+//!
+//! [1]: core::borrow
 
 #[cfg(feature = "std")]
-mod boxed;
+mod cow;
 
 pub use core::borrow::*;
 
@@ -13,7 +17,6 @@ mod std_features {
     pub use std::borrow::*;
 
     pub use super::cow::*;
-    pub use super::boxed::*;
 }
 
 #[cfg(feature = "std")]

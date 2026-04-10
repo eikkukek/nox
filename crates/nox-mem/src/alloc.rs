@@ -1,3 +1,15 @@
+//! An extension of [`alloc`][1].
+//!
+//! # New traits
+//! - [`LocalAlloc`]: A trait for local, owned allocators.
+//! - [`LocalAllocExt`]: An auto-trait for types implementing [`LocalAlloc`].
+//! # New types
+//! - [`StdAlloc`]: An implementation of [`LocalAlloc`] using [`GlobalAlloc`][2]. Requires the
+//!   "std" feature.
+//!
+//! [1]: core::alloc
+//! [2]: std::alloc::alloc
+
 pub use core::alloc::*;
 
 use core::{
@@ -8,10 +20,6 @@ use core::{
     ops::Deref,
 };
 
-use nox_proc::Error;
-
-use crate::dynamic::Dyn;
-
 /// A trait for local, owned allocators.
 ///
 /// # Safety
@@ -20,6 +28,7 @@ use crate::dynamic::Dyn;
 pub unsafe trait LocalAlloc
 {
 
+    /// The error returned when an allocation fails.
     type Error: Error + Send + Sync + 'static;
    
     /// Allocates a raw block of bytes of `size` aligned to `align`.
@@ -41,10 +50,10 @@ pub unsafe trait LocalAlloc
 /// Provides methods for allocating memory based on generics.
 pub trait LocalAllocExt: LocalAlloc {
 
-    /// Allocates an uninitialized block of [`T`].
+    /// Allocates an uninitialized block of `T`.
     /// # Safety
-    /// The pointer returned must be aligned to the alignment of [`T`] and point to a valid array
-    /// of type [`T`] up to `count`.
+    /// The pointer returned must be aligned to the alignment of `T` and point to a valid array
+    /// of type `T` up to `count`.
     #[inline]
     unsafe fn alloc_uninit<T>(&self, count: usize) -> Result<NonNull<T>, Self::Error> {
         let size = mem::size_of::<T>() * count;
@@ -52,24 +61,10 @@ pub trait LocalAllocExt: LocalAlloc {
         unsafe { self.alloc_raw(Layout::from_size_align_unchecked(size, align)).map(|ptr| ptr.cast::<T>()) }
     }
 
-    /// Allocates a potentially unsized type of [`T`] from a sized type [`U`] implementing the
-    /// [`Dyn<T>`] trait.
-    /// # Safety
-    /// The pointer returned must be aligned to the alignment of [`T`] and point to a valid [`T`].
-    unsafe fn alloc_dyn<T: ?Sized, U: Dyn<T, Target = U>>(&self, value: U) -> Result<NonNull<T>, Self::Error> {
-        unsafe {
-            let mut raw_parts = U::raw_parts(&value);
-            let ptr = self.alloc_uninit(1)?;
-            ptr.write(value);
-            raw_parts.data = ptr.as_ptr();
-            Ok(NonNull::new_unchecked(<U as Dyn<T>>::from_raw_parts(raw_parts).cast_mut()))
-        }
-    }
-
-    /// Frees a previously allocated block of [`T`] of `count`. This does not call [`drop`] on any
+    /// Frees a previously allocated block of `T` of `count`. This does not call [`drop`] on any
     /// values.
     /// # Safety
-    /// The pointer passed to this function must be the result of a previous allocation of [`T`]
+    /// The pointer passed to this function must be the result of a previous allocation of `T`
     /// and `count` from *same allocator*.
     unsafe fn free_uninit<T>(&self, ptr: NonNull<T>, count: usize) {
         let size = mem::size_of::<T>() * count;
@@ -77,13 +72,13 @@ pub trait LocalAllocExt: LocalAlloc {
         unsafe { self.free_raw(ptr.cast::<u8>(), Layout::from_size_align_unchecked(size, align)) }
     }
 
-    /// Frees a previously allocated value of [`T`].
+    /// Frees a previously allocated value of `T`.
     ///
     /// This also drops the value.
     ///
     /// # Safety
-    /// The pointer passed to this function must be the result of a previous allocation of [`T`]
-    /// from the *same allocator*. The value must point to a valid [`T`] and it must not be dropped
+    /// The pointer passed to this function must be the result of a previous allocation of `T`
+    /// from the *same allocator*. The value must point to a valid `T` and it must not be dropped
     /// before or after calling this function.
     unsafe fn free_dyn<T: ?Sized>(&self, value: NonNull<T>) {
         unsafe {
@@ -121,12 +116,15 @@ unsafe impl<T> LocalAlloc for T
 
 impl<T: LocalAlloc> LocalAllocExt for T {}
 
+/// A wrapper around a type containing/referencing [`LocalAlloc`].
+///
+/// Used by custom containers.
 pub struct LocalAllocWrap<Alloc, Wrap>
     where
         Alloc: LocalAlloc + ?Sized,
         Wrap: Deref<Target = Alloc>,
 {
-    pub alloc: Wrap,
+    alloc: Wrap,
     _marker: PhantomData<Alloc>,
 }
 
@@ -136,6 +134,7 @@ impl<Alloc, Wrap> LocalAllocWrap<Alloc, Wrap>
         Wrap: Deref<Target = Alloc>,
 {
 
+    /// Creates a new [`LocalAllocWrap`].
     #[inline]
     pub fn new(alloc: Wrap) -> Self {
         Self {
@@ -185,13 +184,27 @@ mod std_features {
 
     use super::*;
 
+    use core::{
+        fmt::{self, Display},
+        error::Error,
+    };
+
     pub use std::alloc::*;
 
-
-    #[derive(Debug, Error)] #[display("global alloc failed for layout {layout:?}")]
+    /// An global alloc error.
+    #[derive(Debug)]
     pub struct StdAllocError {
         layout: Layout,
     }
+
+    impl Display for StdAllocError {
+
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "global alloc failed for layout {:?}", self.layout)
+        }
+    }
+
+    impl Error for StdAllocError {}
 
     /// Allocator using [`GlobalAlloc`].
     pub struct StdAlloc;
@@ -216,8 +229,33 @@ mod std_features {
 #[cfg(feature = "std")]
 pub use std_features::*;
 
-#[macro_export]
+/// Allocates data as contiguously as possible.
+///
+/// # Examples
+/// ``` rust
+/// use nox_mem::pack_alloc;
+///
+/// let layout;
+/// let ptr;
+/// let pack1;
+/// let pack2;
+/// unsafe {
+///     pack_alloc!(
+///         layout as Layout,
+///         ptr as *mut u8,
+///         pack1 as [u8; 10],
+///         pack2 as [String; 1],
+///     );
+///     pack2.write("hello".to_string());
+///     for i in 0..10 {
+///         pack.add(i).write(i as u8 / 2);
+///     }
+///     pack2.drop_in_place();
+///     std::alloc::dealloc(ptr, layout);
+/// }
+/// ```
 #[cfg(feature = "std")]
+#[macro_export]
 macro_rules! pack_alloc {
     (
         $layout:ident as Layout,

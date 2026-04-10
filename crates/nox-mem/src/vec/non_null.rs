@@ -3,15 +3,14 @@ use core::{
     ptr::NonNull,
     ops::{Deref, DerefMut},
     mem::ManuallyDrop,
-    fmt::{self, Display, Formatter}
+    fmt::{self, Display, Formatter},
+    slice,
 };
 
 use crate::{
     alloc::{Layout, LocalAlloc},
-    collections::{ReservePolicy, TryReserveError},
-    impl_traits,
-    num::{FromUsize, IntoUsize},
-    slice,
+    reserve::*,
+    int::{FromUsize, IntoUsize},
     conditional::{Conditional, True, False},
 };
 
@@ -23,11 +22,11 @@ pub struct NonNullAlloc<'a>(PhantomData<&'a ()>);
 
 unsafe impl<'a> LocalAlloc for NonNullAlloc<'a> {
 
-    type Error = TryReserveError<()>;
+    type Error = ReserveError<()>;
 
     #[inline]
     unsafe fn alloc_raw(&self, _layout: Layout) -> Result<NonNull<u8>, Self::Error> {
-        Err(TryReserveError::max_capacity_exceeded(0, 0, ()))
+        Err(ReserveError::max_capacity_exceeded(0, 0, ()))
     }
 
     #[inline]
@@ -45,9 +44,9 @@ unsafe impl<SizeType> ReservePolicy<SizeType> for NonNullPolicy<SizeType>
     fn grow(
         current: SizeType, 
         required: usize,
-    ) -> Result<SizeType, TryReserveError<()>> {
+    ) -> Result<SizeType, ReserveError<()>> {
         if required > current.into_usize() {
-            Err(TryReserveError::max_capacity_exceeded(current, required, ()))
+            Err(ReserveError::max_capacity_exceeded(current, required, ()))
         } else {
             Ok(current)
         }
@@ -216,22 +215,21 @@ impl<'a, T, SizeType, Clonable> NonNullVecBase<'a, T, SizeType, Clonable>
 /// This can be useful when you have a raw pointer which you want to use like a vector, for example
 /// with custom allocators.
 ///
-/// It has the property [`size_of<Vec> == size_of<NonNullVec>`].
+/// It has the property:
+/// ``` rust
+/// size_of::<Vec<T>>() == size_of::<NonNullVec<T>>()
+/// ```
 ///
 /// # Examples
 /// ``` rust
 /// use nox_mem::alloc::{StdAlloc, LocalAllocExt};
-/// use nox_mem::vec::{NonNullVec, Vector};
+/// use nox_mem::vec::NonNullVec;
 /// unsafe {
 ///     let ptr = StdAlloc.alloc_uninit(4).unwrap();
 ///     let mut vec = NonNullVec::new(ptr, 4);
 ///     vec.push("foo".to_string());
 ///     vec.push("bar".to_string());
 ///     vec.drop_in_place();
-///     assert_eq!(
-///         vec.try_push("hello".to_string()).unwrap_err().recover_value().0,
-///         "hello",
-///     );
 ///     StdAlloc.free_uninit(ptr, 4);
 /// }
 /// ```
@@ -241,12 +239,14 @@ pub type NonNullVec<'a, T, Clonable = False> = NonNullVecBase<'a, T, usize, Clon
 ///
 /// Unlike [`NonNullVec`], this stores its capacity and length as [`u32`].
 ///
-/// It has the property [`size_of<Vec32> == size_of<NonNullVec32>`].
-///
+/// It has the property:
+///``` rust
+/// size_of::<Box<[T]>>() == size_of::<NonNullVec32<T>>()
+/// ```
 /// See [`NonNullVec`] for examples and full description.
 pub type NonNullVec32<'a, T, Clonable = False> = NonNullVecBase<'a, T, u32, Clonable>;
 
-impl_traits! {
+crate::macros::impl_traits! {
     for NonNullVecBase<'a, T, SizeType: [IntoUsize + FromUsize], Clonable: [Conditional]>
     Default =>
 

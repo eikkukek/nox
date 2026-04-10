@@ -1,31 +1,3 @@
-#[macro_export]
-macro_rules! const_assert {
-    ($check:expr $(,$msg:tt)*) => {
-        const _: () = assert!($check $(,$msg)*);
-    };
-}
-
-#[macro_export]
-macro_rules! slice {
-    [$v:expr; $n:expr] => (
-        [$v; $n].as_slice()
-    );
-    [$($elem:expr),* $(,)?] => {
-        [$($elem),*].as_slice()
-    };
-}
-
-#[macro_export]
-macro_rules! slice_mut {
-    [$v:expr; $n:expr] => (
-        [$v; $n].as_mut_slice()
-    );
-    [$($elem:expr),* $(,)?] => {
-        [$($elem),*].as_mut_slice()
-    };
-}
-
-#[macro_export]
 macro_rules! impl_traits {
     (
         for $type:ident $(<$($gen:tt $(: [$($bounds:tt)*])? $([$gen_q:ident])?),*>)?
@@ -65,7 +37,7 @@ macro_rules! impl_traits {
                 fn $met_this$(<$($met_g_this $(: $met_gb_this)?),*>)?($($arg_this)*) $(-> $ret_this)? $body_this
             )*
         }
-        impl_traits! {
+        $crate::macros::impl_traits! {
             for $type $(<$($gen $(: [$($bounds)*])? $([$gen_q])?),*>)?
             $($trait $(<$($trg),+>)? $(for $(&$lifetime)? $(mut &$lifetime_mut)?)? $(where $($trbl: $trbr$(<$trbg>)?),+)? =>
                 $(type $stype = $sty;)*
@@ -84,30 +56,4 @@ macro_rules! impl_traits {
     {
     };
 }
-
-#[macro_export]
-macro_rules! impl_inherent {
-    (
-        $type:ident $(<$($gen:tt $(: $bounds:tt)? $([$gen_q:ident])?),*>)? {
-            $(type $stype:ident = $sty:ty;)*
-            $(
-                $(#[$macro_this:ident $(($macro_spec_this:ident))?])*
-                $([$($qual:ident)+])? fn $fn:ident$(<$($t:tt),+>)?($($arg_this:tt)*) $(-> $ret_this:ty)?
-                    $body_this:block
-            )*
-        }
-    ) => {
-        impl<$($($($gen_q)? $gen $(: $bounds)?),*)?> $type<$($($gen),*)?> {
-
-            $(
-                type $stype = $sty;
-            )*
-
-            $(
-                $(#[$macro_this $(($macro_spec_this))?])*
-                $($($qual)+)? fn $fn $(<$($t),+>)? ($($arg_this)*) $(-> $ret_this)?
-                    $body_this
-            )*
-        }
-    };
-}
+pub(crate) use impl_traits;

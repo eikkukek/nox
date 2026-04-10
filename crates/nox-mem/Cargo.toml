@@ -2,9 +2,14 @@
 name = "nox-mem"
 version = "0.1.0"
 edition = "2024"
+description = "Custom allocator collections and utilities"
+license = "MIT or Apache-2.0"
+repository = "https://github.com/eikkukek/nox"
+readme = "README.md"
+keywords = ["allocator", "memory", "arena", "slotmap", "container", "vector"]
+categories = ["data-structures", "memory-management", "no-std", "no-std::no-alloc"]
 
 [dependencies]
-nox-proc = { path = "../nox-proc" }
 paste = "1.0"
 
 [features]

@@ -8,13 +8,11 @@ use core::{
     slice,
 };
 
-use crate::{
-    collections::TryReserveError,
-    impl_traits,
-};
+use crate::reserve::ReserveError;
 
 use super::Pointer;
 
+/// A wrapper around an array, which is interpreted as a vector.
 pub struct ArrayVec<T, const N: usize>
 {
     data: [MaybeUninit<T>; N],
@@ -24,6 +22,7 @@ pub struct ArrayVec<T, const N: usize>
 impl<T, const N: usize> ArrayVec<T, N>
 {
 
+    /// Creates a new empty vector.
     pub fn new() -> Self {
         Self {
             data: unsafe { MaybeUninit::uninit().assume_init() },
@@ -31,12 +30,13 @@ impl<T, const N: usize> ArrayVec<T, N>
         }
     }
 
-    pub fn with_len(len: usize, value: T) -> Result<Self, TryReserveError<()>>
+    /// Creates a new vector with a length and value.
+    pub fn with_len(len: usize, value: T) -> Result<Self, ReserveError<()>>
         where
             T: Clone,
     {
         if len > N {
-            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
+            return Err(ReserveError::max_capacity_exceeded(N, len, ()))
         }
         let mut data: [MaybeUninit<T>; N] = unsafe { MaybeUninit::uninit().assume_init() };
         for t in data.iter_mut().take(len) {
@@ -48,12 +48,13 @@ impl<T, const N: usize> ArrayVec<T, N>
         })
     }
 
-    pub fn with_len_with<F>(len: usize, mut f: F) -> Result<Self, TryReserveError<()>>
+    /// Creates a new vector with a length and a closure which returns values.
+    pub fn with_len_with<F>(len: usize, mut f: F) -> Result<Self, ReserveError<()>>
         where
             F: FnMut() -> T
     {
         if len > N {
-            return Err(TryReserveError::max_capacity_exceeded(N, len, ()))
+            return Err(ReserveError::max_capacity_exceeded(N, len, ()))
         }
         let mut data: [MaybeUninit<T>; N] = unsafe { MaybeUninit::uninit().assume_init() };
         for t in data.iter_mut().take(len) {
@@ -65,6 +66,7 @@ impl<T, const N: usize> ArrayVec<T, N>
         })
     }
 
+    /// Maps the vector to another [`ArrayVec`] with different element type.
     pub fn map<U>(&self, f: impl FnMut(&T) -> U) -> ArrayVec<U, N>
     {
         let mut vec = ArrayVec::new();
@@ -305,33 +307,6 @@ impl<T, const N: usize> ArrayVec<T, N>
                 );
         }
         self.len = len;
-    }
-
-    /// Extends the vector with an iterator.
-    ///
-    /// This panics if the length of the vector exceeds `N`.
-    pub fn extend<I>(&mut self, iter: I)
-        where I: IntoIterator<Item = T>
-    {
-        for item in iter {
-            self.push(item);
-        }
-    }
-
-    /// Extends the vector with an iterator over [`Result`], returning an error if any item in the
-    /// iterator is [`Err`].
-    ///
-    /// This panics if the length of the vector exceeds `N`.
-    pub fn try_extend<I, E>(
-        &mut self,
-        iter: I,
-    ) -> Result<(), E>
-        where I: IntoIterator<Item = Result<T, E>>
-    {
-        for item in iter {
-            self.push(item?);
-        }
-        Ok(())
     } 
 
     /// Returns a reference to the last element of the vector, or [`None`] if the vector is empty.
@@ -373,6 +348,9 @@ impl<T, const N: usize> ArrayVec<T, N>
         removed
     }
 
+    /// Removes an element at `index` and swaps it with the last element, if any.
+    ///
+    /// Panics if the index is out of bounds.
     pub fn swap_remove(&mut self, index: usize) -> T {
         if index >= self.len { panic!("index {} was out of bounds with len {} when removing", index, self.len()) }
         let ptr = self.as_mut_ptr();
@@ -569,7 +547,7 @@ impl<T, const N: usize> Drop for IterArrayVec<T, N> {
     }
 }
 
-impl_traits! {
+crate::macros::impl_traits! {
     for ArrayVec<T, N: [usize] [const]>
     Drop =>
 
@@ -723,6 +701,16 @@ impl<T, A, const N: usize> PartialEq<T> for ArrayVec<A, N>
 {
     fn eq(&self, other: &T) -> bool {
         self.as_ref() == other.as_ref()
+    }
+}
+
+impl<A, const N: usize> Extend<A> for ArrayVec<A, N> {
+
+    #[inline]
+    fn extend<T: IntoIterator<Item = A>>(&mut self, iter: T) {
+        for item in iter {
+            self.push(item);
+        }
     }
 }
 

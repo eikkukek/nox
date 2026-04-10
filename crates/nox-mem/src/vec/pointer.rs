@@ -7,8 +7,7 @@ use core::{
 };
 
 use crate::{
-    impl_traits,
-    num::IntoUsize,
+    int::IntoUsize,
 };
 
 /// A helper pointer wrapper for common vector operations.
@@ -62,6 +61,7 @@ impl<T, SizeType: IntoUsize> PartialEq for Pointer<T, SizeType> {
 
 impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
 
+    /// Creates a new pointer, returning [`None`] if the pointer is null.
     #[inline]
     pub fn new(ptr: *mut T) -> Option<Self>
     {
@@ -79,6 +79,7 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
         }
     }
 
+    /// Creates a dangling, aligned pointer.
     #[inline]
     pub fn dangling() -> Self {
         Self(NonNull::dangling(), PhantomData)
@@ -102,12 +103,13 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
         }
     }
 
+    /// Casts the pointer to another pointer with a different pointee.
     #[inline]
     pub fn cast<U>(self) -> Pointer<U, SizeType> {
         Pointer(self.0.cast(), PhantomData)
     }
    
-    /// Moves elements from the pointee of [`self`] to the pointee of `dst`.
+    /// Moves elements from the pointee of self to the pointee of `dst`.
     ///
     /// # Safety
     /// The source and destination *must not* overlap.
@@ -118,10 +120,10 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
         }
     }
 
-    /// Inserts a value of [`T`] to `index` pushing elements on subsequent indices back up to
+    /// Inserts a value of `T` to `index` pushing elements on subsequent indices back up to
     /// `len`.
     /// # Safety
-    /// [`Self`] needs to point to an aligned array of [`T`]s up to `len` + 1.
+    /// [`Self`] needs to point to an aligned array of `T`s up to `len` + 1.
     #[inline]
     pub unsafe fn insert_element(
         self, 
@@ -138,10 +140,10 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
         }
     }
 
-    /// Drops values up to `len` if [`T`] requires [`Drop`].
+    /// Drops values up to `len` if `T` requires [`Drop`].
     /// # Safety
-    /// [`Self`] needs to point to a valid, aligned array of [`T`] which contains *initialized*
-    /// values of [`T`] up to `len`.
+    /// [`Self`] needs to point to a valid, aligned array of `T` which contains *initialized*
+    /// values of `T` up to `len`.
     #[inline]
     pub unsafe fn drop_in_place(self, len: SizeType) {
         if needs_drop::<T>() {
@@ -153,10 +155,10 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
         }
     }
 
-    /// Clones elements from [`self`] to `dst` up to `len`.
+    /// Clones elements from self to `dst` up to `len`.
     /// # Safety
-    /// [`self`] and `dst` need to be valid, aligned pointers to arrays of [`T`] up to `len` and
-    /// [`self`] needs to hold valid, initialized values of [`T`] up to `len`. The source and
+    /// self and `dst` need to be valid, aligned pointers to arrays of `T` up to `len` and
+    /// self needs to hold valid, initialized values of `T` up to `len`. The source and
     /// destination *must* not overlap.
     #[inline]
     pub unsafe fn clone_elements(self, dst: Self, len: SizeType)
@@ -169,10 +171,10 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
         }
     }
 
-    /// Clones elements from [`self`] to `dst` up to `len`.
+    /// Clones elements from self to `dst` up to `len`.
     /// # Safety
-    /// [`self`] and `dst` need to be valid, aligned pointers to arrays of [`T`] up to `len` and
-    /// [`self`] needs to hold valid, initialized values of [`T`] up to `len`. The source and
+    /// self and `dst` need to be valid, aligned pointers to arrays of `T` up to `len` and
+    /// self needs to hold valid, initialized values of `T` up to `len`. The source and
     /// destination *must* not overlap
     pub unsafe fn fast_clone_elements(self, dst: Self, len: SizeType)
         where T: Copy
@@ -183,7 +185,7 @@ impl<T: Sized, SizeType: IntoUsize> Pointer<T, SizeType> {
     }
 }
 
-impl_traits!{
+crate::macros::impl_traits!{
     for Pointer<T, SizeType: [IntoUsize]>
     Deref =>
 
