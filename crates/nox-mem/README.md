@@ -1,4 +1,4 @@
-library providing various collections for use with custom allocators.
+A library providing various collections for use with custom allocators.
 
 This includes vector types and a slot map implementation.
 

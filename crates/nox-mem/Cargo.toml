@@ -1,6 +1,6 @@
 [package]
 name = "nox-mem"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Custom allocator collections and utilities"
 license = "MIT or Apache-2.0"
