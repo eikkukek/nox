@@ -10,3 +10,6 @@ All changes to this project will be documented in this file.
 - Initial crate release
 - Custom containers
 - Arena allocator implementation
+
+[0.1.1]: https://crates.io/crates/nox-mem/0.1.1
+[0.1.0]: https://crates.io/crates/nox-mem/0.1.0
