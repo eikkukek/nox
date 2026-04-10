@@ -1,11 +1,10 @@
 [package]
 name = "nox-spirv"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 description = "Compact SPIR-V reflection library written in pure-Rust"
 license = "MIT or Apache-2.0"
 repository = "https://github.com/eikkukek/nox"
 readme = "README.md"
-changelog = "CHANGELOG.md"
 keywords = ["shader", "spir-v", "reflect"]
 categories = ["parsing", "rendering::data-formats"]

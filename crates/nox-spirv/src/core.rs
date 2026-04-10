@@ -5,7 +5,7 @@ use core::{
     ops::Deref,
 };
 
-/// A trait for types, which can be trivially converted from a [`u32`].
+/// A trait for types, which can be trivially created from a [`u32`].
 pub trait Word: Sized {
     
     fn from_word(word: u32) -> Self;
@@ -27,7 +27,7 @@ pub(crate) fn slice_as_bytes<T>(slice: &[T]) -> &[u8] {
 }
 
 /// Represents a string inside SPIR-V.
-//
+///
 /// Doesn't do any extra allocations and is trivially copyable.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct CompilerStr<'a> {

@@ -10,8 +10,9 @@ use nox_spirv::Module;
 use nox_spirv::reflect::{Reflector, ResourceType};
 
 let spirv: &[u32] = ...;
-let module = Module::new(spirv);
+let module = Module::new(spirv).unwrap();
 let mut reflector = Reflector::new(module).unwrap();
+reflector.set_entry_point(c"main", op::ExecutionModel::FRAGMENT).unwrap();
 for ubo in reflector.resources_for_type(ResourceType::UniformBuffer).unwrap() {
     match ubo {
         Ok(ubo) => {
@@ -34,10 +35,11 @@ for ubo in reflector.resources_for_type(ResourceType::UniformBuffer).unwrap() {
 for pc in reflector.resources_for_type(ResourceType::PushConstant).unwrap() {
     match pc {
         Ok(pc) => {
+            let offset = pc.offset.unwrap();
             let size = reflector
                 .type_description(pc.base_type_id)
                 .unwrap().size_hint.declared();
-            println!("Push constant (size {size}): {}", pc.name.unwrap_or_default());
+            println!("Push constant (offset {offset}, size {size}): {}", pc.name.unwrap_or_default());
         },
         Err(err) => eprintln!("parse error: {err}"),
     }

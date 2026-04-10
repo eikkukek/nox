@@ -377,8 +377,9 @@ struct EntryPoint<'a> {
 /// use nox_spirv::reflect::{Reflector, ResourceType};
 /// 
 /// let spirv: &[u32] = ...;
-/// let module = Module::new(spirv);
+/// let module = Module::new(spirv).unwrap();
 /// let mut reflector = Reflector::new(module).unwrap();
+/// reflector.set_entry_point(c"main", op::ExecutionModel::FRAGMENT).unwrap();
 /// for push_constant in reflector.resources_for_type(ResourceType::PushConstant).unwrap() {
 ///     let push_constant = push_constant.unwrap();
 ///     let size = reflector

@@ -195,10 +195,10 @@ impl<'a> LiteralContextDependentNumber {
     }
 }
 /// A 32-bit unsigned integer indicating which instruction to use and determining the layout
-/// of following operands (for [`InstExtInst`]).
+/// of following operands (for OpExtInst).
 pub type LiteralExtInstInteger = u32;
 /// An opcode indicating the operation to be performed and determining the layout of following
-/// operands (for [`InstSpecConstantOp`]).
+/// operands (for OpSpecConstantOp).
 #[derive(Clone, Copy, Debug)]
 pub struct LiteralSpecConstantOpInteger<'a> {
     pub code: Code,
