@@ -6,7 +6,7 @@ description = "Custom allocator collections and utilities"
 license = "MIT or Apache-2.0"
 repository = "https://github.com/eikkukek/nox"
 readme = "README.md"
-keywords = ["allocator", "memory", "arena", "slotmap", "container", "vector"]
+keywords = ["allocator", "arena", "slotmap", "container", "vector"]
 categories = ["data-structures", "memory-management", "no-std", "no-std::no-alloc"]
 
 [dependencies]
