@@ -1,6 +1,6 @@
 [package]
 name = "nox-spirv"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Compact SPIR-V reflection library written in pure-Rust."
 license = "MIT or Apache-2.0"
