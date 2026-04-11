@@ -5,9 +5,9 @@ A compact SPIR-V reflection library written in pure-Rust with zero dependencies,
 
 An example of doing some reflection on SPIR-V words.
 ``` rust
-use nox_spirv::op;
-use nox_spirv::Module;
-use nox_spirv::reflect::{Reflector, ResourceType};
+use leimu_spirv::op;
+use leimu_spirv::Module;
+use leimu_spirv::reflect::{Reflector, ResourceType};
 
 let spirv: &[u32] = ...;
 let module = Module::new(spirv).unwrap();

@@ -372,9 +372,9 @@ struct EntryPoint<'a> {
 ///
 /// # Example
 /// ``` rust
-/// use nox_spirv::op;
-/// use nox_spirv::Module;
-/// use nox_spirv::reflect::{Reflector, ResourceType};
+/// use leimu_spirv::op;
+/// use leimu_spirv::Module;
+/// use leimu_spirv::reflect::{Reflector, ResourceType};
 /// 
 /// let spirv: &[u32] = ...;
 /// let module = Module::new(spirv).unwrap();
