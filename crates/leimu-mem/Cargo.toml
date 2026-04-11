@@ -1,8 +1,8 @@
 [package]
-name = "nox-mem"
+name = "leimu-mem"
 version = "0.2.0"
 edition = "2024"
-description = "Custom allocator collections and utilities"
+description = "Custom allocator collections and utilities."
 license = "MIT or Apache-2.0"
 repository = "https://github.com/eikkukek/nox"
 readme = "README.md"

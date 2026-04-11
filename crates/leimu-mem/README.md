@@ -1,7 +1,4 @@
-# Deprecation notice
-The name has been changed to [leimu-mem].
-
-# nox-mem
+# leimu-mem
 
 A library providing various collections for use with custom allocators.
 

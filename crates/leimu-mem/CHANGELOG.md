@@ -1,5 +1,8 @@
 # Cangelog
 All changes to this project will be documented in this file.
+## [0.2.0] - 2026-04-11
+### Changes
+- Names change to leimu-mem
 
 ## [0.1.1] - 2026-04-10
 ### Changes
@@ -11,5 +14,6 @@ All changes to this project will be documented in this file.
 - Custom containers
 - Arena allocator implementation
 
+[0.2.0]: https://crates.io/crates/leimu-mem/0.2.0
 [0.1.1]: https://crates.io/crates/nox-mem/0.1.1
 [0.1.0]: https://crates.io/crates/nox-mem/0.1.0
