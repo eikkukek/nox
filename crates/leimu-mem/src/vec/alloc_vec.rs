@@ -146,8 +146,8 @@ pub struct AllocVec<T, Alloc, ReservePol, IsStd, SizeType = usize>
 ///
 /// # Examples
 /// ``` rust
-/// use nox_mem::arena::Arena;
-/// use nox_mem::vec::FixedVec;
+/// use leimu_mem::arena::Arena;
+/// use leimu_mem::vec::FixedVec;
 ///
 /// let arena = Arena::new(64).unwrap();
 /// let mut vec = FixedVec::with_capacity(5, &arena).unwrap();

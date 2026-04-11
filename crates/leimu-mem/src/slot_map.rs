@@ -19,7 +19,7 @@
 //!
 //! # Examples
 //! ```rust
-//! use nox_mem::slot_map::SlotMap;
+//! use leimu_mem::slot_map::SlotMap;
 //!
 //! let mut map = SlotMap::new();
 //! let key1 = map.insert("hello");
@@ -1118,7 +1118,7 @@ mod std_features {
     /// # Example
     ///
     /// ```rust
-    /// use nox_mem::slot_map::SlotMap;
+    /// use leimu_mem::slot_map::SlotMap;
     ///
     /// let mut map = SlotMap::new();
     /// let key1 = map.insert("hello");

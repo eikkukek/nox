@@ -6,9 +6,9 @@
 //!
 //! # Usage
 //!``` rust
-//! use nox_mem::arena::Arena;
-//! use nox_mem::vec::FixedVec;
-//! use nox_mem::slot_map::SlotMap;
+//! use leimu_mem::arena::Arena;
+//! use leimu_mem::vec::FixedVec;
+//! use leimu_mem::slot_map::SlotMap;
 //!
 //! let arena = Arena::new(512).unwrap();
 //! let mut vec = FixedVec::with_capacity(5, &arena).unwrap();

@@ -5,7 +5,7 @@
 /// # Example
 /// ``` rust
 /// use std::borrow::Borrow;
-/// nox_mem::smallbox!(
+/// leimu_mem::smallbox!(
 ///     /// Supports doc comments
 ///     pub MySmallBox: Borrow<str>
 /// );

@@ -233,7 +233,7 @@ pub use std_features::*;
 ///
 /// # Examples
 /// ``` rust
-/// use nox_mem::pack_alloc;
+/// use leimu_mem::pack_alloc;
 ///
 /// let layout;
 /// let ptr;

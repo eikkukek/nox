@@ -74,9 +74,9 @@ pub const fn max_align() -> usize {
 ///
 /// # Examples
 /// ``` rust
-/// use nox_mem::alloc::LocalAlloc;
-/// use nox_mem::arena::Arena;
-/// use nox_mem::vec::FixedVec;
+/// use leimu_mem::alloc::LocalAlloc;
+/// use leimu_mem::arena::Arena;
+/// use leimu_mem::vec::FixedVec;
 ///
 /// let arena = Arena::new(64).unwrap();
 /// {

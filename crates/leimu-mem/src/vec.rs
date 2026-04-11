@@ -34,7 +34,7 @@ mod std_features {
     ///
     /// # Examples
     /// ``` rust
-    /// use nox_mem::vec32;
+    /// use leimu_mem::vec32;
     ///
     /// let vec1 = vec32!["foo"; 10];
     /// let vec2 = vec32![0, 1, 2, 3, 4];

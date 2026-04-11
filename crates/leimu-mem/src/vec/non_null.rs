@@ -222,8 +222,8 @@ impl<'a, T, SizeType, Clonable> NonNullVecBase<'a, T, SizeType, Clonable>
 ///
 /// # Examples
 /// ``` rust
-/// use nox_mem::alloc::{StdAlloc, LocalAllocExt};
-/// use nox_mem::vec::NonNullVec;
+/// use leimu_mem::alloc::{StdAlloc, LocalAllocExt};
+/// use leimu_mem::vec::NonNullVec;
 /// unsafe {
 ///     let ptr = StdAlloc.alloc_uninit(4).unwrap();
 ///     let mut vec = NonNullVec::new(ptr, 4);

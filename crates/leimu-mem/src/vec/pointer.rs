@@ -15,8 +15,8 @@ use crate::{
 /// # Examples
 /// ``` rust
 /// 
-/// use nox_mem::alloc::{StdAlloc, LocalAllocExt};
-/// use nox_mem::vec::Pointer;
+/// use leimu_mem::alloc::{StdAlloc, LocalAllocExt};
+/// use leimu_mem::vec::Pointer;
 ///
 /// unsafe {
 ///     let ptr: Pointer<String> = StdAlloc
