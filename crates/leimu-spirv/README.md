@@ -1,3 +1,6 @@
+# Deprecation notice
+The name has been changed to [leimu-spirv].
+
 # nox-spirv
 A compact SPIR-V reflection library written in pure-Rust with zero dependencies, minimal allocations and fast compile-times.
 
@@ -45,3 +48,5 @@ for pc in reflector.resources_for_type(ResourceType::PushConstant).unwrap() {
     }
 }
 ```
+
+[leimu-spirv]: https://crates.io/crates/leimu-spirv

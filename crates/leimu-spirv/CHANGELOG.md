@@ -1,5 +1,10 @@
 # Cangelog
 All changes to this project will be documented in this file.
+
+## [0.3.0] - 2026-04-11
+
+### Changed
+- Name change to leimu-spirv
 ## [0.2.0] - 2026-04-10
 
 ### Added
