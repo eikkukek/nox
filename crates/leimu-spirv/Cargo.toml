@@ -1,5 +1,5 @@
 [package]
-name = "nox-spirv"
+name = "leimu-spirv"
 version = "0.3.0"
 edition = "2024"
 description = "Compact SPIR-V reflection library written in pure-Rust."

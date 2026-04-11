@@ -1,7 +1,4 @@
-# Deprecation notice
-The name has been changed to [leimu-spirv].
-
-# nox-spirv
+# leimu-spirv
 A compact SPIR-V reflection library written in pure-Rust with zero dependencies, minimal allocations and fast compile-times.
 
 ## Usage
