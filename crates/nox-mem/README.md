@@ -1,3 +1,8 @@
+# Deprecation notice
+The name has been changed to [leimu-mem].
+
+# nox-mem
+
 A library providing various collections for use with custom allocators.
 
 This includes vector types and a slot map implementation.
@@ -26,3 +31,5 @@ assert_eq!(key1.index(), key2.index());
 assert!(slot_map.get(key1).is_err());
 assert!(matches!(slot_map.get(key2), Ok(&"bar")));
 ```
+
+[leimu-mem]: https://crates.io/crates/leimu-mem
