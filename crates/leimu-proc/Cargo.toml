@@ -1,0 +1,17 @@
+[package]
+name = "leimu-proc"
+version = "0.1.0"
+edition = "2024"
+description = "Procedual macros for leimu"
+license = "MIT or Apache-2.0"
+repository = "https://github.com/eikkukek/nox"
+readme = "README.md"
+keywords = ["macros"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"

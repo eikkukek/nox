@@ -1,0 +1,30 @@
+[package]
+name = "leimu"
+version = "0.1.0"
+edition = "2024"
+description = "Modern and faithful Vulkan interface"
+license = "MIT or Apache-2.0"
+repository = "https://github.com/eikkukek/nox"
+readme = "README.md"
+keywords = ["gpu", "graphics", "vulkan"]
+
+[dependencies]
+nox-spirv = { path = "../nox-spirv" }
+nox-mem = { path = "../nox-mem" }
+nox-proc = { path = "../nox-proc" }
+nox-error = { path = "../nox-error" }
+nox-log = { path = "../nox-log" }
+nox-threads = { path = "../nox-threads" }
+nox-ash = { path = "../nox-ash" }
+
+ash-window = "0.13.0"
+raw-window-handle = "0.6.0"
+parking_lot = "0.12.5"
+shaderc = "0.9.1"
+ahash = "0.8.12"
+
+winit = { version = "0.30", optional = true }
+
+[features]
+event-loop = ["dep:winit"]
+default = ["event-loop"]

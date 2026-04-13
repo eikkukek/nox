@@ -1,7 +1,7 @@
 use image::EncodableLayout;
 use nox::{
-    Platform, Version,
-    gpu::{self, ext},
+    Platform,
+    gpu::{self, ext, Version},
     log,
     mem::collections::{EntryExt, HashMap},
     sync::{Arc, SwapLock, atomic::{self, AtomicU64}},
@@ -22,7 +22,6 @@ pub fn load_rgba_image(path: &str) -> ::image::ImageResult<::image::ImageBuffer<
 }
 
 fn main() {
-    nox::init();
     let platform = Platform::new();
     let instance = gpu::Instance::new(
         &platform,
@@ -292,7 +291,7 @@ fn main() {
                                         )?;
                                         pipeline_cmd.push_descriptor_bindings(&[
                                             gpu::PushDescriptorBinding::new(
-                                                "tex",
+                                                c"tex",
                                                 0,
                                                 gpu::DescriptorInfos::images(&[
                                                     gpu::DescriptorImageInfo {

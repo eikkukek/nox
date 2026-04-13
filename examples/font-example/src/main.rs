@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use nox::{
     event_loop::ActiveEventLoop,
     gpu::{self, MemoryBinder},
@@ -22,8 +24,7 @@ pub struct App {
     index_buffers: Arc<[gpu::BufferId]>,
     shader_set: gpu::ShaderSetId,
     rendered_text: Arc<RenderedText>,
-    semaphore: gpu::TimelineSemaphoreId,
-    semaphore_value: u64,
+    command_id: Option<gpu::CommandId>,
     image_alloc: gpu::LinearBinder,
     frame_semaphore: gpu::TimelineSemaphoreId,
     frame: u64,
@@ -202,9 +203,7 @@ impl App {
         let vert = vertex_buffers.clone();
         let off = vertex_offset_buffers.clone();
         let ind = index_buffers.clone();
-        let mut semaphore = Default::default();
-        event_loop.gpu().create_timeline_semaphores([(&mut semaphore, 0)])?;
-        event_loop
+        let command_id = event_loop
             .gpu()
             .schedule_commands()
             .new_commands::<gpu::NewCopyCommands>(
@@ -254,7 +253,7 @@ impl App {
                     }
                     Ok(())
                 }
-            )?.with_signal_semaphore(semaphore, 1);
+            )?.id();
         let mut frame_semaphore = Default::default();
         event_loop.gpu().create_timeline_semaphores([(&mut frame_semaphore, 3)])?;
         Ok(Self {
@@ -269,8 +268,7 @@ impl App {
             index_buffers,
             shader_set,
             rendered_text,
-            semaphore,
-            semaphore_value: 1,
+            command_id: Some(command_id),
             image_alloc: gpu::LinearBinder::new(
                 event_loop.gpu().device().clone(),
                 1 << 25,
@@ -300,8 +298,9 @@ impl App {
                 let off = self.vertex_offset_buffers.clone();
                 let ind = self.index_buffers.clone();
                 let frame = self.frame;
-                event_loop.gpu()
-                    .schedule_commands()
+                let mut scheduler = event_loop.gpu().schedule_commands();
+                let command =
+                    scheduler
                     .new_commands::<gpu::NewGraphicsCommands>(
                         event_loop.gpu().any_device_queue(gpu::QueueFlags::GRAPHICS).unwrap(),
                         move |cmd| {
@@ -363,10 +362,10 @@ impl App {
                                                 gpu::IndexBufferInfo::new(ind[i], 0),
                                                 &[
                                                     gpu::DrawBufferRange::new(
-                                                        vert[i], 0, None,
+                                                        vert[i], 0, 0,
                                                     ),
                                                     gpu::DrawBufferRange::new(
-                                                        off[i], 0, None,
+                                                        off[i], 0, 0,
                                                     ),
                                                 ],
                                                 None,
@@ -381,10 +380,6 @@ impl App {
                             Ok(())
                         },
                     )?.with_wait_semaphore(
-                        self.semaphore,
-                        self.semaphore_value,
-                        gpu::MemoryDependencyHint::NONE,
-                    ).with_wait_semaphore(
                         self.frame_semaphore,
                         self.frame - 2,
                         gpu::MemoryDependencyHint::COLOR_OUTPUT,
@@ -392,12 +387,21 @@ impl App {
                         self.frame_semaphore,
                         self.frame + 1
                     );
+                    if let Some(command_id) = self.command_id.take() {
+                        command.with_dependencies([gpu::CommandDependency::new(
+                            command_id,
+                            gpu::MemoryDependencyHint::TRANSFER
+                        )]);
+                    }
                     self.frame += 1;
                 Ok(())
             },
             nox::Event::GpuEvent(event) => match event {
                 gpu::Event::SwapchainCreated { surface_id: _, new_format, new_size, image_count: _ } => {
-                    if event_loop.gpu().wait_for_semaphores(&[(self.frame_semaphore, self.frame - 1)], u64::MAX)? 
+                    if event_loop.gpu().wait_for_semaphores(
+                            &[(self.frame_semaphore, self.frame - 1)],
+                            Duration::from_secs(2)
+                        )? 
                     {
                         if self.fb_state.images.load()[0] != gpu::ImageViewId::default() {
                             event_loop.gpu().destroy_resources(
@@ -438,24 +442,15 @@ impl App {
                             *images = [
                                 event_loop.gpu().create_image_view(
                                     a,
-                                    gpu::ImageRange::new(gpu::ImageSubresourceRange
-                                        ::default()
-                                        .aspect_mask(gpu::ImageAspects::COLOR),
-                                    None)
+                                    gpu::ImageRange::whole_range(gpu::ImageAspects::COLOR)
                                 )?,
                                 event_loop.gpu().create_image_view(
                                     b,
-                                    gpu::ImageRange::new(gpu::ImageSubresourceRange
-                                        ::default()
-                                        .aspect_mask(gpu::ImageAspects::COLOR),
-                                    None)
+                                    gpu::ImageRange::whole_range(gpu::ImageAspects::COLOR)
                                 )?,
                                 event_loop.gpu().create_image_view(
                                     c,
-                                    gpu::ImageRange::new(gpu::ImageSubresourceRange
-                                        ::default()
-                                        .aspect_mask(gpu::ImageAspects::COLOR),
-                                    None)
+                                    gpu::ImageRange::whole_range(gpu::ImageAspects::COLOR)
                                 )?,
                             ];
                             nox::Result::Ok(())
@@ -471,10 +466,10 @@ impl App {
                                 .entry(new_format)
                                 .or_try_insert_with_key(|&format| {
                                     let mut id = Default::default();
-                                    let _ = event_loop
+                                    let mut pipeline_batch = event_loop
                                         .gpu()
-                                        .create_pipeline_batch(None)?
-                                        .with_graphics_pipelines([
+                                        .create_pipeline_batch(None)?;
+                                    pipeline_batch.with_graphics_pipelines([
                                             gpu::GraphicsPipelineCreateInfo
                                                 ::new(&mut id, self.shader_set)
                                                 .with_color_output(
@@ -496,7 +491,8 @@ impl App {
                                                 )?.with_sample_shading(gpu::SampleShadingInfo   
                                                     ::default().samples(gpu::MsaaSamples::X8)
                                                 ),
-                                        ]).build()?;
+                                        ]);
+                                    let _ = pipeline_batch.build()?;
                                     nox::error::Result::Ok(id)
                                 })?;
                             nox::Result::Ok(())
@@ -511,12 +507,11 @@ impl App {
 }
 
 fn main() {
-    nox::init();
     let platform = nox::Platform::new();
     let instance = gpu::Instance::new(
         &platform,
         "test",
-        nox::Version::new(1, 0, 0),
+        gpu::Version::new(1, 0, 0),
         &[gpu::InstanceLayer::new(
             gpu::LAYER_KHRONOS_VALIDATION,
             true

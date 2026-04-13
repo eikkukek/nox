@@ -1,11 +1,11 @@
 use core::f32::consts::{PI, TAU, FRAC_PI_3};
 
 use nox::{
-    Platform, Version,
+    Platform,
     gpu::{self, ext},
-    log,
     mem::collections::{EntryExt, HashMap},
     sync::{Arc, SwapLock, atomic::{self, AtomicU64}},
+    log,
 };
 
 fn hsva_to_srgb_pack32(hue: f32, sat: f32, val: f32) -> u32 {
@@ -28,16 +28,12 @@ fn hsva_to_srgb_pack32(hue: f32, sat: f32, val: f32) -> u32 {
 }
 
 fn main() {
-    nox::init();
     let platform = Platform::new();
     let instance = gpu::Instance::new(
         &platform,
         "test",
-        Version::new(1, 0, 0),
-        &[gpu::InstanceLayer::new(
-            gpu::LAYER_KHRONOS_VALIDATION,
-            false,
-        )],
+        gpu::Version::new(1, 0, 0),
+        &[gpu::InstanceLayer::new(gpu::LAYER_KHRONOS_VALIDATION, false)],
     ).unwrap();
     let device_attributes = gpu
         ::default_device_attributes()
@@ -125,7 +121,7 @@ fn main() {
                     void main() {
                         uint idx = gl_VertexIndex;
                         out_color = unpack_color(colors.data[idx]);
-                        gl_Position = vec4(positions[idx], 0.0f, 1.0f);
+                        gl_Position = vec4(positions[idx], 0.0, 1.0f);
                     }
                 ")
             )?;
@@ -264,7 +260,7 @@ fn main() {
                                         )?;
                                         pipeline_cmd.push_descriptor_bindings(&[
                                             gpu::PushDescriptorBinding::new(
-                                                "colors",
+                                                c"colors",
                                                 0,
                                                 gpu::DescriptorInfos::buffers(&[
                                                     gpu::DescriptorBufferInfo::default()
@@ -314,7 +310,6 @@ fn main() {
                         gpu::Event::SwapchainCreated {
                             surface_id: _, new_format, new_size, image_count: _
                         } => {
-                            log::debug!("new surface format: {new_format}");
                             let mut extent = new_size.0 as u64;
                             extent |= (new_size.1 as u64) << 32;
                             fb_state.extent.store(extent, atomic::Ordering::Release);
