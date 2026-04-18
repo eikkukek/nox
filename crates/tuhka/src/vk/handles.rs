@@ -1,0 +1,298 @@
+use super::*;
+use crate::define_handle;
+use crate::define_non_dispatchable_handle;
+define_handle!(
+    Instance,
+    INSTANCE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Instance.html>",
+);
+define_handle!(
+    PhysicalDevice,
+    PHYSICAL_DEVICE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/PhysicalDevice.html>",
+);
+define_handle!(
+    Device,
+    DEVICE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Device.html>",
+);
+define_handle!(
+    Queue,
+    QUEUE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Queue.html>",
+);
+define_handle!(
+    CommandBuffer,
+    COMMAND_BUFFER,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/CommandBuffer.html>",
+);
+define_non_dispatchable_handle!(
+    DeviceMemory,
+    DEVICE_MEMORY,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DeviceMemory.html>",
+);
+define_non_dispatchable_handle!(
+    CommandPool,
+    COMMAND_POOL,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/CommandPool.html>",
+);
+define_non_dispatchable_handle!(
+    Buffer,
+    BUFFER,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Buffer.html>",
+);
+define_non_dispatchable_handle!(
+    BufferView,
+    BUFFER_VIEW,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/BufferView.html>",
+);
+define_non_dispatchable_handle!(
+    Image,
+    IMAGE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Image.html>",
+);
+define_non_dispatchable_handle!(
+    ImageView,
+    IMAGE_VIEW,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/ImageView.html>",
+);
+define_non_dispatchable_handle!(
+    ShaderModule,
+    SHADER_MODULE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/ShaderModule.html>",
+);
+define_non_dispatchable_handle!(
+    Pipeline,
+    PIPELINE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Pipeline.html>",
+);
+define_non_dispatchable_handle!(
+    PipelineLayout,
+    PIPELINE_LAYOUT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/PipelineLayout.html>",
+);
+define_non_dispatchable_handle!(
+    Sampler,
+    SAMPLER,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Sampler.html>",
+);
+define_non_dispatchable_handle!(
+    DescriptorSet,
+    DESCRIPTOR_SET,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DescriptorSet.html>",
+);
+define_non_dispatchable_handle!(
+    DescriptorSetLayout,
+    DESCRIPTOR_SET_LAYOUT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DescriptorSetLayout.html>",
+);
+define_non_dispatchable_handle!(
+    DescriptorPool,
+    DESCRIPTOR_POOL,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DescriptorPool.html>",
+);
+define_non_dispatchable_handle!(
+    Fence,
+    FENCE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Fence.html>",
+);
+define_non_dispatchable_handle!(
+    Semaphore,
+    SEMAPHORE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Semaphore.html>",
+);
+define_non_dispatchable_handle!(
+    Event,
+    EVENT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Event.html>",
+);
+define_non_dispatchable_handle!(
+    QueryPool,
+    QUERY_POOL,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/QueryPool.html>",
+);
+define_non_dispatchable_handle!(
+    Framebuffer,
+    FRAMEBUFFER,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/Framebuffer.html>",
+);
+define_non_dispatchable_handle!(
+    RenderPass,
+    RENDER_PASS,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/RenderPass.html>",
+);
+define_non_dispatchable_handle!(
+    PipelineCache,
+    PIPELINE_CACHE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/PipelineCache.html>",
+);
+define_non_dispatchable_handle!(
+    PipelineBinaryKHR,
+    PIPELINE_BINARY_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/PipelineBinaryKHR.html>",
+);
+define_non_dispatchable_handle!(
+    IndirectCommandsLayoutNV,
+    INDIRECT_COMMANDS_LAYOUT_NV,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/IndirectCommandsLayoutNV.html>",
+);
+define_non_dispatchable_handle!(
+    IndirectCommandsLayoutEXT,
+    INDIRECT_COMMANDS_LAYOUT_EXT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/IndirectCommandsLayoutEXT.html>",
+);
+define_non_dispatchable_handle!(
+    IndirectExecutionSetEXT,
+    INDIRECT_EXECUTION_SET_EXT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/IndirectExecutionSetEXT.html>",
+);
+define_non_dispatchable_handle!(
+    DescriptorUpdateTemplate,
+    DESCRIPTOR_UPDATE_TEMPLATE,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DescriptorUpdateTemplate.html>",
+);
+define_non_dispatchable_handle!(
+    SamplerYcbcrConversion,
+    SAMPLER_YCBCR_CONVERSION,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/SamplerYcbcrConversion.html>",
+);
+define_non_dispatchable_handle!(
+    ValidationCacheEXT,
+    VALIDATION_CACHE_EXT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/ValidationCacheEXT.html>",
+);
+define_non_dispatchable_handle!(
+    AccelerationStructureKHR,
+    ACCELERATION_STRUCTURE_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/AccelerationStructureKHR.html>",
+);
+define_non_dispatchable_handle!(
+    AccelerationStructureNV,
+    ACCELERATION_STRUCTURE_NV,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/AccelerationStructureNV.html>",
+);
+define_non_dispatchable_handle!(
+    PerformanceConfigurationINTEL,
+    PERFORMANCE_CONFIGURATION_INTEL,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/PerformanceConfigurationINTEL.html>",
+);
+define_non_dispatchable_handle!(
+    BufferCollectionFUCHSIA,
+    BUFFER_COLLECTION_FUCHSIA,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/BufferCollectionFUCHSIA.html>",
+);
+define_non_dispatchable_handle!(
+    DeferredOperationKHR,
+    DEFERRED_OPERATION_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DeferredOperationKHR.html>",
+);
+define_non_dispatchable_handle!(
+    PrivateDataSlot,
+    PRIVATE_DATA_SLOT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/PrivateDataSlot.html>",
+);
+define_non_dispatchable_handle!(
+    CuModuleNVX,
+    CU_MODULE_NVX,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/CuModuleNVX.html>",
+);
+define_non_dispatchable_handle!(
+    CuFunctionNVX,
+    CU_FUNCTION_NVX,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/CuFunctionNVX.html>",
+);
+define_non_dispatchable_handle!(
+    OpticalFlowSessionNV,
+    OPTICAL_FLOW_SESSION_NV,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/OpticalFlowSessionNV.html>",
+);
+define_non_dispatchable_handle!(
+    MicromapEXT,
+    MICROMAP_EXT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/MicromapEXT.html>",
+);
+define_non_dispatchable_handle!(
+    ShaderEXT,
+    SHADER_EXT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/ShaderEXT.html>",
+);
+define_non_dispatchable_handle!(
+    TensorARM,
+    TENSOR_ARM,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/TensorARM.html>",
+);
+define_non_dispatchable_handle!(
+    TensorViewARM,
+    TENSOR_VIEW_ARM,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/TensorViewARM.html>",
+);
+define_non_dispatchable_handle!(
+    DataGraphPipelineSessionARM,
+    DATA_GRAPH_PIPELINE_SESSION_ARM,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DataGraphPipelineSessionARM.html>",
+);
+define_non_dispatchable_handle!(
+    ShaderInstrumentationARM,
+    SHADER_INSTRUMENTATION_ARM,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/ShaderInstrumentationARM.html>",
+);
+define_non_dispatchable_handle!(
+    DisplayKHR,
+    DISPLAY_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DisplayKHR.html>",
+);
+define_non_dispatchable_handle!(
+    DisplayModeKHR,
+    DISPLAY_MODE_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DisplayModeKHR.html>",
+);
+define_non_dispatchable_handle!(
+    SurfaceKHR,
+    SURFACE_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/SurfaceKHR.html>",
+);
+define_non_dispatchable_handle!(
+    SwapchainKHR,
+    SWAPCHAIN_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/SwapchainKHR.html>",
+);
+define_non_dispatchable_handle!(
+    DebugReportCallbackEXT,
+    DEBUG_REPORT_CALLBACK_EXT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DebugReportCallbackEXT.html>",
+);
+define_non_dispatchable_handle!(
+    DebugUtilsMessengerEXT,
+    DEBUG_UTILS_MESSENGER_EXT,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/DebugUtilsMessengerEXT.html>",
+);
+define_non_dispatchable_handle!(
+    VideoSessionKHR,
+    VIDEO_SESSION_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/VideoSessionKHR.html>",
+);
+define_non_dispatchable_handle!(
+    VideoSessionParametersKHR,
+    VIDEO_SESSION_PARAMETERS_KHR,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/VideoSessionParametersKHR.html>",
+);
+define_non_dispatchable_handle!(
+    SemaphoreSciSyncPoolNV,
+    SEMAPHORE_SCI_SYNC_POOL_NV,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/SemaphoreSciSyncPoolNV.html>",
+);
+define_non_dispatchable_handle!(
+    CudaModuleNV,
+    CUDA_MODULE_NV,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/CudaModuleNV.html>",
+);
+define_non_dispatchable_handle!(
+    CudaFunctionNV,
+    CUDA_FUNCTION_NV,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/CudaFunctionNV.html>",
+);
+define_handle!(
+    ExternalComputeQueueNV,
+    EXTERNAL_COMPUTE_QUEUE_NV,
+    "<https://docs.vulkan.org/refpages/latest/refpages/source/ExternalComputeQueueNV.html>",
+);

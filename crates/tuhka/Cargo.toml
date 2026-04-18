@@ -1,0 +1,14 @@
+[package]
+name = "tuhka"
+version = "0.1.0"
+edition = "2024"
+description = "New up-to-date Vulkan bindings for Rust"
+license = "MIT or Apache-2.0"
+repository = "https://github.com/eikkukek/leimu"
+readme = "README.md"
+keywords = ["bindings", "graphics", "vulkan"]
+categories = ["graphics", "api-bindings", "external-ffi-bindings", "rendering::graphics-api"]
+
+
+[dependencies]
+libloading = "0.9.0"
